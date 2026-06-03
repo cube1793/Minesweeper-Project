@@ -67,8 +67,8 @@ MAX_CELL_SIZE = 60
 DEFAULT_CELL_SIZE = 28
 MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
 
-# 통계 패널 폭(px). 값 열에 소수 4자리 등이 잘리지 않도록 넉넉히 확보.
-STATS_PANEL_WIDTH = 200
+# 통계 패널 폭(px). 150~180 권장 범위 내.
+STATS_PANEL_WIDTH = 170
 
 
 class ChordMode(IntEnum):
@@ -110,11 +110,10 @@ STAT_ROWS = [
     ("thrp",            "ThrP",           "0"),
     ("corr",            "Corr",           "0"),
     ("zini",            "ZiNi",           "0"),
-    ("hzini",           "H.ZiNi",         "0"),
     ("zne",             "ZNE",            "0"),
-    ("hzne",            "HZNE",           "0"),
     ("znt",             "ZNT",            "0"),
     ("rqp",             "RQP",            "0"),
+    ("ios",             "IOS",            "0"),
 ]
 
 
@@ -258,23 +257,13 @@ class MinesweeperUI(QWidget):
         table.setSelectionMode(QAbstractItemView.NoSelection)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setFocusPolicy(Qt.NoFocus)
-        # 가로 스크롤은 항상 끄고(열은 패널 폭에 맞춰 신축),
-        # 세로 스크롤은 창이 작아져 행이 다 보이지 않을 때만 안전하게 켠다.
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # 패널 높이가 줄어도 테이블이 세로로 수축해 스크롤이 동작하도록,
-        # 테이블 자체의 최소 높이를 작게 잡아 부모 레이아웃이 자유롭게
-        # 줄일 수 있게 한다.
-        table.setMinimumHeight(0)
-        table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
-        # 열 너비: 0열(항목명)은 고정, 1열(값)은 나머지 공간 신축.
-        # 패널 폭 확대분을 반영해 항목명 열을 조금 넓혀 라벨이 잘리지 않게 하고,
-        # 남는 폭은 값 열(Stretch)이 가져가 소수 4자리도 온전히 보이게 한다.
+        # 열 너비: 0열(항목명)은 고정, 1열(값)은 나머지 공간 신축
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-        table.setColumnWidth(0, 84)
+        table.setColumnWidth(0, 72)
 
         label_font = QFont("Segoe UI", 8)
         value_font = QFont("Consolas", 8)
@@ -672,11 +661,6 @@ class MinesweeperUI(QWidget):
             btn.setText("💥")
             btn.setStyleSheet(self._style_exploded())
         elif value == CellState.MINE.value:
-            # 💣 이모지는 글리프 폭이 넓어 일반 폰트 크기로는 테두리에 닿아
-            # 잘려 보인다. 지뢰 칸에 한해 폰트를 살짝 줄여 셀 안쪽 여백을
-            # 확보한다. (🚩 깃발 칸은 요구사항대로 기존 크기를 유지)
-            mine_font = QFont("Arial", self._mine_font_size(font_size), QFont.Bold)
-            btn.setFont(mine_font)
             btn.setText("💣")
             btn.setStyleSheet(self._style_revealed())
         elif value == 0:
@@ -686,15 +670,6 @@ class MinesweeperUI(QWidget):
             btn.setText(str(value))
             color = NUMBER_COLORS.get(value, "#000000")
             btn.setStyleSheet(self._style_revealed(color=color))
-
-    @staticmethod
-    def _mine_font_size(base_font_size: int) -> int:
-        """
-        지뢰(💣) 전용 폰트 크기를 계산한다.
-        넓은 이모지 글리프가 셀 테두리에 잘리지 않도록 기본 폰트보다
-        약간(약 80%) 작게 잡되, 너무 작아지지 않게 최소 6px을 보장한다.
-        """
-        return max(6, int(base_font_size * 0.8))
 
     # 스타일 헬퍼 (셀 크기 단계별 고정 테두리 적용) ---------------------
     @staticmethod
