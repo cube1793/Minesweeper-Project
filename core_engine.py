@@ -82,6 +82,8 @@ import time
 from collections import deque
 from enum import IntEnum
 
+from board_snapshot import BoardSnapshot
+
 
 class CellState(IntEnum):
     """get_observation()이 반환하는 가시적 셀 상태 코드."""
@@ -321,6 +323,24 @@ class MinesweeperEngine:
                 else:
                     obs[y][x] = CellState.HIDDEN.value
         return obs
+
+    def get_board_snapshot(self) -> BoardSnapshot:
+        """
+        분석 모듈이 사용할 수 있는 읽기 전용 보드 스냅샷을 반환한다.
+
+        지뢰가 아직 배치되지 않은 새 게임 상태에서는 mines_placed=False,
+        mines=frozenset(), adjacent=현재 0 배열 형태로 반환한다. 즉, 호출은
+        항상 가능하지만 ZiNi/3BV 같은 확정 보드 분석은 mines_placed를 먼저
+        확인해야 한다.
+        """
+        return BoardSnapshot(
+            width=self.width,
+            height=self.height,
+            num_mines=self.num_mines,
+            mines_placed=self._mines_placed,
+            mines=frozenset(self._mines),
+            adjacent=tuple(tuple(row) for row in self._adjacent),
+        )
 
     def count_flags(self):
         """현재 꽂힌 깃발 수 (지뢰 카운터 표시용)."""
