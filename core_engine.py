@@ -82,6 +82,7 @@ import time
 from collections import deque
 from enum import IntEnum
 
+from board_analyzer import BoardAnalysis, analyze_board
 from board_snapshot import BoardSnapshot
 
 
@@ -651,8 +652,8 @@ class MinesweeperEngine:
         self._compute_adjacency()
         self._mines_placed = True
 
-        # 지뢰 배치가 확정된 직후, 3BV/Ops 정적 분석을 수행한다.
-        self._analyze_board()
+        # 지뢰 배치가 확정된 직후, 별도 분석 모듈로 3BV/Ops 정적 분석을 수행한다.
+        self._apply_board_analysis(analyze_board(self.get_board_snapshot()))
 
     def _compute_adjacency(self):
         """모든 칸의 주변 지뢰 수를 미리 계산한다."""
@@ -660,78 +661,20 @@ class MinesweeperEngine:
             for nx, ny in self._neighbors(mx, my):
                 self._adjacent[ny][nx] += 1
 
-    def _analyze_board(self):
+    def _apply_board_analysis(self, analysis: BoardAnalysis):
         """
-        지뢰 배치 직후 보드 전체를 분석하여 안전 칸을 분류하고,
-        총 3BV/Ops 분모를 계산한다.
+        분석 모듈의 불변 결과를 기존 엔진 내부 필드 구조에 반영한다.
 
-        절차:
-            1) 안전한 빈칸(adjacent==0)들을 BFS로 묶어 '오프닝 그룹'을 식별하고
-               각 칸에 그룹 ID(_opening_id)를 부여한다. (대각 인접 포함)
-            2) 안전한 숫자 칸(adjacent>0)을 순회하며, 주변 8칸 중 하나라도
-               오프닝 내부 칸이면 BORDER, 아니면 ISOLATED 로 분류한다.
-            3) 총 Ops = 오프닝 그룹 수.
-               총 3BV = 오프닝 그룹 수 + 고립 숫자 칸 수.
+        _account_reveal()과 get_stats()의 기존 흐름을 유지하기 위해
+        _opening_id, _cell_class, _total_3bv, _total_ops 필드는 그대로 둔다.
         """
-        # 초기화 (reset에서 이미 비워지지만 재배치 안전을 위해 다시 정리)
-        self._opening_id = [[-1] * self.width for _ in range(self.height)]
-        self._cell_class = [[None] * self.width for _ in range(self.height)]
-
-        # 1) 오프닝 그룹 식별 (빈칸 BFS)
-        group_id = 0
-        for y in range(self.height):
-            for x in range(self.width):
-                if (x, y) in self._mines:
-                    continue
-                if self._adjacent[y][x] != 0:
-                    continue
-                if self._opening_id[y][x] != -1:
-                    continue
-                # 새 오프닝 그룹 발견 → BFS 확장
-                self._flood_mark_opening(x, y, group_id)
-                group_id += 1
-
-        self._total_ops = group_id
-
-        # 2) 숫자 칸 분류 (BORDER / ISOLATED)
-        isolated_count = 0
-        for y in range(self.height):
-            for x in range(self.width):
-                if (x, y) in self._mines:
-                    self._cell_class[y][x] = None
-                    continue
-                if self._adjacent[y][x] == 0:
-                    self._cell_class[y][x] = self.CELL_OPENING
-                    continue
-                # 숫자 칸: 오프닝 내부 칸과 인접하면 테두리, 아니면 고립
-                touches_opening = any(
-                    self._adjacent[ny][nx] == 0 and (nx, ny) not in self._mines
-                    for nx, ny in self._neighbors(x, y)
-                )
-                if touches_opening:
-                    self._cell_class[y][x] = self.CELL_BORDER
-                else:
-                    self._cell_class[y][x] = self.CELL_ISOLATED
-                    isolated_count += 1
-
-        # 3) 총 3BV = 오프닝 그룹 수 + 고립 숫자 칸 수
-        self._total_3bv = self._total_ops + isolated_count
-
-    def _flood_mark_opening(self, start_x: int, start_y: int, group_id: int):
-        """빈칸(adjacent==0)을 BFS로 묶어 group_id를 부여한다(대각 포함)."""
-        queue = deque([(start_x, start_y)])
-        self._opening_id[start_y][start_x] = group_id
-        while queue:
-            x, y = queue.popleft()
-            for nx, ny in self._neighbors(x, y):
-                if (nx, ny) in self._mines:
-                    continue
-                if self._adjacent[ny][nx] != 0:
-                    continue
-                if self._opening_id[ny][nx] != -1:
-                    continue
-                self._opening_id[ny][nx] = group_id
-                queue.append((nx, ny))
+        self._opening_id = [list(row) for row in analysis.opening_id]
+        self._cell_class = [
+            [None if cls is None else int(cls) for cls in row]
+            for row in analysis.cell_class
+        ]
+        self._total_3bv = analysis.total_3bv
+        self._total_ops = analysis.total_ops
 
     def _account_reveal(self, x: int, y: int):
         """

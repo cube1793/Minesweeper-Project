@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import FrozenInstanceError
 
+from board_analyzer import analyze_board
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 
 
@@ -68,6 +69,18 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
         self.assertEqual(len(snapshot.mines), 10)
         self.assertEqual(len(snapshot.adjacent), 9)
         self.assertTrue(all(len(row) == 9 for row in snapshot.adjacent))
+
+        analysis = analyze_board(snapshot)
+        self.assertEqual(engine._total_3bv, analysis.total_3bv)
+        self.assertEqual(engine._total_ops, analysis.total_ops)
+        self.assertEqual(engine._opening_id, [list(row) for row in analysis.opening_id])
+        self.assertEqual(
+            engine._cell_class,
+            [
+                [None if cell_class is None else int(cell_class) for cell_class in row]
+                for row in analysis.cell_class
+            ],
+        )
 
         safe_zone = {
             (x, y)
