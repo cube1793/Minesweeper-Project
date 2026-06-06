@@ -42,12 +42,14 @@ from PyQt5.QtWidgets import (
     QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
     QSpinBox, QScrollArea, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView,
+    QAbstractItemView, QHeaderView, QFileDialog, QMessageBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QKeySequence, QColor
 
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
+from replay_json import save_replay_json
+from replay_recorder import ReplayRecorder
 
 
 # 타일 숫자별 클래식/Arbiter 스타일 색상
@@ -163,6 +165,11 @@ class MinesweeperUI(QWidget):
         self._buttons = {}
         self._chord_mode = ChordMode.LEFT_CLICK
         self._cell_size = DEFAULT_CELL_SIZE
+        self._replay_recorder = ReplayRecorder(
+            width=self.engine.width,
+            height=self.engine.height,
+            num_mines=self.engine.num_mines,
+        )
 
         # 통계 패널의 값 셀(QTableWidgetItem)을 stat_key로 보관.
         # _update_statistics_panel() 이 이 매핑을 통해 값을 갱신한다.
@@ -358,11 +365,17 @@ class MinesweeperUI(QWidget):
         self.timer_label = QLabel()
         self.timer_label.setFont(QFont("Consolas", 12, QFont.Bold))
 
+        self.save_replay_button = QPushButton("Replay 저장")
+        self.save_replay_button.setFocusPolicy(Qt.NoFocus)
+        self.save_replay_button.clicked.connect(self.on_save_replay)
+
         top_bar.addWidget(self.mine_label)
         top_bar.addStretch()
         top_bar.addWidget(self.reset_button)
         top_bar.addStretch()
         top_bar.addWidget(self.timer_label)
+        top_bar.addSpacing(12)
+        top_bar.addWidget(self.save_replay_button)
         main_layout.addLayout(top_bar)
 
         # --- 보드: 컨테이너 위젯 + 그리드, QScrollArea로 감싸기 ---
@@ -488,6 +501,81 @@ class MinesweeperUI(QWidget):
                 item.setText(str(value))
 
     # ------------------------------------------------------------------
+    # 리플레이 기록/저장
+    # ------------------------------------------------------------------
+    def _reset_replay_recorder(self):
+        """현재 엔진 설정 기준으로 한 판 리플레이 기록을 초기화한다."""
+        self._replay_recorder.reset(
+            width=self.engine.width,
+            height=self.engine.height,
+            num_mines=self.engine.num_mines,
+        )
+
+    def _record_replay_event(self, x: int, y: int, action: Action):
+        """engine.step()으로 실제 처리된 클릭 이벤트를 recorder에 반영한다."""
+        try:
+            self._replay_recorder.record_event(
+                elapsed_time=self.engine.get_elapsed_time(),
+                x=x,
+                y=y,
+                action=action,
+            )
+            self._capture_replay_board_if_ready()
+        except Exception as exc:
+            # 리플레이 기록 실패가 기존 게임 플레이를 중단시키지 않도록 한다.
+            print(f"[Replay warning] 이벤트 기록 실패: {exc}")
+
+    def _capture_replay_board_if_ready(self):
+        """지뢰 배치가 확정된 뒤 한 번만 보드 정보를 recorder에 저장한다."""
+        if self._replay_recorder.board is not None:
+            return
+
+        snapshot = self.engine.get_board_snapshot()
+        if snapshot.mines_placed:
+            self._replay_recorder.capture_board(snapshot)
+
+    def on_save_replay(self):
+        """현재 판 리플레이를 JSON 파일로 저장한다."""
+        self._capture_replay_board_if_ready()
+
+        try:
+            replay_data = self._replay_recorder.to_replay_data()
+        except ValueError:
+            QMessageBox.information(
+                self,
+                "리플레이 저장",
+                "지뢰가 아직 배치되지 않아 저장할 리플레이가 없습니다.",
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "리플레이 저장",
+            "replay.json",
+            "Replay JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+
+        try:
+            save_replay_json(replay_data, path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "리플레이 저장 실패",
+                f"리플레이를 저장하지 못했습니다.\n{exc}",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "리플레이 저장",
+            "리플레이를 저장했습니다.",
+        )
+
+    # ------------------------------------------------------------------
     # 설정 핸들러
     # ------------------------------------------------------------------
     def on_chord_mode_changed(self, index: int):
@@ -547,6 +635,7 @@ class MinesweeperUI(QWidget):
         self._game_over = False
         self.reset_button.setText("🙂")
         self._reset_timer()
+        self._reset_replay_recorder()
 
         self._build_grid()
         self._apply_initial_window_size()
@@ -574,11 +663,13 @@ class MinesweeperUI(QWidget):
         if self._is_revealed_number(x, y):
             if self._chord_mode == ChordMode.LEFT_CLICK:
                 _, _, _, _, info = self.engine.step(x, y, Action.CHORD)
+                self._record_replay_event(x, y, Action.CHORD)
             else:
                 return
         else:
             _, _, _, _, info = self.engine.step(x, y, Action.OPEN)
             self._start_timer()
+            self._record_replay_event(x, y, Action.OPEN)
 
         self.render_board()
         self._apply_stats_from_info(info)
@@ -589,6 +680,7 @@ class MinesweeperUI(QWidget):
             return
         _, _, _, _, info = self.engine.step(x, y, Action.FLAG)
         self._start_timer()
+        self._record_replay_event(x, y, Action.FLAG)
         self.render_board()
         self._apply_stats_from_info(info)
 
@@ -598,6 +690,7 @@ class MinesweeperUI(QWidget):
         if self._chord_mode == ChordMode.DISABLED:
             return
         _, _, _, _, info = self.engine.step(x, y, Action.CHORD)
+        self._record_replay_event(x, y, Action.CHORD)
         self.render_board()
         self._apply_stats_from_info(info)
         self._check_end_state()
@@ -607,6 +700,7 @@ class MinesweeperUI(QWidget):
         self._game_over = False
         self.reset_button.setText("🙂")
         self._reset_timer()
+        self._reset_replay_recorder()
         self.render_board()
         # 리셋 직후에는 PLAYING 상태이므로 마스킹/초기 값이 표시된다.
         self._update_statistics_panel(self.engine.get_stats())
