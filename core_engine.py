@@ -233,6 +233,49 @@ class MinesweeperEngine:
 
         return self.get_observation()
 
+    def reset_with_mines(
+        self,
+        width: int,
+        height: int,
+        num_mines: int,
+        mine_positions,
+    ):
+        """
+        저장된 지뢰 배치로 게임 상태를 초기화하고 첫 관측값을 반환한다.
+
+        리플레이 재현을 위한 public API이다. 랜덤 지뢰 배치를 수행하지 않고,
+        전달받은 mine_positions를 확정 보드로 사용한다.
+        """
+        if width <= 0 or height <= 0:
+            raise ValueError("보드 크기는 양수여야 합니다.")
+        if num_mines >= width * height:
+            raise ValueError("지뢰 수는 전체 칸 수보다 적어야 합니다.")
+
+        mines = set()
+        for position in mine_positions:
+            try:
+                x, y = position
+            except (TypeError, ValueError) as exc:
+                raise ValueError("지뢰 좌표는 (x, y) 쌍이어야 합니다.") from exc
+            if not (0 <= x < width and 0 <= y < height):
+                raise ValueError("지뢰 좌표가 보드 범위를 벗어났습니다.")
+            mines.add((x, y))
+
+        if len(mines) != num_mines:
+            raise ValueError("지뢰 좌표 수가 num_mines와 일치해야 합니다.")
+
+        self.width = width
+        self.height = height
+        self.num_mines = num_mines
+        self.reset()
+
+        self._mines = mines
+        self._compute_adjacency()
+        self._mines_placed = True
+        self._apply_board_analysis(analyze_board(self.get_board_snapshot()))
+
+        return self.get_observation()
+
     def step(self, x: int, y: int, action: int):
         """
         하나의 액션(=하나의 물리적 클릭)을 적용하고 결과를 반환한다.
