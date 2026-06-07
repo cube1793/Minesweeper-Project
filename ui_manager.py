@@ -71,6 +71,7 @@ DEFAULT_CELL_SIZE = 28
 MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
 
 # 통계 패널 폭(px). 150~180 권장 범위 내.
+REPLAY_AUTOPLAY_INTERVAL_MS = 200
 STATS_PANEL_WIDTH = 170
 
 
@@ -181,6 +182,9 @@ class MinesweeperUI(QWidget):
 
         # 통계 패널의 값 셀(QTableWidgetItem)을 stat_key로 보관.
         # _update_statistics_panel() 이 이 매핑을 통해 값을 갱신한다.
+        self._replay_autoplay_timer = QTimer(self)
+        self._replay_autoplay_timer.setInterval(REPLAY_AUTOPLAY_INTERVAL_MS)
+        self._replay_autoplay_timer.timeout.connect(self._advance_replay_autoplay)
         self._stat_value_items = {}
 
         self._elapsed_seconds = 0
@@ -385,6 +389,11 @@ class MinesweeperUI(QWidget):
         self.replay_status_label.setFont(QFont("Consolas", 10, QFont.Bold))
         self.replay_status_label.setVisible(False)
 
+        self.replay_play_button = QPushButton("재생")
+        self.replay_play_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_play_button.clicked.connect(self.on_replay_play_pause)
+        self.replay_play_button.setVisible(False)
+
         self.replay_first_button = QPushButton("처음")
         self.replay_first_button.setFocusPolicy(Qt.NoFocus)
         self.replay_first_button.clicked.connect(self.on_replay_first)
@@ -419,6 +428,7 @@ class MinesweeperUI(QWidget):
         top_bar.addWidget(self.save_replay_button)
         top_bar.addWidget(self.load_replay_button)
         top_bar.addSpacing(12)
+        top_bar.addWidget(self.replay_play_button)
         top_bar.addWidget(self.replay_first_button)
         top_bar.addWidget(self.replay_prev_button)
         top_bar.addWidget(self.replay_next_button)
@@ -660,27 +670,68 @@ class MinesweeperUI(QWidget):
         """리플레이 모드를 끝내고 현재 선택된 난이도로 새 일반 게임을 시작한다."""
         self._exit_replay_mode()
 
+    def on_replay_play_pause(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+
+        if self._replay_player.current_index >= self._replay_player.event_count:
+            self._stop_replay_autoplay()
+            self._update_replay_controls()
+            return
+
+        if self._replay_autoplay_timer.isActive():
+            self._stop_replay_autoplay()
+        else:
+            self.replay_play_button.setText("일시정지")
+            self._replay_autoplay_timer.start()
+
+    def _advance_replay_autoplay(self):
+        if not self._replay_mode or self._replay_player is None:
+            self._stop_replay_autoplay()
+            return
+
+        if self._replay_player.current_index >= self._replay_player.event_count:
+            self._stop_replay_autoplay()
+            self._update_replay_controls()
+            return
+
+        self._replay_player.next()
+        self._refresh_replay_view_after_move()
+
+        if self._replay_player.current_index >= self._replay_player.event_count:
+            self._stop_replay_autoplay()
+            self._update_replay_controls()
+
+    def _stop_replay_autoplay(self):
+        if self._replay_autoplay_timer.isActive():
+            self._replay_autoplay_timer.stop()
+        self.replay_play_button.setText("재생")
+
     def on_replay_first(self):
         if not self._replay_mode or self._replay_player is None:
             return
+        self._stop_replay_autoplay()
         self._replay_player.go_to(0)
         self._refresh_replay_view_after_move()
 
     def on_replay_previous(self):
         if not self._replay_mode or self._replay_player is None:
             return
+        self._stop_replay_autoplay()
         self._replay_player.previous()
         self._refresh_replay_view_after_move()
 
     def on_replay_next(self):
         if not self._replay_mode or self._replay_player is None:
             return
+        self._stop_replay_autoplay()
         self._replay_player.next()
         self._refresh_replay_view_after_move()
 
     def on_replay_last(self):
         if not self._replay_mode or self._replay_player is None:
             return
+        self._stop_replay_autoplay()
         self._replay_player.go_to(self._replay_player.event_count)
         self._refresh_replay_view_after_move()
 
@@ -715,6 +766,7 @@ class MinesweeperUI(QWidget):
 
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
+        self._stop_replay_autoplay()
         self._replay_mode = False
         self._replay_player = None
         self._update_replay_controls()
@@ -761,6 +813,11 @@ class MinesweeperUI(QWidget):
         self.chord_combo.setEnabled(not self._replay_mode)
         self.cell_size_spin.setEnabled(not self._replay_mode)
         self.replay_status_label.setVisible(self._replay_mode)
+        self.replay_play_button.setVisible(in_replay)
+        self.replay_play_button.setEnabled(in_replay and not at_end)
+        self.replay_play_button.setText(
+            "일시정지" if self._replay_autoplay_timer.isActive() else "재생"
+        )
         self.replay_first_button.setVisible(in_replay)
         self.replay_prev_button.setVisible(in_replay)
         self.replay_next_button.setVisible(in_replay)
