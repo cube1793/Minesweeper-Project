@@ -385,6 +385,26 @@ class MinesweeperUI(QWidget):
         self.replay_status_label.setFont(QFont("Consolas", 10, QFont.Bold))
         self.replay_status_label.setVisible(False)
 
+        self.replay_first_button = QPushButton("처음")
+        self.replay_first_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_first_button.clicked.connect(self.on_replay_first)
+        self.replay_first_button.setVisible(False)
+
+        self.replay_prev_button = QPushButton("이전")
+        self.replay_prev_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_prev_button.clicked.connect(self.on_replay_previous)
+        self.replay_prev_button.setVisible(False)
+
+        self.replay_next_button = QPushButton("다음")
+        self.replay_next_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_next_button.clicked.connect(self.on_replay_next)
+        self.replay_next_button.setVisible(False)
+
+        self.replay_last_button = QPushButton("끝")
+        self.replay_last_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_last_button.clicked.connect(self.on_replay_last)
+        self.replay_last_button.setVisible(False)
+
         self.exit_replay_button = QPushButton("Replay 종료")
         self.exit_replay_button.setFocusPolicy(Qt.NoFocus)
         self.exit_replay_button.clicked.connect(self.on_exit_replay)
@@ -399,6 +419,10 @@ class MinesweeperUI(QWidget):
         top_bar.addWidget(self.save_replay_button)
         top_bar.addWidget(self.load_replay_button)
         top_bar.addSpacing(12)
+        top_bar.addWidget(self.replay_first_button)
+        top_bar.addWidget(self.replay_prev_button)
+        top_bar.addWidget(self.replay_next_button)
+        top_bar.addWidget(self.replay_last_button)
         top_bar.addWidget(self.replay_status_label)
         top_bar.addWidget(self.exit_replay_button)
         main_layout.addLayout(top_bar)
@@ -636,6 +660,38 @@ class MinesweeperUI(QWidget):
         """리플레이 모드를 끝내고 현재 선택된 난이도로 새 일반 게임을 시작한다."""
         self._exit_replay_mode()
 
+    def on_replay_first(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+        self._replay_player.go_to(0)
+        self._refresh_replay_view_after_move()
+
+    def on_replay_previous(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+        self._replay_player.previous()
+        self._refresh_replay_view_after_move()
+
+    def on_replay_next(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+        self._replay_player.next()
+        self._refresh_replay_view_after_move()
+
+    def on_replay_last(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+        self._replay_player.go_to(self._replay_player.event_count)
+        self._refresh_replay_view_after_move()
+
+    def _refresh_replay_view_after_move(self):
+        if self._replay_player is None:
+            return
+        self.engine = self._replay_player.engine
+        self.render_board()
+        self._update_replay_status_label()
+        self._update_replay_controls()
+
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
         self._normal_game_config = (
@@ -691,6 +747,13 @@ class MinesweeperUI(QWidget):
 
     def _update_replay_controls(self):
         """일반/리플레이 모드에 맞춰 버튼 상태를 갱신한다."""
+        in_replay = self._replay_mode and self._replay_player is not None
+        at_start = in_replay and self._replay_player.current_index == 0
+        at_end = (
+            in_replay
+            and self._replay_player.current_index == self._replay_player.event_count
+        )
+
         self.reset_button.setEnabled(not self._replay_mode)
         self.save_replay_button.setEnabled(not self._replay_mode)
         self.load_replay_button.setEnabled(not self._replay_mode)
@@ -698,6 +761,14 @@ class MinesweeperUI(QWidget):
         self.chord_combo.setEnabled(not self._replay_mode)
         self.cell_size_spin.setEnabled(not self._replay_mode)
         self.replay_status_label.setVisible(self._replay_mode)
+        self.replay_first_button.setVisible(in_replay)
+        self.replay_prev_button.setVisible(in_replay)
+        self.replay_next_button.setVisible(in_replay)
+        self.replay_last_button.setVisible(in_replay)
+        self.replay_first_button.setEnabled(in_replay and not at_start)
+        self.replay_prev_button.setEnabled(in_replay and not at_start)
+        self.replay_next_button.setEnabled(in_replay and not at_end)
+        self.replay_last_button.setEnabled(in_replay and not at_end)
         self.exit_replay_button.setVisible(self._replay_mode)
 
     # ------------------------------------------------------------------
