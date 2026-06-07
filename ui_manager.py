@@ -48,7 +48,8 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QKeySequence, QColor
 
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
-from replay_json import save_replay_json
+from replay_json import load_replay_json, save_replay_json
+from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
 
 
@@ -165,6 +166,13 @@ class MinesweeperUI(QWidget):
         self._buttons = {}
         self._chord_mode = ChordMode.LEFT_CLICK
         self._cell_size = DEFAULT_CELL_SIZE
+        self._replay_mode = False
+        self._replay_player = None
+        self._normal_game_config = (
+            self.engine.width,
+            self.engine.height,
+            self.engine.num_mines,
+        )
         self._replay_recorder = ReplayRecorder(
             width=self.engine.width,
             height=self.engine.height,
@@ -369,6 +377,19 @@ class MinesweeperUI(QWidget):
         self.save_replay_button.setFocusPolicy(Qt.NoFocus)
         self.save_replay_button.clicked.connect(self.on_save_replay)
 
+        self.load_replay_button = QPushButton("Replay 불러오기")
+        self.load_replay_button.setFocusPolicy(Qt.NoFocus)
+        self.load_replay_button.clicked.connect(self.on_load_replay)
+
+        self.replay_status_label = QLabel()
+        self.replay_status_label.setFont(QFont("Consolas", 10, QFont.Bold))
+        self.replay_status_label.setVisible(False)
+
+        self.exit_replay_button = QPushButton("Replay 종료")
+        self.exit_replay_button.setFocusPolicy(Qt.NoFocus)
+        self.exit_replay_button.clicked.connect(self.on_exit_replay)
+        self.exit_replay_button.setVisible(False)
+
         top_bar.addWidget(self.mine_label)
         top_bar.addStretch()
         top_bar.addWidget(self.reset_button)
@@ -376,6 +397,10 @@ class MinesweeperUI(QWidget):
         top_bar.addWidget(self.timer_label)
         top_bar.addSpacing(12)
         top_bar.addWidget(self.save_replay_button)
+        top_bar.addWidget(self.load_replay_button)
+        top_bar.addSpacing(12)
+        top_bar.addWidget(self.replay_status_label)
+        top_bar.addWidget(self.exit_replay_button)
         main_layout.addLayout(top_bar)
 
         # --- 보드: 컨테이너 위젯 + 그리드, QScrollArea로 감싸기 ---
@@ -536,6 +561,14 @@ class MinesweeperUI(QWidget):
 
     def on_save_replay(self):
         """현재 판 리플레이를 JSON 파일로 저장한다."""
+        if self._replay_mode:
+            QMessageBox.information(
+                self,
+                "리플레이 저장",
+                "리플레이 모드에서는 저장할 수 없습니다.",
+            )
+            return
+
         self._capture_replay_board_if_ready()
 
         try:
@@ -574,6 +607,98 @@ class MinesweeperUI(QWidget):
             "리플레이 저장",
             "리플레이를 저장했습니다.",
         )
+
+    def on_load_replay(self):
+        """JSON 리플레이 파일을 불러와 리플레이 모드로 진입한다."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "리플레이 불러오기",
+            "",
+            "Replay JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            replay_data = load_replay_json(path)
+            replay_player = ReplayPlayer(replay_data)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "리플레이 불러오기 실패",
+                f"리플레이를 불러오지 못했습니다.\n{exc}",
+            )
+            return
+
+        self._enter_replay_mode(replay_player)
+
+    def on_exit_replay(self):
+        """리플레이 모드를 끝내고 현재 선택된 난이도로 새 일반 게임을 시작한다."""
+        self._exit_replay_mode()
+
+    def _enter_replay_mode(self, replay_player: ReplayPlayer):
+        """ReplayPlayer의 초기 상태를 UI에 표시한다."""
+        self._normal_game_config = (
+            self.engine.width,
+            self.engine.height,
+            self.engine.num_mines,
+        )
+        self._replay_mode = True
+        self._replay_player = replay_player
+        self.engine = replay_player.engine
+        self._game_over = False
+        self.reset_button.setText("🙂")
+        self._reset_timer()
+
+        self._build_grid()
+        self._apply_initial_window_size()
+        self.render_board()
+        self._update_statistics_panel(self.engine.get_stats())
+        self._update_replay_status_label()
+        self._update_replay_controls()
+
+    def _exit_replay_mode(self):
+        """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
+        self._replay_mode = False
+        self._replay_player = None
+        self._update_replay_controls()
+
+        width, height, mines = self._normal_game_config
+        self.engine.width = width
+        self.engine.height = height
+        self.engine.num_mines = mines
+        self.engine.reset()
+        self._game_over = False
+        self.reset_button.setText("🙂")
+        self._reset_timer()
+        self._reset_replay_recorder()
+        self._build_grid()
+        self._apply_initial_window_size()
+        self.render_board()
+        self._update_statistics_panel(self.engine.get_stats())
+
+    def _update_replay_status_label(self):
+        """현재 리플레이 index/time을 표시한다."""
+        if not self._replay_mode or self._replay_player is None:
+            self.replay_status_label.setText("")
+            return
+
+        self.replay_status_label.setText(
+            f"Replay {self._replay_player.current_index} / "
+            f"{self._replay_player.event_count}   "
+            f"{self._replay_player.current_time:.3f}s"
+        )
+
+    def _update_replay_controls(self):
+        """일반/리플레이 모드에 맞춰 버튼 상태를 갱신한다."""
+        self.reset_button.setEnabled(not self._replay_mode)
+        self.save_replay_button.setEnabled(not self._replay_mode)
+        self.load_replay_button.setEnabled(not self._replay_mode)
+        self.difficulty_combo.setEnabled(not self._replay_mode)
+        self.chord_combo.setEnabled(not self._replay_mode)
+        self.cell_size_spin.setEnabled(not self._replay_mode)
+        self.replay_status_label.setVisible(self._replay_mode)
+        self.exit_replay_button.setVisible(self._replay_mode)
 
     # ------------------------------------------------------------------
     # 설정 핸들러
@@ -631,6 +756,7 @@ class MinesweeperUI(QWidget):
         self.engine.height = height
         self.engine.num_mines = mines
         self.engine.reset()
+        self._normal_game_config = (width, height, mines)
 
         self._game_over = False
         self.reset_button.setText("🙂")
@@ -656,6 +782,8 @@ class MinesweeperUI(QWidget):
         )
 
     def on_left_click(self, x: int, y: int):
+        if self._replay_mode:
+            return
         if self._game_over:
             return
 
@@ -676,6 +804,8 @@ class MinesweeperUI(QWidget):
         self._check_end_state()
 
     def on_right_click(self, x: int, y: int):
+        if self._replay_mode:
+            return
         if self._game_over:
             return
         _, _, _, _, info = self.engine.step(x, y, Action.FLAG)
@@ -685,6 +815,8 @@ class MinesweeperUI(QWidget):
         self._apply_stats_from_info(info)
 
     def on_both_click(self, x: int, y: int):
+        if self._replay_mode:
+            return
         if self._game_over:
             return
         if self._chord_mode == ChordMode.DISABLED:
@@ -696,6 +828,8 @@ class MinesweeperUI(QWidget):
         self._check_end_state()
 
     def on_reset(self):
+        if self._replay_mode:
+            return
         self.engine.reset()
         self._game_over = False
         self.reset_button.setText("🙂")
