@@ -123,12 +123,11 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         result = calculate_g_zini(snapshot)
 
-        self.assertEqual(result.clicks, 2)
-        self.assertEqual(len(result.moves), 2)
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(len(result.moves), 1)
         self.assertEqual(
             _move_signature(result),
             (
-                ("fallback_click", 1, 0, None, 1),
                 ("fallback_click", 2, 0, None, 1),
             ),
         )
@@ -831,8 +830,12 @@ class ZiniCalculatorTests(unittest.TestCase):
             adjacent=((0,),),
         )
         state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
 
-        self.assertEqual(_select_fallback_click_target(state), (0, 0))
+        self.assertEqual(
+            _select_fallback_click_target(state, context),
+            (0, 0),
+        )
 
     def test_fallback_click_zero_reveals_opening_and_solves_board(self):
         snapshot = BoardSnapshot(
@@ -906,19 +909,22 @@ class ZiniCalculatorTests(unittest.TestCase):
         self.assertIsNone(move.premium)
         self.assertEqual(move.clicks_added, 1)
 
-    def test_select_fallback_click_target_uses_top_leftmost_covered_safe_cell(self):
+    def test_select_fallback_click_target_uses_top_leftmost_unrevealed_3bv_unit(self):
         snapshot = BoardSnapshot(
             width=3,
-            height=2,
+            height=3,
             num_mines=1,
             mines_placed=True,
             mines=frozenset({(0, 0)}),
-            adjacent=((0, 1, 0), (1, 1, 0)),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
         )
         state = _ZiniBoardState.create(snapshot)
-        state.revealed.update({(1, 0), (2, 0)})
+        context = _build_premium_context(snapshot)
 
-        self.assertEqual(_select_fallback_click_target(state), (0, 1))
+        self.assertEqual(
+            _select_fallback_click_target(state, context),
+            (2, 0),
+        )
 
     def test_select_fallback_click_target_returns_none_when_all_safe_revealed(self):
         snapshot = BoardSnapshot(
@@ -931,8 +937,9 @@ class ZiniCalculatorTests(unittest.TestCase):
         )
         state = _ZiniBoardState.create(snapshot)
         state.revealed.add((0, 0))
+        context = _build_premium_context(snapshot)
 
-        self.assertIsNone(_select_fallback_click_target(state))
+        self.assertIsNone(_select_fallback_click_target(state, context))
 
     def test_fallback_click_rejects_mine_target(self):
         snapshot = BoardSnapshot(
@@ -978,6 +985,7 @@ class ZiniCalculatorTests(unittest.TestCase):
         context = _build_premium_context(snapshot)
         broken_context = type(context)(
             analysis=context.analysis,
+            units=context.units,
             opening_units_by_id={},
             isolated_cells=context.isolated_cells,
         )

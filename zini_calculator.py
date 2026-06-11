@@ -57,6 +57,7 @@ class _PremiumContext:
     """Static lookup data used while calculating Premium values."""
 
     analysis: BoardAnalysis
+    units: tuple[_Static3BvUnit, ...]
     opening_units_by_id: dict[int, _Static3BvUnit]
     isolated_cells: frozenset[Coordinate]
 
@@ -221,6 +222,7 @@ def _build_premium_context(snapshot: BoardSnapshot) -> _PremiumContext:
 
     return _PremiumContext(
         analysis=analysis,
+        units=units,
         opening_units_by_id={
             unit.opening_id: unit
             for unit in units
@@ -488,12 +490,25 @@ def _reveal_chord_neighbors(
     state.revealed.update(number_cells)
 
 
-def _select_fallback_click_target(state: _ZiniBoardState) -> Coordinate | None:
-    """Select the top-leftmost covered safe cell for fallback click."""
-    for coord in _safe_cells(state.snapshot):
-        if coord not in state.revealed:
-            return coord
-    return None
+def _select_fallback_click_target(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> Coordinate | None:
+    """Select the top-leftmost unresolved static 3BV unit target."""
+    targets = []
+    for unit in context.units:
+        if unit.kind == _UNIT_OPENING:
+            unrevealed_zero_cells = [
+                coord for coord in unit.cells if coord not in state.revealed
+            ]
+            if unrevealed_zero_cells:
+                targets.append(min(unrevealed_zero_cells, key=_top_left_key))
+        elif unit.kind == _UNIT_ISOLATED and unit.representative not in state.revealed:
+            targets.append(unit.representative)
+
+    if not targets:
+        return None
+    return min(targets, key=_top_left_key)
 
 
 def _click_fallback_cell(
@@ -546,7 +561,7 @@ def _apply_next_g_zini_move(
 
     candidate = _select_best_premium_candidate(state, context)
     if candidate is None or candidate.premium < 0:
-        target = _select_fallback_click_target(state)
+        target = _select_fallback_click_target(state, context)
         if target is None:
             return None
         return _click_fallback_cell(state, target, context)
