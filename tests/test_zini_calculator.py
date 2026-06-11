@@ -10,7 +10,9 @@ from zini_calculator import (
     _ZiniBoardState,
     _calculate_premium,
     _click_covered_candidate,
+    _click_fallback_cell,
     _flag_and_chord_uncovered_candidate,
+    _select_fallback_click_target,
     _select_best_premium_candidate,
     calculate_g_zini,
 )
@@ -728,6 +730,170 @@ class ZiniCalculatorTests(unittest.TestCase):
             _flag_and_chord_uncovered_candidate(
                 state, candidate, _build_premium_context(snapshot)
             )
+
+    def test_select_fallback_click_target_returns_single_empty_cell(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+
+        self.assertEqual(_select_fallback_click_target(state), (0, 0))
+
+    def test_fallback_click_zero_reveals_opening_and_solves_board(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _click_fallback_cell(state, (0, 0), context)
+
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertTrue(state.all_safe_cells_revealed())
+        self.assertEqual(move.action, "fallback_click")
+        self.assertEqual((move.x, move.y), (0, 0))
+        self.assertIsNone(move.premium)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_fallback_click_zero_reveals_opening_and_border_ring(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _click_fallback_cell(state, (2, 0), context)
+
+        self.assertEqual(
+            state.revealed,
+            {
+                (1, 0),
+                (0, 1),
+                (1, 1),
+                (2, 0),
+                (2, 1),
+                (0, 2),
+                (1, 2),
+                (2, 2),
+            },
+        )
+        self.assertEqual(move.action, "fallback_click")
+        self.assertIsNone(move.premium)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_fallback_click_number_reveals_only_that_number(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _click_fallback_cell(state, (0, 0), context)
+
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertEqual(move.action, "fallback_click")
+        self.assertEqual((move.x, move.y), (0, 0))
+        self.assertIsNone(move.premium)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_select_fallback_click_target_uses_top_leftmost_covered_safe_cell(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=2,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.update({(1, 0), (2, 0)})
+
+        self.assertEqual(_select_fallback_click_target(state), (0, 1))
+
+    def test_select_fallback_click_target_returns_none_when_all_safe_revealed(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+
+        self.assertIsNone(_select_fallback_click_target(state))
+
+    def test_fallback_click_rejects_mine_target(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        with self.assertRaises(ValueError):
+            _click_fallback_cell(state, (1, 0), context)
+
+    def test_fallback_click_rejects_already_revealed_target(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        context = _build_premium_context(snapshot)
+
+        with self.assertRaises(ValueError):
+            _click_fallback_cell(state, (0, 0), context)
+
+    def test_fallback_click_rejects_zero_without_opening_unit(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+        broken_context = type(context)(
+            analysis=context.analysis,
+            opening_units_by_id={},
+            isolated_cells=context.isolated_cells,
+        )
+
+        with self.assertRaises(ValueError):
+            _click_fallback_cell(state, (0, 0), broken_context)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ _UNIT_OPENING = "opening"
 _UNIT_ISOLATED = "isolated"
 _ACTION_CLICK = "click"
 _ACTION_FLAG_CHORD = "flag_chord"
+_ACTION_FALLBACK_CLICK = "fallback_click"
 
 
 TopLeftKey = tuple[int, int]
@@ -458,6 +459,49 @@ def _reveal_chord_neighbors(
     for opening_id in opening_ids:
         state.reveal_unit(context.opening_units_by_id[opening_id])
     state.revealed.update(number_cells)
+
+
+def _select_fallback_click_target(state: _ZiniBoardState) -> Coordinate | None:
+    """Select the top-leftmost covered safe cell for fallback click."""
+    for coord in _safe_cells(state.snapshot):
+        if coord not in state.revealed:
+            return coord
+    return None
+
+
+def _click_fallback_cell(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    context: _PremiumContext,
+) -> ZiniMove:
+    """
+    Apply one fallback click to a covered safe cell.
+
+    Number cells reveal only themselves.  Zero cells reveal their static opening
+    unit, including the surrounding border ring, through state.reveal_unit().
+    """
+    if coord in state.snapshot.mines:
+        raise ValueError("Fallback click cannot target a mine.")
+    if coord in state.revealed:
+        raise ValueError("Fallback click requires an unrevealed cell.")
+
+    x, y = coord
+    if state.snapshot.adjacent[y][x] == 0:
+        opening_id = context.analysis.opening_id[y][x]
+        unit = context.opening_units_by_id.get(opening_id)
+        if unit is None:
+            raise ValueError("Fallback zero click could not find opening unit.")
+        state.reveal_unit(unit)
+    else:
+        state.revealed.add(coord)
+
+    return ZiniMove(
+        action=_ACTION_FALLBACK_CLICK,
+        x=x,
+        y=y,
+        premium=None,
+        clicks_added=1,
+    )
 
 
 def _top_left_key(coord: Coordinate) -> TopLeftKey:
