@@ -15,6 +15,7 @@ from board_snapshot import BoardSnapshot, Coordinate
 
 _UNIT_OPENING = "opening"
 _UNIT_ISOLATED = "isolated"
+_ACTION_CLICK = "click"
 
 
 TopLeftKey = tuple[int, int]
@@ -341,6 +342,37 @@ def _select_best_premium_candidate(
     return min(
         candidates,
         key=lambda candidate: (-candidate.premium, _top_left_key(candidate.coord)),
+    )
+
+
+def _click_covered_candidate(
+    state: _ZiniBoardState,
+    candidate: _PremiumCandidate,
+) -> ZiniMove:
+    """
+    Apply the click-only move for a covered number candidate.
+
+    This helper intentionally does not flag or chord in the same iteration.
+    Covered BORDER numbers reveal only their own coordinate here; opening flood
+    reveal is handled only when a zero cell/opening is opened by later logic.
+    """
+    coord = candidate.coord
+    if coord in state.revealed:
+        raise ValueError("Covered candidate click requires an unrevealed cell.")
+    if coord in state.snapshot.mines:
+        raise ValueError("Covered candidate click cannot target a mine.")
+
+    x, y = coord
+    if state.snapshot.adjacent[y][x] == 0:
+        raise ValueError("Covered candidate click requires a number cell.")
+
+    state.revealed.add(coord)
+    return ZiniMove(
+        action=_ACTION_CLICK,
+        x=x,
+        y=y,
+        premium=candidate.premium,
+        clicks_added=1,
     )
 
 

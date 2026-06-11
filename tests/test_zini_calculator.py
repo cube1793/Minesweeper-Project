@@ -6,8 +6,10 @@ from zini_calculator import (
     _extract_static_3bv_units,
     _build_premium_context,
     _find_premium_candidates,
+    _PremiumCandidate,
     _ZiniBoardState,
     _calculate_premium,
+    _click_covered_candidate,
     _select_best_premium_candidate,
     calculate_g_zini,
 )
@@ -443,6 +445,104 @@ class ZiniCalculatorTests(unittest.TestCase):
         context = _build_premium_context(snapshot)
 
         self.assertIsNone(_select_best_premium_candidate(state, context))
+
+    def test_click_covered_candidate_reveals_isolated_number_only(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+        candidate = _select_best_premium_candidate(state, context)
+
+        move = _click_covered_candidate(state, candidate)
+
+        self.assertEqual(state.revealed, {candidate.coord})
+        self.assertEqual(move.action, "click")
+        self.assertEqual((move.x, move.y), candidate.coord)
+        self.assertEqual(move.premium, candidate.premium)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_click_covered_candidate_reveals_border_number_only(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+        candidate = next(
+            candidate
+            for candidate in _find_premium_candidates(state, context)
+            if candidate.coord == (1, 1)
+        )
+
+        move = _click_covered_candidate(state, candidate)
+
+        self.assertEqual(state.revealed, {(1, 1)})
+        self.assertTrue(
+            {(2, 0), (2, 1), (0, 2), (1, 2), (2, 2)}.isdisjoint(
+                state.revealed
+            )
+        )
+        self.assertEqual(move.action, "click")
+        self.assertEqual((move.x, move.y), (1, 1))
+        self.assertEqual(move.premium, candidate.premium)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_click_covered_candidate_rejects_already_revealed_candidate(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+        candidate = _select_best_premium_candidate(state, context)
+        state.revealed.add(candidate.coord)
+
+        with self.assertRaises(ValueError):
+            _click_covered_candidate(state, candidate)
+
+    def test_click_covered_candidate_rejects_mine_coordinate(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        candidate = _PremiumCandidate(coord=(1, 0), premium=0)
+
+        with self.assertRaises(ValueError):
+            _click_covered_candidate(state, candidate)
+
+    def test_click_covered_candidate_rejects_zero_cell(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        candidate = _PremiumCandidate(coord=(0, 0), premium=0)
+
+        with self.assertRaises(ValueError):
+            _click_covered_candidate(state, candidate)
 
 
 if __name__ == "__main__":
