@@ -49,6 +49,55 @@ class _Static3BvUnit:
     opening_id: int | None = None
 
 
+@dataclass
+class _ZiniBoardState:
+    """Dynamic board state used by the G.ZiNi simulation."""
+
+    snapshot: BoardSnapshot
+    revealed: set[Coordinate]
+    flagged_mines: set[Coordinate]
+
+    @classmethod
+    def create(cls, snapshot: BoardSnapshot):
+        """Create an empty dynamic state for a finalized snapshot."""
+        return cls(snapshot=snapshot, revealed=set(), flagged_mines=set())
+
+    def reveal_unit(self, unit: _Static3BvUnit):
+        """
+        Reveal one static 3BV unit.
+
+        Opening units reveal their zero-cell group plus the surrounding border
+        ring.  Isolated units reveal only their representative number cell.
+        """
+        if unit.kind == _UNIT_OPENING:
+            self.revealed.update(_opening_reveal_cells(self.snapshot, unit))
+            return
+
+        if unit.kind == _UNIT_ISOLATED:
+            self.revealed.add(unit.representative)
+            return
+
+        raise ValueError(f"Unknown 3BV unit kind: {unit.kind}")
+
+    def flag_mine(self, coord: Coordinate):
+        """
+        Mark a known mine as flagged.
+
+        G.ZiNi has unfair prior knowledge, so this state tracks confirmed mine
+        flags only.  Non-mine flags are not part of the 1st-pass algorithm.
+        """
+        if coord not in self.snapshot.mines:
+            raise ValueError("G.ZiNi board state can only flag mine coordinates.")
+        self.flagged_mines.add(coord)
+
+    def all_safe_cells_revealed(self) -> bool:
+        """Return whether every non-mine cell has been revealed."""
+        return all(
+            coord in self.revealed
+            for coord in _safe_cells(self.snapshot)
+        )
+
+
 def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     """
     Calculate G.ZiNi for a finalized board snapshot.
@@ -122,3 +171,37 @@ def _top_left_key(coord: Coordinate) -> TopLeftKey:
     """Return row-major sorting key for a coordinate stored as (x, y)."""
     x, y = coord
     return y, x
+
+
+def _opening_reveal_cells(
+    snapshot: BoardSnapshot,
+    unit: _Static3BvUnit,
+) -> frozenset[Coordinate]:
+    """Return zero cells and adjacent safe border cells revealed by an opening."""
+    reveal_cells = set(unit.cells)
+    for coord in unit.cells:
+        for neighbor in _neighbors(snapshot, coord):
+            if neighbor not in snapshot.mines:
+                reveal_cells.add(neighbor)
+    return frozenset(reveal_cells)
+
+
+def _safe_cells(snapshot: BoardSnapshot):
+    """Yield all non-mine coordinates in row-major order."""
+    for y in range(snapshot.height):
+        for x in range(snapshot.width):
+            coord = (x, y)
+            if coord not in snapshot.mines:
+                yield coord
+
+
+def _neighbors(snapshot: BoardSnapshot, coord: Coordinate):
+    """Yield in-bounds 8-way neighbor coordinates for a coordinate."""
+    x, y = coord
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < snapshot.width and 0 <= ny < snapshot.height:
+                yield nx, ny

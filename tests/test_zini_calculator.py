@@ -4,6 +4,7 @@ from board_snapshot import BoardSnapshot
 from zini_calculator import (
     ZiniResult,
     _extract_static_3bv_units,
+    _ZiniBoardState,
     calculate_g_zini,
 )
 
@@ -103,6 +104,100 @@ class ZiniCalculatorTests(unittest.TestCase):
             frozenset({(2, 0), (2, 1), (0, 2), (1, 2), (2, 2)}),
         )
         self.assertEqual(units[0].opening_id, 0)
+
+    def test_dynamic_state_reveals_single_cell_opening_and_completes_board(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        unit = _extract_static_3bv_units(snapshot)[0]
+        state = _ZiniBoardState.create(snapshot)
+
+        state.reveal_unit(unit)
+
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertTrue(state.all_safe_cells_revealed())
+
+    def test_dynamic_state_reveals_opening_zero_cells_and_border_ring(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        unit = _extract_static_3bv_units(snapshot)[0]
+        state = _ZiniBoardState.create(snapshot)
+
+        state.reveal_unit(unit)
+
+        self.assertEqual(
+            state.revealed,
+            {
+                (1, 0),
+                (2, 0),
+                (0, 1),
+                (1, 1),
+                (2, 1),
+                (0, 2),
+                (1, 2),
+                (2, 2),
+            },
+        )
+        self.assertTrue(state.all_safe_cells_revealed())
+
+    def test_dynamic_state_reveals_isolated_number_only(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        unit = _extract_static_3bv_units(snapshot)[0]
+        state = _ZiniBoardState.create(snapshot)
+
+        state.reveal_unit(unit)
+
+        self.assertEqual(unit.kind, "isolated")
+        self.assertEqual(unit.representative, (0, 0))
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertFalse(state.all_safe_cells_revealed())
+
+    def test_dynamic_state_flags_mine_coordinate(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+
+        state.flag_mine((1, 0))
+
+        self.assertEqual(state.flagged_mines, {(1, 0)})
+
+    def test_dynamic_state_rejects_non_mine_flag(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+
+        with self.assertRaises(ValueError):
+            state.flag_mine((0, 0))
 
 
 if __name__ == "__main__":
