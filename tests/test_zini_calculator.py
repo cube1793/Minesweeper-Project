@@ -8,6 +8,7 @@ from zini_calculator import (
     _find_premium_candidates,
     _PremiumCandidate,
     _ZiniBoardState,
+    _apply_next_g_zini_move,
     _calculate_premium,
     _click_covered_candidate,
     _click_fallback_cell,
@@ -894,6 +895,107 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             _click_fallback_cell(state, (0, 0), broken_context)
+
+    def test_apply_next_move_returns_none_when_solved(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        context = _build_premium_context(snapshot)
+
+        self.assertIsNone(_apply_next_g_zini_move(state, context))
+
+    def test_apply_next_move_clicks_covered_best_candidate(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _apply_next_g_zini_move(state, context)
+
+        self.assertEqual(move.action, "click")
+        self.assertEqual((move.x, move.y), (1, 0))
+        self.assertEqual(move.premium, 2)
+        self.assertEqual(move.clicks_added, 1)
+        self.assertEqual(state.revealed, {(1, 0)})
+
+    def test_apply_next_move_flag_chords_revealed_non_negative_candidate(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 0))
+        context = _build_premium_context(snapshot)
+
+        move = _apply_next_g_zini_move(state, context)
+
+        self.assertEqual(move.action, "flag_chord")
+        self.assertEqual((move.x, move.y), (1, 0))
+        self.assertEqual(move.premium, 2)
+        self.assertEqual(move.clicks_added, 2)
+        self.assertEqual(state.flagged_mines, {(1, 1)})
+        self.assertEqual(
+            state.revealed,
+            {(1, 0), (0, 0), (2, 0), (0, 1), (2, 1)},
+        )
+
+    def test_apply_next_move_uses_fallback_when_best_premium_is_negative(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _apply_next_g_zini_move(state, context)
+
+        self.assertEqual(move.action, "fallback_click")
+        self.assertEqual((move.x, move.y), (0, 0))
+        self.assertIsNone(move.premium)
+        self.assertEqual(move.clicks_added, 1)
+        self.assertEqual(state.revealed, {(0, 0)})
+
+    def test_apply_next_move_uses_fallback_when_no_premium_candidate_exists(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        move = _apply_next_g_zini_move(state, context)
+
+        self.assertEqual(move.action, "fallback_click")
+        self.assertEqual((move.x, move.y), (0, 0))
+        self.assertIsNone(move.premium)
+        self.assertEqual(move.clicks_added, 1)
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertTrue(state.all_safe_cells_revealed())
 
 
 if __name__ == "__main__":

@@ -504,6 +504,32 @@ def _click_fallback_cell(
     )
 
 
+def _apply_next_g_zini_move(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> ZiniMove | None:
+    """
+    Select and apply exactly one G.ZiNi move for the current state.
+
+    This is a one-step orchestrator only.  It intentionally does not loop or
+    calculate final G.ZiNi totals.
+    """
+    if state.all_safe_cells_revealed():
+        return None
+
+    candidate = _select_best_premium_candidate(state, context)
+    if candidate is None or candidate.premium < 0:
+        target = _select_fallback_click_target(state)
+        if target is None:
+            return None
+        return _click_fallback_cell(state, target, context)
+
+    if candidate.coord in state.revealed:
+        return _flag_and_chord_uncovered_candidate(state, candidate, context)
+
+    return _click_covered_candidate(state, candidate)
+
+
 def _top_left_key(coord: Coordinate) -> TopLeftKey:
     """Return row-major sorting key for a coordinate stored as (x, y)."""
     x, y = coord
