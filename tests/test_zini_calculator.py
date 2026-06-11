@@ -10,6 +10,7 @@ from zini_calculator import (
     _ZiniBoardState,
     _calculate_premium,
     _click_covered_candidate,
+    _flag_and_chord_uncovered_candidate,
     _select_best_premium_candidate,
     calculate_g_zini,
 )
@@ -543,6 +544,190 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             _click_covered_candidate(state, candidate)
+
+    def test_flag_chord_flags_adjacent_mine_and_reveals_safe_neighbors(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 0))
+        context = _build_premium_context(snapshot)
+        candidate = _PremiumCandidate(
+            coord=(1, 0),
+            premium=_calculate_premium(state, (1, 0), context),
+        )
+
+        move = _flag_and_chord_uncovered_candidate(state, candidate, context)
+
+        self.assertEqual(state.flagged_mines, {(1, 1)})
+        self.assertEqual(
+            state.revealed,
+            {(1, 0), (0, 0), (2, 0), (0, 1), (2, 1)},
+        )
+        self.assertEqual(move.action, "flag_chord")
+        self.assertEqual((move.x, move.y), (1, 0))
+        self.assertEqual(move.premium, 2)
+        self.assertEqual(move.clicks_added, 2)
+
+    def test_flag_chord_counts_only_chord_when_adjacent_mine_already_flagged(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 0))
+        state.flag_mine((1, 1))
+        context = _build_premium_context(snapshot)
+        candidate = _PremiumCandidate(
+            coord=(1, 0),
+            premium=_calculate_premium(state, (1, 0), context),
+        )
+
+        move = _flag_and_chord_uncovered_candidate(state, candidate, context)
+
+        self.assertEqual(state.flagged_mines, {(1, 1)})
+        self.assertEqual(move.premium, 3)
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_flag_chord_reveals_opening_through_adjacent_zero_cell(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 1))
+        state.flag_mine((0, 0))
+        context = _build_premium_context(snapshot)
+        candidate = _PremiumCandidate(
+            coord=(1, 1),
+            premium=_calculate_premium(state, (1, 1), context),
+        )
+
+        move = _flag_and_chord_uncovered_candidate(state, candidate, context)
+
+        self.assertEqual(
+            state.revealed,
+            {
+                (1, 0),
+                (0, 1),
+                (1, 1),
+                (2, 0),
+                (2, 1),
+                (0, 2),
+                (1, 2),
+                (2, 2),
+            },
+        )
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_flag_chord_reveals_border_neighbors_without_border_only_opening(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 1)}),
+            adjacent=((1, 1, 0, 0), (0, 1, 0, 0), (1, 1, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        state.flag_mine((0, 1))
+        context = _build_premium_context(snapshot)
+        candidate = _PremiumCandidate(coord=(0, 0), premium=0)
+
+        move = _flag_and_chord_uncovered_candidate(state, candidate, context)
+
+        self.assertEqual(state.revealed, {(0, 0), (1, 0), (1, 1)})
+        self.assertTrue(
+            {(2, 0), (2, 1), (1, 2), (2, 2), (3, 2)}.isdisjoint(
+                state.revealed
+            )
+        )
+        self.assertEqual(move.clicks_added, 1)
+
+    def test_flag_chord_rejects_covered_candidate(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        candidate = _PremiumCandidate(coord=(1, 0), premium=2)
+
+        with self.assertRaises(ValueError):
+            _flag_and_chord_uncovered_candidate(
+                state, candidate, _build_premium_context(snapshot)
+            )
+
+    def test_flag_chord_rejects_negative_premium(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        candidate = _PremiumCandidate(coord=(0, 0), premium=-1)
+
+        with self.assertRaises(ValueError):
+            _flag_and_chord_uncovered_candidate(
+                state, candidate, _build_premium_context(snapshot)
+            )
+
+    def test_flag_chord_rejects_mine_candidate(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 0))
+        candidate = _PremiumCandidate(coord=(1, 0), premium=0)
+
+        with self.assertRaises(ValueError):
+            _flag_and_chord_uncovered_candidate(
+                state, candidate, _build_premium_context(snapshot)
+            )
+
+    def test_flag_chord_rejects_zero_candidate(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        candidate = _PremiumCandidate(coord=(0, 0), premium=0)
+
+        with self.assertRaises(ValueError):
+            _flag_and_chord_uncovered_candidate(
+                state, candidate, _build_premium_context(snapshot)
+            )
 
 
 if __name__ == "__main__":

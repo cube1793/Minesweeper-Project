@@ -16,6 +16,7 @@ from board_snapshot import BoardSnapshot, Coordinate
 _UNIT_OPENING = "opening"
 _UNIT_ISOLATED = "isolated"
 _ACTION_CLICK = "click"
+_ACTION_FLAG_CHORD = "flag_chord"
 
 
 TopLeftKey = tuple[int, int]
@@ -374,6 +375,89 @@ def _click_covered_candidate(
         premium=candidate.premium,
         clicks_added=1,
     )
+
+
+def _flag_and_chord_uncovered_candidate(
+    state: _ZiniBoardState,
+    candidate: _PremiumCandidate,
+    context: _PremiumContext,
+) -> ZiniMove:
+    """
+    Apply flag + chord for an already revealed non-mine number candidate.
+
+    This helper is only for the G.ZiNi branch where selected Premium is
+    non-negative and the candidate is already uncovered. Click cost is the
+    number of newly placed adjacent mine flags plus one chord click.
+    """
+    coord = candidate.coord
+    if coord in state.snapshot.mines:
+        raise ValueError("Flag+chord candidate cannot target a mine.")
+    if coord not in state.revealed:
+        raise ValueError("Flag+chord candidate must already be revealed.")
+    if candidate.premium < 0:
+        raise ValueError("Flag+chord candidate requires non-negative Premium.")
+
+    x, y = coord
+    if state.snapshot.adjacent[y][x] == 0:
+        raise ValueError("Flag+chord candidate must be a number cell.")
+
+    new_flags = _flag_adjacent_unflagged_mines(state, coord)
+    _reveal_chord_neighbors(state, coord, context)
+
+    return ZiniMove(
+        action=_ACTION_FLAG_CHORD,
+        x=x,
+        y=y,
+        premium=candidate.premium,
+        clicks_added=new_flags + 1,
+    )
+
+
+def _flag_adjacent_unflagged_mines(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+) -> int:
+    """Flag adjacent mines that are not already flagged, returning new flags."""
+    new_flags = 0
+    for neighbor in _neighbors(state.snapshot, coord):
+        if neighbor in state.snapshot.mines and neighbor not in state.flagged_mines:
+            state.flag_mine(neighbor)
+            new_flags += 1
+    return new_flags
+
+
+def _reveal_chord_neighbors(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    context: _PremiumContext,
+):
+    """
+    Reveal covered safe neighbors affected by a chord.
+
+    Directly adjacent covered safe number cells, including BORDER numbers, are
+    revealed as cells. Adjacent covered zero cells reveal their whole opening
+    unit. Border-only contact does not reveal an opening unless a covered zero
+    cell from that opening is directly adjacent.
+    """
+    opening_ids: set[int] = set()
+    number_cells: set[Coordinate] = set()
+
+    for neighbor in _neighbors(state.snapshot, coord):
+        if neighbor in state.revealed or neighbor in state.snapshot.mines:
+            continue
+
+        nx, ny = neighbor
+        cell_class = context.analysis.cell_class[ny][nx]
+        if cell_class == CellClass.OPENING:
+            opening_id = context.analysis.opening_id[ny][nx]
+            if opening_id in context.opening_units_by_id:
+                opening_ids.add(opening_id)
+        elif cell_class in (CellClass.BORDER, CellClass.ISOLATED):
+            number_cells.add(neighbor)
+
+    for opening_id in opening_ids:
+        state.reveal_unit(context.opening_units_by_id[opening_id])
+    state.revealed.update(number_cells)
 
 
 def _top_left_key(coord: Coordinate) -> TopLeftKey:
