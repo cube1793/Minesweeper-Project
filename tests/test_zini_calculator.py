@@ -33,7 +33,7 @@ class ZiniCalculatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_g_zini(snapshot)
 
-    def test_finalized_snapshot_returns_result_shell(self):
+    def test_calculate_g_zini_empty_board_returns_one_fallback_click(self):
         snapshot = BoardSnapshot(
             width=1,
             height=1,
@@ -46,8 +46,70 @@ class ZiniCalculatorTests(unittest.TestCase):
         result = calculate_g_zini(snapshot)
 
         self.assertIsInstance(result, ZiniResult)
-        self.assertIsInstance(result.clicks, int)
         self.assertIsInstance(result.moves, tuple)
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(len(result.moves), 1)
+        self.assertEqual(result.moves[0].action, "fallback_click")
+        self.assertEqual((result.moves[0].x, result.moves[0].y), (0, 0))
+        self.assertIsNone(result.moves[0].premium)
+        self.assertEqual(result.moves[0].clicks_added, 1)
+
+    def test_calculate_g_zini_two_cell_mine_board_uses_negative_premium_fallback(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+
+        result = calculate_g_zini(snapshot)
+
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(len(result.moves), 1)
+        self.assertEqual(result.moves[0].action, "fallback_click")
+        self.assertEqual((result.moves[0].x, result.moves[0].y), (0, 0))
+        self.assertIsNone(result.moves[0].premium)
+        self.assertEqual(result.moves[0].clicks_added, 1)
+
+    def test_calculate_g_zini_center_mine_board_has_consistent_click_total(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+
+        result = calculate_g_zini(snapshot)
+
+        self.assertGreater(len(result.moves), 0)
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
+        self.assertTrue(all(move.clicks_added > 0 for move in result.moves))
+
+    def test_calculate_g_zini_corner_opening_board_finishes_consistently(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+
+        result = calculate_g_zini(snapshot)
+
+        self.assertGreater(len(result.moves), 0)
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
+        self.assertTrue(all(move.clicks_added > 0 for move in result.moves))
 
     def test_static_units_empty_board_has_one_opening(self):
         snapshot = BoardSnapshot(

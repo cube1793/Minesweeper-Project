@@ -122,19 +122,46 @@ def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     """
     Calculate G.ZiNi for a finalized board snapshot.
 
-    The full premium/reveal/flag/chord simulation is intentionally left for
-    later, smaller diffs.  This first scaffold establishes the public API and
-    the finalized-board validation contract.
-
     Raises:
         ValueError: if mines have not been placed yet.
+        RuntimeError: if the internal simulation cannot make progress.
     """
     if not snapshot.mines_placed:
         raise ValueError("Cannot calculate G.ZiNi before mines are placed.")
 
-    _extract_static_3bv_units(snapshot)
+    context = _build_premium_context(snapshot)
+    state = _ZiniBoardState.create(snapshot)
+    moves = _run_g_zini_loop(state, context)
 
-    return ZiniResult(clicks=0)
+    return ZiniResult(
+        clicks=sum(move.clicks_added for move in moves),
+        moves=moves,
+    )
+
+
+def _run_g_zini_loop(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> tuple[ZiniMove, ...]:
+    """Run the G.ZiNi greedy loop until all safe cells are revealed."""
+    max_moves = max(1, state.snapshot.width * state.snapshot.height * 4)
+    moves: list[ZiniMove] = []
+
+    for _ in range(max_moves):
+        if state.all_safe_cells_revealed():
+            return tuple(moves)
+
+        before = (len(state.revealed), len(state.flagged_mines))
+        move = _apply_next_g_zini_move(state, context)
+        if move is None:
+            raise ValueError("G.ZiNi could not produce a move before solving.")
+
+        moves.append(move)
+        after = (len(state.revealed), len(state.flagged_mines))
+        if after == before and not state.all_safe_cells_revealed():
+            raise RuntimeError("G.ZiNi move made no progress.")
+
+    raise RuntimeError("G.ZiNi exceeded the safety move limit.")
 
 
 def _extract_static_3bv_units(snapshot: BoardSnapshot) -> tuple[_Static3BvUnit, ...]:
