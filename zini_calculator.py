@@ -58,6 +58,14 @@ class _PremiumContext:
     isolated_cells: frozenset[Coordinate]
 
 
+@dataclass(frozen=True)
+class _PremiumCandidate:
+    """One selectable number-cell candidate and its Premium."""
+
+    coord: Coordinate
+    premium: int
+
+
 @dataclass
 class _ZiniBoardState:
     """Dynamic board state used by the G.ZiNi simulation."""
@@ -285,6 +293,55 @@ def _is_covered_non_3bv(
 
     x, y = coord
     return context.analysis.cell_class[y][x] == CellClass.BORDER
+
+
+def _find_premium_candidates(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> tuple[_PremiumCandidate, ...]:
+    """
+    Calculate Premium candidates for the current board state.
+
+    Candidates are non-mine number cells only.  Covered zero cells are excluded;
+    opening fallback clicks are handled by a later step, not by Premium
+    selection.
+    """
+    candidates = []
+    for coord in _safe_cells(state.snapshot):
+        x, y = coord
+        if state.snapshot.adjacent[y][x] == 0:
+            continue
+        candidates.append(
+            _PremiumCandidate(
+                coord=coord,
+                premium=_calculate_premium(state, coord, context),
+            )
+        )
+    return tuple(candidates)
+
+
+def _select_best_premium_candidate(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> _PremiumCandidate | None:
+    """
+    Select the highest-Premium candidate using top-leftmost tie-break.
+
+    Negative Premium values are compared as normal integers.  If the board is
+    already solved, or no number-cell candidates exist, return None and leave
+    fallback handling to a later step.
+    """
+    if state.all_safe_cells_revealed():
+        return None
+
+    candidates = _find_premium_candidates(state, context)
+    if not candidates:
+        return None
+
+    return min(
+        candidates,
+        key=lambda candidate: (-candidate.premium, _top_left_key(candidate.coord)),
+    )
 
 
 def _top_left_key(coord: Coordinate) -> TopLeftKey:

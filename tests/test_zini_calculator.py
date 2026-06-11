@@ -5,8 +5,10 @@ from zini_calculator import (
     ZiniResult,
     _extract_static_3bv_units,
     _build_premium_context,
+    _find_premium_candidates,
     _ZiniBoardState,
     _calculate_premium,
+    _select_best_premium_candidate,
     calculate_g_zini,
 )
 
@@ -314,6 +316,133 @@ class ZiniCalculatorTests(unittest.TestCase):
         # Only (0, 1) remains as adjacent covered 3BV. The adjacent mine is
         # still unflagged, so the Premium is negative and remains unclamped.
         self.assertEqual(premium, -1)
+
+    def test_select_best_candidate_uses_highest_premium_and_top_left_tie_break(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        candidate = _select_best_premium_candidate(state, context)
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.coord, (1, 0))
+        self.assertEqual(candidate.premium, 2)
+
+    def test_select_best_candidate_uses_flagged_mines_in_premium(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.flag_mine((1, 1))
+        context = _build_premium_context(snapshot)
+
+        candidate = _select_best_premium_candidate(state, context)
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.coord, (1, 0))
+        self.assertEqual(candidate.premium, 3)
+
+    def test_select_best_candidate_tie_breaks_by_y_then_x(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=2,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1), (1, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        candidate = _select_best_premium_candidate(state, context)
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.coord, (0, 0))
+        self.assertEqual(candidate.premium, 0)
+
+    def test_find_premium_candidates_excludes_covered_zero_cells(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        candidates = _find_premium_candidates(state, context)
+
+        self.assertEqual(
+            {candidate.coord for candidate in candidates},
+            {(1, 0), (0, 1), (1, 1)},
+        )
+
+    def test_select_best_candidate_allows_negative_premium(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        candidate = _select_best_premium_candidate(state, context)
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.coord, (0, 0))
+        self.assertEqual(candidate.premium, -2)
+
+    def test_select_best_candidate_returns_none_when_no_number_candidates_exist(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        self.assertEqual(_find_premium_candidates(state, context), ())
+        self.assertIsNone(_select_best_premium_candidate(state, context))
+
+    def test_select_best_candidate_returns_none_when_board_is_solved(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.update(
+            (x, y)
+            for y in range(snapshot.height)
+            for x in range(snapshot.width)
+            if (x, y) not in snapshot.mines
+        )
+        context = _build_premium_context(snapshot)
+
+        self.assertIsNone(_select_best_premium_candidate(state, context))
 
 
 if __name__ == "__main__":
