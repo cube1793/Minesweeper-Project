@@ -19,6 +19,13 @@ from zini_calculator import (
 )
 
 
+def _move_signature(result):
+    return tuple(
+        (move.action, move.x, move.y, move.premium, move.clicks_added)
+        for move in result.moves
+    )
+
+
 class ZiniCalculatorTests(unittest.TestCase):
     def test_unplaced_snapshot_is_not_calculable(self):
         snapshot = BoardSnapshot(
@@ -49,10 +56,11 @@ class ZiniCalculatorTests(unittest.TestCase):
         self.assertIsInstance(result.moves, tuple)
         self.assertEqual(result.clicks, 1)
         self.assertEqual(len(result.moves), 1)
-        self.assertEqual(result.moves[0].action, "fallback_click")
-        self.assertEqual((result.moves[0].x, result.moves[0].y), (0, 0))
-        self.assertIsNone(result.moves[0].premium)
-        self.assertEqual(result.moves[0].clicks_added, 1)
+        self.assertEqual(_move_signature(result), (("fallback_click", 0, 0, None, 1),))
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
 
     def test_calculate_g_zini_two_cell_mine_board_uses_negative_premium_fallback(self):
         snapshot = BoardSnapshot(
@@ -68,12 +76,13 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         self.assertEqual(result.clicks, 1)
         self.assertEqual(len(result.moves), 1)
-        self.assertEqual(result.moves[0].action, "fallback_click")
-        self.assertEqual((result.moves[0].x, result.moves[0].y), (0, 0))
-        self.assertIsNone(result.moves[0].premium)
-        self.assertEqual(result.moves[0].clicks_added, 1)
+        self.assertEqual(_move_signature(result), (("fallback_click", 0, 0, None, 1),))
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
 
-    def test_calculate_g_zini_center_mine_board_has_consistent_click_total(self):
+    def test_calculate_g_zini_center_mine_board_matches_expected_trace(self):
         snapshot = BoardSnapshot(
             width=3,
             height=3,
@@ -85,14 +94,24 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         result = calculate_g_zini(snapshot)
 
-        self.assertGreater(len(result.moves), 0)
+        self.assertEqual(result.clicks, 5)
+        self.assertEqual(len(result.moves), 4)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("click", 1, 0, 2, 1),
+                ("flag_chord", 1, 0, 2, 2),
+                ("flag_chord", 0, 1, 1, 1),
+                ("flag_chord", 2, 1, 0, 1),
+            ),
+        )
         self.assertEqual(
             result.clicks,
             sum(move.clicks_added for move in result.moves),
         )
         self.assertTrue(all(move.clicks_added > 0 for move in result.moves))
 
-    def test_calculate_g_zini_corner_opening_board_finishes_consistently(self):
+    def test_calculate_g_zini_corner_opening_board_matches_expected_trace(self):
         snapshot = BoardSnapshot(
             width=3,
             height=3,
@@ -104,7 +123,15 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         result = calculate_g_zini(snapshot)
 
-        self.assertGreater(len(result.moves), 0)
+        self.assertEqual(result.clicks, 2)
+        self.assertEqual(len(result.moves), 2)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("fallback_click", 1, 0, None, 1),
+                ("fallback_click", 2, 0, None, 1),
+            ),
+        )
         self.assertEqual(
             result.clicks,
             sum(move.clicks_added for move in result.moves),
