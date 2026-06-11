@@ -9,7 +9,7 @@ providing the static board facts.
 
 from dataclasses import dataclass
 
-from board_analyzer import CellClass, analyze_board
+from board_analyzer import BoardAnalysis, CellClass, analyze_board
 from board_snapshot import BoardSnapshot, Coordinate
 
 
@@ -47,6 +47,15 @@ class _Static3BvUnit:
     representative: Coordinate
     cells: frozenset[Coordinate]
     opening_id: int | None = None
+
+
+@dataclass(frozen=True)
+class _PremiumContext:
+    """Static lookup data used while calculating Premium values."""
+
+    analysis: BoardAnalysis
+    opening_units_by_id: dict[int, _Static3BvUnit]
+    isolated_cells: frozenset[Coordinate]
 
 
 @dataclass
@@ -165,6 +174,117 @@ def _extract_static_3bv_units(snapshot: BoardSnapshot) -> tuple[_Static3BvUnit, 
             key=lambda unit: _top_left_key(unit.representative),
         )
     )
+
+
+def _build_premium_context(snapshot: BoardSnapshot) -> _PremiumContext:
+    """Build static lookup data for Premium calculation."""
+    analysis = analyze_board(snapshot)
+    units = _extract_static_3bv_units(snapshot)
+
+    return _PremiumContext(
+        analysis=analysis,
+        opening_units_by_id={
+            unit.opening_id: unit
+            for unit in units
+            if unit.kind == _UNIT_OPENING and unit.opening_id is not None
+        },
+        isolated_cells=frozenset(
+            unit.representative
+            for unit in units
+            if unit.kind == _UNIT_ISOLATED
+        ),
+    )
+
+
+def _calculate_premium(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    context: _PremiumContext,
+) -> int:
+    """
+    Calculate the G.ZiNi Premium for one non-mine number candidate.
+
+    Premium is an evaluation value for move selection, not a click count.  It
+    must be returned as-is, including negative values.  Covered zero cells are
+    not Premium candidates in this first-pass implementation.
+    """
+    if coord in state.snapshot.mines:
+        raise ValueError("Cannot calculate Premium for a mine coordinate.")
+
+    x, y = coord
+    if state.snapshot.adjacent[y][x] == 0:
+        raise ValueError("Premium candidates must be number cells.")
+
+    premium = (
+        _count_adjacent_covered_3bv(state, coord, context)
+        - _count_adjacent_unflagged_mines(state, coord)
+        - 1
+    )
+    if _is_covered_non_3bv(state, coord, context):
+        premium -= 1
+    return premium
+
+
+def _count_adjacent_covered_3bv(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    context: _PremiumContext,
+) -> int:
+    """
+    Count distinct covered 3BV units adjacent to a candidate cell.
+
+    Only neighbors are considered, so the candidate itself is never counted.
+    Opening units are counted only when an adjacent covered zero cell belongs to
+    that opening.  Adjacent covered border numbers do not count as opening 3BV
+    by themselves, and repeated zero cells from the same opening count once.
+
+    The later reveal/chord simulation must use the same adjacent-zero rule:
+    if Premium counts an opening here, the move must actually reveal that
+    opening's zero-cell unit; if Premium does not count it here, later logic
+    must not assume the move solved it.
+    """
+    opening_ids: set[int] = set()
+    isolated_cells: set[Coordinate] = set()
+
+    for neighbor in _neighbors(state.snapshot, coord):
+        if neighbor in state.revealed or neighbor in state.snapshot.mines:
+            continue
+
+        nx, ny = neighbor
+        cell_class = context.analysis.cell_class[ny][nx]
+        if cell_class == CellClass.OPENING:
+            opening_id = context.analysis.opening_id[ny][nx]
+            if opening_id in context.opening_units_by_id:
+                opening_ids.add(opening_id)
+        elif cell_class == CellClass.ISOLATED and neighbor in context.isolated_cells:
+            isolated_cells.add(neighbor)
+
+    return len(opening_ids) + len(isolated_cells)
+
+
+def _count_adjacent_unflagged_mines(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+) -> int:
+    """Count adjacent mines that have not already been flagged."""
+    return sum(
+        1
+        for neighbor in _neighbors(state.snapshot, coord)
+        if neighbor in state.snapshot.mines and neighbor not in state.flagged_mines
+    )
+
+
+def _is_covered_non_3bv(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    context: _PremiumContext,
+) -> bool:
+    """Return whether coord is a covered border number cell."""
+    if coord in state.revealed:
+        return False
+
+    x, y = coord
+    return context.analysis.cell_class[y][x] == CellClass.BORDER
 
 
 def _top_left_key(coord: Coordinate) -> TopLeftKey:

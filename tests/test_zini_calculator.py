@@ -4,7 +4,9 @@ from board_snapshot import BoardSnapshot
 from zini_calculator import (
     ZiniResult,
     _extract_static_3bv_units,
+    _build_premium_context,
     _ZiniBoardState,
+    _calculate_premium,
     calculate_g_zini,
 )
 
@@ -198,6 +200,120 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             state.flag_mine((0, 0))
+
+    def test_premium_counts_adjacent_unflagged_mines_without_counting_candidate(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        premium = _calculate_premium(state, (0, 0), context)
+
+        # Adjacent covered isolated cells: (1, 0), (0, 1). The covered
+        # isolated candidate (0, 0) is not adjacent to itself and is not
+        # counted. Adjacent unflagged mines: (1, 1).
+        self.assertEqual(premium, 0)
+
+    def test_premium_ignores_already_flagged_adjacent_mines(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.flag_mine((1, 1))
+        context = _build_premium_context(snapshot)
+
+        premium = _calculate_premium(state, (0, 0), context)
+
+        self.assertEqual(premium, 1)
+
+    def test_premium_deduplicates_multiple_adjacent_zero_cells(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        premium = _calculate_premium(state, (1, 1), context)
+
+        # Candidate (1, 1) touches several zero cells from the same opening,
+        # two covered BORDER numbers, and one unflagged mine. The opening is
+        # counted once, BORDER numbers are not independent 3BV, and the covered
+        # BORDER candidate receives the non-3BV penalty.
+        self.assertEqual(premium, -2)
+
+    def test_premium_excludes_border_only_opening_contact(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 1)}),
+            adjacent=((1, 1, 0, 0), (0, 1, 0, 0), (1, 1, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        premium = _calculate_premium(state, (0, 0), context)
+
+        # Candidate (0, 0) touches only BORDER numbers from the opening at its
+        # east side, not any zero cell from that opening. The opening must not
+        # be counted as adjacent covered 3BV. The negative value is intentional
+        # and must not be clamped to zero.
+        self.assertEqual(premium, -2)
+
+    def test_premium_applies_covered_border_penalty_only_while_covered(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(0, 0)}),
+            adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        covered_premium = _calculate_premium(state, (1, 1), context)
+        state.revealed.add((1, 1))
+        uncovered_premium = _calculate_premium(state, (1, 1), context)
+
+        self.assertEqual(covered_premium, -2)
+        self.assertEqual(uncovered_premium, -1)
+
+    def test_premium_excludes_already_revealed_adjacent_3bv(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((1, 0))
+        context = _build_premium_context(snapshot)
+
+        premium = _calculate_premium(state, (0, 0), context)
+
+        # Only (0, 1) remains as adjacent covered 3BV. The adjacent mine is
+        # still unflagged, so the Premium is negative and remains unclamped.
+        self.assertEqual(premium, -1)
 
 
 if __name__ == "__main__":
