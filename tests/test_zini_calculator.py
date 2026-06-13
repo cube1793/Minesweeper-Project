@@ -16,6 +16,7 @@ from zini_calculator import (
     _select_fallback_click_target,
     _select_best_premium_candidate,
     calculate_g_zini,
+    calculate_g_zini_min_ties,
 )
 
 
@@ -136,6 +137,178 @@ class ZiniCalculatorTests(unittest.TestCase):
             sum(move.clicks_added for move in result.moves),
         )
         self.assertTrue(all(move.clicks_added > 0 for move in result.moves))
+
+    def test_calculate_g_zini_min_ties_rejects_unplaced_snapshot(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=2,
+            num_mines=1,
+            mines_placed=False,
+            mines=frozenset(),
+            adjacent=((0, 0), (0, 0)),
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_g_zini_min_ties(snapshot)
+
+    def test_calculate_g_zini_min_ties_d1_matches_expected_trace(self):
+        snapshot = BoardSnapshot(
+            width=5,
+            height=5,
+            num_mines=2,
+            mines_placed=True,
+            mines=frozenset({(1, 0), (1, 3)}),
+            adjacent=(
+                (1, 0, 1, 0, 0),
+                (1, 1, 1, 0, 0),
+                (1, 1, 1, 0, 0),
+                (1, 0, 1, 0, 0),
+                (1, 1, 1, 0, 0),
+            ),
+        )
+
+        result = calculate_g_zini_min_ties(snapshot)
+
+        self.assertEqual(result.clicks, 6)
+        self.assertEqual(len(result.moves), 5)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("click", 0, 2, 2, 1),
+                ("flag_chord", 0, 2, 2, 2),
+                ("flag_chord", 0, 3, 1, 1),
+                ("fallback_click", 0, 0, None, 1),
+                ("fallback_click", 3, 0, None, 1),
+            ),
+        )
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
+
+    def test_calculate_g_zini_min_ties_d2_matches_expected_trace(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=4,
+            num_mines=3,
+            mines_placed=True,
+            mines=frozenset({(2, 0), (2, 2), (3, 3)}),
+            adjacent=(
+                (0, 1, 0, 1),
+                (0, 2, 2, 2),
+                (0, 1, 0, 2),
+                (0, 1, 2, 0),
+            ),
+        )
+
+        result = calculate_g_zini_min_ties(snapshot)
+
+        self.assertEqual(result.clicks, 5)
+        self.assertEqual(len(result.moves), 3)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("click", 2, 1, 0, 1),
+                ("flag_chord", 2, 1, 0, 3),
+                ("flag_chord", 1, 2, 1, 1),
+            ),
+        )
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
+
+    def test_calculate_g_zini_min_ties_d3_matches_expected_trace(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=4,
+            num_mines=3,
+            mines_placed=True,
+            mines=frozenset({(3, 0), (2, 1), (2, 3)}),
+            adjacent=(
+                (0, 1, 2, 0),
+                (0, 1, 0, 2),
+                (0, 2, 2, 2),
+                (0, 1, 0, 1),
+            ),
+        )
+
+        result = calculate_g_zini_min_ties(snapshot)
+
+        self.assertEqual(result.clicks, 5)
+        self.assertEqual(len(result.moves), 3)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("click", 1, 1, 0, 1),
+                ("flag_chord", 1, 1, 1, 2),
+                ("flag_chord", 2, 2, 1, 2),
+            ),
+        )
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
+
+    def test_calculate_g_zini_min_ties_board_c_matches_expected_trace(self):
+        snapshot = BoardSnapshot(
+            width=9,
+            height=9,
+            num_mines=10,
+            mines_placed=True,
+            mines=frozenset(
+                {
+                    (1, 0),
+                    (6, 0),
+                    (3, 1),
+                    (8, 2),
+                    (0, 3),
+                    (5, 4),
+                    (2, 5),
+                    (7, 6),
+                    (4, 7),
+                    (0, 8),
+                }
+            ),
+            adjacent=(
+                (1, 0, 2, 1, 1, 1, 0, 1, 0),
+                (1, 1, 2, 0, 1, 1, 1, 2, 1),
+                (1, 1, 1, 1, 1, 0, 0, 1, 0),
+                (0, 1, 0, 0, 1, 1, 1, 1, 1),
+                (1, 2, 1, 1, 1, 0, 1, 0, 0),
+                (0, 1, 0, 1, 1, 1, 2, 1, 1),
+                (0, 1, 1, 2, 1, 1, 1, 0, 1),
+                (1, 1, 0, 1, 0, 1, 1, 1, 1),
+                (0, 1, 0, 1, 1, 1, 0, 0, 0),
+            ),
+        )
+
+        result = calculate_g_zini_min_ties(snapshot)
+
+        self.assertEqual(result.clicks, 16)
+        self.assertEqual(len(result.moves), 13)
+        self.assertEqual(
+            _move_signature(result),
+            (
+                ("click", 1, 1, 3, 1),
+                ("flag_chord", 1, 1, 3, 2),
+                ("click", 4, 6, 2, 1),
+                ("flag_chord", 4, 6, 2, 2),
+                ("flag_chord", 5, 7, 2, 1),
+                ("click", 4, 1, 1, 1),
+                ("flag_chord", 4, 1, 2, 2),
+                ("flag_chord", 2, 2, 0, 1),
+                ("flag_chord", 3, 7, 0, 1),
+                ("fallback_click", 8, 0, None, 1),
+                ("fallback_click", 7, 4, None, 1),
+                ("fallback_click", 0, 5, None, 1),
+                ("fallback_click", 8, 6, None, 1),
+            ),
+        )
+        self.assertEqual(
+            result.clicks,
+            sum(move.clicks_added for move in result.moves),
+        )
 
     def test_static_units_empty_board_has_one_opening(self):
         snapshot = BoardSnapshot(

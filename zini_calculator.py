@@ -7,7 +7,7 @@ the dynamic G.ZiNi simulation layer, while BoardSnapshot and board_analyzer keep
 providing the static board facts.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from board_analyzer import BoardAnalysis, CellClass, analyze_board
 from board_snapshot import BoardSnapshot, Coordinate
@@ -21,6 +21,7 @@ _ACTION_FALLBACK_CLICK = "fallback_click"
 
 
 TopLeftKey = tuple[int, int]
+_ZiniStateKey = tuple[frozenset[Coordinate], frozenset[Coordinate]]
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,135 @@ class _ZiniBoardState:
         )
 
 
+@dataclass
+class _MinTieSearch:
+    """Find the lowest-click path among equal maximum-Premium choices."""
+
+    snapshot: BoardSnapshot
+    context: _PremiumContext
+    best_clicks: int
+    best_moves: tuple[ZiniMove, ...]
+    best_cost_by_state: dict[_ZiniStateKey, int] = field(default_factory=dict)
+
+    def find_best_moves(self) -> tuple[ZiniMove, ...]:
+        """Search maximum-Premium ties and return the best discovered path."""
+        self._search(
+            state=_ZiniBoardState.create(self.snapshot),
+            clicks=0,
+            moves=(),
+        )
+        return self.best_moves
+
+    def _search(
+        self,
+        state: _ZiniBoardState,
+        clicks: int,
+        moves: tuple[ZiniMove, ...],
+    ):
+        if state.all_safe_cells_revealed():
+            if clicks < self.best_clicks:
+                self.best_clicks = clicks
+                self.best_moves = moves
+            return
+
+        if clicks >= self.best_clicks:
+            return
+
+        state_key = self._state_key(state)
+        known_cost = self.best_cost_by_state.get(state_key)
+        if known_cost is not None and known_cost <= clicks:
+            return
+        self.best_cost_by_state[state_key] = clicks
+
+        candidates = _find_premium_candidates(state, self.context)
+        best_premium = max(
+            (candidate.premium for candidate in candidates),
+            default=None,
+        )
+
+        if best_premium is None or best_premium < 0:
+            self._search_fallback(state, state_key, clicks, moves)
+            return
+
+        best_candidates = sorted(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.premium == best_premium
+            ),
+            key=lambda candidate: _top_left_key(candidate.coord),
+        )
+        next_branches: dict[
+            _ZiniStateKey,
+            tuple[_ZiniBoardState, ZiniMove],
+        ] = {}
+
+        for candidate in best_candidates:
+            next_state = self._copy_state(state)
+            if candidate.coord in next_state.revealed:
+                move = _flag_and_chord_uncovered_candidate(
+                    next_state,
+                    candidate,
+                    self.context,
+                )
+            else:
+                move = _click_covered_candidate(next_state, candidate)
+
+            next_key = self._state_key(next_state)
+            if next_key == state_key:
+                raise RuntimeError("G.ZiNi min-tie branch made no progress.")
+
+            previous = next_branches.get(next_key)
+            if previous is None or move.clicks_added < previous[1].clicks_added:
+                next_branches[next_key] = (next_state, move)
+
+        for next_state, move in next_branches.values():
+            self._search(
+                next_state,
+                clicks + move.clicks_added,
+                moves + (move,),
+            )
+
+    def _search_fallback(
+        self,
+        state: _ZiniBoardState,
+        state_key: _ZiniStateKey,
+        clicks: int,
+        moves: tuple[ZiniMove, ...],
+    ):
+        target = _select_fallback_click_target(state, self.context)
+        if target is None:
+            raise ValueError(
+                "G.ZiNi could not produce a fallback before solving."
+            )
+
+        next_state = self._copy_state(state)
+        move = _click_fallback_cell(next_state, target, self.context)
+        if self._state_key(next_state) == state_key:
+            raise RuntimeError("G.ZiNi min-tie fallback made no progress.")
+
+        self._search(
+            next_state,
+            clicks + move.clicks_added,
+            moves + (move,),
+        )
+
+    @staticmethod
+    def _copy_state(state: _ZiniBoardState) -> _ZiniBoardState:
+        return _ZiniBoardState(
+            snapshot=state.snapshot,
+            revealed=set(state.revealed),
+            flagged_mines=set(state.flagged_mines),
+        )
+
+    @staticmethod
+    def _state_key(state: _ZiniBoardState) -> _ZiniStateKey:
+        return (
+            frozenset(state.revealed),
+            frozenset(state.flagged_mines),
+        )
+
+
 def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     """
     Calculate G.ZiNi for a finalized board snapshot.
@@ -133,6 +263,43 @@ def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     context = _build_premium_context(snapshot)
     state = _ZiniBoardState.create(snapshot)
     moves = _run_g_zini_loop(state, context)
+
+    return ZiniResult(
+        clicks=sum(move.clicks_added for move in moves),
+        moves=moves,
+    )
+
+
+def calculate_g_zini_min_ties(snapshot: BoardSnapshot) -> ZiniResult:
+    """
+    Calculate an extended G.ZiNi result by exploring maximum-Premium ties.
+
+    This extension explores only candidates tied for the highest Premium at
+    each step and selects the path with the lowest total click count. Premium,
+    move application, and fallback behavior remain identical to
+    calculate_g_zini().
+
+    Raises:
+        ValueError: if mines have not been placed yet.
+        RuntimeError: if an explored branch cannot make progress.
+    """
+    if not snapshot.mines_placed:
+        raise ValueError("Cannot calculate G.ZiNi before mines are placed.")
+
+    context = _build_premium_context(snapshot)
+    deterministic_moves = _run_g_zini_loop(
+        _ZiniBoardState.create(snapshot),
+        context,
+    )
+    search = _MinTieSearch(
+        snapshot=snapshot,
+        context=context,
+        best_clicks=sum(
+            move.clicks_added for move in deterministic_moves
+        ),
+        best_moves=deterministic_moves,
+    )
+    moves = search.find_best_moves()
 
     return ZiniResult(
         clicks=sum(move.clicks_added for move in moves),
