@@ -3,6 +3,7 @@ import unittest
 from board_snapshot import BoardSnapshot
 from zini_calculator import (
     ZiniResult,
+    ZiniSearchResult,
     _extract_static_3bv_units,
     _build_premium_context,
     _find_premium_candidates,
@@ -17,6 +18,7 @@ from zini_calculator import (
     _select_best_premium_candidate,
     calculate_g_zini,
     calculate_g_zini_min_ties,
+    calculate_g_zini_min_ties_bounded,
 )
 
 
@@ -309,6 +311,129 @@ class ZiniCalculatorTests(unittest.TestCase):
             result.clicks,
             sum(move.clicks_added for move in result.moves),
         )
+
+    def test_bounded_min_ties_finishes_exactly_on_small_board(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=4,
+            num_mines=3,
+            mines_placed=True,
+            mines=frozenset({(2, 0), (2, 2), (3, 3)}),
+            adjacent=(
+                (0, 1, 0, 1),
+                (0, 2, 2, 2),
+                (0, 1, 0, 2),
+                (0, 1, 2, 0),
+            ),
+        )
+
+        search = calculate_g_zini_min_ties_bounded(snapshot)
+
+        self.assertIsInstance(search, ZiniSearchResult)
+        self.assertTrue(search.exact)
+        self.assertFalse(search.timed_out)
+        self.assertFalse(search.state_limited)
+        self.assertEqual(search.result.clicks, 5)
+        self.assertEqual(search.best_clicks, 5)
+        self.assertEqual(search.deterministic_clicks, 6)
+        self.assertGreaterEqual(search.elapsed_seconds, 0)
+        self.assertGreater(search.unique_states, 0)
+        self.assertGreater(search.search_calls, 0)
+        self.assertEqual(
+            search.result.clicks,
+            sum(move.clicks_added for move in search.result.moves),
+        )
+
+    def test_bounded_min_ties_stops_at_state_limit(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=4,
+            num_mines=3,
+            mines_placed=True,
+            mines=frozenset({(2, 0), (2, 2), (3, 3)}),
+            adjacent=(
+                (0, 1, 0, 1),
+                (0, 2, 2, 2),
+                (0, 1, 0, 2),
+                (0, 1, 2, 0),
+            ),
+        )
+
+        search = calculate_g_zini_min_ties_bounded(snapshot, max_states=1)
+
+        self.assertFalse(search.exact)
+        self.assertFalse(search.timed_out)
+        self.assertTrue(search.state_limited)
+        self.assertEqual(search.unique_states, 1)
+        self.assertLessEqual(
+            search.result.clicks,
+            search.deterministic_clicks,
+        )
+
+    def test_bounded_min_ties_stops_at_time_limit(self):
+        snapshot = BoardSnapshot(
+            width=4,
+            height=4,
+            num_mines=3,
+            mines_placed=True,
+            mines=frozenset({(2, 0), (2, 2), (3, 3)}),
+            adjacent=(
+                (0, 1, 0, 1),
+                (0, 2, 2, 2),
+                (0, 1, 0, 2),
+                (0, 1, 2, 0),
+            ),
+        )
+
+        search = calculate_g_zini_min_ties_bounded(snapshot, max_seconds=0.0)
+
+        self.assertFalse(search.exact)
+        self.assertTrue(search.timed_out)
+        self.assertFalse(search.state_limited)
+        self.assertEqual(search.unique_states, 0)
+        self.assertLessEqual(
+            search.result.clicks,
+            search.deterministic_clicks,
+        )
+
+    def test_bounded_min_ties_rejects_unplaced_snapshot(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=2,
+            num_mines=1,
+            mines_placed=False,
+            mines=frozenset(),
+            adjacent=((0, 0), (0, 0)),
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_g_zini_min_ties_bounded(snapshot)
+
+    def test_bounded_min_ties_rejects_negative_seconds(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_g_zini_min_ties_bounded(snapshot, max_seconds=-1)
+
+    def test_bounded_min_ties_rejects_negative_states(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_g_zini_min_ties_bounded(snapshot, max_states=-1)
 
     def test_static_units_empty_board_has_one_opening(self):
         snapshot = BoardSnapshot(
