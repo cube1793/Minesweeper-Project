@@ -8,6 +8,7 @@ providing the static board facts.
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 from time import perf_counter
 
 from board_analyzer import BoardAnalysis, CellClass, analyze_board
@@ -19,6 +20,7 @@ _UNIT_ISOLATED = "isolated"
 _ACTION_CLICK = "click"
 _ACTION_FLAG_CHORD = "flag_chord"
 _ACTION_FALLBACK_CLICK = "fallback_click"
+_SUPPORTED_NEIGHBORHOOD_BEAM_RANKING_POLICIES = frozenset({"standard_v1"})
 
 
 TopLeftKey = tuple[int, int]
@@ -57,6 +59,94 @@ class ZiniSearchResult:
     search_calls: int
     best_clicks: int
     deterministic_clicks: int
+
+
+class ZiniAdvancedTerminationReason(str, Enum):
+    """Reason a bounded advanced best-so-far search stopped.
+
+    SEARCH_EXHAUSTED means only that the configured bounded strategy has no
+    more candidates to expand.  It does not prove a global minimum or optimal
+    ZiNi value.
+    """
+
+    TIME_LIMIT = "time_limit"
+    EVALUATION_LIMIT = "evaluation_limit"
+    STALL_LIMIT = "stall_limit"
+    SEARCH_EXHAUSTED = "search_exhausted"
+
+
+@dataclass(frozen=True)
+class ZiniNeighborhoodBeamConfig:
+    """Configuration for a future bounded neighborhood-beam search."""
+
+    premium_window: int = 2
+    beam_size: int = 8
+    max_decision_points: int = 6
+    max_alternatives_per_point: int = 3
+    prefix_diversity_length: int = 20
+    retain_click_margin: int = 3
+    max_seconds: float | None = 5.0
+    max_evaluations: int | None = 500
+    stall_seconds: float | None = None
+    seed: int = 0
+    ranking_policy: str = "standard_v1"
+
+    def __post_init__(self):
+        _validate_neighborhood_beam_config(self)
+
+
+@dataclass(frozen=True)
+class ZiniAdvancedSearchResult:
+    """Heuristic best-so-far result from a future advanced bounded search.
+
+    Advanced neighborhood-beam search does not prove a minimum or optimum, so
+    future APIs returning this type must always set exact to False.
+    """
+
+    result: ZiniResult
+    exact: bool
+    termination_reason: ZiniAdvancedTerminationReason
+    elapsed_seconds: float
+    evaluations: int
+    generations: int
+    best_clicks: int
+    deterministic_clicks: int
+    strategy_name: str
+    strategy_version: str
+    config: ZiniNeighborhoodBeamConfig
+
+
+def _validate_neighborhood_beam_config(config: ZiniNeighborhoodBeamConfig):
+    """Validate bounds for a future neighborhood-beam search."""
+    if config.premium_window < 0:
+        raise ValueError("premium_window cannot be negative.")
+    if config.beam_size <= 0:
+        raise ValueError("beam_size must be positive.")
+    if config.max_decision_points <= 0:
+        raise ValueError("max_decision_points must be positive.")
+    if config.max_alternatives_per_point <= 0:
+        raise ValueError("max_alternatives_per_point must be positive.")
+    if config.prefix_diversity_length <= 0:
+        raise ValueError("prefix_diversity_length must be positive.")
+    if config.retain_click_margin < 0:
+        raise ValueError("retain_click_margin cannot be negative.")
+    if config.max_seconds is not None and config.max_seconds < 0:
+        raise ValueError("max_seconds cannot be negative.")
+    if config.max_evaluations is not None and config.max_evaluations < 0:
+        raise ValueError("max_evaluations cannot be negative.")
+    if config.stall_seconds is not None and config.stall_seconds < 0:
+        raise ValueError("stall_seconds cannot be negative.")
+    if (
+        config.max_seconds is None
+        and config.max_evaluations is None
+        and config.stall_seconds is None
+    ):
+        raise ValueError("At least one advanced search limit is required.")
+    if config.ranking_policy not in _SUPPORTED_NEIGHBORHOOD_BEAM_RANKING_POLICIES:
+        raise ValueError(
+            f"Unsupported neighborhood-beam ranking policy: "
+            f"{config.ranking_policy}"
+        )
 
 
 class _MinTieSearchLimitReached(Exception):

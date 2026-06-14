@@ -1,7 +1,11 @@
 import unittest
+from dataclasses import FrozenInstanceError
 
 from board_snapshot import BoardSnapshot
 from zini_calculator import (
+    ZiniAdvancedSearchResult,
+    ZiniAdvancedTerminationReason,
+    ZiniNeighborhoodBeamConfig,
     ZiniResult,
     ZiniSearchResult,
     _apply_premium_candidate,
@@ -19,6 +23,7 @@ from zini_calculator import (
     _flag_and_chord_uncovered_candidate,
     _select_fallback_click_target,
     _select_best_premium_candidate,
+    _validate_neighborhood_beam_config,
     _zini_state_key,
     calculate_g_zini,
     calculate_g_zini_min_ties,
@@ -184,6 +189,92 @@ def _expert_seed1003_snapshot():
 
 
 class ZiniCalculatorTests(unittest.TestCase):
+    def test_neighborhood_beam_config_has_safe_defaults(self):
+        config = ZiniNeighborhoodBeamConfig()
+
+        self.assertEqual(config.premium_window, 2)
+        self.assertEqual(config.beam_size, 8)
+        self.assertEqual(config.max_decision_points, 6)
+        self.assertEqual(config.max_alternatives_per_point, 3)
+        self.assertEqual(config.prefix_diversity_length, 20)
+        self.assertEqual(config.retain_click_margin, 3)
+        self.assertEqual(config.max_seconds, 5.0)
+        self.assertEqual(config.max_evaluations, 500)
+        self.assertIsNone(config.stall_seconds)
+        self.assertEqual(config.seed, 0)
+        self.assertEqual(config.ranking_policy, "standard_v1")
+        self.assertIsNone(_validate_neighborhood_beam_config(config))
+
+    def test_neighborhood_beam_config_is_frozen(self):
+        config = ZiniNeighborhoodBeamConfig()
+
+        with self.assertRaises(FrozenInstanceError):
+            config.beam_size = 16
+
+    def test_neighborhood_beam_config_accepts_zero_execution_budgets(self):
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=0,
+            max_evaluations=0,
+            stall_seconds=0,
+        )
+
+        self.assertIsNone(_validate_neighborhood_beam_config(config))
+
+    def test_neighborhood_beam_config_rejects_invalid_values(self):
+        invalid_configs = (
+            {"premium_window": -1},
+            {"beam_size": 0},
+            {"max_decision_points": 0},
+            {"max_alternatives_per_point": 0},
+            {"prefix_diversity_length": 0},
+            {"retain_click_margin": -1},
+            {"max_seconds": -1},
+            {"max_evaluations": -1},
+            {"stall_seconds": -1},
+            {
+                "max_seconds": None,
+                "max_evaluations": None,
+                "stall_seconds": None,
+            },
+            {"ranking_policy": "unknown"},
+        )
+
+        for values in invalid_configs:
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    ZiniNeighborhoodBeamConfig(**values)
+
+    def test_advanced_termination_reason_values_are_stable(self):
+        self.assertEqual(
+            tuple(reason.value for reason in ZiniAdvancedTerminationReason),
+            (
+                "time_limit",
+                "evaluation_limit",
+                "stall_limit",
+                "search_exhausted",
+            ),
+        )
+
+    def test_advanced_search_result_stores_best_so_far_metadata(self):
+        config = ZiniNeighborhoodBeamConfig()
+        result = ZiniAdvancedSearchResult(
+            result=ZiniResult(clicks=1),
+            exact=False,
+            termination_reason=ZiniAdvancedTerminationReason.SEARCH_EXHAUSTED,
+            elapsed_seconds=0.1,
+            evaluations=2,
+            generations=1,
+            best_clicks=1,
+            deterministic_clicks=2,
+            strategy_name="neighborhood_beam",
+            strategy_version="1",
+            config=config,
+        )
+
+        self.assertFalse(result.exact)
+        self.assertEqual(result.best_clicks, result.result.clicks)
+        self.assertIs(result.config, config)
+
     def test_copy_zini_state_preserves_key_without_sharing_mutable_sets(self):
         snapshot = BoardSnapshot(
             width=2,
