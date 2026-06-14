@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from random import Random
 from time import perf_counter
-from typing import Protocol
+from typing import Iterator, Protocol
 
 from board_analyzer import BoardAnalysis, CellClass, analyze_board
 from board_snapshot import BoardSnapshot, Coordinate
@@ -446,12 +446,12 @@ class _NeighborhoodPolicy(Protocol):
         random: Random,
     ) -> tuple[_NeighborhoodAlternative, ...]: ...
 
-    def rollout_deviation(
+    def iter_rollout_deviations(
         self,
         decision: _NeighborhoodDecision,
         alternative: _NeighborhoodAlternative,
         context: _PremiumContext,
-    ) -> _AdvancedTrajectory: ...
+    ) -> Iterator[_AdvancedTrajectory]: ...
 
     def rank_trajectory(
         self,
@@ -509,13 +509,13 @@ class _StandardNeighborhoodPolicyV1:
             random=random,
         )
 
-    def rollout_deviation(
+    def iter_rollout_deviations(
         self,
         decision: _NeighborhoodDecision,
         alternative: _NeighborhoodAlternative,
         context: _PremiumContext,
-    ) -> _AdvancedTrajectory:
-        return _rollout_neighborhood_deviation(
+    ) -> Iterator[_AdvancedTrajectory]:
+        yield _rollout_neighborhood_deviation(
             decision,
             alternative,
             context,
@@ -628,25 +628,37 @@ class _NeighborhoodBeamSearch:
                             alternative,
                         )
                         self.attempted_deviations.add(deviation_key)
-                        candidate = self.policy.rollout_deviation(
+                        rollouts = self.policy.iter_rollout_deviations(
                             decision,
                             alternative,
                             self.context,
                         )
-                        self.evaluations += 1
-                        evaluated_this_generation = True
+                        while True:
+                            termination = self._limit_reason()
+                            if termination is not None:
+                                if evaluated_this_generation:
+                                    self.generations += 1
+                                return termination
 
-                        signature = _zini_move_signature(
-                            candidate.result.moves
-                        )
-                        if signature in self.trajectory_signatures:
-                            continue
+                            try:
+                                candidate = next(rollouts)
+                            except StopIteration:
+                                break
 
-                        self.trajectory_signatures.add(signature)
-                        generated.append(candidate)
-                        if candidate.result.clicks < self.best.result.clicks:
-                            self.best = candidate
-                            self.last_improvement_at = perf_counter()
+                            self.evaluations += 1
+                            evaluated_this_generation = True
+
+                            signature = _zini_move_signature(
+                                candidate.result.moves
+                            )
+                            if signature in self.trajectory_signatures:
+                                continue
+
+                            self.trajectory_signatures.add(signature)
+                            generated.append(candidate)
+                            if candidate.result.clicks < self.best.result.clicks:
+                                self.best = candidate
+                                self.last_improvement_at = perf_counter()
 
             if evaluated_this_generation:
                 self.generations += 1

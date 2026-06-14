@@ -18,6 +18,7 @@ from zini_calculator import (
     _find_fallback_click_targets,
     _get_neighborhood_policy,
     _PremiumCandidate,
+    _rollout_neighborhood_deviation,
     _StandardNeighborhoodPolicyV1,
     _ZiniBoardState,
     _apply_next_g_zini_move,
@@ -284,6 +285,38 @@ class ZiniCalculatorTests(unittest.TestCase):
         policy = _get_neighborhood_policy(ZiniNeighborhoodBeamConfig())
 
         self.assertIsInstance(policy, _StandardNeighborhoodPolicyV1)
+
+    def test_standard_v1_iterator_yields_exactly_one_rollout(self):
+        snapshot = _advanced_search_snapshot()
+        context = _build_premium_context(snapshot)
+        trajectory = _AdvancedTrajectory(calculate_g_zini(snapshot))
+        config = ZiniNeighborhoodBeamConfig()
+        decision = _collect_neighborhood_decisions(
+            snapshot,
+            context,
+            trajectory,
+            config,
+        )[0]
+        alternative = decision.alternatives[0]
+        policy = _get_neighborhood_policy(config)
+
+        rollouts = tuple(
+            policy.iter_rollout_deviations(
+                decision,
+                alternative,
+                context,
+            )
+        )
+
+        self.assertEqual(len(rollouts), 1)
+        self.assertEqual(
+            rollouts[0],
+            _rollout_neighborhood_deviation(
+                decision,
+                alternative,
+                context,
+            ),
+        )
 
     def test_standard_v1_board_c_small_budget_trace_is_stable(self):
         config = ZiniNeighborhoodBeamConfig(
