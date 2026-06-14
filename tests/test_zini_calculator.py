@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import FrozenInstanceError
+from random import Random
 
 from board_snapshot import BoardSnapshot
 from zini_calculator import (
@@ -9,6 +10,7 @@ from zini_calculator import (
     ZiniResult,
     ZiniSearchResult,
     _AdvancedTrajectory,
+    _ChainNeighborhoodPolicyV1,
     _apply_premium_candidate,
     _collect_neighborhood_decisions,
     _extract_static_3bv_units,
@@ -286,6 +288,13 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         self.assertIsInstance(policy, _StandardNeighborhoodPolicyV1)
 
+    def test_neighborhood_policy_dispatches_chain_v1(self):
+        policy = _get_neighborhood_policy(
+            ZiniNeighborhoodBeamConfig(ranking_policy="chain_v1")
+        )
+
+        self.assertIsInstance(policy, _ChainNeighborhoodPolicyV1)
+
     def test_standard_v1_iterator_yields_exactly_one_rollout(self):
         snapshot = _advanced_search_snapshot()
         context = _build_premium_context(snapshot)
@@ -302,9 +311,13 @@ class ZiniCalculatorTests(unittest.TestCase):
 
         rollouts = tuple(
             policy.iter_rollout_deviations(
+                snapshot,
                 decision,
                 alternative,
                 context,
+                config,
+                Random(config.seed),
+                set(),
             )
         )
 
@@ -317,6 +330,140 @@ class ZiniCalculatorTests(unittest.TestCase):
                 context,
             ),
         )
+
+    def test_chain_v1_depth_one_matches_standard_v1(self):
+        snapshot = _advanced_search_snapshot()
+        shared = dict(
+            chain_depth=1,
+            max_seconds=None,
+            max_evaluations=20,
+            stall_seconds=None,
+            seed=1234,
+        )
+        standard = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=ZiniNeighborhoodBeamConfig(
+                ranking_policy="standard_v1",
+                **shared,
+            ),
+        )
+        chain = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=ZiniNeighborhoodBeamConfig(
+                ranking_policy="chain_v1",
+                **shared,
+            ),
+        )
+
+        self.assertEqual(chain.result, standard.result)
+        self.assertEqual(chain.evaluations, standard.evaluations)
+        self.assertEqual(chain.generations, standard.generations)
+        self.assertEqual(chain.termination_reason, standard.termination_reason)
+
+    def test_chain_v1_rollouts_preserve_first_deviation(self):
+        snapshot = _advanced_search_snapshot()
+        context = _build_premium_context(snapshot)
+        trajectory = _AdvancedTrajectory(calculate_g_zini(snapshot))
+        config = ZiniNeighborhoodBeamConfig(
+            ranking_policy="chain_v1",
+            chain_depth=2,
+            chain_branching=2,
+        )
+        policy = _get_neighborhood_policy(config)
+        decision = _collect_neighborhood_decisions(
+            snapshot,
+            context,
+            trajectory,
+            config,
+        )[0]
+        alternative = decision.alternatives[0]
+
+        rollouts = tuple(
+            policy.iter_rollout_deviations(
+                snapshot,
+                decision,
+                alternative,
+                context,
+                config,
+                Random(config.seed),
+                set(),
+            )
+        )
+
+        self.assertGreater(len(rollouts), 1)
+        first_deviation = rollouts[0].result.moves[decision.step_index]
+        for rollout in rollouts[1:]:
+            self.assertEqual(
+                rollout.result.moves[decision.step_index],
+                first_deviation,
+            )
+
+    def test_chain_v1_small_board_result_is_valid(self):
+        snapshot = _advanced_search_snapshot()
+        baseline = calculate_g_zini(snapshot)
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=ZiniNeighborhoodBeamConfig(
+                ranking_policy="chain_v1",
+                max_seconds=None,
+                max_evaluations=30,
+                stall_seconds=None,
+                seed=7,
+            ),
+        )
+        state = _replay_zini_result(snapshot, search.result)
+
+        self.assertFalse(search.exact)
+        self.assertTrue(state.all_safe_cells_revealed())
+        self.assertTrue(state.flagged_mines <= snapshot.mines)
+        self.assertLessEqual(search.best_clicks, baseline.clicks)
+        self.assertEqual(
+            search.result.clicks,
+            sum(move.clicks_added for move in search.result.moves),
+        )
+
+    def test_chain_v1_is_reproducible_with_fixed_evaluation_budget(self):
+        snapshot = _advanced_search_snapshot()
+        config = ZiniNeighborhoodBeamConfig(
+            ranking_policy="chain_v1",
+            max_seconds=None,
+            max_evaluations=30,
+            stall_seconds=None,
+            seed=1234,
+        )
+
+        first = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+        second = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+
+        self.assertEqual(first.result, second.result)
+        self.assertEqual(first.evaluations, second.evaluations)
+        self.assertEqual(first.generations, second.generations)
+        self.assertEqual(first.termination_reason, second.termination_reason)
+
+    def test_chain_v1_zero_evaluations_returns_baseline(self):
+        snapshot = _advanced_search_snapshot()
+        baseline = calculate_g_zini(snapshot)
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=ZiniNeighborhoodBeamConfig(
+                ranking_policy="chain_v1",
+                max_seconds=None,
+                max_evaluations=0,
+            ),
+        )
+
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.EVALUATION_LIMIT,
+        )
+        self.assertEqual(search.evaluations, 0)
+        self.assertEqual(search.result, baseline)
 
     def test_standard_v1_board_c_small_budget_trace_is_stable(self):
         config = ZiniNeighborhoodBeamConfig(
@@ -574,6 +721,8 @@ class ZiniCalculatorTests(unittest.TestCase):
         self.assertIsNone(config.stall_seconds)
         self.assertEqual(config.seed, 0)
         self.assertEqual(config.ranking_policy, "standard_v1")
+        self.assertEqual(config.chain_depth, 2)
+        self.assertEqual(config.chain_branching, 2)
         self.assertIsNone(_validate_neighborhood_beam_config(config))
 
     def test_neighborhood_beam_config_is_frozen(self):
@@ -599,6 +748,10 @@ class ZiniCalculatorTests(unittest.TestCase):
             {"max_alternatives_per_point": 0},
             {"prefix_diversity_length": 0},
             {"retain_click_margin": -1},
+            {"chain_depth": 0},
+            {"chain_depth": -1},
+            {"chain_branching": 0},
+            {"chain_branching": -1},
             {"max_seconds": -1},
             {"max_evaluations": -1},
             {"stall_seconds": -1},

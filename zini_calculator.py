@@ -26,7 +26,9 @@ _ALTERNATIVE_PREMIUM = "premium"
 _ALTERNATIVE_FALLBACK = "fallback"
 _NEIGHBORHOOD_BEAM_STRATEGY_NAME = "neighborhood_beam"
 _NEIGHBORHOOD_BEAM_STRATEGY_VERSION = "1"
-_SUPPORTED_NEIGHBORHOOD_BEAM_RANKING_POLICIES = frozenset({"standard_v1"})
+_SUPPORTED_NEIGHBORHOOD_BEAM_RANKING_POLICIES = frozenset(
+    {"standard_v1", "chain_v1"}
+)
 
 
 TopLeftKey = tuple[int, int]
@@ -85,7 +87,7 @@ class ZiniAdvancedTerminationReason(str, Enum):
 
 @dataclass(frozen=True)
 class ZiniNeighborhoodBeamConfig:
-    """Configuration for a future bounded neighborhood-beam search."""
+    """Configuration for bounded neighborhood-beam search policies."""
 
     premium_window: int = 2
     beam_size: int = 8
@@ -98,6 +100,8 @@ class ZiniNeighborhoodBeamConfig:
     stall_seconds: float | None = None
     seed: int = 0
     ranking_policy: str = "standard_v1"
+    chain_depth: int = 2
+    chain_branching: int = 2
 
     def __post_init__(self):
         _validate_neighborhood_beam_config(self)
@@ -138,6 +142,10 @@ def _validate_neighborhood_beam_config(config: ZiniNeighborhoodBeamConfig):
         raise ValueError("prefix_diversity_length must be positive.")
     if config.retain_click_margin < 0:
         raise ValueError("retain_click_margin cannot be negative.")
+    if config.chain_depth <= 0:
+        raise ValueError("chain_depth must be positive.")
+    if config.chain_branching <= 0:
+        raise ValueError("chain_branching must be positive.")
     if config.max_seconds is not None and config.max_seconds < 0:
         raise ValueError("max_seconds cannot be negative.")
     if config.max_evaluations is not None and config.max_evaluations < 0:
@@ -279,6 +287,23 @@ class _NeighborhoodDecision:
     state: _ZiniBoardState
     prefix_moves: tuple[ZiniMove, ...]
     alternatives: tuple[_NeighborhoodAlternative, ...]
+
+
+@dataclass(frozen=True)
+class _ChainAncestryEntry:
+    """One deviation that must remain present in a chain trajectory."""
+
+    step_index: int
+    move_signature: _ZiniMoveSignatureEntry
+
+
+@dataclass(frozen=True)
+class _ChainTrajectoryNode:
+    """One complete trajectory retained while extending a deviation chain."""
+
+    trajectory: _AdvancedTrajectory
+    last_step_index: int
+    ancestry: tuple[_ChainAncestryEntry, ...]
 
 
 @dataclass
@@ -448,9 +473,13 @@ class _NeighborhoodPolicy(Protocol):
 
     def iter_rollout_deviations(
         self,
+        snapshot: BoardSnapshot,
         decision: _NeighborhoodDecision,
         alternative: _NeighborhoodAlternative,
         context: _PremiumContext,
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+        known_trajectory_signatures: set[_ZiniMoveSignature],
     ) -> Iterator[_AdvancedTrajectory]: ...
 
     def rank_trajectory(
@@ -511,9 +540,13 @@ class _StandardNeighborhoodPolicyV1:
 
     def iter_rollout_deviations(
         self,
+        snapshot: BoardSnapshot,
         decision: _NeighborhoodDecision,
         alternative: _NeighborhoodAlternative,
         context: _PremiumContext,
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+        known_trajectory_signatures: set[_ZiniMoveSignature],
     ) -> Iterator[_AdvancedTrajectory]:
         yield _rollout_neighborhood_deviation(
             decision,
@@ -547,12 +580,56 @@ class _StandardNeighborhoodPolicyV1:
         return tuple(ordered[index] for index in indices)
 
 
+class _ChainNeighborhoodPolicyV1(_StandardNeighborhoodPolicyV1):
+    """Bounded chain of forward-only deviations and deterministic rollouts."""
+
+    def __init__(self):
+        self._seen_nodes: set[tuple[_ZiniMoveSignature, int]] = set()
+        self._seen_extensions: set[tuple] = set()
+        self._yielded_signatures: set[_ZiniMoveSignature] = set()
+
+    def iter_rollout_deviations(
+        self,
+        snapshot: BoardSnapshot,
+        decision: _NeighborhoodDecision,
+        alternative: _NeighborhoodAlternative,
+        context: _PremiumContext,
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+        known_trajectory_signatures: set[_ZiniMoveSignature],
+    ) -> Iterator[_AdvancedTrajectory]:
+        if config.chain_depth == 1:
+            yield from super().iter_rollout_deviations(
+                snapshot,
+                decision,
+                alternative,
+                context,
+                config,
+                random,
+                known_trajectory_signatures,
+            )
+            return
+
+        yield from _iter_chain_neighborhood_rollouts(
+            policy=self,
+            snapshot=snapshot,
+            initial_decision=decision,
+            initial_alternative=alternative,
+            context=context,
+            config=config,
+            random=random,
+            known_trajectory_signatures=known_trajectory_signatures,
+        )
+
+
 def _get_neighborhood_policy(
     config: ZiniNeighborhoodBeamConfig,
 ) -> _NeighborhoodPolicy:
     """Resolve the configured internal neighborhood policy."""
     if config.ranking_policy == "standard_v1":
         return _StandardNeighborhoodPolicyV1()
+    if config.ranking_policy == "chain_v1":
+        return _ChainNeighborhoodPolicyV1()
     raise ValueError(
         f"Unsupported neighborhood-beam ranking policy: "
         f"{config.ranking_policy}"
@@ -629,9 +706,13 @@ class _NeighborhoodBeamSearch:
                         )
                         self.attempted_deviations.add(deviation_key)
                         rollouts = self.policy.iter_rollout_deviations(
+                            self.snapshot,
                             decision,
                             alternative,
                             self.context,
+                            self.config,
+                            self.random,
+                            self.trajectory_signatures,
                         )
                         while True:
                             termination = self._limit_reason()
@@ -1078,12 +1159,244 @@ def _rollout_neighborhood_deviation(
     )
 
 
+def _zini_move_signature_entry(move: ZiniMove) -> _ZiniMoveSignatureEntry:
+    """Return the canonical signature for one trace move."""
+    return (
+        move.action,
+        move.x,
+        move.y,
+        move.premium,
+        move.clicks_added,
+    )
+
+
+def _validate_chain_ancestry(node: _ChainTrajectoryNode):
+    """Ensure every earlier deviation is preserved in the current trace."""
+    moves = node.trajectory.result.moves
+    for entry in node.ancestry:
+        if entry.step_index >= len(moves):
+            raise RuntimeError("Chain ancestry step is outside the trajectory.")
+        if _zini_move_signature_entry(moves[entry.step_index]) != (
+            entry.move_signature
+        ):
+            raise RuntimeError(
+                "Chain rollout did not preserve an earlier deviation."
+            )
+
+
+def _chain_node_key(
+    node: _ChainTrajectoryNode,
+) -> tuple[_ZiniMoveSignature, int]:
+    return (
+        _zini_move_signature(node.trajectory.result.moves),
+        node.last_step_index,
+    )
+
+
+def _chain_ancestry_signature(
+    ancestry: tuple[_ChainAncestryEntry, ...],
+) -> tuple[tuple[int, _ZiniMoveSignatureEntry], ...]:
+    return tuple(
+        (entry.step_index, entry.move_signature)
+        for entry in ancestry
+    )
+
+
+def _chain_extension_key(
+    node: _ChainTrajectoryNode,
+    decision: _NeighborhoodDecision,
+    alternative: _NeighborhoodAlternative,
+) -> tuple:
+    return (
+        _chain_ancestry_signature(node.ancestry),
+        _zini_move_signature(node.trajectory.result.moves),
+        node.last_step_index,
+        decision.step_index,
+        alternative.kind,
+        alternative.coord,
+        alternative.premium,
+    )
+
+
+def _chain_choice_key(
+    choice: tuple[_NeighborhoodDecision, _NeighborhoodAlternative],
+) -> tuple:
+    decision, alternative = choice
+    return decision.step_index, _neighborhood_alternative_key(alternative)
+
+
+def _select_chain_choices(
+    policy: _ChainNeighborhoodPolicyV1,
+    snapshot: BoardSnapshot,
+    context: _PremiumContext,
+    node: _ChainTrajectoryNode,
+    config: ZiniNeighborhoodBeamConfig,
+    random: Random,
+) -> tuple[tuple[_NeighborhoodDecision, _NeighborhoodAlternative], ...]:
+    """Select bounded forward-only extensions for one complete trajectory."""
+    _validate_chain_ancestry(node)
+    decisions = tuple(
+        decision
+        for decision in policy.collect_decisions(
+            snapshot,
+            context,
+            node.trajectory,
+            config,
+        )
+        if decision.step_index > node.last_step_index
+    )
+    decisions = policy.select_decisions(decisions, config, random)
+    choices = []
+    for decision in decisions:
+        alternatives = policy.select_alternatives(
+            decision.alternatives,
+            config,
+            random,
+        )
+        for alternative in alternatives:
+            extension_key = _chain_extension_key(
+                node,
+                decision,
+                alternative,
+            )
+            if extension_key not in policy._seen_extensions:
+                choices.append((decision, alternative))
+
+    return policy._sample_ordered(
+        tuple(choices),
+        config.chain_branching,
+        key=_chain_choice_key,
+        random=random,
+    )
+
+
+def _chain_node_from_rollout(
+    trajectory: _AdvancedTrajectory,
+    step_index: int,
+    ancestry: tuple[_ChainAncestryEntry, ...],
+) -> _ChainTrajectoryNode:
+    if step_index >= len(trajectory.result.moves):
+        raise RuntimeError("Chain deviation step is outside the trajectory.")
+    entry = _ChainAncestryEntry(
+        step_index=step_index,
+        move_signature=_zini_move_signature_entry(
+            trajectory.result.moves[step_index]
+        ),
+    )
+    node = _ChainTrajectoryNode(
+        trajectory=trajectory,
+        last_step_index=step_index,
+        ancestry=ancestry + (entry,),
+    )
+    _validate_chain_ancestry(node)
+    return node
+
+
+def _should_yield_chain_trajectory(
+    policy: _ChainNeighborhoodPolicyV1,
+    trajectory: _AdvancedTrajectory,
+    known_trajectory_signatures: set[_ZiniMoveSignature],
+) -> bool:
+    signature = _zini_move_signature(trajectory.result.moves)
+    if (
+        signature in known_trajectory_signatures
+        or signature in policy._yielded_signatures
+    ):
+        return False
+    policy._yielded_signatures.add(signature)
+    return True
+
+
+def _iter_chain_neighborhood_rollouts(
+    *,
+    policy: _ChainNeighborhoodPolicyV1,
+    snapshot: BoardSnapshot,
+    initial_decision: _NeighborhoodDecision,
+    initial_alternative: _NeighborhoodAlternative,
+    context: _PremiumContext,
+    config: ZiniNeighborhoodBeamConfig,
+    random: Random,
+    known_trajectory_signatures: set[_ZiniMoveSignature],
+) -> Iterator[_AdvancedTrajectory]:
+    """Yield complete forward-only chain trajectories one at a time."""
+    initial_trajectory = _rollout_neighborhood_deviation(
+        initial_decision,
+        initial_alternative,
+        context,
+    )
+    initial_node = _chain_node_from_rollout(
+        initial_trajectory,
+        initial_decision.step_index,
+        (),
+    )
+    initial_node_key = _chain_node_key(initial_node)
+    if initial_node_key in policy._seen_nodes:
+        return
+    policy._seen_nodes.add(initial_node_key)
+
+    if _should_yield_chain_trajectory(
+        policy,
+        initial_trajectory,
+        known_trajectory_signatures,
+    ):
+        yield initial_trajectory
+
+    frontier = (initial_node,)
+    for _depth in range(2, config.chain_depth + 1):
+        next_frontier = []
+        for node in frontier:
+            choices = _select_chain_choices(
+                policy,
+                snapshot,
+                context,
+                node,
+                config,
+                random,
+            )
+            for decision, alternative in choices:
+                extension_key = _chain_extension_key(
+                    node,
+                    decision,
+                    alternative,
+                )
+                policy._seen_extensions.add(extension_key)
+                child_trajectory = _rollout_neighborhood_deviation(
+                    decision,
+                    alternative,
+                    context,
+                )
+                child_node = _chain_node_from_rollout(
+                    child_trajectory,
+                    decision.step_index,
+                    node.ancestry,
+                )
+                child_node_key = _chain_node_key(child_node)
+                if child_node_key in policy._seen_nodes:
+                    continue
+                policy._seen_nodes.add(child_node_key)
+                next_frontier.append(child_node)
+
+                if _should_yield_chain_trajectory(
+                    policy,
+                    child_trajectory,
+                    known_trajectory_signatures,
+                ):
+                    yield child_trajectory
+
+        if not next_frontier:
+            return
+        frontier = tuple(next_frontier)
+
+
 def _rank_advanced_trajectory(
     trajectory: _AdvancedTrajectory,
     config: ZiniNeighborhoodBeamConfig,
 ):
     """Return the configured deterministic trajectory ranking key."""
-    if config.ranking_policy == "standard_v1":
+    if config.ranking_policy in (
+        "standard_v1",
+        "chain_v1",
+    ):
         return (
             trajectory.result.clicks,
             len(trajectory.result.moves),
