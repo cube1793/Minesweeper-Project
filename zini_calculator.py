@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from random import Random
 from time import perf_counter
+from typing import Protocol
 
 from board_analyzer import BoardAnalysis, CellClass, analyze_board
 from board_snapshot import BoardSnapshot, Coordinate
@@ -420,6 +421,144 @@ class _MinTieSearch:
             raise _MinTieSearchLimitReached
 
 
+class _NeighborhoodPolicy(Protocol):
+    """Internal policy seam for bounded neighborhood-beam behavior."""
+
+    def collect_decisions(
+        self,
+        snapshot: BoardSnapshot,
+        context: _PremiumContext,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> tuple[_NeighborhoodDecision, ...]: ...
+
+    def select_decisions(
+        self,
+        decisions: tuple[_NeighborhoodDecision, ...],
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+    ) -> tuple[_NeighborhoodDecision, ...]: ...
+
+    def select_alternatives(
+        self,
+        alternatives: tuple[_NeighborhoodAlternative, ...],
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+    ) -> tuple[_NeighborhoodAlternative, ...]: ...
+
+    def rollout_deviation(
+        self,
+        decision: _NeighborhoodDecision,
+        alternative: _NeighborhoodAlternative,
+        context: _PremiumContext,
+    ) -> _AdvancedTrajectory: ...
+
+    def rank_trajectory(
+        self,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> tuple: ...
+
+    def diversity_key(
+        self,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> _ZiniMoveSignature: ...
+
+
+class _StandardNeighborhoodPolicyV1:
+    """Current single-deviation neighborhood behavior, unchanged."""
+
+    def collect_decisions(
+        self,
+        snapshot: BoardSnapshot,
+        context: _PremiumContext,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> tuple[_NeighborhoodDecision, ...]:
+        return _collect_neighborhood_decisions(
+            snapshot,
+            context,
+            trajectory,
+            config,
+        )
+
+    def select_decisions(
+        self,
+        decisions: tuple[_NeighborhoodDecision, ...],
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+    ) -> tuple[_NeighborhoodDecision, ...]:
+        return self._sample_ordered(
+            decisions,
+            config.max_decision_points,
+            key=lambda item: item.step_index,
+            random=random,
+        )
+
+    def select_alternatives(
+        self,
+        alternatives: tuple[_NeighborhoodAlternative, ...],
+        config: ZiniNeighborhoodBeamConfig,
+        random: Random,
+    ) -> tuple[_NeighborhoodAlternative, ...]:
+        return self._sample_ordered(
+            alternatives,
+            config.max_alternatives_per_point,
+            key=_neighborhood_alternative_key,
+            random=random,
+        )
+
+    def rollout_deviation(
+        self,
+        decision: _NeighborhoodDecision,
+        alternative: _NeighborhoodAlternative,
+        context: _PremiumContext,
+    ) -> _AdvancedTrajectory:
+        return _rollout_neighborhood_deviation(
+            decision,
+            alternative,
+            context,
+        )
+
+    def rank_trajectory(
+        self,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> tuple:
+        return _rank_advanced_trajectory(trajectory, config)
+
+    def diversity_key(
+        self,
+        trajectory: _AdvancedTrajectory,
+        config: ZiniNeighborhoodBeamConfig,
+    ) -> _ZiniMoveSignature:
+        return _advanced_prefix_key(
+            trajectory,
+            config.prefix_diversity_length,
+        )
+
+    @staticmethod
+    def _sample_ordered(items, limit: int, *, key, random: Random):
+        ordered = tuple(sorted(items, key=key))
+        if len(ordered) <= limit:
+            return ordered
+        indices = sorted(random.sample(range(len(ordered)), limit))
+        return tuple(ordered[index] for index in indices)
+
+
+def _get_neighborhood_policy(
+    config: ZiniNeighborhoodBeamConfig,
+) -> _NeighborhoodPolicy:
+    """Resolve the configured internal neighborhood policy."""
+    if config.ranking_policy == "standard_v1":
+        return _StandardNeighborhoodPolicyV1()
+    raise ValueError(
+        f"Unsupported neighborhood-beam ranking policy: "
+        f"{config.ranking_policy}"
+    )
+
+
 @dataclass
 class _NeighborhoodBeamSearch:
     """Bounded best-so-far search over local G.ZiNi trajectory deviations."""
@@ -434,6 +573,7 @@ class _NeighborhoodBeamSearch:
     best: _AdvancedTrajectory = field(init=False)
     last_improvement_at: float = field(init=False)
     random: Random = field(init=False)
+    policy: _NeighborhoodPolicy = field(init=False)
     trajectory_signatures: set[_ZiniMoveSignature] = field(default_factory=set)
     attempted_deviations: set[tuple] = field(default_factory=set)
 
@@ -441,6 +581,7 @@ class _NeighborhoodBeamSearch:
         self.best = _AdvancedTrajectory(self.baseline)
         self.last_improvement_at = self.started_at
         self.random = Random(self.config.seed)
+        self.policy = _get_neighborhood_policy(self.config)
         self.trajectory_signatures.add(
             _zini_move_signature(self.baseline.moves)
         )
@@ -460,7 +601,10 @@ class _NeighborhoodBeamSearch:
 
             for trajectory in sorted(
                 beam,
-                key=lambda item: _rank_advanced_trajectory(item, self.config),
+                key=lambda item: self.policy.rank_trajectory(
+                    item,
+                    self.config,
+                ),
             ):
                 decisions = self._unattempted_decisions(trajectory)
                 decisions = self._select_decisions(decisions)
@@ -484,7 +628,7 @@ class _NeighborhoodBeamSearch:
                             alternative,
                         )
                         self.attempted_deviations.add(deviation_key)
-                        candidate = _rollout_neighborhood_deviation(
+                        candidate = self.policy.rollout_deviation(
                             decision,
                             alternative,
                             self.context,
@@ -513,13 +657,14 @@ class _NeighborhoodBeamSearch:
                 (*beam, *generated),
                 self.best.result.clicks,
                 self.config,
+                self.policy,
             )
 
     def _unattempted_decisions(
         self,
         trajectory: _AdvancedTrajectory,
     ) -> tuple[_NeighborhoodDecision, ...]:
-        decisions = _collect_neighborhood_decisions(
+        decisions = self.policy.collect_decisions(
             self.snapshot,
             self.context,
             trajectory,
@@ -551,28 +696,21 @@ class _NeighborhoodBeamSearch:
         self,
         decisions: tuple[_NeighborhoodDecision, ...],
     ) -> tuple[_NeighborhoodDecision, ...]:
-        return self._sample_ordered(
+        return self.policy.select_decisions(
             decisions,
-            self.config.max_decision_points,
-            key=lambda item: item.step_index,
+            self.config,
+            self.random,
         )
 
     def _select_alternatives(
         self,
         alternatives: tuple[_NeighborhoodAlternative, ...],
     ) -> tuple[_NeighborhoodAlternative, ...]:
-        return self._sample_ordered(
+        return self.policy.select_alternatives(
             alternatives,
-            self.config.max_alternatives_per_point,
-            key=_neighborhood_alternative_key,
+            self.config,
+            self.random,
         )
-
-    def _sample_ordered(self, items, limit: int, *, key):
-        ordered = tuple(sorted(items, key=key))
-        if len(ordered) <= limit:
-            return ordered
-        indices = sorted(self.random.sample(range(len(ordered)), limit))
-        return tuple(ordered[index] for index in indices)
 
     def _deviation_key(
         self,
@@ -956,13 +1094,14 @@ def _select_diverse_advanced_beam(
     trajectories: tuple[_AdvancedTrajectory, ...],
     best_clicks: int,
     config: ZiniNeighborhoodBeamConfig,
+    policy: _NeighborhoodPolicy,
 ) -> tuple[_AdvancedTrajectory, ...]:
     """Select a ranked beam while preserving distinct move prefixes."""
     maximum_clicks = best_clicks + config.retain_click_margin
     unique_by_signature = {}
     for trajectory in sorted(
         trajectories,
-        key=lambda item: _rank_advanced_trajectory(item, config),
+        key=lambda item: policy.rank_trajectory(item, config),
     ):
         if trajectory.result.clicks > maximum_clicks:
             continue
@@ -972,7 +1111,7 @@ def _select_diverse_advanced_beam(
     ordered = tuple(
         sorted(
             unique_by_signature.values(),
-            key=lambda item: _rank_advanced_trajectory(item, config),
+            key=lambda item: policy.rank_trajectory(item, config),
         )
     )
     selected = []
@@ -980,10 +1119,7 @@ def _select_diverse_advanced_beam(
     prefixes = set()
 
     for trajectory in ordered:
-        prefix = _advanced_prefix_key(
-            trajectory,
-            config.prefix_diversity_length,
-        )
+        prefix = policy.diversity_key(trajectory, config)
         if prefix in prefixes:
             deferred.append(trajectory)
             continue

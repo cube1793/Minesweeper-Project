@@ -16,7 +16,9 @@ from zini_calculator import (
     _copy_zini_state,
     _find_premium_candidates,
     _find_fallback_click_targets,
+    _get_neighborhood_policy,
     _PremiumCandidate,
+    _StandardNeighborhoodPolicyV1,
     _ZiniBoardState,
     _apply_next_g_zini_move,
     _calculate_premium,
@@ -53,6 +55,40 @@ def _advanced_search_snapshot():
             (0, 2, 2, 2),
             (0, 1, 0, 2),
             (0, 1, 2, 0),
+        ),
+    )
+
+
+def _board_c_snapshot():
+    return BoardSnapshot(
+        width=9,
+        height=9,
+        num_mines=10,
+        mines_placed=True,
+        mines=frozenset(
+            {
+                (1, 0),
+                (6, 0),
+                (3, 1),
+                (8, 2),
+                (0, 3),
+                (5, 4),
+                (2, 5),
+                (7, 6),
+                (4, 7),
+                (0, 8),
+            }
+        ),
+        adjacent=(
+            (1, 0, 2, 1, 1, 1, 0, 1, 0),
+            (1, 1, 2, 0, 1, 1, 1, 2, 1),
+            (1, 1, 1, 1, 1, 0, 0, 1, 0),
+            (0, 1, 0, 0, 1, 1, 1, 1, 1),
+            (1, 2, 1, 1, 1, 0, 1, 0, 0),
+            (0, 1, 0, 1, 1, 1, 2, 1, 1),
+            (0, 1, 1, 2, 1, 1, 1, 0, 1),
+            (1, 1, 0, 1, 0, 1, 1, 1, 1),
+            (0, 1, 0, 1, 1, 1, 0, 0, 0),
         ),
     )
 
@@ -244,6 +280,51 @@ def _expert_seed1003_snapshot():
 
 
 class ZiniCalculatorTests(unittest.TestCase):
+    def test_neighborhood_policy_dispatches_standard_v1(self):
+        policy = _get_neighborhood_policy(ZiniNeighborhoodBeamConfig())
+
+        self.assertIsInstance(policy, _StandardNeighborhoodPolicyV1)
+
+    def test_standard_v1_board_c_small_budget_trace_is_stable(self):
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=None,
+            max_evaluations=20,
+            stall_seconds=None,
+            seed=1234,
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            _board_c_snapshot(),
+            config=config,
+        )
+
+        self.assertFalse(search.exact)
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.EVALUATION_LIMIT,
+        )
+        self.assertEqual(search.best_clicks, 16)
+        self.assertEqual(search.evaluations, 20)
+        self.assertEqual(search.generations, 2)
+        self.assertEqual(
+            _move_signature(search.result),
+            (
+                ("click", 5, 7, 2, 1),
+                ("click", 1, 1, 3, 1),
+                ("flag_chord", 1, 1, 3, 2),
+                ("flag_chord", 5, 7, 3, 2),
+                ("flag_chord", 4, 6, 2, 1),
+                ("click", 4, 1, 1, 1),
+                ("flag_chord", 4, 1, 2, 2),
+                ("flag_chord", 2, 2, 0, 1),
+                ("flag_chord", 3, 7, 0, 1),
+                ("fallback_click", 8, 0, None, 1),
+                ("fallback_click", 7, 4, None, 1),
+                ("fallback_click", 0, 5, None, 1),
+                ("fallback_click", 8, 6, None, 1),
+            ),
+        )
+
     def test_neighborhood_beam_rejects_unplaced_snapshot(self):
         snapshot = BoardSnapshot(
             width=2,
