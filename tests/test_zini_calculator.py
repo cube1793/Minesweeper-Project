@@ -8,7 +8,9 @@ from zini_calculator import (
     ZiniNeighborhoodBeamConfig,
     ZiniResult,
     ZiniSearchResult,
+    _AdvancedTrajectory,
     _apply_premium_candidate,
+    _collect_neighborhood_decisions,
     _extract_static_3bv_units,
     _build_premium_context,
     _copy_zini_state,
@@ -26,6 +28,7 @@ from zini_calculator import (
     _validate_neighborhood_beam_config,
     _zini_state_key,
     calculate_g_zini,
+    calculate_g_zini_neighborhood_beam_bounded,
     calculate_g_zini_min_ties,
     calculate_g_zini_min_ties_bounded,
 )
@@ -36,6 +39,58 @@ def _move_signature(result):
         (move.action, move.x, move.y, move.premium, move.clicks_added)
         for move in result.moves
     )
+
+
+def _advanced_search_snapshot():
+    return BoardSnapshot(
+        width=4,
+        height=4,
+        num_mines=3,
+        mines_placed=True,
+        mines=frozenset({(2, 0), (2, 2), (3, 3)}),
+        adjacent=(
+            (0, 1, 0, 1),
+            (0, 2, 2, 2),
+            (0, 1, 0, 2),
+            (0, 1, 2, 0),
+        ),
+    )
+
+
+def _replay_zini_result(snapshot, result):
+    state = _ZiniBoardState.create(snapshot)
+    context = _build_premium_context(snapshot)
+
+    for expected in result.moves:
+        candidates = _find_premium_candidates(state, context)
+        best_premium = max(
+            (candidate.premium for candidate in candidates),
+            default=None,
+        )
+        coord = (expected.x, expected.y)
+
+        if expected.action == "fallback_click":
+            if best_premium is not None and best_premium >= 0:
+                raise AssertionError(
+                    "Fallback move used with non-negative Premium."
+                )
+            if coord not in _find_fallback_click_targets(state, context):
+                raise AssertionError("Fallback move target is unavailable.")
+            actual = _click_fallback_cell(state, coord, context)
+        else:
+            matching = tuple(
+                candidate
+                for candidate in candidates
+                if candidate.coord == coord
+            )
+            if len(matching) != 1:
+                raise AssertionError("Premium move target is unavailable.")
+            actual = _apply_premium_candidate(state, matching[0], context)
+
+        if actual != expected:
+            raise AssertionError("Replayed move does not match result trace.")
+
+    return state
 
 
 _EXPERT_SEED1003_MINES = frozenset(
@@ -189,6 +244,208 @@ def _expert_seed1003_snapshot():
 
 
 class ZiniCalculatorTests(unittest.TestCase):
+    def test_neighborhood_beam_rejects_unplaced_snapshot(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=2,
+            num_mines=1,
+            mines_placed=False,
+            mines=frozenset(),
+            adjacent=((0, 0), (0, 0)),
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_g_zini_neighborhood_beam_bounded(snapshot)
+
+    def test_neighborhood_beam_default_config_returns_valid_result(self):
+        snapshot = BoardSnapshot(
+            width=1,
+            height=1,
+            num_mines=0,
+            mines_placed=True,
+            mines=frozenset(),
+            adjacent=((0,),),
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(snapshot)
+
+        self.assertIsInstance(search, ZiniAdvancedSearchResult)
+        self.assertFalse(search.exact)
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.SEARCH_EXHAUSTED,
+        )
+        self.assertEqual(search.result.clicks, search.best_clicks)
+        self.assertLessEqual(search.best_clicks, search.deterministic_clicks)
+        self.assertEqual(
+            search.result.clicks,
+            sum(move.clicks_added for move in search.result.moves),
+        )
+
+    def test_neighborhood_beam_zero_evaluations_returns_baseline(self):
+        snapshot = _advanced_search_snapshot()
+        baseline = calculate_g_zini(snapshot)
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=None,
+            max_evaluations=0,
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.EVALUATION_LIMIT,
+        )
+        self.assertEqual(search.evaluations, 0)
+        self.assertEqual(search.result, baseline)
+
+    def test_neighborhood_beam_zero_seconds_returns_baseline(self):
+        snapshot = _advanced_search_snapshot()
+        baseline = calculate_g_zini(snapshot)
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=0,
+            max_evaluations=0,
+            stall_seconds=0,
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.TIME_LIMIT,
+        )
+        self.assertEqual(search.evaluations, 0)
+        self.assertEqual(search.result, baseline)
+
+    def test_neighborhood_beam_zero_stall_returns_baseline(self):
+        snapshot = _advanced_search_snapshot()
+        baseline = calculate_g_zini(snapshot)
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=None,
+            max_evaluations=20,
+            stall_seconds=0,
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+
+        self.assertEqual(
+            search.termination_reason,
+            ZiniAdvancedTerminationReason.STALL_LIMIT,
+        )
+        self.assertEqual(search.evaluations, 0)
+        self.assertEqual(search.result, baseline)
+
+    def test_neighborhood_beam_is_reproducible_with_fixed_evaluation_budget(self):
+        snapshot = _advanced_search_snapshot()
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=None,
+            max_evaluations=20,
+            seed=1234,
+        )
+
+        first = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+        second = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+
+        self.assertEqual(first.best_clicks, second.best_clicks)
+        self.assertEqual(
+            _move_signature(first.result),
+            _move_signature(second.result),
+        )
+        self.assertEqual(first.evaluations, second.evaluations)
+        self.assertEqual(first.generations, second.generations)
+
+    def test_neighborhood_beam_result_replays_with_current_move_semantics(self):
+        snapshot = _advanced_search_snapshot()
+        config = ZiniNeighborhoodBeamConfig(
+            max_seconds=None,
+            max_evaluations=20,
+            seed=7,
+        )
+
+        search = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+        state = _replay_zini_result(snapshot, search.result)
+
+        self.assertTrue(state.all_safe_cells_revealed())
+        self.assertTrue(state.flagged_mines <= snapshot.mines)
+        self.assertLessEqual(search.best_clicks, search.deterministic_clicks)
+        self.assertEqual(
+            search.result.clicks,
+            sum(move.clicks_added for move in search.result.moves),
+        )
+
+    def test_neighborhood_decisions_copy_state_and_exclude_original_move(self):
+        snapshot = _advanced_search_snapshot()
+        result = calculate_g_zini(snapshot)
+        context = _build_premium_context(snapshot)
+        decisions = _collect_neighborhood_decisions(
+            snapshot,
+            context,
+            _AdvancedTrajectory(result),
+            ZiniNeighborhoodBeamConfig(),
+        )
+
+        self.assertGreater(len(decisions), 1)
+        self.assertEqual(
+            len({id(decision.state) for decision in decisions}),
+            len(decisions),
+        )
+        for decision in decisions:
+            original = result.moves[decision.step_index]
+            original_coord = (original.x, original.y)
+            self.assertTrue(
+                all(
+                    alternative.coord != original_coord
+                    for alternative in decision.alternatives
+                )
+            )
+
+    def test_neighborhood_fallback_alternatives_exclude_original_target(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0, 1),),
+        )
+        result = calculate_g_zini(snapshot)
+        context = _build_premium_context(snapshot)
+
+        decisions = _collect_neighborhood_decisions(
+            snapshot,
+            context,
+            _AdvancedTrajectory(result),
+            ZiniNeighborhoodBeamConfig(),
+        )
+
+        self.assertEqual((result.moves[0].x, result.moves[0].y), (0, 0))
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(
+            tuple(
+                alternative.coord
+                for alternative in decisions[0].alternatives
+            ),
+            ((2, 0),),
+        )
+
     def test_neighborhood_beam_config_has_safe_defaults(self):
         config = ZiniNeighborhoodBeamConfig()
 
