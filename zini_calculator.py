@@ -140,6 +140,23 @@ class _ZiniBoardState:
         )
 
 
+def _copy_zini_state(state: _ZiniBoardState) -> _ZiniBoardState:
+    """Return an independent copy of one dynamic G.ZiNi board state."""
+    return _ZiniBoardState(
+        snapshot=state.snapshot,
+        revealed=set(state.revealed),
+        flagged_mines=set(state.flagged_mines),
+    )
+
+
+def _zini_state_key(state: _ZiniBoardState) -> _ZiniStateKey:
+    """Return the immutable identity used to deduplicate search states."""
+    return (
+        frozenset(state.revealed),
+        frozenset(state.flagged_mines),
+    )
+
+
 @dataclass
 class _MinTieSearch:
     """Find the lowest-click path among equal maximum-Premium choices."""
@@ -187,7 +204,7 @@ class _MinTieSearch:
         if clicks >= self.best_clicks:
             return
 
-        state_key = self._state_key(state)
+        state_key = _zini_state_key(state)
         known_cost = self.best_cost_by_state.get(state_key)
         if known_cost is not None and known_cost <= clicks:
             return
@@ -225,17 +242,14 @@ class _MinTieSearch:
         ] = {}
 
         for candidate in best_candidates:
-            next_state = self._copy_state(state)
-            if candidate.coord in next_state.revealed:
-                move = _flag_and_chord_uncovered_candidate(
-                    next_state,
-                    candidate,
-                    self.context,
-                )
-            else:
-                move = _click_covered_candidate(next_state, candidate)
+            next_state = _copy_zini_state(state)
+            move = _apply_premium_candidate(
+                next_state,
+                candidate,
+                self.context,
+            )
 
-            next_key = self._state_key(next_state)
+            next_key = _zini_state_key(next_state)
             if next_key == state_key:
                 raise RuntimeError("G.ZiNi min-tie branch made no progress.")
 
@@ -263,9 +277,9 @@ class _MinTieSearch:
                 "G.ZiNi could not produce a fallback before solving."
             )
 
-        next_state = self._copy_state(state)
+        next_state = _copy_zini_state(state)
         move = _click_fallback_cell(next_state, target, self.context)
-        if self._state_key(next_state) == state_key:
+        if _zini_state_key(next_state) == state_key:
             raise RuntimeError("G.ZiNi min-tie fallback made no progress.")
 
         self._search(
@@ -281,22 +295,6 @@ class _MinTieSearch:
         ):
             self.timed_out = True
             raise _MinTieSearchLimitReached
-
-    @staticmethod
-    def _copy_state(state: _ZiniBoardState) -> _ZiniBoardState:
-        return _ZiniBoardState(
-            snapshot=state.snapshot,
-            revealed=set(state.revealed),
-            flagged_mines=set(state.flagged_mines),
-        )
-
-    @staticmethod
-    def _state_key(state: _ZiniBoardState) -> _ZiniStateKey:
-        return (
-            frozenset(state.revealed),
-            frozenset(state.flagged_mines),
-        )
-
 
 def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     """
@@ -698,6 +696,17 @@ def _flag_and_chord_uncovered_candidate(
     )
 
 
+def _apply_premium_candidate(
+    state: _ZiniBoardState,
+    candidate: _PremiumCandidate,
+    context: _PremiumContext,
+) -> ZiniMove:
+    """Apply a selected Premium candidate using its current covered state."""
+    if candidate.coord in state.revealed:
+        return _flag_and_chord_uncovered_candidate(state, candidate, context)
+    return _click_covered_candidate(state, candidate)
+
+
 def _flag_adjacent_unflagged_mines(
     state: _ZiniBoardState,
     coord: Coordinate,
@@ -745,11 +754,11 @@ def _reveal_chord_neighbors(
     state.revealed.update(number_cells)
 
 
-def _select_fallback_click_target(
+def _find_fallback_click_targets(
     state: _ZiniBoardState,
     context: _PremiumContext,
-) -> Coordinate | None:
-    """Select the top-leftmost unresolved static 3BV unit target."""
+) -> tuple[Coordinate, ...]:
+    """Return unresolved static 3BV targets in deterministic row-major order."""
     targets = []
     for unit in context.units:
         if unit.kind == _UNIT_OPENING:
@@ -761,9 +770,16 @@ def _select_fallback_click_target(
         elif unit.kind == _UNIT_ISOLATED and unit.representative not in state.revealed:
             targets.append(unit.representative)
 
-    if not targets:
-        return None
-    return min(targets, key=_top_left_key)
+    return tuple(sorted(targets, key=_top_left_key))
+
+
+def _select_fallback_click_target(
+    state: _ZiniBoardState,
+    context: _PremiumContext,
+) -> Coordinate | None:
+    """Select the top-leftmost unresolved static 3BV unit target."""
+    targets = _find_fallback_click_targets(state, context)
+    return targets[0] if targets else None
 
 
 def _click_fallback_cell(
@@ -821,10 +837,7 @@ def _apply_next_g_zini_move(
             return None
         return _click_fallback_cell(state, target, context)
 
-    if candidate.coord in state.revealed:
-        return _flag_and_chord_uncovered_candidate(state, candidate, context)
-
-    return _click_covered_candidate(state, candidate)
+    return _apply_premium_candidate(state, candidate, context)
 
 
 def _top_left_key(coord: Coordinate) -> TopLeftKey:

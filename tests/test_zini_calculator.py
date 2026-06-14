@@ -4,9 +4,12 @@ from board_snapshot import BoardSnapshot
 from zini_calculator import (
     ZiniResult,
     ZiniSearchResult,
+    _apply_premium_candidate,
     _extract_static_3bv_units,
     _build_premium_context,
+    _copy_zini_state,
     _find_premium_candidates,
+    _find_fallback_click_targets,
     _PremiumCandidate,
     _ZiniBoardState,
     _apply_next_g_zini_move,
@@ -16,6 +19,7 @@ from zini_calculator import (
     _flag_and_chord_uncovered_candidate,
     _select_fallback_click_target,
     _select_best_premium_candidate,
+    _zini_state_key,
     calculate_g_zini,
     calculate_g_zini_min_ties,
     calculate_g_zini_min_ties_bounded,
@@ -180,6 +184,48 @@ def _expert_seed1003_snapshot():
 
 
 class ZiniCalculatorTests(unittest.TestCase):
+    def test_copy_zini_state_preserves_key_without_sharing_mutable_sets(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        state.revealed.add((0, 0))
+        state.flag_mine((1, 0))
+
+        copied = _copy_zini_state(state)
+
+        self.assertEqual(_zini_state_key(copied), _zini_state_key(state))
+        self.assertIsNot(copied.revealed, state.revealed)
+        self.assertIsNot(copied.flagged_mines, state.flagged_mines)
+
+    def test_apply_premium_candidate_preserves_covered_then_revealed_routing(self):
+        snapshot = BoardSnapshot(
+            width=2,
+            height=1,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 0)}),
+            adjacent=((1, 0),),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+        candidate = _PremiumCandidate(coord=(0, 0), premium=0)
+
+        click = _apply_premium_candidate(state, candidate, context)
+        flag_chord = _apply_premium_candidate(state, candidate, context)
+
+        self.assertEqual(click.action, "click")
+        self.assertEqual(click.clicks_added, 1)
+        self.assertEqual(flag_chord.action, "flag_chord")
+        self.assertEqual(flag_chord.clicks_added, 2)
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertEqual(state.flagged_mines, {(1, 0)})
+
     def test_unplaced_snapshot_is_not_calculable(self):
         snapshot = BoardSnapshot(
             width=2,
@@ -1471,6 +1517,35 @@ class ZiniCalculatorTests(unittest.TestCase):
             _select_fallback_click_target(state, context),
             (2, 0),
         )
+
+    def test_find_fallback_click_targets_uses_deterministic_row_major_order(self):
+        snapshot = BoardSnapshot(
+            width=3,
+            height=3,
+            num_mines=1,
+            mines_placed=True,
+            mines=frozenset({(1, 1)}),
+            adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        context = _build_premium_context(snapshot)
+
+        targets = _find_fallback_click_targets(state, context)
+
+        self.assertEqual(
+            targets,
+            (
+                (0, 0),
+                (1, 0),
+                (2, 0),
+                (0, 1),
+                (2, 1),
+                (0, 2),
+                (1, 2),
+                (2, 2),
+            ),
+        )
+        self.assertEqual(_select_fallback_click_target(state, context), targets[0])
 
     def test_select_fallback_click_target_returns_none_when_all_safe_revealed(self):
         snapshot = BoardSnapshot(
