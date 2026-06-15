@@ -7,7 +7,7 @@ the dynamic G.ZiNi simulation layer, while BoardSnapshot and board_analyzer keep
 providing the static board facts.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from random import Random
 from time import perf_counter
@@ -27,7 +27,7 @@ _ALTERNATIVE_FALLBACK = "fallback"
 _NEIGHBORHOOD_BEAM_STRATEGY_NAME = "neighborhood_beam"
 _NEIGHBORHOOD_BEAM_STRATEGY_VERSION = "1"
 _SUPPORTED_NEIGHBORHOOD_BEAM_RANKING_POLICIES = frozenset(
-    {"standard_v1", "chain_v1"}
+    {"standard_v1", "chain_v1", "standard_seeded_chain_v1"}
 )
 
 
@@ -102,6 +102,7 @@ class ZiniNeighborhoodBeamConfig:
     ranking_policy: str = "standard_v1"
     chain_depth: int = 2
     chain_branching: int = 2
+    standard_phase_evaluations: int | None = None
 
     def __post_init__(self):
         _validate_neighborhood_beam_config(self)
@@ -146,6 +147,11 @@ def _validate_neighborhood_beam_config(config: ZiniNeighborhoodBeamConfig):
         raise ValueError("chain_depth must be positive.")
     if config.chain_branching <= 0:
         raise ValueError("chain_branching must be positive.")
+    if (
+        config.standard_phase_evaluations is not None
+        and config.standard_phase_evaluations < 0
+    ):
+        raise ValueError("standard_phase_evaluations cannot be negative.")
     if config.max_seconds is not None and config.max_seconds < 0:
         raise ValueError("max_seconds cannot be negative.")
     if config.max_evaluations is not None and config.max_evaluations < 0:
@@ -163,6 +169,31 @@ def _validate_neighborhood_beam_config(config: ZiniNeighborhoodBeamConfig):
             f"Unsupported neighborhood-beam ranking policy: "
             f"{config.ranking_policy}"
         )
+    if config.ranking_policy == "standard_seeded_chain_v1":
+        if config.max_evaluations is None:
+            raise ValueError(
+                "standard_seeded_chain_v1 requires max_evaluations."
+            )
+        if (
+            config.standard_phase_evaluations is not None
+            and config.standard_phase_evaluations > config.max_evaluations
+        ):
+            raise ValueError(
+                "standard_phase_evaluations cannot exceed max_evaluations."
+            )
+
+
+def _resolve_standard_phase_evaluations(
+    config: ZiniNeighborhoodBeamConfig,
+) -> int:
+    """Resolve the fixed Phase 1 budget for seeded-chain search."""
+    if config.max_evaluations is None:
+        raise ValueError(
+            "standard_seeded_chain_v1 requires max_evaluations."
+        )
+    if config.standard_phase_evaluations is not None:
+        return config.standard_phase_evaluations
+    return (config.max_evaluations + 1) // 2
 
 
 class _MinTieSearchLimitReached(Exception):
@@ -839,6 +870,136 @@ class _NeighborhoodBeamSearch:
         return None
 
 
+@dataclass(frozen=True)
+class _SeededChainSearchOutcome:
+    """Combined result and accounting for a two-phase seeded search."""
+
+    result: ZiniResult
+    termination_reason: ZiniAdvancedTerminationReason
+    evaluations: int
+    generations: int
+
+
+def _remaining_advanced_seconds(
+    started_at: float,
+    max_seconds: float | None,
+) -> float | None:
+    """Return the remaining global wall-time budget for a search phase."""
+    if max_seconds is None:
+        return None
+    return max(0.0, max_seconds - (perf_counter() - started_at))
+
+
+def _run_standard_seeded_chain_search(
+    snapshot: BoardSnapshot,
+    context: _PremiumContext,
+    config: ZiniNeighborhoodBeamConfig,
+    deterministic_result: ZiniResult,
+    started_at: float,
+) -> _SeededChainSearchOutcome:
+    """Run standard search, then chain-expand only its best trajectory."""
+    standard_budget = _resolve_standard_phase_evaluations(config)
+    total_budget = config.max_evaluations
+    if total_budget is None:
+        raise ValueError(
+            "standard_seeded_chain_v1 requires max_evaluations."
+        )
+    chain_budget = total_budget - standard_budget
+
+    remaining_seconds = _remaining_advanced_seconds(
+        started_at,
+        config.max_seconds,
+    )
+    if remaining_seconds == 0:
+        return _SeededChainSearchOutcome(
+            result=deterministic_result,
+            termination_reason=ZiniAdvancedTerminationReason.TIME_LIMIT,
+            evaluations=0,
+            generations=0,
+        )
+    if total_budget == 0:
+        return _SeededChainSearchOutcome(
+            result=deterministic_result,
+            termination_reason=(
+                ZiniAdvancedTerminationReason.EVALUATION_LIMIT
+            ),
+            evaluations=0,
+            generations=0,
+        )
+
+    phase_one_config = replace(
+        config,
+        ranking_policy="standard_v1",
+        max_seconds=remaining_seconds,
+        max_evaluations=standard_budget,
+        standard_phase_evaluations=None,
+    )
+    phase_one_search = _NeighborhoodBeamSearch(
+        snapshot=snapshot,
+        context=context,
+        config=phase_one_config,
+        baseline=deterministic_result,
+        started_at=perf_counter(),
+    )
+    phase_one_reason = phase_one_search.run()
+
+    if phase_one_reason == ZiniAdvancedTerminationReason.TIME_LIMIT:
+        return _SeededChainSearchOutcome(
+            result=phase_one_search.best.result,
+            termination_reason=phase_one_reason,
+            evaluations=phase_one_search.evaluations,
+            generations=phase_one_search.generations,
+        )
+
+    remaining_seconds = _remaining_advanced_seconds(
+        started_at,
+        config.max_seconds,
+    )
+    if remaining_seconds == 0:
+        return _SeededChainSearchOutcome(
+            result=phase_one_search.best.result,
+            termination_reason=ZiniAdvancedTerminationReason.TIME_LIMIT,
+            evaluations=phase_one_search.evaluations,
+            generations=phase_one_search.generations,
+        )
+    if chain_budget == 0:
+        return _SeededChainSearchOutcome(
+            result=phase_one_search.best.result,
+            termination_reason=(
+                ZiniAdvancedTerminationReason.EVALUATION_LIMIT
+            ),
+            evaluations=phase_one_search.evaluations,
+            generations=phase_one_search.generations,
+        )
+
+    phase_two_config = replace(
+        config,
+        ranking_policy="chain_v1",
+        max_seconds=remaining_seconds,
+        max_evaluations=chain_budget,
+        standard_phase_evaluations=None,
+    )
+    phase_two_search = _NeighborhoodBeamSearch(
+        snapshot=snapshot,
+        context=context,
+        config=phase_two_config,
+        baseline=phase_one_search.best.result,
+        started_at=perf_counter(),
+    )
+    phase_two_reason = phase_two_search.run()
+
+    return _SeededChainSearchOutcome(
+        result=phase_two_search.best.result,
+        termination_reason=phase_two_reason,
+        evaluations=(
+            phase_one_search.evaluations + phase_two_search.evaluations
+        ),
+        generations=(
+            phase_one_search.generations + phase_two_search.generations
+        ),
+    )
+
+
 def calculate_g_zini(snapshot: BoardSnapshot) -> ZiniResult:
     """
     Calculate G.ZiNi for a finalized board snapshot.
@@ -967,23 +1128,39 @@ def calculate_g_zini_neighborhood_beam_bounded(
         clicks=sum(move.clicks_added for move in deterministic_moves),
         moves=deterministic_moves,
     )
-    search = _NeighborhoodBeamSearch(
-        snapshot=snapshot,
-        context=context,
-        config=resolved_config,
-        baseline=deterministic_result,
-        started_at=started_at,
-    )
-    termination_reason = search.run()
+    if resolved_config.ranking_policy == "standard_seeded_chain_v1":
+        outcome = _run_standard_seeded_chain_search(
+            snapshot,
+            context,
+            resolved_config,
+            deterministic_result,
+            started_at,
+        )
+        result = outcome.result
+        termination_reason = outcome.termination_reason
+        evaluations = outcome.evaluations
+        generations = outcome.generations
+    else:
+        search = _NeighborhoodBeamSearch(
+            snapshot=snapshot,
+            context=context,
+            config=resolved_config,
+            baseline=deterministic_result,
+            started_at=started_at,
+        )
+        termination_reason = search.run()
+        result = search.best.result
+        evaluations = search.evaluations
+        generations = search.generations
 
     return ZiniAdvancedSearchResult(
-        result=search.best.result,
+        result=result,
         exact=False,
         termination_reason=termination_reason,
         elapsed_seconds=perf_counter() - started_at,
-        evaluations=search.evaluations,
-        generations=search.generations,
-        best_clicks=search.best.result.clicks,
+        evaluations=evaluations,
+        generations=generations,
+        best_clicks=result.clicks,
         deterministic_clicks=deterministic_result.clicks,
         strategy_name=_NEIGHBORHOOD_BEAM_STRATEGY_NAME,
         strategy_version=_NEIGHBORHOOD_BEAM_STRATEGY_VERSION,
