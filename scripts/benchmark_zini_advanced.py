@@ -75,6 +75,7 @@ _COLUMNS = (
     "premium_window",
     "beam_size",
     "max_evaluations",
+    "standard_phase_evaluations",
     "clicks",
     "moves",
     "flags",
@@ -112,6 +113,11 @@ _FULL_EVALUATIONS = {
 }
 
 _FULL_SEEDS = (0, 7, 1234, 614003)
+
+_SEEDED_CHAIN_RUNS = {
+    "board_c": ((50, 25), (100, 50)),
+    "expert1003": ((500, 250), (1000, 500)),
+}
 
 
 @dataclass(frozen=True)
@@ -257,6 +263,7 @@ def _row(
     premium_window: int | str = "-",
     beam_size: int | str = "-",
     max_evaluations: int | str = "-",
+    standard_phase_evaluations: int | str = "-",
     termination: str = "-",
     evaluations: int | str = "-",
     generations: int | str = "-",
@@ -268,6 +275,7 @@ def _row(
         "premium_window": premium_window,
         "beam_size": beam_size,
         "max_evaluations": max_evaluations,
+        "standard_phase_evaluations": standard_phase_evaluations,
         "clicks": result.clicks,
         "moves": len(result.moves),
         "flags": validation.flags,
@@ -355,7 +363,7 @@ def _benchmark_board(
         rows.append(
             _row(
                 board=name,
-                method="neighborhood_beam",
+                method="standard_v1",
                 result=advanced.result,
                 validation=validation,
                 elapsed_seconds=elapsed,
@@ -363,6 +371,39 @@ def _benchmark_board(
                 premium_window=config.premium_window,
                 beam_size=config.beam_size,
                 max_evaluations=max_evaluations,
+                termination=advanced.termination_reason.value,
+                evaluations=advanced.evaluations,
+                generations=advanced.generations,
+            )
+        )
+
+    for max_evaluations, standard_phase_evaluations in _SEEDED_CHAIN_RUNS[name]:
+        config_values = dict(_BASE_ADVANCED_CONFIG)
+        config_values.update(
+            ranking_policy="standard_seeded_chain_v1",
+            max_evaluations=max_evaluations,
+            standard_phase_evaluations=standard_phase_evaluations,
+        )
+        config = ZiniNeighborhoodBeamConfig(**config_values)
+        started_at = perf_counter()
+        advanced = calculate_g_zini_neighborhood_beam_bounded(
+            snapshot,
+            config=config,
+        )
+        elapsed = perf_counter() - started_at
+        validation = _validate_result(snapshot, advanced.result)
+        rows.append(
+            _row(
+                board=name,
+                method="standard_seeded_chain_v1",
+                result=advanced.result,
+                validation=validation,
+                elapsed_seconds=elapsed,
+                seed=config.seed,
+                premium_window=config.premium_window,
+                beam_size=config.beam_size,
+                max_evaluations=max_evaluations,
+                standard_phase_evaluations=standard_phase_evaluations,
                 termination=advanced.termination_reason.value,
                 evaluations=advanced.evaluations,
                 generations=advanced.generations,
