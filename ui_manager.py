@@ -41,6 +41,7 @@ import pickle
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from enum import IntEnum
 
 from PyQt5.QtWidgets import (
@@ -206,6 +207,7 @@ class MinesweeperUI(QWidget):
             height=self.engine.height,
             num_mines=self.engine.num_mines,
         )
+        self._last_replay_directory = None
 
         # 통계 패널의 값 셀(QTableWidgetItem)을 stat_key로 보관.
         # _update_statistics_panel() 이 이 매핑을 통해 값을 갱신한다.
@@ -419,9 +421,17 @@ class MinesweeperUI(QWidget):
         self.timer_label = QLabel()
         self.timer_label.setFont(QFont("Consolas", 12, QFont.Bold))
 
+        self.current_replay_button = QPushButton("이번 판 Replay")
+        self.current_replay_button.setFocusPolicy(Qt.NoFocus)
+        self.current_replay_button.clicked.connect(self.on_view_current_replay)
+
         self.save_replay_button = QPushButton("Replay 저장")
         self.save_replay_button.setFocusPolicy(Qt.NoFocus)
         self.save_replay_button.clicked.connect(self.on_save_replay)
+
+        self.save_replay_as_button = QPushButton("Replay 다른 이름으로 저장")
+        self.save_replay_as_button.setFocusPolicy(Qt.NoFocus)
+        self.save_replay_as_button.clicked.connect(self.on_save_replay_as)
 
         self.load_replay_button = QPushButton("Replay 불러오기")
         self.load_replay_button.setFocusPolicy(Qt.NoFocus)
@@ -467,7 +477,9 @@ class MinesweeperUI(QWidget):
         top_bar.addStretch()
         top_bar.addWidget(self.timer_label)
         top_bar.addSpacing(12)
+        top_bar.addWidget(self.current_replay_button)
         top_bar.addWidget(self.save_replay_button)
+        top_bar.addWidget(self.save_replay_as_button)
         top_bar.addWidget(self.load_replay_button)
         top_bar.addSpacing(12)
         top_bar.addWidget(self.replay_first_button)
@@ -910,61 +922,162 @@ class MinesweeperUI(QWidget):
         if snapshot.mines_placed:
             self._replay_recorder.capture_board(snapshot)
 
-    def on_save_replay(self):
-        """현재 판 리플레이를 JSON 파일로 저장한다."""
+    def _build_current_replay_data(self, title: str, require_finished: bool = False):
+        """Return current replay data or show a user-facing reason it is unavailable."""
         if self._replay_mode:
             QMessageBox.information(
                 self,
-                "리플레이 저장",
-                "리플레이 모드에서는 저장할 수 없습니다.",
+                title,
+                "Replay 모드에서는 현재 판 replay를 만들 수 없습니다.",
             )
-            return
+            return None
 
-        self._capture_replay_board_if_ready()
-
-        try:
-            replay_data = self._replay_recorder.to_replay_data()
-        except ValueError:
+        snapshot = self.engine.get_board_snapshot()
+        if not snapshot.mines_placed:
             QMessageBox.information(
                 self,
-                "리플레이 저장",
-                "지뢰가 아직 배치되지 않아 저장할 리플레이가 없습니다.",
+                title,
+                "지뢰가 아직 배치되지 않아 replay를 만들 수 없습니다.",
             )
-            return
+            return None
 
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "리플레이 저장",
-            "replay.json",
-            "Replay JSON (*.json);;All Files (*)",
-        )
-        if not path:
-            return
+        if require_finished and self.engine.status == GameStatus.PLAYING:
+            QMessageBox.information(
+                self,
+                title,
+                "게임이 끝난 뒤 이번 판 Replay를 볼 수 있습니다.",
+            )
+            return None
+
+        self._capture_replay_board_if_ready()
+        try:
+            return self._replay_recorder.to_replay_data()
+        except ValueError as exc:
+            QMessageBox.information(
+                self,
+                title,
+                f"현재 판 replay를 만들 수 없습니다.\n{exc}",
+            )
+            return None
+
+    def _remember_replay_directory(self, path: str):
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            self._last_replay_directory = directory
+
+    def _replay_dialog_directory(self) -> str:
+        if self._last_replay_directory and os.path.isdir(self._last_replay_directory):
+            return self._last_replay_directory
+        return ""
+
+    def _append_json_extension(self, path: str) -> str:
         if not path.lower().endswith(".json"):
-            path += ".json"
+            return f"{path}.json"
+        return path
 
+    def _next_auto_replay_path(self, directory: str) -> str:
+        base_name = datetime.now().strftime("replay_%Y%m%d_%H%M%S")
+        path = os.path.join(directory, f"{base_name}.json")
+        suffix = 1
+        while os.path.exists(path):
+            path = os.path.join(directory, f"{base_name}_{suffix}.json")
+            suffix += 1
+        return path
+
+    def _save_replay_data(self, replay_data, path: str, title: str) -> bool:
         try:
             save_replay_json(replay_data, path)
         except Exception as exc:
             QMessageBox.warning(
                 self,
-                "리플레이 저장 실패",
-                f"리플레이를 저장하지 못했습니다.\n{exc}",
+                f"{title} 실패",
+                f"Replay를 저장하지 못했습니다.\n{exc}",
             )
-            return
+            return False
 
+        self._remember_replay_directory(path)
         QMessageBox.information(
             self,
-            "리플레이 저장",
-            "리플레이를 저장했습니다.",
+            title,
+            f"Replay를 저장했습니다.\n{path}",
         )
+        return True
+
+    def _select_auto_replay_directory(self) -> str | None:
+        directory = self._replay_dialog_directory()
+        if directory:
+            return directory
+
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Replay 저장 폴더 선택",
+            "",
+        )
+        if not selected:
+            return None
+        self._last_replay_directory = selected
+        return selected
+
+    def on_view_current_replay(self):
+        """Open the just-finished game in replay mode without saving a file."""
+        replay_data = self._build_current_replay_data(
+            "이번 판 Replay",
+            require_finished=True,
+        )
+        if replay_data is None:
+            return
+        self._enter_replay_mode(ReplayPlayer(replay_data))
+
+    def on_save_replay(self):
+        """Save the current replay with a fresh timestamped filename."""
+        replay_data = self._build_current_replay_data("Replay 저장")
+        if replay_data is None:
+            return
+
+        directory = self._select_auto_replay_directory()
+        if not directory:
+            return
+
+        path = self._next_auto_replay_path(directory)
+        self._save_replay_data(replay_data, path, "Replay 저장")
+
+    def on_save_replay_as(self):
+        """Save the current replay to a user-selected file."""
+        replay_data = self._build_current_replay_data("Replay 다른 이름으로 저장")
+        if replay_data is None:
+            return
+
+        default_name = datetime.now().strftime("replay_%Y%m%d_%H%M%S.json")
+        initial_path = os.path.join(self._replay_dialog_directory(), default_name)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Replay 다른 이름으로 저장",
+            initial_path,
+            "Replay JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        path = self._append_json_extension(path)
+
+        if os.path.exists(path):
+            reply = QMessageBox.question(
+                self,
+                "Replay 덮어쓰기 확인",
+                f"이미 있는 파일입니다.\n덮어쓸까요?\n{path}",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        self._save_replay_data(replay_data, path, "Replay 다른 이름으로 저장")
 
     def on_load_replay(self):
         """JSON 리플레이 파일을 불러와 리플레이 모드로 진입한다."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "리플레이 불러오기",
-            "",
+            self._replay_dialog_directory(),
             "Replay JSON (*.json);;All Files (*)",
         )
         if not path:
@@ -981,6 +1094,7 @@ class MinesweeperUI(QWidget):
             )
             return
 
+        self._remember_replay_directory(path)
         self._enter_replay_mode(replay_player)
 
     def on_exit_replay(self):
@@ -1126,7 +1240,9 @@ class MinesweeperUI(QWidget):
         )
 
         self.reset_button.setEnabled(not self._replay_mode)
+        self.current_replay_button.setEnabled(not self._replay_mode)
         self.save_replay_button.setEnabled(not self._replay_mode)
+        self.save_replay_as_button.setEnabled(not self._replay_mode)
         self.load_replay_button.setEnabled(not self._replay_mode)
         self.difficulty_combo.setEnabled(not self._replay_mode)
         self.chord_combo.setEnabled(not self._replay_mode)
