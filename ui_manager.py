@@ -47,7 +47,7 @@ from enum import IntEnum
 from PyQt5.QtWidgets import (
     QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
-    QSpinBox, QScrollArea, QTableWidget, QTableWidgetItem,
+    QSpinBox, QScrollArea, QSlider, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QHeaderView, QFileDialog, QMessageBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
@@ -197,6 +197,7 @@ class MinesweeperUI(QWidget):
         self._cell_size = DEFAULT_CELL_SIZE
         self._replay_mode = False
         self._replay_player = None
+        self._replay_slider_updating = False
         self._normal_game_config = (
             self.engine.width,
             self.engine.height,
@@ -441,27 +442,27 @@ class MinesweeperUI(QWidget):
         self.replay_status_label.setFont(QFont("Consolas", 10, QFont.Bold))
         self.replay_status_label.setVisible(False)
 
-        self.replay_play_button = QPushButton("재생")
+        self.replay_play_button = QPushButton("▶")
         self.replay_play_button.setFocusPolicy(Qt.NoFocus)
         self.replay_play_button.clicked.connect(self.on_replay_play_pause)
         self.replay_play_button.setVisible(False)
 
-        self.replay_first_button = QPushButton("처음")
+        self.replay_first_button = QPushButton("<<")
         self.replay_first_button.setFocusPolicy(Qt.NoFocus)
         self.replay_first_button.clicked.connect(self.on_replay_first)
         self.replay_first_button.setVisible(False)
 
-        self.replay_prev_button = QPushButton("이전")
+        self.replay_prev_button = QPushButton("|◀")
         self.replay_prev_button.setFocusPolicy(Qt.NoFocus)
         self.replay_prev_button.clicked.connect(self.on_replay_previous)
         self.replay_prev_button.setVisible(False)
 
-        self.replay_next_button = QPushButton("다음")
+        self.replay_next_button = QPushButton("▶|")
         self.replay_next_button.setFocusPolicy(Qt.NoFocus)
         self.replay_next_button.clicked.connect(self.on_replay_next)
         self.replay_next_button.setVisible(False)
 
-        self.replay_last_button = QPushButton("끝")
+        self.replay_last_button = QPushButton(">>")
         self.replay_last_button.setFocusPolicy(Qt.NoFocus)
         self.replay_last_button.clicked.connect(self.on_replay_last)
         self.replay_last_button.setVisible(False)
@@ -470,6 +471,23 @@ class MinesweeperUI(QWidget):
         self.exit_replay_button.setFocusPolicy(Qt.NoFocus)
         self.exit_replay_button.clicked.connect(self.on_exit_replay)
         self.exit_replay_button.setVisible(False)
+
+        self.replay_slider = QSlider(Qt.Horizontal)
+        self.replay_slider.setFocusPolicy(Qt.NoFocus)
+        self.replay_slider.setMinimum(0)
+        self.replay_slider.setMaximum(0)
+        self.replay_slider.setValue(0)
+        self.replay_slider.setMinimumWidth(180)
+        self.replay_slider.valueChanged.connect(self.on_replay_slider_changed)
+
+        for button in (
+            self.replay_first_button,
+            self.replay_prev_button,
+            self.replay_play_button,
+            self.replay_next_button,
+            self.replay_last_button,
+        ):
+            button.setFixedWidth(36)
 
         top_bar.addWidget(self.mine_label)
         top_bar.addStretch()
@@ -481,14 +499,6 @@ class MinesweeperUI(QWidget):
         top_bar.addWidget(self.save_replay_button)
         top_bar.addWidget(self.save_replay_as_button)
         top_bar.addWidget(self.load_replay_button)
-        top_bar.addSpacing(12)
-        top_bar.addWidget(self.replay_first_button)
-        top_bar.addWidget(self.replay_prev_button)
-        top_bar.addWidget(self.replay_play_button)
-        top_bar.addWidget(self.replay_next_button)
-        top_bar.addWidget(self.replay_last_button)
-        top_bar.addWidget(self.replay_status_label)
-        top_bar.addWidget(self.exit_replay_button)
         main_layout.addLayout(top_bar)
 
         # --- 보드: 컨테이너 위젯 + 그리드, QScrollArea로 감싸기 ---
@@ -502,6 +512,21 @@ class MinesweeperUI(QWidget):
         self.scroll_area.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.scroll_area.setWidgetResizable(False)
         main_layout.addWidget(self.scroll_area)
+
+        self.replay_control_bar = QWidget()
+        self.replay_control_bar.setVisible(False)
+        replay_control_layout = QHBoxLayout(self.replay_control_bar)
+        replay_control_layout.setContentsMargins(0, 2, 0, 0)
+        replay_control_layout.setSpacing(6)
+        replay_control_layout.addWidget(self.replay_first_button)
+        replay_control_layout.addWidget(self.replay_prev_button)
+        replay_control_layout.addWidget(self.replay_play_button)
+        replay_control_layout.addWidget(self.replay_next_button)
+        replay_control_layout.addWidget(self.replay_last_button)
+        replay_control_layout.addWidget(self.replay_slider, 1)
+        replay_control_layout.addWidget(self.replay_status_label)
+        replay_control_layout.addWidget(self.exit_replay_button)
+        main_layout.addWidget(self.replay_control_bar)
 
         return main_layout
 
@@ -1113,7 +1138,7 @@ class MinesweeperUI(QWidget):
         if self._replay_autoplay_timer.isActive():
             self._stop_replay_autoplay()
         else:
-            self.replay_play_button.setText("일시정지")
+            self.replay_play_button.setText("||")
             self._replay_autoplay_timer.start()
 
     def _advance_replay_autoplay(self):
@@ -1136,7 +1161,7 @@ class MinesweeperUI(QWidget):
     def _stop_replay_autoplay(self):
         if self._replay_autoplay_timer.isActive():
             self._replay_autoplay_timer.stop()
-        self.replay_play_button.setText("재생")
+        self.replay_play_button.setText("▶")
 
     def on_replay_first(self):
         if not self._replay_mode or self._replay_player is None:
@@ -1164,6 +1189,15 @@ class MinesweeperUI(QWidget):
             return
         self._stop_replay_autoplay()
         self._replay_player.go_to(self._replay_player.event_count)
+        self._refresh_replay_view_after_move()
+
+    def on_replay_slider_changed(self, value: int):
+        if self._replay_slider_updating:
+            return
+        if not self._replay_mode or self._replay_player is None:
+            return
+        self._stop_replay_autoplay()
+        self._replay_player.go_to(value)
         self._refresh_replay_view_after_move()
 
     def _refresh_replay_view_after_move(self):
@@ -1230,6 +1264,22 @@ class MinesweeperUI(QWidget):
             f"{self._replay_player.current_time:.3f}s"
         )
 
+    def _sync_replay_slider(self):
+        previous_block = self.replay_slider.blockSignals(True)
+        self._replay_slider_updating = True
+        try:
+            if self._replay_mode and self._replay_player is not None:
+                self.replay_slider.setRange(0, self._replay_player.event_count)
+                self.replay_slider.setValue(self._replay_player.current_index)
+                self.replay_slider.setEnabled(self._replay_player.event_count > 0)
+            else:
+                self.replay_slider.setRange(0, 0)
+                self.replay_slider.setValue(0)
+                self.replay_slider.setEnabled(False)
+        finally:
+            self._replay_slider_updating = False
+            self.replay_slider.blockSignals(previous_block)
+
     def _update_replay_controls(self):
         """일반/리플레이 모드에 맞춰 버튼 상태를 갱신한다."""
         in_replay = self._replay_mode and self._replay_player is not None
@@ -1239,7 +1289,12 @@ class MinesweeperUI(QWidget):
             and self._replay_player.current_index == self._replay_player.event_count
         )
 
+        general_replay_controls_visible = not self._replay_mode
         self.reset_button.setEnabled(not self._replay_mode)
+        self.current_replay_button.setVisible(general_replay_controls_visible)
+        self.save_replay_button.setVisible(general_replay_controls_visible)
+        self.save_replay_as_button.setVisible(general_replay_controls_visible)
+        self.load_replay_button.setVisible(general_replay_controls_visible)
         self.current_replay_button.setEnabled(not self._replay_mode)
         self.save_replay_button.setEnabled(not self._replay_mode)
         self.save_replay_as_button.setEnabled(not self._replay_mode)
@@ -1247,11 +1302,12 @@ class MinesweeperUI(QWidget):
         self.difficulty_combo.setEnabled(not self._replay_mode)
         self.chord_combo.setEnabled(not self._replay_mode)
         self.cell_size_spin.setEnabled(not self._replay_mode)
-        self.replay_status_label.setVisible(self._replay_mode)
+        self.replay_control_bar.setVisible(in_replay)
+        self.replay_status_label.setVisible(in_replay)
         self.replay_play_button.setVisible(in_replay)
         self.replay_play_button.setEnabled(in_replay and not at_end)
         self.replay_play_button.setText(
-            "일시정지" if self._replay_autoplay_timer.isActive() else "재생"
+            "||" if self._replay_autoplay_timer.isActive() else "▶"
         )
         self.replay_first_button.setVisible(in_replay)
         self.replay_prev_button.setVisible(in_replay)
@@ -1262,6 +1318,7 @@ class MinesweeperUI(QWidget):
         self.replay_next_button.setEnabled(in_replay and not at_end)
         self.replay_last_button.setEnabled(in_replay and not at_end)
         self.exit_replay_button.setVisible(self._replay_mode)
+        self._sync_replay_slider()
 
     # ------------------------------------------------------------------
     # 설정 핸들러
