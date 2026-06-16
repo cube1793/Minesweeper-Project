@@ -41,17 +41,20 @@ import pickle
 import subprocess
 import sys
 import tempfile
+import time
+from bisect import bisect_right
 from datetime import datetime
 from enum import IntEnum
 
 from PyQt5.QtWidgets import (
     QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
-    QSpinBox, QScrollArea, QSlider, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView, QFileDialog, QMessageBox,
+    QSpinBox, QDoubleSpinBox, QScrollArea, QSlider,
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
+    QFileDialog, QMessageBox, QStyle, QStyleOptionSlider,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QKeySequence, QColor
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize
+from PyQt5.QtGui import QFont, QKeySequence, QColor, QIcon, QPainter, QPixmap, QPolygon
 
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from replay_json import load_replay_json, save_replay_json
@@ -79,6 +82,14 @@ MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
 
 # 통계 패널 폭(px). 150~180 권장 범위 내.
 REPLAY_AUTOPLAY_INTERVAL_MS = 200
+REPLAY_TIME_TICK_INTERVAL_MS = 20
+REPLAY_INDEX_INTERVAL_MIN_MS = 20
+REPLAY_INDEX_INTERVAL_MAX_MS = 5000
+REPLAY_SPEED_MIN = 0.25
+REPLAY_SPEED_MAX = 8.0
+REPLAY_MODE_INDEX = "Index"
+REPLAY_MODE_TIME = "Time"
+REPLAY_ICON_SIZE = QSize(24, 24)
 STATS_PANEL_WIDTH = 170
 ZINI_WORKER_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -149,6 +160,52 @@ ZINI_COUNTER_CONFIG = ZiniNeighborhoodBeamConfig(
 )
 
 
+def _draw_replay_icon(kind: str, color: QColor) -> QPixmap:
+    pixmap = QPixmap(REPLAY_ICON_SIZE)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+
+    def rect(x: int, y: int, width: int, height: int):
+        painter.drawRect(x, y, width, height)
+
+    def triangle(points: list[tuple[int, int]]):
+        painter.drawPolygon(QPolygon([QPoint(x, y) for x, y in points]))
+
+    if kind == "first":
+        rect(2, 4, 4, 16)
+        triangle([(15, 4), (7, 12), (15, 20)])
+        triangle([(22, 4), (14, 12), (22, 20)])
+    elif kind == "previous":
+        rect(4, 4, 4, 16)
+        triangle([(19, 4), (9, 12), (19, 20)])
+    elif kind == "play":
+        triangle([(7, 4), (19, 12), (7, 20)])
+    elif kind == "pause":
+        rect(6, 4, 4, 16)
+        rect(14, 4, 4, 16)
+    elif kind == "next":
+        triangle([(5, 4), (15, 12), (5, 20)])
+        rect(17, 4, 4, 16)
+    elif kind == "last":
+        triangle([(2, 4), (10, 12), (2, 20)])
+        triangle([(9, 4), (17, 12), (9, 20)])
+        rect(18, 4, 4, 16)
+
+    painter.end()
+    return pixmap
+
+
+def _replay_icon(kind: str) -> QIcon:
+    icon = QIcon()
+    icon.addPixmap(_draw_replay_icon(kind, QColor("#202020")), QIcon.Normal, QIcon.Off)
+    icon.addPixmap(_draw_replay_icon(kind, QColor("#9a9a9a")), QIcon.Disabled, QIcon.Off)
+    return icon
+
+
 def border_width_for(cell_size: int) -> int:
     """셀 크기에 따른 고정 테두리 두께(px)를 단계별로 반환한다."""
     if cell_size < 20:
@@ -185,6 +242,34 @@ class CellButton(QPushButton):
             self.right_clicked.emit(self.x, self.y)
 
 
+class JumpSlider(QSlider):
+    """Horizontal slider that jumps to the clicked track position."""
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            option = QStyleOptionSlider()
+            self.initStyleOption(option)
+            handle_rect = self.style().subControlRect(
+                QStyle.CC_Slider,
+                option,
+                QStyle.SC_SliderHandle,
+                self,
+            )
+            if not handle_rect.contains(event.pos()):
+                self.setValue(self._value_from_x(event.x(), handle_rect.width()))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def _value_from_x(self, x: int, handle_width: int) -> int:
+        span = max(1, self.width() - handle_width)
+        ratio = (x - handle_width / 2) / span
+        ratio = max(0.0, min(1.0, ratio))
+        if self.invertedAppearance():
+            ratio = 1.0 - ratio
+        return round(self.minimum() + ratio * (self.maximum() - self.minimum()))
+
+
 class MinesweeperUI(QWidget):
     """엔진을 주입받아 화면을 그리는 메인 위젯."""
 
@@ -197,7 +282,11 @@ class MinesweeperUI(QWidget):
         self._cell_size = DEFAULT_CELL_SIZE
         self._replay_mode = False
         self._replay_player = None
+        self._replay_data = None
         self._replay_slider_updating = False
+        self._replay_time_anchor_wall = None
+        self._replay_time_anchor_replay = 0.0
+        self._replay_display_time_override = None
         self._normal_game_config = (
             self.engine.width,
             self.engine.height,
@@ -442,27 +531,27 @@ class MinesweeperUI(QWidget):
         self.replay_status_label.setFont(QFont("Consolas", 10, QFont.Bold))
         self.replay_status_label.setVisible(False)
 
-        self.replay_play_button = QPushButton("▶")
+        self.replay_play_button = QPushButton()
         self.replay_play_button.setFocusPolicy(Qt.NoFocus)
         self.replay_play_button.clicked.connect(self.on_replay_play_pause)
         self.replay_play_button.setVisible(False)
 
-        self.replay_first_button = QPushButton("<<")
+        self.replay_first_button = QPushButton()
         self.replay_first_button.setFocusPolicy(Qt.NoFocus)
         self.replay_first_button.clicked.connect(self.on_replay_first)
         self.replay_first_button.setVisible(False)
 
-        self.replay_prev_button = QPushButton("|◀")
+        self.replay_prev_button = QPushButton()
         self.replay_prev_button.setFocusPolicy(Qt.NoFocus)
         self.replay_prev_button.clicked.connect(self.on_replay_previous)
         self.replay_prev_button.setVisible(False)
 
-        self.replay_next_button = QPushButton("▶|")
+        self.replay_next_button = QPushButton()
         self.replay_next_button.setFocusPolicy(Qt.NoFocus)
         self.replay_next_button.clicked.connect(self.on_replay_next)
         self.replay_next_button.setVisible(False)
 
-        self.replay_last_button = QPushButton(">>")
+        self.replay_last_button = QPushButton()
         self.replay_last_button.setFocusPolicy(Qt.NoFocus)
         self.replay_last_button.clicked.connect(self.on_replay_last)
         self.replay_last_button.setVisible(False)
@@ -472,7 +561,45 @@ class MinesweeperUI(QWidget):
         self.exit_replay_button.clicked.connect(self.on_exit_replay)
         self.exit_replay_button.setVisible(False)
 
-        self.replay_slider = QSlider(Qt.Horizontal)
+        self.replay_playback_mode_combo = QComboBox()
+        self.replay_playback_mode_combo.addItems([REPLAY_MODE_INDEX, REPLAY_MODE_TIME])
+        self.replay_playback_mode_combo.setFocusPolicy(Qt.NoFocus)
+        self.replay_playback_mode_combo.currentTextChanged.connect(
+            self.on_replay_playback_mode_changed
+        )
+
+        self.replay_index_interval_spin = QSpinBox()
+        self.replay_index_interval_spin.setRange(
+            REPLAY_INDEX_INTERVAL_MIN_MS,
+            REPLAY_INDEX_INTERVAL_MAX_MS,
+        )
+        self.replay_index_interval_spin.setValue(REPLAY_AUTOPLAY_INTERVAL_MS)
+        self.replay_index_interval_spin.setSuffix(" ms")
+        self.replay_index_interval_spin.setFocusPolicy(Qt.ClickFocus)
+        self.replay_index_interval_spin.valueChanged.connect(
+            self.on_replay_index_interval_changed
+        )
+
+        self.replay_time_speed_spin = QDoubleSpinBox()
+        self.replay_time_speed_spin.setRange(REPLAY_SPEED_MIN, REPLAY_SPEED_MAX)
+        self.replay_time_speed_spin.setDecimals(2)
+        self.replay_time_speed_spin.setSingleStep(0.25)
+        self.replay_time_speed_spin.setValue(1.0)
+        self.replay_time_speed_spin.setSuffix("x")
+        self.replay_time_speed_spin.setFocusPolicy(Qt.ClickFocus)
+        self.replay_time_speed_spin.valueChanged.connect(
+            self.on_replay_time_speed_changed
+        )
+
+        self.replay_mode_save_button = QPushButton("저장")
+        self.replay_mode_save_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_mode_save_button.clicked.connect(self.on_save_replay)
+
+        self.replay_mode_save_as_button = QPushButton("다른 이름")
+        self.replay_mode_save_as_button.setFocusPolicy(Qt.NoFocus)
+        self.replay_mode_save_as_button.clicked.connect(self.on_save_replay_as)
+
+        self.replay_slider = JumpSlider(Qt.Horizontal)
         self.replay_slider.setFocusPolicy(Qt.NoFocus)
         self.replay_slider.setMinimum(0)
         self.replay_slider.setMaximum(0)
@@ -480,14 +607,11 @@ class MinesweeperUI(QWidget):
         self.replay_slider.setMinimumWidth(180)
         self.replay_slider.valueChanged.connect(self.on_replay_slider_changed)
 
-        for button in (
-            self.replay_first_button,
-            self.replay_prev_button,
-            self.replay_play_button,
-            self.replay_next_button,
-            self.replay_last_button,
-        ):
-            button.setFixedWidth(36)
+        self._configure_replay_icon_button(self.replay_first_button, "first")
+        self._configure_replay_icon_button(self.replay_prev_button, "previous")
+        self._configure_replay_icon_button(self.replay_play_button, "play")
+        self._configure_replay_icon_button(self.replay_next_button, "next")
+        self._configure_replay_icon_button(self.replay_last_button, "last")
 
         top_bar.addWidget(self.mine_label)
         top_bar.addStretch()
@@ -523,12 +647,26 @@ class MinesweeperUI(QWidget):
         replay_control_layout.addWidget(self.replay_play_button)
         replay_control_layout.addWidget(self.replay_next_button)
         replay_control_layout.addWidget(self.replay_last_button)
+        replay_control_layout.addWidget(self.replay_playback_mode_combo)
+        replay_control_layout.addWidget(self.replay_index_interval_spin)
+        replay_control_layout.addWidget(self.replay_time_speed_spin)
         replay_control_layout.addWidget(self.replay_slider, 1)
         replay_control_layout.addWidget(self.replay_status_label)
+        replay_control_layout.addWidget(self.replay_mode_save_button)
+        replay_control_layout.addWidget(self.replay_mode_save_as_button)
         replay_control_layout.addWidget(self.exit_replay_button)
         main_layout.addWidget(self.replay_control_bar)
 
         return main_layout
+
+    def _configure_replay_icon_button(self, button: QPushButton, icon_kind: str):
+        button.setIcon(_replay_icon(icon_kind))
+        button.setIconSize(REPLAY_ICON_SIZE)
+        button.setFixedSize(34, 30)
+        button.setText("")
+
+    def _set_replay_play_icon(self, icon_kind: str):
+        self.replay_play_button.setIcon(_replay_icon(icon_kind))
 
     def _build_grid(self):
         """엔진 크기에 맞춰 그리드 버튼을 (재)생성한다."""
@@ -947,9 +1085,16 @@ class MinesweeperUI(QWidget):
         if snapshot.mines_placed:
             self._replay_recorder.capture_board(snapshot)
 
-    def _build_current_replay_data(self, title: str, require_finished: bool = False):
+    def _build_current_replay_data(
+        self,
+        title: str,
+        require_finished: bool = False,
+        allow_replay_mode: bool = False,
+    ):
         """Return current replay data or show a user-facing reason it is unavailable."""
         if self._replay_mode:
+            if allow_replay_mode and self._replay_player is not None:
+                return self._replay_data or self._replay_player.replay_data
             QMessageBox.information(
                 self,
                 title,
@@ -1055,7 +1200,10 @@ class MinesweeperUI(QWidget):
 
     def on_save_replay(self):
         """Save the current replay with a fresh timestamped filename."""
-        replay_data = self._build_current_replay_data("Replay 저장")
+        replay_data = self._build_current_replay_data(
+            "Replay 저장",
+            allow_replay_mode=True,
+        )
         if replay_data is None:
             return
 
@@ -1068,7 +1216,10 @@ class MinesweeperUI(QWidget):
 
     def on_save_replay_as(self):
         """Save the current replay to a user-selected file."""
-        replay_data = self._build_current_replay_data("Replay 다른 이름으로 저장")
+        replay_data = self._build_current_replay_data(
+            "Replay 다른 이름으로 저장",
+            allow_replay_mode=True,
+        )
         if replay_data is None:
             return
 
@@ -1126,6 +1277,34 @@ class MinesweeperUI(QWidget):
         """리플레이 모드를 끝내고 현재 선택된 난이도로 새 일반 게임을 시작한다."""
         self._exit_replay_mode()
 
+    def _replay_playback_mode(self) -> str:
+        return self.replay_playback_mode_combo.currentText()
+
+    def _reset_replay_time_anchor(self):
+        if self._replay_player is None:
+            anchor_replay_time = 0.0
+        else:
+            anchor_replay_time = self._replay_display_time()
+        self._replay_time_anchor_wall = time.perf_counter()
+        self._replay_time_anchor_replay = anchor_replay_time
+
+    def _start_replay_autoplay(self):
+        if not self._replay_mode or self._replay_player is None:
+            return
+        if self._replay_player.current_index >= self._replay_player.event_count:
+            return
+
+        if self._replay_playback_mode() == REPLAY_MODE_TIME:
+            self._reset_replay_time_anchor()
+            self._clear_replay_display_time_override()
+            self._replay_autoplay_timer.setInterval(REPLAY_TIME_TICK_INTERVAL_MS)
+        else:
+            self._replay_autoplay_timer.setInterval(
+                self.replay_index_interval_spin.value()
+            )
+        self._replay_autoplay_timer.start()
+        self._update_replay_controls()
+
     def on_replay_play_pause(self):
         if not self._replay_mode or self._replay_player is None:
             return
@@ -1136,10 +1315,10 @@ class MinesweeperUI(QWidget):
             return
 
         if self._replay_autoplay_timer.isActive():
-            self._stop_replay_autoplay()
+            self._stop_replay_autoplay(preserve_time_position=True)
+            self._update_replay_controls()
         else:
-            self.replay_play_button.setText("||")
-            self._replay_autoplay_timer.start()
+            self._start_replay_autoplay()
 
     def _advance_replay_autoplay(self):
         if not self._replay_mode or self._replay_player is None:
@@ -1151,22 +1330,58 @@ class MinesweeperUI(QWidget):
             self._update_replay_controls()
             return
 
-        self._replay_player.next()
-        self._refresh_replay_view_after_move()
+        if self._replay_playback_mode() == REPLAY_MODE_TIME:
+            self._advance_replay_autoplay_by_time()
+        else:
+            self._replay_player.next()
+            self._refresh_replay_view_after_move()
 
         if self._replay_player.current_index >= self._replay_player.event_count:
             self._stop_replay_autoplay()
             self._update_replay_controls()
 
-    def _stop_replay_autoplay(self):
+    def _advance_replay_autoplay_by_time(self):
+        if self._replay_player is None:
+            return
+        if self._replay_time_anchor_wall is None:
+            self._reset_replay_time_anchor()
+
+        elapsed_wall = time.perf_counter() - self._replay_time_anchor_wall
+        target_time = (
+            self._replay_time_anchor_replay
+            + elapsed_wall * self.replay_time_speed_spin.value()
+        )
+        advanced = False
+        events = self._replay_player.replay_data.events
+        while self._replay_player.current_index < self._replay_player.event_count:
+            next_event = events[self._replay_player.current_index]
+            if next_event.elapsed_time > target_time:
+                break
+            self._replay_player.next()
+            advanced = True
+
+        if advanced:
+            self._refresh_replay_view_after_move()
+        else:
+            self._update_replay_status_label()
+            self._sync_replay_slider()
+
+    def _stop_replay_autoplay(self, preserve_time_position: bool = False):
         if self._replay_autoplay_timer.isActive():
+            if (
+                preserve_time_position
+                and self._replay_playback_mode() == REPLAY_MODE_TIME
+            ):
+                self._set_replay_display_time_override(self._replay_display_time())
             self._replay_autoplay_timer.stop()
-        self.replay_play_button.setText("▶")
+        self._replay_time_anchor_wall = None
+        self._set_replay_play_icon("play")
 
     def on_replay_first(self):
         if not self._replay_mode or self._replay_player is None:
             return
         self._stop_replay_autoplay()
+        self._clear_replay_display_time_override()
         self._replay_player.go_to(0)
         self._refresh_replay_view_after_move()
 
@@ -1174,6 +1389,7 @@ class MinesweeperUI(QWidget):
         if not self._replay_mode or self._replay_player is None:
             return
         self._stop_replay_autoplay()
+        self._clear_replay_display_time_override()
         self._replay_player.previous()
         self._refresh_replay_view_after_move()
 
@@ -1181,6 +1397,7 @@ class MinesweeperUI(QWidget):
         if not self._replay_mode or self._replay_player is None:
             return
         self._stop_replay_autoplay()
+        self._clear_replay_display_time_override()
         self._replay_player.next()
         self._refresh_replay_view_after_move()
 
@@ -1188,6 +1405,7 @@ class MinesweeperUI(QWidget):
         if not self._replay_mode or self._replay_player is None:
             return
         self._stop_replay_autoplay()
+        self._clear_replay_display_time_override()
         self._replay_player.go_to(self._replay_player.event_count)
         self._refresh_replay_view_after_move()
 
@@ -1197,8 +1415,46 @@ class MinesweeperUI(QWidget):
         if not self._replay_mode or self._replay_player is None:
             return
         self._stop_replay_autoplay()
-        self._replay_player.go_to(value)
+        if self._replay_playback_mode() == REPLAY_MODE_TIME:
+            target_time = self._slider_value_to_replay_time(value)
+            self._set_replay_display_time_override(target_time)
+            self._replay_player.go_to(self._replay_index_for_time(target_time))
+        else:
+            self._clear_replay_display_time_override()
+            self._replay_player.go_to(value)
         self._refresh_replay_view_after_move()
+
+    def on_replay_playback_mode_changed(self, _mode: str):
+        if self._replay_autoplay_timer.isActive():
+            if self._replay_playback_mode() == REPLAY_MODE_TIME:
+                self._reset_replay_time_anchor()
+                self._clear_replay_display_time_override()
+                self._replay_autoplay_timer.setInterval(REPLAY_TIME_TICK_INTERVAL_MS)
+            else:
+                self._clear_replay_display_time_override()
+                self._replay_autoplay_timer.setInterval(
+                    self.replay_index_interval_spin.value()
+                )
+        elif self._replay_playback_mode() == REPLAY_MODE_INDEX:
+            self._clear_replay_display_time_override()
+        self._update_replay_status_label()
+        self._update_replay_controls()
+
+    def on_replay_index_interval_changed(self, value: int):
+        if (
+            self._replay_autoplay_timer.isActive()
+            and self._replay_playback_mode() == REPLAY_MODE_INDEX
+        ):
+            self._replay_autoplay_timer.setInterval(value)
+        self._update_replay_status_label()
+
+    def on_replay_time_speed_changed(self, _value: float):
+        if (
+            self._replay_autoplay_timer.isActive()
+            and self._replay_playback_mode() == REPLAY_MODE_TIME
+        ):
+            self._reset_replay_time_anchor()
+        self._update_replay_status_label()
 
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
@@ -1218,6 +1474,8 @@ class MinesweeperUI(QWidget):
         self._reset_counter_metrics_for_board_change()
         self._replay_mode = True
         self._replay_player = replay_player
+        self._replay_data = replay_player.replay_data
+        self._clear_replay_display_time_override()
         self.engine = replay_player.engine
         self._game_over = False
         self.reset_button.setText("🙂")
@@ -1236,6 +1494,8 @@ class MinesweeperUI(QWidget):
         self._reset_counter_metrics_for_board_change()
         self._replay_mode = False
         self._replay_player = None
+        self._replay_data = None
+        self._clear_replay_display_time_override()
         self._update_replay_controls()
 
         width, height, mines = self._normal_game_config
@@ -1259,19 +1519,99 @@ class MinesweeperUI(QWidget):
             return
 
         self.replay_status_label.setText(
-            f"Replay {self._replay_player.current_index} / "
-            f"{self._replay_player.event_count}   "
-            f"{self._replay_player.current_time:.3f}s"
+            f"{self._playback_status_prefix()} | "
+            f"Step {self._replay_player.current_index}/"
+            f"{self._replay_player.event_count} | "
+            f"{self._replay_display_time():.3f}s"
         )
+
+    def _replay_display_time(self) -> float:
+        if (
+            self._replay_playback_mode() == REPLAY_MODE_TIME
+            and self._replay_autoplay_timer.isActive()
+            and self._replay_time_anchor_wall is not None
+            and self._replay_player is not None
+        ):
+            elapsed_wall = time.perf_counter() - self._replay_time_anchor_wall
+            display_time = (
+                self._replay_time_anchor_replay
+                + elapsed_wall * self.replay_time_speed_spin.value()
+            )
+            return self._clamp_replay_display_time(display_time)
+        if self._replay_player is None:
+            return 0.0
+        if (
+            self._replay_playback_mode() == REPLAY_MODE_TIME
+            and self._replay_display_time_override is not None
+        ):
+            return self._clamp_replay_display_time(
+                self._replay_display_time_override
+            )
+        return self._replay_player.current_time
+
+    def _last_replay_event_time(self) -> float:
+        if self._replay_player is None or not self._replay_player.replay_data.events:
+            return 0.0
+        return self._replay_player.replay_data.events[-1].elapsed_time
+
+    def _last_replay_event_time_ms(self) -> int:
+        return max(0, int(self._last_replay_event_time() * 1000))
+
+    def _replay_display_time_ms(self) -> int:
+        return max(0, int(self._replay_display_time() * 1000))
+
+    def _clamp_replay_display_time(self, replay_time: float) -> float:
+        return max(0.0, min(replay_time, self._last_replay_event_time()))
+
+    def _set_replay_display_time_override(self, replay_time: float):
+        self._replay_display_time_override = self._clamp_replay_display_time(
+            replay_time
+        )
+
+    def _clear_replay_display_time_override(self):
+        self._replay_display_time_override = None
+
+    def _replay_index_for_time(self, replay_time: float) -> int:
+        if self._replay_player is None:
+            return 0
+        target_time = self._clamp_replay_display_time(replay_time)
+        event_times = [
+            event.elapsed_time for event in self._replay_player.replay_data.events
+        ]
+        return bisect_right(event_times, target_time)
+
+    def _slider_value_to_replay_time(self, value: int) -> float:
+        if value >= self.replay_slider.maximum():
+            return self._last_replay_event_time()
+        return self._clamp_replay_display_time(value / 1000.0)
+
+    def _playback_status_prefix(self) -> str:
+        if self._replay_playback_mode() == REPLAY_MODE_TIME:
+            return f"Time {self._format_speed_value(self.replay_time_speed_spin.value())}x"
+        return f"Index {self.replay_index_interval_spin.value()}ms"
+
+    @staticmethod
+    def _format_speed_value(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
 
     def _sync_replay_slider(self):
         previous_block = self.replay_slider.blockSignals(True)
         self._replay_slider_updating = True
         try:
             if self._replay_mode and self._replay_player is not None:
-                self.replay_slider.setRange(0, self._replay_player.event_count)
-                self.replay_slider.setValue(self._replay_player.current_index)
-                self.replay_slider.setEnabled(self._replay_player.event_count > 0)
+                if self._replay_playback_mode() == REPLAY_MODE_TIME:
+                    max_time_ms = self._last_replay_event_time_ms()
+                    self.replay_slider.setRange(0, max_time_ms)
+                    self.replay_slider.setValue(
+                        min(self._replay_display_time_ms(), max_time_ms)
+                    )
+                    self.replay_slider.setEnabled(max_time_ms > 0)
+                else:
+                    self.replay_slider.setRange(0, self._replay_player.event_count)
+                    self.replay_slider.setValue(self._replay_player.current_index)
+                    self.replay_slider.setEnabled(
+                        self._replay_player.event_count > 0
+                    )
             else:
                 self.replay_slider.setRange(0, 0)
                 self.replay_slider.setValue(0)
@@ -1306,9 +1646,13 @@ class MinesweeperUI(QWidget):
         self.replay_status_label.setVisible(in_replay)
         self.replay_play_button.setVisible(in_replay)
         self.replay_play_button.setEnabled(in_replay and not at_end)
-        self.replay_play_button.setText(
-            "||" if self._replay_autoplay_timer.isActive() else "▶"
+        self._set_replay_play_icon(
+            "pause" if self._replay_autoplay_timer.isActive() else "play"
         )
+        is_index_mode = self._replay_playback_mode() == REPLAY_MODE_INDEX
+        self.replay_playback_mode_combo.setVisible(in_replay)
+        self.replay_index_interval_spin.setVisible(in_replay and is_index_mode)
+        self.replay_time_speed_spin.setVisible(in_replay and not is_index_mode)
         self.replay_first_button.setVisible(in_replay)
         self.replay_prev_button.setVisible(in_replay)
         self.replay_next_button.setVisible(in_replay)
@@ -1317,6 +1661,10 @@ class MinesweeperUI(QWidget):
         self.replay_prev_button.setEnabled(in_replay and not at_start)
         self.replay_next_button.setEnabled(in_replay and not at_end)
         self.replay_last_button.setEnabled(in_replay and not at_end)
+        self.replay_mode_save_button.setVisible(in_replay)
+        self.replay_mode_save_as_button.setVisible(in_replay)
+        self.replay_mode_save_button.setEnabled(in_replay)
+        self.replay_mode_save_as_button.setEnabled(in_replay)
         self.exit_replay_button.setVisible(self._replay_mode)
         self._sync_replay_slider()
 
