@@ -36,8 +36,12 @@ UI는 게임 상태를 독립적으로 계산하지 않으며,
     - 45px 초과   : 3px outset #ffffff (대형 셀 입체감 유지)
 """
 
+import os
+import pickle
+import subprocess
+import sys
+import tempfile
 from enum import IntEnum
-from threading import Lock, Thread
 
 from PyQt5.QtWidgets import (
     QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
@@ -52,10 +56,7 @@ from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
-from zini_calculator import (
-    ZiniNeighborhoodBeamConfig,
-    calculate_g_zini_neighborhood_beam_bounded,
-)
+from zini_calculator import ZiniNeighborhoodBeamConfig
 
 
 # 타일 숫자별 클래식/Arbiter 스타일 색상
@@ -78,6 +79,11 @@ MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
 # 통계 패널 폭(px). 150~180 권장 범위 내.
 REPLAY_AUTOPLAY_INTERVAL_MS = 200
 STATS_PANEL_WIDTH = 170
+ZINI_WORKER_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "zini_metric_worker.py",
+)
+ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS = 1.0
 
 
 class ChordMode(IntEnum):
@@ -208,11 +214,12 @@ class MinesweeperUI(QWidget):
         self._replay_autoplay_timer.timeout.connect(self._advance_replay_autoplay)
         self._stat_value_items = {}
         self._zini_job_token = 0
-        self._zini_job_running_token = None
         self._zini_result_token = None
         self._zini_result_clicks = None
-        self._zini_pending_results = []
-        self._zini_pending_lock = Lock()
+        self._zini_process = None
+        self._zini_process_token = None
+        self._zini_payload_path = None
+        self._zini_result_path = None
         self._zini_poll_timer = QTimer(self)
         self._zini_poll_timer.setInterval(100)
         self._zini_poll_timer.timeout.connect(self._poll_zini_metric_job)
@@ -231,6 +238,11 @@ class MinesweeperUI(QWidget):
         self.render_board()
         # 시작 시 PLAYING 상태 → 3BV/Ops는 마스킹("-/-"), 클릭류는 "0"
         self._update_statistics_panel(self.engine.get_stats())
+
+    def closeEvent(self, event):
+        """Stop any running ZiNi worker when the UI is closing."""
+        self._terminate_zini_metric_process()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # UI 구성
@@ -552,10 +564,14 @@ class MinesweeperUI(QWidget):
         elapsed = self.engine.get_elapsed_time()
         self._elapsed_seconds = int(elapsed)
         self._update_timer_label()
-        # 진행 중 Time 항목(소수 한 자리)을 실시간으로 갱신.
-        # get_stats()는 PLAYING이면 time만 .1f로 채우고 나머지는 마스킹한다.
         if self.engine.status == GameStatus.PLAYING:
-            self._update_statistics_panel({"time": f"{elapsed:.1f}"})
+            self._update_live_time_stat(elapsed)
+
+    def _update_live_time_stat(self, elapsed: float):
+        """Update only the Counters Time value during the 10ms UI timer."""
+        item = self._stat_value_items.get("time")
+        if item is not None:
+            item.setText(f"{elapsed:.1f}")
 
     def _update_timer_label(self):
         """
@@ -585,7 +601,8 @@ class MinesweeperUI(QWidget):
             엔진이 채워주는 키는 자동으로 해당 행에 반영된다.
         """
         merged_stats = dict(stats_dict)
-        merged_stats.update(self._counter_metric_values())
+        if self.engine.status != GameStatus.PLAYING:
+            merged_stats.update(self._counter_metric_values())
 
         for key, value in merged_stats.items():
             item = self._stat_value_items.get(key)
@@ -599,7 +616,6 @@ class MinesweeperUI(QWidget):
         status = counter_snapshot["status"]
 
         if status == GameStatus.PLAYING:
-            self._reset_zini_metric_job()
             return metrics
         if status not in (GameStatus.LOST, GameStatus.WON):
             return metrics
@@ -642,68 +658,202 @@ class MinesweeperUI(QWidget):
 
         return metrics
 
+    def _reset_counter_metrics_for_board_change(self):
+        """Reset cached/displayed Counters metrics for a new board."""
+        self._reset_zini_metric_job()
+        self._set_counter_metric_placeholders()
+
+    def _set_counter_metric_placeholders(self):
+        """Show placeholder values for metrics that are hidden while playing."""
+        for key in COUNTER_METRIC_KEYS:
+            item = self._stat_value_items.get(key)
+            if item is not None:
+                item.setText("-")
+
     def _reset_zini_metric_job(self):
-        """Invalidate any pending ZiNi calculation for a previous board."""
+        """Invalidate and stop any pending ZiNi calculation for a previous board."""
         self._zini_job_token += 1
-        self._zini_job_running_token = None
         self._zini_result_token = None
         self._zini_result_clicks = None
-        with self._zini_pending_lock:
-            self._zini_pending_results.clear()
+        self._terminate_zini_metric_process()
         if self._zini_poll_timer.isActive():
             self._zini_poll_timer.stop()
 
     def _ensure_zini_metric_job(self):
-        """Start bounded seeded-chain ZiNi calculation without blocking UI."""
+        """Start bounded seeded-chain ZiNi calculation in a cancellable subprocess."""
         snapshot = self.engine.get_board_snapshot()
         if not snapshot.mines_placed:
             return
-        if (
-            self._zini_result_token == self._zini_job_token
-            or self._zini_job_running_token == self._zini_job_token
-        ):
+        if self._zini_result_token == self._zini_job_token:
             return
+        if self._zini_process is not None:
+            if (
+                self._zini_process_token == self._zini_job_token
+                and self._zini_process.poll() is None
+            ):
+                if not self._zini_poll_timer.isActive():
+                    self._zini_poll_timer.start()
+                return
+            self._terminate_zini_metric_process()
 
         token = self._zini_job_token
-        self._zini_job_running_token = token
-        worker = Thread(
-            target=self._calculate_zini_metric_worker,
-            args=(token, snapshot),
-            daemon=True,
-        )
-        worker.start()
+        try:
+            payload_path, result_path = self._create_zini_worker_files(
+                token,
+                snapshot,
+            )
+            process = subprocess.Popen(
+                [sys.executable, ZINI_WORKER_SCRIPT, payload_path, result_path],
+                cwd=os.path.dirname(ZINI_WORKER_SCRIPT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"[ZiNi warning] counter ZiNi worker start failed: {exc}")
+            self._cleanup_zini_worker_files(
+                locals().get("payload_path"),
+                locals().get("result_path"),
+            )
+            self._zini_result_token = token
+            self._zini_result_clicks = None
+            return
+
+        self._zini_process = process
+        self._zini_process_token = token
+        self._zini_payload_path = payload_path
+        self._zini_result_path = result_path
         if not self._zini_poll_timer.isActive():
             self._zini_poll_timer.start()
 
-    def _calculate_zini_metric_worker(self, token: int, snapshot):
-        """Calculate bounded best-so-far ZiNi off the UI thread."""
-        clicks = None
+    def _create_zini_worker_files(self, token: int, snapshot) -> tuple[str, str]:
+        """Write one subprocess payload and reserve one atomic result path."""
+        payload_fd, payload_path = tempfile.mkstemp(
+            prefix="minesweeper_zini_payload_",
+            suffix=".pkl",
+        )
+        result_fd, result_path = tempfile.mkstemp(
+            prefix="minesweeper_zini_result_",
+            suffix=".pkl",
+        )
+        os.close(result_fd)
+        os.remove(result_path)
         try:
-            result = calculate_g_zini_neighborhood_beam_bounded(
-                snapshot,
-                config=ZINI_COUNTER_CONFIG,
-            )
-            clicks = result.best_clicks
+            with os.fdopen(payload_fd, "wb") as payload_file:
+                pickle.dump(
+                    {
+                        "token": token,
+                        "snapshot": snapshot,
+                        "config": ZINI_COUNTER_CONFIG,
+                    },
+                    payload_file,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+        except Exception:
+            self._cleanup_zini_worker_files(payload_path, result_path)
+            raise
+        return payload_path, result_path
+
+    def _terminate_zini_metric_process(self):
+        """Terminate the active ZiNi subprocess and remove its temp files."""
+        process = self._zini_process
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
+                else:
+                    process.wait(timeout=0)
+            except Exception as exc:
+                print(f"[ZiNi warning] counter ZiNi worker cleanup failed: {exc}")
+        self._clear_zini_metric_process()
+
+    def _clear_zini_metric_process(self):
+        """Forget completed worker state and clean worker temp files."""
+        self._cleanup_zini_worker_files(
+            self._zini_payload_path,
+            self._zini_result_path,
+        )
+        self._zini_process = None
+        self._zini_process_token = None
+        self._zini_payload_path = None
+        self._zini_result_path = None
+
+    def _cleanup_zini_worker_files(self, *paths):
+        """Remove worker temp files, ignoring already-cleaned paths."""
+        for path in paths:
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                print(f"[ZiNi warning] temp file cleanup failed: {exc}")
+
+    def _read_zini_worker_result(self) -> dict | None:
+        """Read the completed subprocess result if it has been written."""
+        if not self._zini_result_path or not os.path.exists(self._zini_result_path):
+            return None
+        try:
+            with open(self._zini_result_path, "rb") as result_file:
+                return pickle.load(result_file)
         except Exception as exc:
-            print(f"[ZiNi warning] counter ZiNi calculation failed: {exc}")
-        with self._zini_pending_lock:
-            self._zini_pending_results.append((token, clicks))
+            print(f"[ZiNi warning] counter ZiNi result read failed: {exc}")
+            return {
+                "token": self._zini_process_token,
+                "clicks": None,
+                "error": repr(exc),
+            }
+
+    def _finish_zini_metric_process(self):
+        """Reap a worker that already produced a result, then clear its files."""
+        process = self._zini_process
+        try:
+            if process is not None and process.poll() is None:
+                try:
+                    process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
+        except Exception as exc:
+            print(f"[ZiNi warning] counter ZiNi worker cleanup failed: {exc}")
+        self._clear_zini_metric_process()
 
     def _poll_zini_metric_job(self):
-        """Apply completed ZiNi calculation results on the UI thread."""
-        with self._zini_pending_lock:
-            pending_results = tuple(self._zini_pending_results)
-            self._zini_pending_results.clear()
-        if not pending_results:
+        """Apply completed ZiNi subprocess results on the UI thread."""
+        if self._zini_process is None:
+            self._zini_poll_timer.stop()
             return
 
-        for token, clicks in pending_results:
-            if token == self._zini_job_token:
-                self._zini_job_running_token = None
-                self._zini_result_token = token
-                self._zini_result_clicks = clicks
-                self._update_statistics_panel(self.engine.get_stats())
-        if self._zini_job_running_token is None:
+        result = self._read_zini_worker_result()
+        if result is None:
+            if self._zini_process.poll() is None:
+                return
+            result = {
+                "token": self._zini_process_token,
+                "clicks": None,
+                "error": f"worker exited with code {self._zini_process.returncode}",
+            }
+
+        token = result.get("token")
+        if token == self._zini_job_token:
+            if result.get("error"):
+                print(f"[ZiNi warning] counter ZiNi calculation failed: {result['error']}")
+            self._zini_result_token = token
+            self._zini_result_clicks = result.get("clicks")
+            self._update_statistics_panel(self.engine.get_stats())
+
+        self._finish_zini_metric_process()
+        if self._zini_process is None:
             self._zini_poll_timer.stop()
 
     def _current_zini_clicks(self) -> int | None:
@@ -905,7 +1055,6 @@ class MinesweeperUI(QWidget):
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
-        self._reset_zini_metric_job()
         self.engine = self._replay_player.engine
         self.render_board()
         self._update_replay_status_label()
@@ -918,7 +1067,7 @@ class MinesweeperUI(QWidget):
             self.engine.height,
             self.engine.num_mines,
         )
-        self._reset_zini_metric_job()
+        self._reset_counter_metrics_for_board_change()
         self._replay_mode = True
         self._replay_player = replay_player
         self.engine = replay_player.engine
@@ -936,7 +1085,7 @@ class MinesweeperUI(QWidget):
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
         self._stop_replay_autoplay()
-        self._reset_zini_metric_job()
+        self._reset_counter_metrics_for_board_change()
         self._replay_mode = False
         self._replay_player = None
         self._update_replay_controls()
@@ -1050,7 +1199,7 @@ class MinesweeperUI(QWidget):
 
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
-        self._reset_zini_metric_job()
+        self._reset_counter_metrics_for_board_change()
         self.engine.width = width
         self.engine.height = height
         self.engine.num_mines = mines
@@ -1129,7 +1278,7 @@ class MinesweeperUI(QWidget):
     def on_reset(self):
         if self._replay_mode:
             return
-        self._reset_zini_metric_job()
+        self._reset_counter_metrics_for_board_change()
         self.engine.reset()
         self._game_over = False
         self.reset_button.setText("🙂")
