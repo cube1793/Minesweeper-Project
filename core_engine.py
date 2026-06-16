@@ -386,6 +386,15 @@ class MinesweeperEngine:
             adjacent=tuple(tuple(row) for row in self._adjacent),
         )
 
+    def get_counter_snapshot(self) -> dict:
+        """Return raw public inputs for UI counter metric calculations."""
+        return {
+            "status": self.status,
+            "active_clicks": self._active_clicks["total"],
+            "wasted_clicks": self._wasted_clicks["total"],
+            "completed_3bv": self._effective_3bv,
+        }
+
     def count_flags(self):
         """현재 꽂힌 깃발 수 (지뢰 카운터 표시용)."""
         return sum(row.count(True) for row in self._flagged)

@@ -37,6 +37,7 @@ UI는 게임 상태를 독립적으로 계산하지 않으며,
 """
 
 from enum import IntEnum
+from threading import Lock, Thread
 
 from PyQt5.QtWidgets import (
     QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
@@ -51,6 +52,10 @@ from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
+from zini_calculator import (
+    ZiniNeighborhoodBeamConfig,
+    calculate_g_zini_neighborhood_beam_bounded,
+)
 
 
 # 타일 숫자별 클래식/Arbiter 스타일 색상
@@ -108,17 +113,33 @@ STAT_ROWS = [
     ("right",           "Right",          "0"),
     ("chord",           "Chord",          "0"),
     ("cps",             "CPS",            "0"),
-    ("efficiency",      "Efficiency",     "0%"),
-    ("ioe",             "IOE",            "0"),
+    ("efficiency",      "Efficiency",     "-"),
+    ("ioe",             "IOE",            "-"),
     ("ops",             "Ops",            "0/0"),
-    ("thrp",            "ThrP",           "0"),
-    ("corr",            "Corr",           "0"),
-    ("zini",            "ZiNi",           "0"),
-    ("zne",             "ZNE",            "0"),
-    ("znt",             "ZNT",            "0"),
-    ("rqp",             "RQP",            "0"),
-    ("ios",             "IOS",            "0"),
+    ("thrp",            "Thrp",           "-"),
+    ("corr",            "Corr",           "-"),
+    ("zini",            "ZiNi",           "-"),
+    ("zne",             "ZNE",            "-"),
+    ("znt",             "ZNT",            "-"),
 ]
+
+COUNTER_METRIC_KEYS = (
+    "efficiency",
+    "ioe",
+    "thrp",
+    "corr",
+    "zini",
+    "zne",
+    "znt",
+)
+ZINI_COUNTER_CONFIG = ZiniNeighborhoodBeamConfig(
+    ranking_policy="standard_seeded_chain_v1",
+    max_evaluations=1000,
+    standard_phase_evaluations=500,
+    max_seconds=None,
+    stall_seconds=None,
+    seed=0,
+)
 
 
 def border_width_for(cell_size: int) -> int:
@@ -186,6 +207,15 @@ class MinesweeperUI(QWidget):
         self._replay_autoplay_timer.setInterval(REPLAY_AUTOPLAY_INTERVAL_MS)
         self._replay_autoplay_timer.timeout.connect(self._advance_replay_autoplay)
         self._stat_value_items = {}
+        self._zini_job_token = 0
+        self._zini_job_running_token = None
+        self._zini_result_token = None
+        self._zini_result_clicks = None
+        self._zini_pending_results = []
+        self._zini_pending_lock = Lock()
+        self._zini_poll_timer = QTimer(self)
+        self._zini_poll_timer.setInterval(100)
+        self._zini_poll_timer.timeout.connect(self._poll_zini_metric_job)
 
         self._elapsed_seconds = 0
         self._timer = QTimer(self)
@@ -554,10 +584,147 @@ class MinesweeperUI(QWidget):
             time/est_time/bbbv/bbbv_per_sec/clicks/left/right/chord/cps 등
             엔진이 채워주는 키는 자동으로 해당 행에 반영된다.
         """
-        for key, value in stats_dict.items():
+        merged_stats = dict(stats_dict)
+        merged_stats.update(self._counter_metric_values())
+
+        for key, value in merged_stats.items():
             item = self._stat_value_items.get(key)
             if item is not None:
                 item.setText(str(value))
+
+    def _counter_metric_values(self) -> dict[str, str]:
+        """Return the seven Counters metrics using current engine state."""
+        metrics = {key: "-" for key in COUNTER_METRIC_KEYS}
+        counter_snapshot = self.engine.get_counter_snapshot()
+        status = counter_snapshot["status"]
+
+        if status == GameStatus.PLAYING:
+            self._reset_zini_metric_job()
+            return metrics
+        if status not in (GameStatus.LOST, GameStatus.WON):
+            return metrics
+
+        active_clicks = counter_snapshot["active_clicks"]
+        wasted_clicks = counter_snapshot["wasted_clicks"]
+        total_clicks = active_clicks + wasted_clicks
+        completed_3bv = counter_snapshot["completed_3bv"]
+        self._ensure_zini_metric_job()
+        board_zini = self._current_zini_clicks()
+
+        metrics["efficiency"] = self._format_counter_percent(
+            completed_3bv,
+            total_clicks,
+        )
+        metrics["ioe"] = self._format_counter_decimal(
+            completed_3bv,
+            total_clicks,
+        )
+        metrics["thrp"] = self._format_counter_decimal(
+            completed_3bv,
+            active_clicks,
+        )
+        metrics["corr"] = self._format_counter_decimal(
+            active_clicks,
+            total_clicks,
+        )
+        if board_zini is not None:
+            metrics["zini"] = str(board_zini)
+
+        if status == GameStatus.WON and board_zini is not None:
+            metrics["zne"] = self._format_counter_decimal(
+                board_zini,
+                total_clicks,
+            )
+            metrics["znt"] = self._format_counter_decimal(
+                board_zini,
+                active_clicks,
+            )
+
+        return metrics
+
+    def _reset_zini_metric_job(self):
+        """Invalidate any pending ZiNi calculation for a previous board."""
+        self._zini_job_token += 1
+        self._zini_job_running_token = None
+        self._zini_result_token = None
+        self._zini_result_clicks = None
+        with self._zini_pending_lock:
+            self._zini_pending_results.clear()
+        if self._zini_poll_timer.isActive():
+            self._zini_poll_timer.stop()
+
+    def _ensure_zini_metric_job(self):
+        """Start bounded seeded-chain ZiNi calculation without blocking UI."""
+        snapshot = self.engine.get_board_snapshot()
+        if not snapshot.mines_placed:
+            return
+        if (
+            self._zini_result_token == self._zini_job_token
+            or self._zini_job_running_token == self._zini_job_token
+        ):
+            return
+
+        token = self._zini_job_token
+        self._zini_job_running_token = token
+        worker = Thread(
+            target=self._calculate_zini_metric_worker,
+            args=(token, snapshot),
+            daemon=True,
+        )
+        worker.start()
+        if not self._zini_poll_timer.isActive():
+            self._zini_poll_timer.start()
+
+    def _calculate_zini_metric_worker(self, token: int, snapshot):
+        """Calculate bounded best-so-far ZiNi off the UI thread."""
+        clicks = None
+        try:
+            result = calculate_g_zini_neighborhood_beam_bounded(
+                snapshot,
+                config=ZINI_COUNTER_CONFIG,
+            )
+            clicks = result.best_clicks
+        except Exception as exc:
+            print(f"[ZiNi warning] counter ZiNi calculation failed: {exc}")
+        with self._zini_pending_lock:
+            self._zini_pending_results.append((token, clicks))
+
+    def _poll_zini_metric_job(self):
+        """Apply completed ZiNi calculation results on the UI thread."""
+        with self._zini_pending_lock:
+            pending_results = tuple(self._zini_pending_results)
+            self._zini_pending_results.clear()
+        if not pending_results:
+            return
+
+        for token, clicks in pending_results:
+            if token == self._zini_job_token:
+                self._zini_job_running_token = None
+                self._zini_result_token = token
+                self._zini_result_clicks = clicks
+                self._update_statistics_panel(self.engine.get_stats())
+        if self._zini_job_running_token is None:
+            self._zini_poll_timer.stop()
+
+    def _current_zini_clicks(self) -> int | None:
+        """Return the completed bounded best-so-far ZiNi value, if any."""
+        if self._zini_result_token != self._zini_job_token:
+            return None
+        return self._zini_result_clicks
+
+    @staticmethod
+    def _format_counter_decimal(numerator: int, denominator: int) -> str:
+        """Format a ratio metric or mask divide-by-zero as '-'."""
+        if denominator == 0:
+            return "-"
+        return f"{numerator / denominator:.4f}"
+
+    @staticmethod
+    def _format_counter_percent(numerator: int, denominator: int) -> str:
+        """Format Efficiency as an integer percentage."""
+        if denominator == 0:
+            return "-"
+        return f"{numerator / denominator * 100:.0f}%"
 
     # ------------------------------------------------------------------
     # 리플레이 기록/저장
@@ -738,6 +905,7 @@ class MinesweeperUI(QWidget):
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
+        self._reset_zini_metric_job()
         self.engine = self._replay_player.engine
         self.render_board()
         self._update_replay_status_label()
@@ -750,6 +918,7 @@ class MinesweeperUI(QWidget):
             self.engine.height,
             self.engine.num_mines,
         )
+        self._reset_zini_metric_job()
         self._replay_mode = True
         self._replay_player = replay_player
         self.engine = replay_player.engine
@@ -767,6 +936,7 @@ class MinesweeperUI(QWidget):
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
         self._stop_replay_autoplay()
+        self._reset_zini_metric_job()
         self._replay_mode = False
         self._replay_player = None
         self._update_replay_controls()
@@ -880,6 +1050,7 @@ class MinesweeperUI(QWidget):
 
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
+        self._reset_zini_metric_job()
         self.engine.width = width
         self.engine.height = height
         self.engine.num_mines = mines
@@ -958,6 +1129,7 @@ class MinesweeperUI(QWidget):
     def on_reset(self):
         if self._replay_mode:
             return
+        self._reset_zini_metric_job()
         self.engine.reset()
         self._game_over = False
         self.reset_button.setText("🙂")
