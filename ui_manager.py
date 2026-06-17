@@ -2,10 +2,12 @@
 ui_manager.py
 PyQt5 기반 지뢰찾기 화면 및 인터페이스.
 
-core_engine.MinesweeperEngine 를 의존성 주입받아 구동된다.
-UI는 게임 상태를 독립적으로 계산하지 않으며,
-오직 engine.get_observation() 결과만으로 보드를 렌더링한다.
-통계 또한 엔진이 산출한 stats 딕셔너리를 받아 '표시'만 한다.
+일반 게임의 기본 통계는 MinesweeperEngine이 제공하며,
+ZiNi 기반 파생 지표는 엔진의 공개 counter snapshot과
+ZiNi worker 결과를 사용해 UI 계층에서 조합한다.
+Replay 통계는 ReplayStatisticsAnalyzer가 계산한다.
+UI는 통계 결과를 표시하고 Replay 재생 상태를 관리한다.
+engine.get_observation() 결과로 보드를 렌더링하며, Replay 재생 상태를 관리한다.
 
 레이아웃 전략:
     - 최상위 레이아웃은 QHBoxLayout(좌우 분할)이다.
@@ -60,6 +62,7 @@ from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
+from replay_statistics import ReplayStatisticsAnalyzer
 from zini_calculator import ZiniNeighborhoodBeamConfig
 
 
@@ -287,6 +290,7 @@ class MinesweeperUI(QWidget):
         self._replay_time_anchor_wall = None
         self._replay_time_anchor_replay = 0.0
         self._replay_display_time_override = None
+        self._replay_counter_timeline = None
         self._normal_game_config = (
             self.engine.width,
             self.engine.height,
@@ -779,7 +783,11 @@ class MinesweeperUI(QWidget):
         if self.engine.status != GameStatus.PLAYING:
             merged_stats.update(self._counter_metric_values())
 
-        for key, value in merged_stats.items():
+        self._set_statistics_panel_values(merged_stats)
+
+    def _set_statistics_panel_values(self, stats_dict: dict):
+        """Apply already-formatted statistic values to visible STAT_ROWS."""
+        for key, value in stats_dict.items():
             item = self._stat_value_items.get(key)
             if item is not None:
                 item.setText(str(value))
@@ -1025,7 +1033,10 @@ class MinesweeperUI(QWidget):
                 print(f"[ZiNi warning] counter ZiNi calculation failed: {result['error']}")
             self._zini_result_token = token
             self._zini_result_clicks = result.get("clicks")
-            self._update_statistics_panel(self.engine.get_stats())
+            if self._replay_mode:
+                self._update_replay_statistics_panel()
+            else:
+                self._update_statistics_panel(self.engine.get_stats())
 
         self._finish_zini_metric_process()
         if self._zini_process is None:
@@ -1050,6 +1061,42 @@ class MinesweeperUI(QWidget):
         if denominator == 0:
             return "-"
         return f"{numerator / denominator * 100:.0f}%"
+
+    def _clear_replay_counter_state(self):
+        """Clear cached replay analyzer output for replay-mode statistics."""
+        self._replay_counter_timeline = None
+
+    def _prepare_replay_counter_state(self, replay_data):
+        """Build replay counter timeline through the pure analyzer."""
+        self._clear_replay_counter_state()
+        try:
+            timeline = ReplayStatisticsAnalyzer.analyze(replay_data)
+        except Exception as exc:
+            print(f"[Replay warning] counter timeline build failed: {exc}")
+            return
+
+        self._replay_counter_timeline = timeline
+
+    def _update_replay_statistics_panel(self):
+        """Update Counters from replay timeline instead of live-game masking."""
+        self._set_statistics_panel_values(self._build_replay_statistics())
+
+    def _build_replay_statistics(self) -> dict[str, str]:
+        timeline = self._replay_counter_timeline
+        if timeline is None or self._replay_player is None:
+            return ReplayStatisticsAnalyzer.masked_statistics()
+
+        board_zini = None
+        if timeline.is_completed:
+            self._ensure_zini_metric_job()
+            board_zini = self._current_zini_clicks()
+
+        return ReplayStatisticsAnalyzer.statistics_at(
+            timeline=timeline,
+            index=self._replay_player.current_index,
+            replay_time=self._replay_display_time(),
+            board_zini=board_zini,
+        )
 
     # ------------------------------------------------------------------
     # 리플레이 기록/저장
@@ -1316,6 +1363,7 @@ class MinesweeperUI(QWidget):
 
         if self._replay_autoplay_timer.isActive():
             self._stop_replay_autoplay(preserve_time_position=True)
+            self._update_replay_statistics_panel()
             self._update_replay_controls()
         else:
             self._start_replay_autoplay()
@@ -1364,6 +1412,7 @@ class MinesweeperUI(QWidget):
             self._refresh_replay_view_after_move()
         else:
             self._update_replay_status_label()
+            self._update_replay_statistics_panel()
             self._sync_replay_slider()
 
     def _stop_replay_autoplay(self, preserve_time_position: bool = False):
@@ -1438,6 +1487,8 @@ class MinesweeperUI(QWidget):
         elif self._replay_playback_mode() == REPLAY_MODE_INDEX:
             self._clear_replay_display_time_override()
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
         self._update_replay_controls()
 
     def on_replay_index_interval_changed(self, value: int):
@@ -1447,6 +1498,8 @@ class MinesweeperUI(QWidget):
         ):
             self._replay_autoplay_timer.setInterval(value)
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
 
     def on_replay_time_speed_changed(self, _value: float):
         if (
@@ -1455,12 +1508,15 @@ class MinesweeperUI(QWidget):
         ):
             self._reset_replay_time_anchor()
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
 
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
         self.engine = self._replay_player.engine
         self.render_board()
+        self._update_replay_statistics_panel()
         self._update_replay_status_label()
         self._update_replay_controls()
 
@@ -1476,6 +1532,7 @@ class MinesweeperUI(QWidget):
         self._replay_player = replay_player
         self._replay_data = replay_player.replay_data
         self._clear_replay_display_time_override()
+        self._prepare_replay_counter_state(replay_player.replay_data)
         self.engine = replay_player.engine
         self._game_over = False
         self.reset_button.setText("🙂")
@@ -1484,7 +1541,7 @@ class MinesweeperUI(QWidget):
         self._build_grid()
         self._apply_initial_window_size()
         self.render_board()
-        self._update_statistics_panel(self.engine.get_stats())
+        self._update_replay_statistics_panel()
         self._update_replay_status_label()
         self._update_replay_controls()
 
@@ -1496,6 +1553,7 @@ class MinesweeperUI(QWidget):
         self._replay_player = None
         self._replay_data = None
         self._clear_replay_display_time_override()
+        self._clear_replay_counter_state()
         self._update_replay_controls()
 
         width, height, mines = self._normal_game_config
