@@ -56,8 +56,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QIcon, QPainter, QPixmap, QPolygon
 
+from board_analyzer import CellClass, analyze_board
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from replay_json import load_replay_json, save_replay_json
+from replay_model import ACTION_CHORD, ACTION_FLAG, ACTION_OPEN
 from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
 from zini_calculator import ZiniNeighborhoodBeamConfig
@@ -90,6 +92,11 @@ REPLAY_SPEED_MAX = 8.0
 REPLAY_MODE_INDEX = "Index"
 REPLAY_MODE_TIME = "Time"
 REPLAY_ICON_SIZE = QSize(24, 24)
+REPLAY_ACTION_COUNTER_KEYS = {
+    ACTION_OPEN: "left",
+    ACTION_FLAG: "right",
+    ACTION_CHORD: "chord",
+}
 STATS_PANEL_WIDTH = 170
 ZINI_WORKER_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -287,6 +294,10 @@ class MinesweeperUI(QWidget):
         self._replay_time_anchor_wall = None
         self._replay_time_anchor_replay = 0.0
         self._replay_display_time_override = None
+        self._replay_is_completed = False
+        self._replay_counter_timeline = []
+        self._replay_total_3bv = 0
+        self._replay_total_ops = 0
         self._normal_game_config = (
             self.engine.width,
             self.engine.height,
@@ -779,7 +790,11 @@ class MinesweeperUI(QWidget):
         if self.engine.status != GameStatus.PLAYING:
             merged_stats.update(self._counter_metric_values())
 
-        for key, value in merged_stats.items():
+        self._set_statistics_panel_values(merged_stats)
+
+    def _set_statistics_panel_values(self, stats_dict: dict):
+        """Apply already-formatted statistic values to visible STAT_ROWS."""
+        for key, value in stats_dict.items():
             item = self._stat_value_items.get(key)
             if item is not None:
                 item.setText(str(value))
@@ -1025,7 +1040,10 @@ class MinesweeperUI(QWidget):
                 print(f"[ZiNi warning] counter ZiNi calculation failed: {result['error']}")
             self._zini_result_token = token
             self._zini_result_clicks = result.get("clicks")
-            self._update_statistics_panel(self.engine.get_stats())
+            if self._replay_mode:
+                self._update_replay_statistics_panel()
+            else:
+                self._update_statistics_panel(self.engine.get_stats())
 
         self._finish_zini_metric_process()
         if self._zini_process is None:
@@ -1050,6 +1068,192 @@ class MinesweeperUI(QWidget):
         if denominator == 0:
             return "-"
         return f"{numerator / denominator * 100:.0f}%"
+
+    def _clear_replay_counter_state(self):
+        """Clear cached replay counter data for replay-mode statistics."""
+        self._replay_is_completed = False
+        self._replay_counter_timeline = []
+        self._replay_total_3bv = 0
+        self._replay_total_ops = 0
+
+    def _prepare_replay_counter_state(self, replay_data):
+        """Build replay counter timeline using only public engine interfaces."""
+        self._clear_replay_counter_state()
+        try:
+            timeline, total_3bv, total_ops = self._build_replay_counter_timeline(
+                replay_data
+            )
+        except Exception as exc:
+            print(f"[Replay warning] counter timeline build failed: {exc}")
+            return
+
+        final_status = timeline[-1]["status"] if timeline else GameStatus.PLAYING
+        self._replay_is_completed = final_status in (GameStatus.WON, GameStatus.LOST)
+        if not self._replay_is_completed:
+            return
+
+        self._replay_counter_timeline = timeline
+        self._replay_total_3bv = total_3bv
+        self._replay_total_ops = total_ops
+
+    def _build_replay_counter_timeline(self, replay_data):
+        player = ReplayPlayer(replay_data)
+        analysis = analyze_board(player.engine.get_board_snapshot())
+        active = {"total": 0, "left": 0, "right": 0, "chord": 0}
+        wasted = {"total": 0, "left": 0, "right": 0, "chord": 0}
+        timeline = []
+
+        def append_current_entry():
+            counter_snapshot = player.engine.get_counter_snapshot()
+            active["total"] = counter_snapshot["active_clicks"]
+            wasted["total"] = counter_snapshot["wasted_clicks"]
+            timeline.append(
+                {
+                    "status": counter_snapshot["status"],
+                    "active": dict(active),
+                    "wasted": dict(wasted),
+                    "completed_3bv": counter_snapshot["completed_3bv"],
+                    "completed_ops": self._completed_ops_from_public_observation(
+                        player.engine.get_observation(),
+                        analysis,
+                    ),
+                }
+            )
+
+        append_current_entry()
+        for event in replay_data.events:
+            before = player.engine.get_counter_snapshot()
+            player.next()
+            after = player.engine.get_counter_snapshot()
+            category = REPLAY_ACTION_COUNTER_KEYS.get(event.action)
+            if category is not None:
+                active_delta = after["active_clicks"] - before["active_clicks"]
+                wasted_delta = after["wasted_clicks"] - before["wasted_clicks"]
+                if active_delta > 0:
+                    active[category] += active_delta
+                if wasted_delta > 0:
+                    wasted[category] += wasted_delta
+            append_current_entry()
+
+        return timeline, analysis.total_3bv, analysis.total_ops
+
+    @staticmethod
+    def _completed_ops_from_public_observation(observation, analysis) -> int:
+        opened_groups = set()
+        for y, row in enumerate(observation):
+            for x, value in enumerate(row):
+                if analysis.cell_class[y][x] != CellClass.OPENING:
+                    continue
+                if value != 0:
+                    continue
+                group_id = analysis.opening_id[y][x]
+                if group_id >= 0:
+                    opened_groups.add(group_id)
+        return len(opened_groups)
+
+    def _current_replay_counter_entry(self):
+        if not self._replay_counter_timeline or self._replay_player is None:
+            return None
+        index = max(
+            0,
+            min(
+                self._replay_player.current_index,
+                len(self._replay_counter_timeline) - 1,
+            ),
+        )
+        return self._replay_counter_timeline[index]
+
+    def _update_replay_statistics_panel(self):
+        """Update Counters from replay timeline instead of live-game masking."""
+        self._set_statistics_panel_values(self._build_replay_statistics())
+
+    def _build_replay_statistics(self) -> dict[str, str]:
+        if not self._replay_is_completed:
+            return self._masked_statistics()
+
+        entry = self._current_replay_counter_entry()
+        if entry is None:
+            return self._masked_statistics()
+
+        replay_time = self._replay_display_time()
+        active = entry["active"]
+        wasted = entry["wasted"]
+        active_clicks = active["total"]
+        wasted_clicks = wasted["total"]
+        total_clicks = active_clicks + wasted_clicks
+        completed_3bv = entry["completed_3bv"]
+        completed_ops = entry["completed_ops"]
+
+        bbbv_per_sec = (
+            completed_3bv / replay_time if replay_time > 0.0 else None
+        )
+        est_time = (
+            self._replay_total_3bv / bbbv_per_sec
+            if bbbv_per_sec and bbbv_per_sec > 0.0
+            else None
+        )
+
+        self._ensure_zini_metric_job()
+        board_zini = self._current_zini_clicks()
+
+        stats = {
+            "time": f"{replay_time:.3f}",
+            "est_time": f"{est_time:.3f}" if est_time is not None else "-",
+            "bbbv": f"{completed_3bv}/{self._replay_total_3bv}",
+            "bbbv_per_sec": (
+                f"{bbbv_per_sec:.4f}" if bbbv_per_sec is not None else "-"
+            ),
+            "clicks": self._format_replay_click_counter(
+                active["total"],
+                wasted["total"],
+            ),
+            "left": self._format_replay_click_counter(
+                active["left"],
+                wasted["left"],
+            ),
+            "right": self._format_replay_click_counter(
+                active["right"],
+                wasted["right"],
+            ),
+            "chord": self._format_replay_click_counter(
+                active["chord"],
+                wasted["chord"],
+            ),
+            "cps": self._format_replay_rate(total_clicks, replay_time),
+            "efficiency": self._format_counter_percent(
+                completed_3bv,
+                total_clicks,
+            ),
+            "ioe": self._format_counter_decimal(completed_3bv, total_clicks),
+            "ops": f"{completed_ops}/{self._replay_total_ops}",
+            "thrp": self._format_counter_decimal(completed_3bv, active_clicks),
+            "corr": self._format_counter_decimal(active_clicks, total_clicks),
+            "zini": str(board_zini) if board_zini is not None else "-",
+            "zne": "-",
+            "znt": "-",
+        }
+
+        if board_zini is not None:
+            stats["zne"] = self._format_counter_decimal(board_zini, total_clicks)
+            stats["znt"] = self._format_counter_decimal(board_zini, active_clicks)
+
+        return stats
+
+    @staticmethod
+    def _masked_statistics() -> dict[str, str]:
+        return {key: "-" for key, _label, _dummy in STAT_ROWS}
+
+    @staticmethod
+    def _format_replay_rate(numerator: int, elapsed: float) -> str:
+        if elapsed <= 0.0:
+            return "-"
+        return f"{numerator / elapsed:.4f}"
+
+    @staticmethod
+    def _format_replay_click_counter(active: int, wasted: int) -> str:
+        if wasted == 0:
+            return str(active)
+        return f"{active} + {wasted}"
 
     # ------------------------------------------------------------------
     # 리플레이 기록/저장
@@ -1316,6 +1520,7 @@ class MinesweeperUI(QWidget):
 
         if self._replay_autoplay_timer.isActive():
             self._stop_replay_autoplay(preserve_time_position=True)
+            self._update_replay_statistics_panel()
             self._update_replay_controls()
         else:
             self._start_replay_autoplay()
@@ -1364,6 +1569,7 @@ class MinesweeperUI(QWidget):
             self._refresh_replay_view_after_move()
         else:
             self._update_replay_status_label()
+            self._update_replay_statistics_panel()
             self._sync_replay_slider()
 
     def _stop_replay_autoplay(self, preserve_time_position: bool = False):
@@ -1438,6 +1644,8 @@ class MinesweeperUI(QWidget):
         elif self._replay_playback_mode() == REPLAY_MODE_INDEX:
             self._clear_replay_display_time_override()
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
         self._update_replay_controls()
 
     def on_replay_index_interval_changed(self, value: int):
@@ -1447,6 +1655,8 @@ class MinesweeperUI(QWidget):
         ):
             self._replay_autoplay_timer.setInterval(value)
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
 
     def on_replay_time_speed_changed(self, _value: float):
         if (
@@ -1455,12 +1665,15 @@ class MinesweeperUI(QWidget):
         ):
             self._reset_replay_time_anchor()
         self._update_replay_status_label()
+        if self._replay_mode:
+            self._update_replay_statistics_panel()
 
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
         self.engine = self._replay_player.engine
         self.render_board()
+        self._update_replay_statistics_panel()
         self._update_replay_status_label()
         self._update_replay_controls()
 
@@ -1476,6 +1689,7 @@ class MinesweeperUI(QWidget):
         self._replay_player = replay_player
         self._replay_data = replay_player.replay_data
         self._clear_replay_display_time_override()
+        self._prepare_replay_counter_state(replay_player.replay_data)
         self.engine = replay_player.engine
         self._game_over = False
         self.reset_button.setText("🙂")
@@ -1484,7 +1698,7 @@ class MinesweeperUI(QWidget):
         self._build_grid()
         self._apply_initial_window_size()
         self.render_board()
-        self._update_statistics_panel(self.engine.get_stats())
+        self._update_replay_statistics_panel()
         self._update_replay_status_label()
         self._update_replay_controls()
 
@@ -1496,6 +1710,7 @@ class MinesweeperUI(QWidget):
         self._replay_player = None
         self._replay_data = None
         self._clear_replay_display_time_override()
+        self._clear_replay_counter_state()
         self._update_replay_controls()
 
         width, height, mines = self._normal_game_config
