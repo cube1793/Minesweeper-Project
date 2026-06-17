@@ -123,6 +123,7 @@ from replay_model import (
     ReplayEvent,
 )
 from replay_player import ReplayPlayer
+from replay_statistics import ReplayStatisticsAnalyzer, STAT_KEYS
 from ui_manager import MinesweeperUI, STAT_ROWS
 
 
@@ -183,6 +184,17 @@ class ReplayStatisticsTests(unittest.TestCase):
             ),
         )
 
+    def _timeline_for(self, replay_data):
+        return ReplayStatisticsAnalyzer.analyze(replay_data)
+
+    def _stats_at(self, timeline, index, display_time, zini=5):
+        return ReplayStatisticsAnalyzer.statistics_at(
+            timeline=timeline,
+            index=index,
+            replay_time=display_time,
+            board_zini=zini,
+        )
+
     def _ui_for_replay(self, replay_data, zini=5):
         ui = MinesweeperUI.__new__(MinesweeperUI)
         ui._replay_player = ReplayPlayer(replay_data)
@@ -193,49 +205,37 @@ class ReplayStatisticsTests(unittest.TestCase):
         ui._prepare_replay_counter_state(replay_data)
         return ui
 
-    def _stats_at(self, ui, index, display_time=None):
-        ui._replay_player.go_to(index)
-        if display_time is None:
-            display_time = ui._replay_player.current_time
-        ui._display_time = display_time
-        return ui._build_replay_statistics()
-
     def test_completed_replay_stays_unmasked_when_current_state_is_playing(self):
-        ui = self._ui_for_replay(self._lost_replay())
+        replay_data = self._lost_replay()
+        timeline = self._timeline_for(replay_data)
+        player = ReplayPlayer(replay_data)
 
-        stats = self._stats_at(ui, 1)
+        player.go_to(1)
+        stats = self._stats_at(timeline, 1, 1.0)
 
-        self.assertTrue(ui._replay_is_completed)
-        self.assertEqual(ui._replay_player.engine.status, GameStatus.PLAYING)
+        self.assertTrue(timeline.is_completed)
+        self.assertEqual(player.engine.status, GameStatus.PLAYING)
         self.assertEqual(stats["time"], "1.000")
         self.assertEqual(stats["bbbv"], "1/8")
         self.assertNotEqual(stats["bbbv"], "-")
 
-        self._stats_at(ui, 7)
-        self.assertTrue(ui._replay_is_completed)
+        self._stats_at(timeline, 7, 7.0)
+        self.assertTrue(timeline.is_completed)
 
-    def test_incomplete_replay_masks_all_stat_rows_and_overwrites_old_values(self):
-        ui = self._ui_for_replay(self._incomplete_replay())
-        ui._stat_value_items = {
-            key: _StatItem("old") for key, _label, _dummy in STAT_ROWS
-        }
+    def test_incomplete_replay_masks_all_stat_rows(self):
+        timeline = self._timeline_for(self._incomplete_replay())
+        stats = self._stats_at(timeline, 1, 1.0)
 
-        ui._update_replay_statistics_panel()
-
-        self.assertFalse(ui._replay_is_completed)
-        self.assertEqual(
-            set(ui._build_replay_statistics()),
-            {key for key, _label, _dummy in STAT_ROWS},
-        )
-        for key, _label, _dummy in STAT_ROWS:
-            self.assertEqual(ui._build_replay_statistics()[key], "-")
-            self.assertEqual(ui._stat_value_items[key].text, "-")
+        self.assertFalse(timeline.is_completed)
+        self.assertEqual(set(stats), set(STAT_KEYS))
+        for key in STAT_KEYS:
+            self.assertEqual(stats[key], "-")
 
     def test_3bv_and_ops_current_values_move_while_totals_stay_fixed(self):
-        ui = self._ui_for_replay(self._won_opening_replay())
+        timeline = self._timeline_for(self._won_opening_replay())
 
-        initial = self._stats_at(ui, 0, display_time=0.0)
-        finished = self._stats_at(ui, 1, display_time=1.0)
+        initial = self._stats_at(timeline, 0, 0.0)
+        finished = self._stats_at(timeline, 1, 1.0)
 
         self.assertEqual(initial["bbbv"], "0/1")
         self.assertEqual(initial["ops"], "0/1")
@@ -245,9 +245,9 @@ class ReplayStatisticsTests(unittest.TestCase):
         self.assertEqual(initial["ops"].split("/")[1], finished["ops"].split("/")[1])
 
     def test_click_counters_use_active_plus_wasted_format_by_action(self):
-        ui = self._ui_for_replay(self._lost_replay())
+        timeline = self._timeline_for(self._lost_replay())
 
-        stats = self._stats_at(ui, 7)
+        stats = self._stats_at(timeline, 7, 7.0)
 
         self.assertEqual(stats["clicks"], "4 + 3")
         self.assertEqual(stats["left"], "1 + 1")
@@ -255,9 +255,9 @@ class ReplayStatisticsTests(unittest.TestCase):
         self.assertEqual(stats["chord"], "1 + 1")
 
     def test_derived_metrics_use_replay_time_and_expected_formats(self):
-        ui = self._ui_for_replay(self._lost_replay(), zini=5)
+        timeline = self._timeline_for(self._lost_replay())
 
-        stats = self._stats_at(ui, 6, display_time=6.0)
+        stats = self._stats_at(timeline, 6, 6.0, zini=5)
 
         self.assertEqual(stats["time"], "6.000")
         self.assertEqual(stats["est_time"], "16.000")
@@ -271,10 +271,10 @@ class ReplayStatisticsTests(unittest.TestCase):
         self.assertEqual(stats["znt"], "1.2500")
 
     def test_zini_is_fixed_while_zne_and_znt_follow_current_click_counts(self):
-        ui = self._ui_for_replay(self._lost_replay(), zini=5)
+        timeline = self._timeline_for(self._lost_replay())
 
-        before_chord = self._stats_at(ui, 5, display_time=5.0)
-        after_chord = self._stats_at(ui, 6, display_time=6.0)
+        before_chord = self._stats_at(timeline, 5, 5.0, zini=5)
+        after_chord = self._stats_at(timeline, 6, 6.0, zini=5)
 
         self.assertEqual(before_chord["zini"], "5")
         self.assertEqual(after_chord["zini"], "5")
@@ -284,9 +284,9 @@ class ReplayStatisticsTests(unittest.TestCase):
         self.assertEqual(after_chord["znt"], "1.2500")
 
     def test_zero_division_metrics_are_masked_at_initial_position(self):
-        ui = self._ui_for_replay(self._lost_replay(), zini=5)
+        timeline = self._timeline_for(self._lost_replay())
 
-        stats = self._stats_at(ui, 0, display_time=0.0)
+        stats = self._stats_at(timeline, 0, 0.0, zini=5)
 
         for key in (
             "est_time",
@@ -302,10 +302,10 @@ class ReplayStatisticsTests(unittest.TestCase):
             self.assertEqual(stats[key], "-")
 
     def test_between_event_time_changes_only_time_based_replay_statistics(self):
-        ui = self._ui_for_replay(self._lost_replay(), zini=5)
+        timeline = self._timeline_for(self._lost_replay())
 
-        at_event_time = self._stats_at(ui, 6, display_time=6.0)
-        between_events = self._stats_at(ui, 6, display_time=6.5)
+        at_event_time = self._stats_at(timeline, 6, 6.0, zini=5)
+        between_events = self._stats_at(timeline, 6, 6.5, zini=5)
 
         for key in ("time", "est_time", "bbbv_per_sec", "cps"):
             self.assertNotEqual(at_event_time[key], between_events[key])
@@ -326,6 +326,37 @@ class ReplayStatisticsTests(unittest.TestCase):
             "znt",
         ):
             self.assertEqual(at_event_time[key], between_events[key])
+
+    def test_ui_replay_statistics_panel_applies_analyzer_result(self):
+        ui = self._ui_for_replay(self._lost_replay(), zini=5)
+        ui._stat_value_items = {
+            key: _StatItem("old") for key, _label, _dummy in STAT_ROWS
+        }
+        ui._replay_player.go_to(6)
+        ui._display_time = 6.0
+
+        ui._update_replay_statistics_panel()
+
+        self.assertIsNotNone(ui._replay_counter_timeline)
+        self.assertTrue(ui._replay_counter_timeline.is_completed)
+        self.assertEqual(ui._stat_value_items["bbbv"].text, "3/8")
+        self.assertEqual(ui._stat_value_items["ops"].text, "0/0")
+        self.assertEqual(ui._stat_value_items["clicks"].text, "4 + 2")
+        self.assertEqual(ui._stat_value_items["zini"].text, "5")
+        self.assertEqual(ui._stat_value_items["zne"].text, "0.8333")
+
+    def test_ui_incomplete_replay_masks_panel_and_overwrites_old_values(self):
+        ui = self._ui_for_replay(self._incomplete_replay())
+        ui._stat_value_items = {
+            key: _StatItem("old") for key, _label, _dummy in STAT_ROWS
+        }
+
+        ui._update_replay_statistics_panel()
+
+        self.assertIsNotNone(ui._replay_counter_timeline)
+        self.assertFalse(ui._replay_counter_timeline.is_completed)
+        for key, _label, _dummy in STAT_ROWS:
+            self.assertEqual(ui._stat_value_items[key].text, "-")
 
 
 if __name__ == "__main__":
