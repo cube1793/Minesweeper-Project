@@ -76,10 +76,10 @@ python scripts/benchmark_zini_advanced.py --board expert1003 --mode quick
 
 Expert seed 1003 보드에서 다음 결과를 확인했습니다.
 
-* 3BV: 185
-* deterministic G.ZiNi: 125 clicks
-* standard advanced search: 121 clicks
-* seeded-chain bounded best-so-far: 120 clicks
+- deterministic G.ZiNi: 125 clicks
+- standard_v1, 100 evaluations: 123 clicks
+- standard_seeded_chain_v1, 500 evaluations: 121 clicks
+- standard_seeded_chain_v1, 1000 evaluations: 120 clicks
 
 120 clicks 결과는 Replay 유효성, 클릭 합계 및 깃발 유효성을 검증했으나 전역 최적 결과를 의미하지 않습니다.
 
