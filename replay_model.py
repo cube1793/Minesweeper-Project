@@ -49,12 +49,12 @@ class ReplayBoard:
             raise ValueError("num_mines must be smaller than the number of cells.")
 
         try:
-            mine_positions = frozenset(self.mine_positions)
-        except (TypeError, ValueError) as exc:
+            positions = iter(self.mine_positions)
+        except TypeError as exc:
             raise ValueError("Replay board mine_positions must be coordinates.") from exc
-        object.__setattr__(self, "mine_positions", mine_positions)
 
-        for position in mine_positions:
+        validated_mine_positions = set()
+        for position in positions:
             try:
                 x, y = position
             except (TypeError, ValueError) as exc:
@@ -66,9 +66,15 @@ class ReplayBoard:
                 raise ValueError("Mine position coordinates must be integers.")
             if not (0 <= x < self.width and 0 <= y < self.height):
                 raise ValueError("Mine position is out of board bounds.")
+            validated_mine_positions.add((x, y))
 
-        if self.num_mines != len(mine_positions):
+        if self.num_mines != len(validated_mine_positions):
             raise ValueError("num_mines must match the number of mine positions.")
+        object.__setattr__(
+            self,
+            "mine_positions",
+            frozenset(validated_mine_positions),
+        )
 
 
 @dataclass(frozen=True)
@@ -86,7 +92,7 @@ class ReplayEvent:
             (int, float),
         ):
             raise ValueError("elapsed_time must be an integer or float.")
-        if not isfinite(self.elapsed_time):
+        if isinstance(self.elapsed_time, float) and not isfinite(self.elapsed_time):
             raise ValueError("elapsed_time must be finite.")
         if self.elapsed_time < 0:
             raise ValueError("elapsed_time must be non-negative.")

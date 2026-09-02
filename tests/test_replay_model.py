@@ -103,6 +103,7 @@ class ReplayModelTests(unittest.TestCase):
         invalid_layouts = (
             (1, {(0.5, 1)}),
             (1, {(True, 1)}),
+            (1, [([0], 1)]),
             (1, {(-1, 1)}),
             (1, {(3, 1)}),
             (2, {(1, 1)}),
@@ -159,6 +160,19 @@ class ReplayModelTests(unittest.TestCase):
                         y=y,
                         action=ACTION_OPEN,
                     )
+
+    def test_replay_event_preserves_very_large_integer_elapsed_time(self):
+        elapsed_time = 10**400
+
+        event = ReplayEvent(
+            elapsed_time=elapsed_time,
+            x=0,
+            y=0,
+            action=ACTION_OPEN,
+        )
+
+        self.assertEqual(event.elapsed_time, elapsed_time)
+        self.assertIs(type(event.elapsed_time), int)
 
     def test_replay_data_allows_equal_and_rejects_decreasing_timestamps(self):
         board = ReplayBoard(

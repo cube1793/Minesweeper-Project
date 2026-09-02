@@ -132,6 +132,10 @@ class ReplayJsonTests(unittest.TestCase):
         invalid_mine_coordinate["board"]["mine_positions"][0][0] = True
         malformed_replays.append(invalid_mine_coordinate)
 
+        unhashable_mine_coordinate = deepcopy(valid)
+        unhashable_mine_coordinate["board"]["mine_positions"][0][0] = [0]
+        malformed_replays.append(unhashable_mine_coordinate)
+
         invalid_event_coordinate = deepcopy(valid)
         invalid_event_coordinate["events"][0]["x"] = 0.5
         malformed_replays.append(invalid_event_coordinate)

@@ -116,7 +116,7 @@ def _event_from_dict(data: dict) -> ReplayEvent:
     return event
 
 
-def _coordinates_from_json(value) -> frozenset[tuple[int, int]]:
+def _coordinates_from_json(value) -> tuple[tuple[object, object], ...]:
     if not isinstance(value, list):
         raise ValueError("Replay JSON coordinates must be a list.")
 
@@ -125,4 +125,4 @@ def _coordinates_from_json(value) -> frozenset[tuple[int, int]]:
         if not isinstance(item, list) or len(item) != 2:
             raise ValueError("Replay JSON coordinate must be a two-item list.")
         coordinates.append((item[0], item[1]))
-    return frozenset(coordinates)
+    return tuple(coordinates)
