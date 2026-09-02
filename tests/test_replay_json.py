@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from replay_json import (
@@ -118,6 +119,39 @@ class ReplayJsonTests(unittest.TestCase):
         invalid_bounds["events"][0]["x"] = replay["board"]["width"]
         with self.assertRaises(ValueError):
             replay_data_from_dict(invalid_bounds)
+
+    def test_load_replay_json_propagates_model_validation_errors(self):
+        valid = replay_data_to_dict(self._sample_replay())
+        malformed_replays = []
+
+        invalid_width = deepcopy(valid)
+        invalid_width["board"]["width"] = 3.5
+        malformed_replays.append(invalid_width)
+
+        invalid_mine_coordinate = deepcopy(valid)
+        invalid_mine_coordinate["board"]["mine_positions"][0][0] = True
+        malformed_replays.append(invalid_mine_coordinate)
+
+        invalid_event_coordinate = deepcopy(valid)
+        invalid_event_coordinate["events"][0]["x"] = 0.5
+        malformed_replays.append(invalid_event_coordinate)
+
+        invalid_elapsed_time = deepcopy(valid)
+        invalid_elapsed_time["events"][0]["elapsed_time"] = float("nan")
+        malformed_replays.append(invalid_elapsed_time)
+
+        decreasing_timestamps = deepcopy(valid)
+        decreasing_timestamps["events"][1]["elapsed_time"] = 0.05
+        malformed_replays.append(decreasing_timestamps)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "malformed_replay.json"
+            for index, replay in enumerate(malformed_replays):
+                with self.subTest(case=index):
+                    with path.open("w", encoding="utf-8") as file:
+                        json.dump(replay, file)
+                    with self.assertRaises(ValueError):
+                        load_replay_json(path)
 
 
 if __name__ == "__main__":
