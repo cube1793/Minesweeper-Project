@@ -1564,10 +1564,7 @@ class MinesweeperUI(QWidget):
         self._update_replay_controls()
 
         width, height, mines = self._normal_game_config
-        self.engine.width = width
-        self.engine.height = height
-        self.engine.num_mines = mines
-        self.engine.reset()
+        self.engine.configure(width=width, height=height, num_mines=mines)
         self._game_over = False
         self.reset_button.setText("🙂")
         self._reset_timer()
@@ -1786,10 +1783,7 @@ class MinesweeperUI(QWidget):
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
         self._reset_counter_metrics_for_board_change()
-        self.engine.width = width
-        self.engine.height = height
-        self.engine.num_mines = mines
-        self.engine.reset()
+        self.engine.configure(width=width, height=height, num_mines=mines)
         self._normal_game_config = (width, height, mines)
 
         self._game_over = False

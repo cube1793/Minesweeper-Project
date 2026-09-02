@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
 
@@ -73,6 +74,14 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
         self.assertEqual(engine._effective_ops, 0)
         self.assert_click_counts(engine)
 
+    def _dirty_lost_engine(self):
+        engine = self._engine_with_mines(3, 3, {(1, 1)})
+        with patch("core_engine.time.perf_counter", return_value=10.0):
+            engine.step(0, 0, Action.OPEN)
+            engine.step(1, 1, Action.OPEN)
+        self.assertEqual(engine.status, GameStatus.LOST)
+        return engine
+
     def test_new_game_stats_and_snapshot_before_mines_are_placed(self):
         engine = MinesweeperEngine(width=9, height=9, num_mines=10)
 
@@ -113,6 +122,125 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
             snapshot.mines.add((0, 0))
         with self.assertRaises(TypeError):
             snapshot.adjacent[0][0] = 1
+
+    def test_constructor_validates_complete_configuration(self):
+        for width, height, num_mines in ((1, 1, 0), (3, 2, 5)):
+            with self.subTest(valid=(width, height, num_mines)):
+                engine = MinesweeperEngine(width, height, num_mines)
+                self.assertEqual(
+                    (engine.width, engine.height, engine.num_mines),
+                    (width, height, num_mines),
+                )
+
+        invalid_configurations = (
+            (True, 3, 1),
+            (3, True, 1),
+            (3, 3, True),
+            (3.0, 3, 1),
+            (3, 3.0, 1),
+            (3, 3, 1.0),
+            ("3", 3, 1),
+            (3, "3", 1),
+            (3, 3, "1"),
+            (0, 3, 1),
+            (3, 0, 1),
+            (-1, 3, 1),
+            (3, -1, 1),
+            (3, 3, -1),
+            (3, 3, 9),
+            (3, 3, 10),
+        )
+        for configuration in invalid_configurations:
+            with self.subTest(invalid=configuration):
+                with self.assertRaises(ValueError):
+                    MinesweeperEngine(*configuration)
+
+    def test_zero_mine_configuration_and_fixed_board_are_supported(self):
+        engine = MinesweeperEngine(width=2, height=2, num_mines=0)
+
+        observation = engine.reset_with_mines(
+            width=2,
+            height=2,
+            num_mines=0,
+            mine_positions=(),
+        )
+
+        self.assertEqual(
+            observation,
+            [[CellState.HIDDEN.value] * 2 for _ in range(2)],
+        )
+        snapshot = engine.get_board_snapshot()
+        self.assertTrue(snapshot.mines_placed)
+        self.assertEqual(snapshot.mines, frozenset())
+        self.assertEqual(snapshot.adjacent, ((0, 0), (0, 0)))
+        self.assertEqual(engine._total_3bv, 1)
+        self.assertEqual(engine._total_ops, 1)
+
+    def test_configure_preserves_identity_and_resets_runtime_state(self):
+        engine = self._dirty_lost_engine()
+        identity = id(engine)
+
+        observation = engine.configure(width=4, height=2, num_mines=0)
+
+        self.assertEqual(id(engine), identity)
+        self.assertEqual((engine.width, engine.height, engine.num_mines), (4, 2, 0))
+        self.assertEqual(
+            observation,
+            [[CellState.HIDDEN.value] * 4 for _ in range(2)],
+        )
+        self.assert_fresh_runtime_state(engine)
+        snapshot = engine.get_board_snapshot()
+        self.assertFalse(snapshot.mines_placed)
+        self.assertEqual(snapshot.mines, frozenset())
+        self.assertEqual(engine._total_3bv, 0)
+        self.assertEqual(engine._total_ops, 0)
+
+        with self.assertRaises(TypeError):
+            engine.configure(width=3, height=3)
+
+    def test_configure_validation_failure_is_atomic(self):
+        engine = self._dirty_lost_engine()
+        before = deepcopy(engine.__dict__)
+
+        invalid_configurations = (
+            (0, 3, 1),
+            (3, 3, True),
+            (3, 3, 9),
+        )
+        for configuration in invalid_configurations:
+            with self.subTest(configuration=configuration):
+                with self.assertRaises(ValueError):
+                    engine.configure(*configuration)
+                self.assertEqual(engine.__dict__, before)
+
+    def test_reset_with_mines_validation_failure_is_atomic(self):
+        engine = self._dirty_lost_engine()
+        before = deepcopy(engine.__dict__)
+
+        invalid_calls = (
+            (0, 3, 1, {(0, 0)}),
+            (3, 3, 1, {(3, 0)}),
+            (3, 3, 1, {(0,)}),
+            (3, 3, 1, {(True, 0)}),
+            (3, 3, 1, {(0.5, 0)}),
+            (3, 3, 2, [(1, 1), (1, 1)]),
+            (3, 3, 1, None),
+        )
+        for width, height, num_mines, mine_positions in invalid_calls:
+            with self.subTest(
+                width=width,
+                height=height,
+                num_mines=num_mines,
+                mine_positions=mine_positions,
+            ):
+                with self.assertRaises(ValueError):
+                    engine.reset_with_mines(
+                        width=width,
+                        height=height,
+                        num_mines=num_mines,
+                        mine_positions=mine_positions,
+                    )
+                self.assertEqual(engine.__dict__, before)
 
     def test_open_first_action_preserves_basic_flow_and_snapshot_copy(self):
         engine = MinesweeperEngine(width=9, height=9, num_mines=10)

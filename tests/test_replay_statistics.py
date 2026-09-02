@@ -604,8 +604,14 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         player.go_to(player.event_count)
         ui._refresh_replay_view_after_move()
 
-        ui._exit_replay_mode()
+        with patch.object(
+            live_engine,
+            "configure",
+            wraps=live_engine.configure,
+        ) as configure:
+            ui._exit_replay_mode()
 
+        configure.assert_called_once_with(width=4, height=3, num_mines=2)
         self.assertIs(ui.engine, live_engine)
         self.assertIs(ui._engine_for_current_mode(), live_engine)
         self.assertFalse(ui._replay_mode)
@@ -633,6 +639,44 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
                 ui._replay_recorder.num_mines,
             ),
             (4, 3, 2),
+        )
+
+    def test_rebuild_game_configures_same_live_engine(self):
+        live_engine = self._live_engine()
+        live_engine.step(2, 1, Action.FLAG)
+        ui = self._prepare_lifecycle_ui(live_engine)
+
+        with patch.object(
+            live_engine,
+            "configure",
+            wraps=live_engine.configure,
+        ) as configure:
+            ui._rebuild_game(width=5, height=2, mines=1)
+
+        configure.assert_called_once_with(width=5, height=2, num_mines=1)
+        self.assertIs(ui.engine, live_engine)
+        self.assertEqual(
+            (live_engine.width, live_engine.height, live_engine.num_mines),
+            (5, 2, 1),
+        )
+        self.assertEqual(ui._normal_game_config, (5, 2, 1))
+        self.assertFalse(live_engine.get_board_snapshot().mines_placed)
+        self.assertTrue(
+            all(
+                value == CellState.HIDDEN.value
+                for row in live_engine.get_observation()
+                for value in row
+            )
+        )
+        self.assertEqual(live_engine.get_counter_snapshot()["active_clicks"], 0)
+        self.assertEqual(live_engine.get_counter_snapshot()["wasted_clicks"], 0)
+        self.assertEqual(
+            (
+                ui._replay_recorder.width,
+                ui._replay_recorder.height,
+                ui._replay_recorder.num_mines,
+            ),
+            (5, 2, 1),
         )
 
     def test_replay_grid_render_size_and_mine_counter_use_replay_engine(self):
