@@ -1,4 +1,5 @@
 import unittest
+from math import inf, nan
 
 from board_analyzer import analyze_board
 from core_engine import MinesweeperEngine
@@ -57,6 +58,138 @@ class ReplayModelTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             ReplayData(board=board, events=(event,))
+
+    def test_replay_board_validates_configuration_types_and_bounds(self):
+        valid_zero_mine_board = ReplayBoard(
+            width=1,
+            height=1,
+            num_mines=0,
+            mine_positions=(),
+        )
+        self.assertEqual(valid_zero_mine_board.mine_positions, frozenset())
+
+        invalid_configurations = (
+            (True, 3, 1),
+            (3, True, 1),
+            (3, 3, True),
+            (3.5, 3, 1),
+            (3, 3.5, 1),
+            (3, 3, 1.0),
+            ("3", 3, 1),
+            (3, "3", 1),
+            (3, 3, "1"),
+            (0, 3, 1),
+            (3, 0, 1),
+            (-1, 3, 1),
+            (3, -1, 1),
+            (3, 3, -1),
+            (3, 3, 9),
+        )
+        for width, height, num_mines in invalid_configurations:
+            with self.subTest(
+                width=width,
+                height=height,
+                num_mines=num_mines,
+            ):
+                with self.assertRaises(ValueError):
+                    ReplayBoard(
+                        width=width,
+                        height=height,
+                        num_mines=num_mines,
+                        mine_positions=(),
+                    )
+
+    def test_replay_board_validates_mine_coordinate_types_bounds_and_count(self):
+        invalid_layouts = (
+            (1, {(0.5, 1)}),
+            (1, {(True, 1)}),
+            (1, [([0], 1)]),
+            (1, {(-1, 1)}),
+            (1, {(3, 1)}),
+            (2, {(1, 1)}),
+        )
+        for num_mines, mine_positions in invalid_layouts:
+            with self.subTest(
+                num_mines=num_mines,
+                mine_positions=mine_positions,
+            ):
+                with self.assertRaises(ValueError):
+                    ReplayBoard(
+                        width=3,
+                        height=3,
+                        num_mines=num_mines,
+                        mine_positions=mine_positions,
+                    )
+
+    def test_replay_event_validates_coordinates_and_elapsed_time(self):
+        integer_time = ReplayEvent(
+            elapsed_time=1,
+            x=0,
+            y=0,
+            action=ACTION_OPEN,
+        )
+        float_time = ReplayEvent(
+            elapsed_time=1.5,
+            x=0,
+            y=0,
+            action=ACTION_OPEN,
+        )
+        self.assertIs(type(integer_time.elapsed_time), int)
+        self.assertIs(type(float_time.elapsed_time), float)
+
+        invalid_events = (
+            (0.0, True, 0),
+            (0.0, 0, True),
+            (0.0, 0.5, 0),
+            (0.0, 0, 0.5),
+            (0.0, -1, 0),
+            (0.0, 0, -1),
+            (True, 0, 0),
+            ("1.0", 0, 0),
+            (nan, 0, 0),
+            (inf, 0, 0),
+            (-inf, 0, 0),
+            (-0.1, 0, 0),
+        )
+        for elapsed_time, x, y in invalid_events:
+            with self.subTest(elapsed_time=elapsed_time, x=x, y=y):
+                with self.assertRaises(ValueError):
+                    ReplayEvent(
+                        elapsed_time=elapsed_time,
+                        x=x,
+                        y=y,
+                        action=ACTION_OPEN,
+                    )
+
+    def test_replay_event_preserves_very_large_integer_elapsed_time(self):
+        elapsed_time = 10**400
+
+        event = ReplayEvent(
+            elapsed_time=elapsed_time,
+            x=0,
+            y=0,
+            action=ACTION_OPEN,
+        )
+
+        self.assertEqual(event.elapsed_time, elapsed_time)
+        self.assertIs(type(event.elapsed_time), int)
+
+    def test_replay_data_allows_equal_and_rejects_decreasing_timestamps(self):
+        board = ReplayBoard(
+            width=3,
+            height=3,
+            num_mines=1,
+            mine_positions={(1, 1)},
+        )
+        first = ReplayEvent(2.0, 0, 0, ACTION_OPEN)
+        same_time = ReplayEvent(2.0, 1, 0, ACTION_FLAG)
+        earlier = ReplayEvent(1.0, 2, 0, ACTION_OPEN)
+
+        replay = ReplayData(board=board, events=(first, same_time))
+        self.assertEqual(replay.events, (first, same_time))
+
+        with self.assertRaises(ValueError):
+            ReplayData(board=board, events=(first, earlier))
 
     def test_reset_with_mines_restores_snapshot_adjacency_and_analysis(self):
         engine = MinesweeperEngine(width=9, height=9, num_mines=10)

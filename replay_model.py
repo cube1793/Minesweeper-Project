@@ -7,6 +7,7 @@ the UI, or execute game actions.
 """
 
 from dataclasses import dataclass
+from math import isfinite
 
 
 Coordinate = tuple[int, int]
@@ -34,19 +35,46 @@ class ReplayBoard:
     mine_positions: MinePositions
 
     def __post_init__(self):
-        mine_positions = frozenset(self.mine_positions)
-        object.__setattr__(self, "mine_positions", mine_positions)
+        for name, value in (("width", self.width), ("height", self.height)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Replay board {name} must be an integer.")
+            if value <= 0:
+                raise ValueError(f"Replay board {name} must be positive.")
 
-        if self.width <= 0 or self.height <= 0:
-            raise ValueError("Replay board dimensions must be positive.")
-        if self.num_mines != len(mine_positions):
-            raise ValueError("num_mines must match the number of mine positions.")
+        if isinstance(self.num_mines, bool) or not isinstance(self.num_mines, int):
+            raise ValueError("Replay board num_mines must be an integer.")
+        if self.num_mines < 0:
+            raise ValueError("Replay board num_mines must be non-negative.")
         if self.num_mines >= self.width * self.height:
             raise ValueError("num_mines must be smaller than the number of cells.")
 
-        for x, y in mine_positions:
+        try:
+            positions = iter(self.mine_positions)
+        except TypeError as exc:
+            raise ValueError("Replay board mine_positions must be coordinates.") from exc
+
+        validated_mine_positions = set()
+        for position in positions:
+            try:
+                x, y = position
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Mine position must be an (x, y) pair.") from exc
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in (x, y)
+            ):
+                raise ValueError("Mine position coordinates must be integers.")
             if not (0 <= x < self.width and 0 <= y < self.height):
                 raise ValueError("Mine position is out of board bounds.")
+            validated_mine_positions.add((x, y))
+
+        if self.num_mines != len(validated_mine_positions):
+            raise ValueError("num_mines must match the number of mine positions.")
+        object.__setattr__(
+            self,
+            "mine_positions",
+            frozenset(validated_mine_positions),
+        )
 
 
 @dataclass(frozen=True)
@@ -59,11 +87,23 @@ class ReplayEvent:
     action: ReplayAction
 
     def __post_init__(self):
+        if isinstance(self.elapsed_time, bool) or not isinstance(
+            self.elapsed_time,
+            (int, float),
+        ):
+            raise ValueError("elapsed_time must be an integer or float.")
+        if isinstance(self.elapsed_time, float) and not isfinite(self.elapsed_time):
+            raise ValueError("elapsed_time must be finite.")
         if self.elapsed_time < 0:
             raise ValueError("elapsed_time must be non-negative.")
-        if self.x < 0 or self.y < 0:
-            raise ValueError("Replay event coordinates must be non-negative.")
-        if self.action not in VALID_REPLAY_ACTIONS:
+
+        for name, value in (("x", self.x), ("y", self.y)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Replay event {name} must be an integer.")
+            if value < 0:
+                raise ValueError(f"Replay event {name} must be non-negative.")
+
+        if not isinstance(self.action, str) or self.action not in VALID_REPLAY_ACTIONS:
             raise ValueError("Replay event action is not supported.")
 
 
@@ -84,6 +124,13 @@ class ReplayData:
         if self.schema_version != 1:
             raise ValueError("Unsupported replay schema_version.")
 
+        previous_elapsed_time = None
         for event in self.events:
             if not (0 <= event.x < self.board.width and 0 <= event.y < self.board.height):
                 raise ValueError("Replay event is out of board bounds.")
+            if (
+                previous_elapsed_time is not None
+                and event.elapsed_time < previous_elapsed_time
+            ):
+                raise ValueError("Replay event times must be nondecreasing.")
+            previous_elapsed_time = event.elapsed_time

@@ -153,9 +153,24 @@ class MinesweeperEngine:
     CELL_BORDER = 1       # 오프닝 테두리 숫자 칸
     CELL_ISOLATED = 2     # 고립된 숫자 칸
 
-    def __init__(self, width: int = 30, height: int = 16, num_mines: int = 99):
+    @staticmethod
+    def _validate_configuration(width: int, height: int, num_mines: int):
+        """Validate a complete engine configuration before applying it."""
+        for name, value in (("width", width), ("height", height)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name}는 정수여야 합니다.")
+            if value <= 0:
+                raise ValueError(f"{name}는 양수여야 합니다.")
+
+        if isinstance(num_mines, bool) or not isinstance(num_mines, int):
+            raise ValueError("num_mines는 정수여야 합니다.")
+        if num_mines < 0:
+            raise ValueError("num_mines는 0 이상이어야 합니다.")
         if num_mines >= width * height:
             raise ValueError("지뢰 수는 전체 칸 수보다 적어야 합니다.")
+
+    def __init__(self, width: int = 30, height: int = 16, num_mines: int = 99):
+        self._validate_configuration(width, height, num_mines)
 
         self.width = width
         self.height = height
@@ -233,6 +248,15 @@ class MinesweeperEngine:
 
         return self.get_observation()
 
+    def configure(self, width: int, height: int, num_mines: int):
+        """Atomically apply a complete configuration and start a new game."""
+        self._validate_configuration(width, height, num_mines)
+
+        self.width = width
+        self.height = height
+        self.num_mines = num_mines
+        return self.reset()
+
     def reset_with_mines(
         self,
         width: int,
@@ -246,17 +270,24 @@ class MinesweeperEngine:
         리플레이 재현을 위한 public API이다. 랜덤 지뢰 배치를 수행하지 않고,
         전달받은 mine_positions를 확정 보드로 사용한다.
         """
-        if width <= 0 or height <= 0:
-            raise ValueError("보드 크기는 양수여야 합니다.")
-        if num_mines >= width * height:
-            raise ValueError("지뢰 수는 전체 칸 수보다 적어야 합니다.")
+        self._validate_configuration(width, height, num_mines)
 
         mines = set()
-        for position in mine_positions:
+        try:
+            positions = iter(mine_positions)
+        except TypeError as exc:
+            raise ValueError("지뢰 좌표 목록은 iterable이어야 합니다.") from exc
+
+        for position in positions:
             try:
                 x, y = position
             except (TypeError, ValueError) as exc:
                 raise ValueError("지뢰 좌표는 (x, y) 쌍이어야 합니다.") from exc
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in (x, y)
+            ):
+                raise ValueError("지뢰 좌표는 정수 (x, y) 쌍이어야 합니다.")
             if not (0 <= x < width and 0 <= y < height):
                 raise ValueError("지뢰 좌표가 보드 범위를 벗어났습니다.")
             mines.add((x, y))
@@ -264,10 +295,7 @@ class MinesweeperEngine:
         if len(mines) != num_mines:
             raise ValueError("지뢰 좌표 수가 num_mines와 일치해야 합니다.")
 
-        self.width = width
-        self.height = height
-        self.num_mines = num_mines
-        self.reset()
+        self.configure(width, height, num_mines)
 
         self._mines = mines
         self._compute_adjacency()
