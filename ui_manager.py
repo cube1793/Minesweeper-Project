@@ -340,6 +340,12 @@ class MinesweeperUI(QWidget):
         self._terminate_zini_metric_process()
         super().closeEvent(event)
 
+    def _engine_for_current_mode(self) -> MinesweeperEngine:
+        """Return the current Replay engine without replacing the live engine."""
+        if self._replay_mode and self._replay_player is not None:
+            return self._replay_player.engine
+        return self.engine
+
     # ------------------------------------------------------------------
     # UI 구성
     # ------------------------------------------------------------------
@@ -679,8 +685,9 @@ class MinesweeperUI(QWidget):
             btn.deleteLater()
         self._buttons.clear()
 
-        for y in range(self.engine.height):
-            for x in range(self.engine.width):
+        engine = self._engine_for_current_mode()
+        for y in range(engine.height):
+            for x in range(engine.width):
                 btn = CellButton(x, y)
                 btn.setFixedSize(self._cell_size, self._cell_size)
                 btn.left_clicked.connect(self.on_left_click)
@@ -693,14 +700,16 @@ class MinesweeperUI(QWidget):
 
     def _resize_board_container(self):
         """보드 컨테이너를 셀 크기 x 칸 수에 딱 맞게 고정."""
-        w = self.engine.width * self._cell_size
-        h = self.engine.height * self._cell_size
+        engine = self._engine_for_current_mode()
+        w = engine.width * self._cell_size
+        h = engine.height * self._cell_size
         self.board_container.setFixedSize(w, h)
 
     def _apply_initial_window_size(self):
         """초기 창 크기를 보드 비율에 맞춰 설정(화면 초과 시 적당히 제한)."""
-        board_w = self.engine.width * self._cell_size
-        board_h = self.engine.height * self._cell_size
+        engine = self._engine_for_current_mode()
+        board_w = engine.width * self._cell_size
+        board_h = engine.height * self._cell_size
         # 왼쪽 통계 패널 폭 + 여백을 추가로 고려한다.
         w = min(board_w + STATS_PANEL_WIDTH + 60, 1500)
         h = min(board_h + 130, 900)
@@ -864,7 +873,7 @@ class MinesweeperUI(QWidget):
 
     def _ensure_zini_metric_job(self):
         """Start bounded seeded-chain ZiNi calculation in a cancellable subprocess."""
-        snapshot = self.engine.get_board_snapshot()
+        snapshot = self._engine_for_current_mode().get_board_snapshot()
         if not snapshot.mines_placed:
             return
         if self._zini_result_token == self._zini_job_token:
@@ -1514,7 +1523,6 @@ class MinesweeperUI(QWidget):
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
-        self.engine = self._replay_player.engine
         self.render_board()
         self._update_replay_statistics_panel()
         self._update_replay_status_label()
@@ -1533,7 +1541,6 @@ class MinesweeperUI(QWidget):
         self._replay_data = replay_player.replay_data
         self._clear_replay_display_time_override()
         self._prepare_replay_counter_state(replay_player.replay_data)
-        self.engine = replay_player.engine
         self._game_over = False
         self.reset_button.setText("🙂")
         self._reset_timer()
@@ -1883,15 +1890,16 @@ class MinesweeperUI(QWidget):
     # ------------------------------------------------------------------
     def render_board(self):
         """engine.get_observation() 결과만으로 전체 보드를 다시 그린다."""
-        obs = self.engine.get_observation()
+        engine = self._engine_for_current_mode()
+        obs = engine.get_observation()
         font_size = self._current_font_size()
         border = border_width_for(self._cell_size)
 
-        for y in range(self.engine.height):
-            for x in range(self.engine.width):
+        for y in range(engine.height):
+            for x in range(engine.width):
                 self._render_cell(self._buttons[(x, y)], obs[y][x], font_size, border)
 
-        remaining = self.engine.num_mines - self.engine.count_flags()
+        remaining = engine.num_mines - engine.count_flags()
         self.mine_label.setText(f"💣 {remaining:03d}")
 
     def _current_font_size(self) -> int:
