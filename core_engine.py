@@ -125,8 +125,9 @@ class MinesweeperEngine:
     내부 2D 배열은 [y][x] 로 접근한다.
 
     첫 클릭 안전 규칙:
-        - 게임에서 '첫 좌클릭(OPEN)'이 발생하는 순간에만 지뢰를 배치하며,
-          이때 클릭한 칸과 주변 8칸을 안전지대로 비운다.
+        - 지뢰가 아직 배치되지 않은 상태에서 '첫 좌클릭(OPEN)'이 발생하면,
+          클릭한 한 칸만 제외하고 지뢰를 배치한다. 주변 8칸에는 지뢰가
+          배치될 수 있으므로 첫 칸의 숫자는 0~8일 수 있다.
         - 만약 그 전에 '깃발(FLAG)'이 먼저 들어오면, 그 시점에 즉시
           (안전지대 없이) 지뢰를 배치한다. 따라서 첫 액션이 우클릭이었다면
           이후 첫 좌클릭이라도 지뢰를 밟을 수 있다.
@@ -580,7 +581,7 @@ class MinesweeperEngine:
             self._record_wasted("left")
             return
 
-        # 실제 오픈 수행 (첫 좌클릭이면 안전지대로 지뢰 배치)
+        # 지뢰가 아직 없으면 클릭한 한 칸만 안전하게 보장하여 배치한다.
         if not self._mines_placed:
             self._place_mines(safe_x=x, safe_y=y)
 
@@ -696,13 +697,13 @@ class MinesweeperEngine:
 
     def _place_mines(self, safe_x=None, safe_y=None):
         """
-        지뢰 배치. safe 좌표가 주어지면 그 칸과 주변 8칸을 안전지대로 비운다.
+        지뢰 배치. safe 좌표가 주어지면 그 한 칸만 배치 후보에서 제외한다.
+        주변 8칸은 배치 후보에 포함하므로 첫 칸이 반드시 0인 것은 아니다.
         safe 좌표가 None이면(첫 액션이 깃발인 경우) 안전지대 없이 배치한다.
         배치가 끝나면 인접 지뢰 수를 계산하고 3BV/Ops 정적 분석을 수행한다.
         """
         if safe_x is not None and safe_y is not None:
             safe_zone = {(safe_x, safe_y)}
-            safe_zone.update(self._neighbors(safe_x, safe_y))
         else:
             safe_zone = set()
 
@@ -712,21 +713,6 @@ class MinesweeperEngine:
             for x in range(self.width)
             if (x, y) not in safe_zone
         ]
-
-        if len(candidates) < self.num_mines:
-            if safe_x is not None and safe_y is not None:
-                candidates = [
-                    (x, y)
-                    for y in range(self.height)
-                    for x in range(self.width)
-                    if (x, y) != (safe_x, safe_y)
-                ]
-            else:
-                candidates = [
-                    (x, y)
-                    for y in range(self.height)
-                    for x in range(self.width)
-                ]
 
         self._mines = set(random.sample(candidates, self.num_mines))
         self._compute_adjacency()

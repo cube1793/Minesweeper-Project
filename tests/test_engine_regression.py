@@ -1,6 +1,7 @@
 import unittest
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
+from random import Random
 from unittest.mock import patch
 
 from board_analyzer import analyze_board
@@ -277,14 +278,9 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
             ],
         )
 
-        safe_zone = {
-            (x, y)
-            for y in range(3, 6)
-            for x in range(3, 6)
-        }
-        self.assertTrue(safe_zone.isdisjoint(snapshot.mines))
-        self.assertEqual(snapshot.adjacent[4][4], 0)
-        self.assertEqual(observation[4][4], 0)
+        self.assertNotIn((4, 4), snapshot.mines)
+        self.assertIn(observation[4][4], range(9))
+        self.assertEqual(observation[4][4], snapshot.adjacent[4][4])
 
         original_snapshot_mines = snapshot.mines
         original_snapshot_adjacent = snapshot.adjacent
@@ -293,6 +289,58 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
         self.assertEqual(snapshot.mines, original_snapshot_mines)
         self.assertEqual(snapshot.adjacent, original_snapshot_adjacent)
         self.assertFalse(engine.get_board_snapshot().mines_placed)
+
+    def test_first_open_never_places_a_mine_on_the_clicked_cell(self):
+        configurations = ((1, 1, 0), (3, 3, 0), (3, 3, 1), (3, 3, 8), (9, 9, 10))
+        for width, height, num_mines in configurations:
+            for y in range(height):
+                for x in range(width):
+                    for seed in (0, 42):
+                        with self.subTest(
+                            board=(width, height, num_mines), x=x, y=y, seed=seed
+                        ):
+                            engine = MinesweeperEngine(width, height, num_mines)
+                            with patch(
+                                "core_engine.random.sample", side_effect=Random(seed).sample
+                            ):
+                                observation, _, _, _, _ = engine.step(x, y, Action.OPEN)
+
+                            snapshot = engine.get_board_snapshot()
+                            self.assertNotIn((x, y), snapshot.mines)
+                            self.assertEqual(len(snapshot.mines), num_mines)
+                            self.assertIn(observation[y][x], range(9))
+                            self.assertNotEqual(engine.status, GameStatus.LOST)
+
+    def test_first_open_can_reveal_only_a_number_from_one_to_eight(self):
+        neighbors = [
+            (x, y)
+            for y in range(1, 4)
+            for x in range(1, 4)
+            if (x, y) != (2, 2)
+        ]
+
+        def sample_neighbor_mines(candidates, count):
+            self.assertNotIn((2, 2), candidates)
+            self.assertTrue(set(neighbors).issubset(candidates))
+            return neighbors[:count]
+
+        for number in range(1, 9):
+            with self.subTest(number=number):
+                engine = MinesweeperEngine(width=5, height=5, num_mines=number)
+                with patch(
+                    "core_engine.random.sample", side_effect=sample_neighbor_mines
+                ):
+                    observation, _, terminated, _, _ = engine.step(2, 2, Action.OPEN)
+
+                expected = [[CellState.HIDDEN.value] * 5 for _ in range(5)]
+                expected[2][2] = number
+                self.assertEqual(observation, expected)
+                self.assertEqual(
+                    engine.get_board_snapshot().mines, set(neighbors[:number])
+                )
+                self.assertEqual(engine.status, GameStatus.PLAYING)
+                self.assertFalse(terminated)
+                self.assert_click_counts(engine, active={"total": 1, "left": 1})
 
     def test_flag_first_action_preserves_counter_flow(self):
         engine = MinesweeperEngine(width=9, height=9, num_mines=10)
@@ -308,6 +356,30 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
         self.assertEqual(info["stats"]["right"], "1")
         self.assertEqual(info["stats"]["chord"], "0")
         self.assertTrue(engine.get_board_snapshot().mines_placed)
+
+    def test_flag_first_keeps_all_cells_eligible_and_first_open_can_lose(self):
+        engine = MinesweeperEngine(width=3, height=3, num_mines=2)
+        mines = [(0, 0), (1, 1)]
+        with patch("core_engine.random.sample", return_value=mines) as sample:
+            engine.step(0, 0, Action.FLAG)
+            snapshot = engine.get_board_snapshot()
+            self.assertTrue(snapshot.mines_placed)
+            self.assertEqual(snapshot.mines, set(mines))
+            self.assertEqual(
+                set(sample.call_args.args[0]),
+                {(x, y) for y in range(3) for x in range(3)},
+            )
+
+            observation, reward, terminated, _, _ = engine.step(1, 1, Action.OPEN)
+            sample.assert_called_once()
+
+        self.assertEqual(engine.get_board_snapshot().mines, snapshot.mines)
+        self.assertEqual(observation[0][0], CellState.FLAGGED.value)
+        self.assertEqual(observation[1][1], CellState.EXPLODED.value)
+        self.assertEqual(engine.status, GameStatus.LOST)
+        self.assertEqual(reward, -1.0)
+        self.assertTrue(terminated)
+        self.assert_click_counts(engine, active={"total": 2, "left": 1, "right": 1})
 
     def test_open_classifies_progress_and_repeat_click(self):
         engine = self._engine_with_mines(3, 3, {(1, 1)})
