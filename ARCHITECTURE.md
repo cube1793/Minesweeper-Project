@@ -230,7 +230,11 @@ Expert seed 1003에서 120 clicks 결과를 얻었지만, 이는 해당 설정�
 * min-ties 및 advanced search
 * Replay 유효성과 클릭 합계
 
-현재 `main` 기준으로 총 138개의 자동 테스트가 존재한다.
+전체 회귀 테스트는 다음 명령으로 실행한다.
+
+```powershell
+python -m unittest discover -s tests -v
+```
 
 Benchmark는 단위 테스트를 대체하지 않으며, 고정 보드에서 탐색 결과와 실행 동작의 회귀를 확인하는 용도로 사용한다.
 
@@ -255,3 +259,87 @@ Benchmark는 단위 테스트를 대체하지 않으며, 고정 보드에서 탐
 * subprocess 실패·취소·종료 테스트
 * Replay timeline checkpoint 또는 lazy evaluation
 * 다양한 보드와 seed를 사용하는 benchmark 확대
+
+## 11. Stage 2-3 Decision Analyzer와 Runner
+
+```text
+observation + num_mines
+        │
+        ▼
+simple_decision.analyze_position()
+        ├── simple_algorithm: local inference 우선
+        └── simple_probability: local move가 없을 때만 exact probability
+        │
+        ▼
+불변 SimpleDecision
+        ├── 향후 Live UI / Replay Analysis에서 표시용으로 재사용
+        └── simple_runner.run_simple() → engine.step() 한 번
+                                           │
+                                           ├── fresh observation → 다시 분석
+                                           └── ReplayRecorder → ReplayData
+```
+
+### 순수 position 분석
+
+`analyze_position(observation, num_mines) -> SimpleDecision | None`은 입력을
+변경하거나 행동을 실행하지 않는다. Engine 객체, BoardSnapshot, ReplayData,
+실제 지뢰 배치는 받지 않는다. 같은 공개 입력에는 같은 결과를 반환한다.
+
+`SimpleDecision`은 `kind`, `move`, `constraints`, `deterministic_result`,
+`probability_result`를 보존하는 frozen dataclass다. `DecisionKind`는 다음과 같다.
+
+* `LOCAL_DETERMINISTIC`: Stage 2-1 선택. Probability solver를 호출하지 않으며
+  `probability_result`는 `None`이다.
+* `GLOBAL_CERTAINTY`: local move가 없고 Stage 2-2에서 선택된 셀의
+  `mine_worlds`가 0 또는 `total_worlds`와 같다. 기존 selector가 OPEN/FLAG를 정한다.
+* `PROBABILITY_GUESS`: 선택된 셀의 `0 < mine_worlds < total_worlds`인 OPEN이다.
+
+확정 여부에 float을 사용하지 않는다. Stage 2-2를 실행한 결과는 그대로 보존한다.
+완전 미오픈 observation도 fixed-layout 확률로 분석한다. 깃발은 두 core와
+동일하게 지뢰로 가정한다. Solver의 입력/모순 오류는 전파하며, local 추론 전에
+공개 FLAGGED/HIDDEN 수로 `0 <= num_mines - flag_count <= hidden_count`를 검증한다.
+전체 보드의 probability enumeration은 Stage 2-2 경로에서만 수행한다.
+
+### 실행과 중단
+
+`run_simple(engine, *, accept_guesses=False) -> SimpleRunResult`는 현재 게임을
+동기적으로 진행한다. 시작 observation이 전부 HIDDEN이면 첫 행동으로
+`OPEN (0, 0)`을 실행하고 기록한다. Fresh random game의 첫 OPEN 안전성은
+기존 엔진이 보장한다. Fixed board는 주어진 배치를 유지한다.
+Opened/flagged 셀이 있으면 현재 observation을 바로 분석하며, 이미 WON/LOST인
+엔진에는 분석이나 추가 행동을 수행하지 않는다.
+
+`accept_guesses=False`는 local/global 확정 행동을 계속 실행하고 실제 guess
+직전에 멈춘다. `True`이면 guess도 실행해 WON/LOST까지 진행한다. 이전 결과의
+여러 셀을 queue하지 않고, 항상 선택된 `SimpleMove` 하나를 그대로 `step()`에
+적용한 뒤 fresh observation을 다시 분석한다.
+
+`SimpleRunResult`는 `status`, `stop_reason`, 실제 `moves` tuple, `replay_data`,
+`pending_decision`, `started_from_hidden`을 가진 frozen dataclass다.
+`StopReason`은 `WON`, `LOST`, `GUESS_REQUIRED`다. Guess 대기 시 status는
+PLAYING이며 실행하지 않은 추천을 `pending_decision`에 보존한다.
+
+PLAYING에서 move가 없거나, 선택된 셀이 HIDDEN이 아니거나, 비종료 행동 후
+HIDDEN 수가 감소하지 않으면 `SimpleRunnerError`를 발생시킨다. 각 행동의
+단조 진행을 검사하므로 임의 step 제한이나 random/approximate fallback은 없다.
+
+### Replay 기록과 범위
+
+기존 UI와 같이 `step()` 이후 `engine.get_elapsed_time()`으로 이벤트를 기록한
+다음, 지뢰가 배치된 board를 한 번 capture한다. Source는 `SOURCE_ALGORITHM`이고,
+이벤트는 이번 호출의 실제 physical moves와 개수·좌표·action·순서가 일치한다.
+승리 시 엔진의 자동 깃발은 별도 physical action으로 기록하지 않는다.
+Snapshot은 recorder로만 전달되며 분석이나 move 선택으로 전달되지 않는다.
+
+ReplayData v1은 종료를 요구하지 않는다. 미오픈 보드에서 시작했다면 완료 기록과
+GUESS_REQUIRED partial 기록 모두 기존 ReplayPlayer와 JSON 경로로 재현된다.
+
+**중간 합류의 한계:** 엔진은 이전 클릭 이력을 제공하지 않고 ReplayData v1은
+시작 observation을 저장하지 않는다. 따라서 `started_from_hidden=False` 결과의
+`replay_data`는 이번 실행 구간만 포함하며, 단독으로 기존 시작 상태를 재현할 수
+없다. 이전 게임의 기록을 보존했다면 같은 board와 실제 시간 순서를 유지하여
+`previous.events + result.replay_data.events`로 전체 ReplayData를 구성할 수 있다.
+Runner는 가짜 초기화 클릭을 추가하지 않는다. 이미 종료된 게임에 붙으면
+추가 moves/events는 비어 있다. Replay schema와 Player는 변경하지 않는다.
+
+이번 단계는 위 두 모듈과 책임별 테스트까지만 제공하며 UI 연동은 포함하지 않는다.
