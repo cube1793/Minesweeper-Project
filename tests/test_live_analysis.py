@@ -489,7 +489,7 @@ class LiveAnalysisUITests(unittest.TestCase):
         self.assert_clear()
         self.assertIn("분석 불가", self.ui.analysis_status_label.text())
 
-    def test_replay_never_analyzes_and_live_controls_work_after_exit(self):
+    def test_replay_reuses_analysis_controls_and_live_controls_work_after_exit(self):
         from replay_model import ACTION_CHORD, ACTION_FLAG, ACTION_OPEN, ReplayBoard, ReplayData, ReplayEvent
         from replay_player import ReplayPlayer
 
@@ -507,20 +507,20 @@ class LiveAnalysisUITests(unittest.TestCase):
                     self.ui.reduction_checkbox, self.ui.analyze_button)
         with patch("ui_manager.analyze_position") as analyze:
             self.ui._enter_replay_mode(player)
-            self.assert_clear()
-            self.assertTrue(all(not control.isEnabled() for control in controls))
+            self.assertIn("첫 클릭 추천", self.ui.analysis_status_label.text())
+            self.assertTrue(all(control.isEnabled() for control in controls))
             self.ui.on_analyze_current()
             self.ui.analyze_button.click()
             self.ui.on_replay_next()
             self.ui.on_replay_next()
-            self.assertEqual(self.ui._buttons[(0, 0)].text(), "1")
+            self.assertEqual(self.ui._buttons[(0, 0)].text(), "")
             self.ui.on_replay_last()
             self.assertEqual(player.current_index, 3)
             self.ui.on_replay_previous()
             self.ui.on_replay_first()
             self.assertEqual(player.current_index, 0)
             self.assertEqual(self.engine.get_observation(), before)
-            self.assert_clear()
+            self.assertIn("첫 클릭 추천", self.ui.analysis_status_label.text())
             self.ui.on_exit_replay()
             self.assertIs(self.ui.engine, self.engine)
             self.assertTrue(all(control.isEnabled() for control in controls))

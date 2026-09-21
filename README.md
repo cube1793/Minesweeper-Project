@@ -37,6 +37,9 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다.
 * 0.25배속부터 8배속까지 재생 속도 조절
 * Replay 시점별 Counters 동기화
 * 완료된 Replay와 미완료 Replay 구분
+* 현재 공개 position의 Simple Algorithm 추천과 실제 다음 이벤트 비교
+* 확정 안전/지뢰 및 최소 위험 동등 후보 표시, 확률·Reduction 표시 재사용
+* Replay 수동 1회 분석 또는 이동/자동 재생에 따른 현재 위치 분석 (행동 실행 없음)
 
 ### 보드 및 ZiNi 분석
 
@@ -65,7 +68,10 @@ python main.py
 python -m unittest discover -s tests
 ```
 
-현재 `main` 기준으로 총 138개의 단위 및 회귀 테스트를 사용하고 있습니다.
+Stage 2-5 기준 총 386개의 단위 및 회귀 테스트를 사용합니다.
+Windows에서 Qt 플랫폼 플러그인 탐색 오류가 있으면 테스트 실행 전에
+`QT_QPA_PLATFORM_PLUGIN_PATH`를 사용 중인 Python의
+`Lib/site-packages/PyQt5/Qt5/plugins/platforms` 경로로 지정합니다.
 
 ## Benchmark
 
@@ -96,6 +102,7 @@ main.py
 ├─ replay_json.py
 ├─ replay_player.py
 ├─ replay_statistics.py
+├─ replay_analysis.py
 ├─ zini_core.py
 ├─ zini_min_ties.py
 ├─ zini_advanced.py

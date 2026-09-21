@@ -343,3 +343,64 @@ Runner는 가짜 초기화 클릭을 추가하지 않는다. 이미 종료된 �
 추가 moves/events는 비어 있다. Replay schema와 Player는 변경하지 않는다.
 
 이번 단계는 위 두 모듈과 책임별 테스트까지만 제공하며 UI 연동은 포함하지 않는다.
+
+## 12. Stage 2-5 Replay Analysis
+
+`replay_analysis.py`는 UI/PyQt 의존성 없이 현재 공개 position을 분석하고,
+이미 계산된 `LiveAnalysis` evidence로 실제 다음 이벤트를 비교한다.
+`analyze_replay_step(observation, num_mines, *, current_index, events, status)`는
+engine, ReplayBoard, BoardSnapshot을 받지 않는다. Solver에는 원본 observation과
+공개 지뢰 수만 전달하며, `analyze_position()` → `present_decision()`을 재사용한다.
+`mine_positions`, snapshot의 mines/adjacent, reconstructed engine의 hidden layout은
+추천 선택에 사용하지 않는다. 다음 이벤트도 추천 계산이 끝난 뒤 비교에만 읽는다.
+
+`current_index == i`의 position은 `events[:i]`가 적용된 상태이며 실제 다음 수는
+`events[i]`다. `i == len(events)`이면 다음 실제 수는 없지만 PLAYING position의
+추천은 표시한다. WON/LOST에서는 solver를 호출하지 않고 overlay를 지우며
+"게임 종료"를 표시한다. Terminal 이후의 저장 이벤트도 기존대로 탐색할 수 있다.
+
+`ReplayStepAnalysis`는 index, 기존 presentation, next event, 비교 kind/text를
+보존한다. 동일 action/좌표는 EXACT_RECOMMENDATION, 다른 SAFE OPEN/MINE FLAG와
+PROBABILITY_GUESS의 GUESS_CANDIDATE OPEN은 EQUIVALENT_CANDIDATE다. 이 규칙은
+GLOBAL_CERTAINTY의 다른 0% OPEN/100% FLAG에도 적용된다. 나머지 비교 가능한
+OPEN/FLAG는 DIFFERENT("추천과 다름")다. CHORD, visible FLAG를 해제하는 FLAG
+(UNFLAG), non-hidden/wasted target은 UNSUPPORTED_ACTUAL이다. 실제 다음 수는
+status text에만 표시하며 새 board 색상이나 별도 overlay를 추가하지 않는다.
+
+### Replay 첫 클릭과 schema v1 한계
+
+ReplayPlayer는 reset_with_mines()로 복원하므로 index 0에서도 mines_placed=True다.
+Replay 분석은 이 snapshot을 읽지 않고 **index 0 + all HIDDEN**만으로 full-game
+fresh start를 가정한다. `first_click_presentation()`의 `OPEN (0, 0)`을 그대로
+표시하고 solver는 호출하지 않는다. 다른 첫 OPEN은 DIFFERENT이며, 엔진의 첫 클릭
+안전 규칙을 근거로 동등 후보로 승격하지 않는다. Index > 0의 all-HIDDEN 상태는
+일반 fixed-layout 분석을 수행한다.
+
+Schema v1에는 full-game/segment 구분이나 시작 observation metadata가 없다.
+따라서 Stage 2-3 continuation/suffix replay도 index 0에서는 이 정책을 적용받는다.
+Segment 단독으로 원래 중간 position을 재현·분석할 수 없으므로 전체 기록을
+분석하려면 이전 events와 연결해야 한다. 이번 단계에서는 schema/Player 의미를
+변경하지 않으며 schema v2를 도입하지 않는다.
+
+### UI 갱신과 오류 경계
+
+Replay에서도 분석 표시, 확률 표시, Reduction, 현재 상태 분석을 사용할 수 있다.
+확정 수 자동 진행/추측 허용은 OFF/disabled이고 simple auto timer는 비활성이다.
+Analysis ON이면 Replay 진입과 index 변경 후 분석한다. OFF에서도 수동 1회 분석이
+가능하며 다음 index 변경 시 결과를 제거한다. `_refresh_replay_view_after_move()`가
+이전 분석 제거 → fresh board render → 현재 index 분석 순서를 중앙에서 관리한다.
+Time autoplay는 한 tick의 최종 index만 한 번 분석하고, event 없는 tick이나
+동일 index의 Time seek/slider sync는 재분석하지 않는다. 확률 toggle은 계산된
+presentation만 다시 표시한다. Reduction은 공개 숫자와 visible flags로 N-F를
+표시할 뿐 solver 입력을 바꾸지 않는다 (양수는 숫자, 0은 blank, 음수는 음수).
+
+공개 상태 모순과 일반 validation/runtime 오류는 UI slot에서 처리하여 overlay를
+제거한다. Replay index/engine/counters/data/timeline이나 live engine을 바꾸지 않고,
+navigation/autoplay를 계속 허용하며 다음 index에서 fresh analysis를 시도한다.
+전체 replay 분석 사전 계산, 점수, background worker는 없다. 복잡한 position의
+동기 exact probability 계산에 따른 UI 지연은 Live Analysis와 같은 후속 성능
+개선 항목이다. 기존 Replay 통계 timeline 및 ZiNi worker는 별도 책임을 유지한다.
+
+`tests/test_replay_analysis.py`는 공개 정보 경계·비교·불변성을,
+`tests/test_replay_analysis_ui.py`는 실제 Qt controls·이동·autoplay·오류 복구와
+engine ownership을 검증한다.

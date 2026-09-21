@@ -67,6 +67,7 @@ from simple_algorithm import InconsistentObservationError
 from simple_decision import DecisionKind, analyze_position
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
+from replay_analysis import ReplayStepAnalysis, analyze_replay_step
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
 from zini_calculator import ZiniNeighborhoodBeamConfig
@@ -353,6 +354,8 @@ class MinesweeperUI(QWidget):
         self._game_over = False
         self._buttons = {}
         self._analysis_result: LiveAnalysis | None = None
+        self._replay_analysis_result: ReplayStepAnalysis | None = None
+        self._replay_view_index = None
         self._analysis_observation = None
         self._analysis_first_click = False
         self._simple_auto_pending = False
@@ -1640,15 +1643,25 @@ class MinesweeperUI(QWidget):
     def _refresh_replay_view_after_move(self):
         if self._replay_player is None:
             return
+        changed = self._replay_view_index != self._replay_player.current_index
+        if changed:
+            self._clear_live_analysis()
+        self._replay_view_index = self._replay_player.current_index
         self.render_board()
         self._update_replay_statistics_panel()
         self._update_replay_status_label()
         self._update_replay_controls()
+        # Time autoplay reaches here once per tick, after all due events. Slider
+        # sync and seeks within the same index must not repeat exact probability.
+        if (changed and self.analysis_checkbox.isChecked()
+                and self._replay_player.engine.status == GameStatus.PLAYING):
+            self.on_analyze_current()
 
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
         self._stop_simple_auto()
-        self._clear_live_analysis("Replay에서는 분석을 사용할 수 없습니다.")
+        self._clear_live_analysis()
+        self._replay_view_index = None
         self._normal_game_config = (
             self.engine.width,
             self.engine.height,
@@ -1666,10 +1679,7 @@ class MinesweeperUI(QWidget):
 
         self._build_grid()
         self._apply_initial_window_size()
-        self.render_board()
-        self._update_replay_statistics_panel()
-        self._update_replay_status_label()
-        self._update_replay_controls()
+        self._refresh_replay_view_after_move()
 
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
@@ -1679,6 +1689,7 @@ class MinesweeperUI(QWidget):
         self._reset_counter_metrics_for_board_change()
         self._replay_mode = False
         self._replay_player = None
+        self._replay_view_index = None
         self._replay_data = None
         self._clear_replay_display_time_override()
         self._clear_replay_counter_state()
@@ -1826,9 +1837,9 @@ class MinesweeperUI(QWidget):
         self.chord_combo.setEnabled(not self._replay_mode)
         self.cell_size_spin.setEnabled(not self._replay_mode)
         for control in (self.analysis_checkbox, self.probability_checkbox,
-                        self.reduction_checkbox, self.analyze_button,
-                        self.simple_auto_checkbox):
-            control.setEnabled(not self._replay_mode)
+                        self.reduction_checkbox, self.analyze_button):
+            control.setEnabled(True)
+        self.simple_auto_checkbox.setEnabled(not self._replay_mode)
         self.allow_guess_checkbox.setEnabled(
             not self._replay_mode and self.simple_auto_checkbox.isChecked()
         )
@@ -2013,6 +2024,7 @@ class MinesweeperUI(QWidget):
     def _clear_live_analysis(self, status="분석 대기"):
         self._cancel_simple_auto_step()
         self._analysis_result = None
+        self._replay_analysis_result = None
         self._analysis_observation = None
         self._analysis_first_click = False
         for button in self._buttons.values():
@@ -2020,7 +2032,7 @@ class MinesweeperUI(QWidget):
         self.analysis_status_label.setText(status)
 
     def _render_live_analysis(self):
-        result = self._analysis_result if not self._replay_mode else None
+        result = self._analysis_result
         for coordinate, button in self._buttons.items():
             overlay = result.overlays.get(coordinate) if result is not None else None
             button.set_analysis_overlay(overlay, self.probability_checkbox.isChecked())
@@ -2034,6 +2046,7 @@ class MinesweeperUI(QWidget):
 
     def on_analyze_current(self):
         if self._replay_mode:
+            self._analyze_current_replay()
             return
         if self.engine.status != GameStatus.PLAYING:
             self._stop_simple_auto()
@@ -2066,6 +2079,29 @@ class MinesweeperUI(QWidget):
         self.analysis_status_label.setText(result.status_text)
         self._render_live_analysis()
         self._schedule_simple_auto_step()
+
+    def _analyze_current_replay(self):
+        """Read only public replay state; never schedule/execute a solver action."""
+        self._stop_simple_auto()
+        self._clear_live_analysis()
+        if self._replay_player is None:
+            return
+        try:
+            player = self._replay_player
+            result = analyze_replay_step(
+                player.get_observation(), player.engine.num_mines,
+                current_index=player.current_index,
+                events=player.replay_data.events, status=player.engine.status,
+            )
+            self._replay_analysis_result = result
+            self._analysis_result = result.presentation
+            self.analysis_status_label.setText(result.status_text)
+            self._render_live_analysis()
+        except InconsistentObservationError:
+            self._clear_live_analysis("분석 불가 - 공개 상태가 모순됩니다.")
+        except Exception:
+            # Keep playback/navigation alive, including validation/runtime errors.
+            self._clear_live_analysis("분석 불가 - 현재 상태를 분석할 수 없습니다.")
 
     def _refresh_live_board(self, info=None, *, auto_observation=None):
         """After each physical action: invalidate, render, analyze fresh, overlay."""
@@ -2200,7 +2236,7 @@ class MinesweeperUI(QWidget):
     def render_board(self):
         """engine.get_observation() 결과만으로 전체 보드를 다시 그린다."""
         engine = self._engine_for_current_mode()
-        if not self._replay_mode and engine.status != GameStatus.PLAYING:
+        if engine.status != GameStatus.PLAYING:
             self._stop_simple_auto()
             self._clear_live_analysis("게임 종료")
         obs = engine.get_observation()
@@ -2210,7 +2246,7 @@ class MinesweeperUI(QWidget):
         for y in range(engine.height):
             for x in range(engine.width):
                 self._render_cell(self._buttons[(x, y)], obs[y][x], font_size, border)
-                if (not self._replay_mode and self.reduction_checkbox.isChecked()
+                if (self.reduction_checkbox.isChecked()
                         and 0 <= obs[y][x] <= 8):
                     # Never feed a reduced number into state-code rendering: N-F
                     # can be negative when the player has placed incorrect flags.
