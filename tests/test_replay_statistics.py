@@ -74,6 +74,7 @@ def _install_pyqt_stubs_if_needed():
         "QVBoxLayout",
         "QHBoxLayout",
         "QLabel",
+        "QCheckBox",
         "QComboBox",
         "QSizePolicy",
         "QShortcut",
@@ -468,7 +469,16 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
             patch.object(MinesweeperUI, "render_board"),
             patch.object(MinesweeperUI, "_update_statistics_panel"),
         ):
-            return MinesweeperUI(live_engine)
+            ui = MinesweeperUI(live_engine)
+        # This fixture bypasses _init_ui; supply the new presentation controls.
+        ui.analysis_status_label = _WidgetProbe()
+        ui.analysis_checkbox = Mock()
+        ui.analysis_checkbox.isChecked.return_value = False
+        ui.probability_checkbox = Mock()
+        ui.probability_checkbox.isChecked.return_value = True
+        ui.reduction_checkbox = Mock()
+        ui.reduction_checkbox.isChecked.return_value = False
+        return ui
 
     def _prepare_lifecycle_ui(self, live_engine):
         ui = self._ui_with_live_engine(live_engine)
@@ -702,8 +712,8 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         self.assertEqual(len(ui.grid.widgets), 4)
         self.assertEqual(ui.board_container.fixed_size, (20, 20))
         ui.resize.assert_called_once_with(
-            20 + ui_manager.STATS_PANEL_WIDTH + 60,
-            20 + 130,
+            20 + ui_manager.STATS_PANEL_WIDTH + 80,
+            20 + 220,
         )
         self.assertEqual(ui._render_cell.call_count, 4)
         self.assertEqual(

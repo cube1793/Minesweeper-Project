@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import FrozenInstanceError, replace
 from fractions import Fraction
 from random import Random
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
@@ -27,6 +28,16 @@ class SimpleRunnerTests(unittest.TestCase):
         engine = MinesweeperEngine(width, height, len(mines))
         engine.reset_with_mines(width, height, len(mines), mines)
         return engine
+
+    def fresh_engine_with_placement(self, width, height, mines):
+        """Deterministic RNG fixture that still places mines on the first OPEN."""
+        def sample(candidates, count):
+            self.assertEqual(count, len(mines))
+            self.assertTrue(set(mines).issubset(candidates))
+            return sorted(mines)
+
+        self.enterContext(patch("core_engine.random.sample", side_effect=sample))
+        return MinesweeperEngine(width, height, len(mines))
 
     def run_traced(self, engine, *, accept_guesses=False):
         """Assert that analysis/step alternate, against the live public position."""
@@ -53,6 +64,7 @@ class SimpleRunnerTests(unittest.TestCase):
                 self.assertEqual(move, decisions[-1].move)
             else:
                 self.assertTrue(all(value == H for row in engine.get_observation() for value in row))
+                self.assertFalse(engine.get_board_snapshot().mines_placed)
                 self.assertEqual(move, SimpleMove(Action.OPEN, 0, 0))
             result = original_step(x, y, action)
             trace.append(("step", move))
@@ -93,15 +105,21 @@ class SimpleRunnerTests(unittest.TestCase):
             self.assertTrue(any(value != H for row in trace[1][1] for value in row))
         self.assert_replays_to_engine(result, engine)
 
-    def test_fresh_fixed_board_first_open_is_in_moves_and_replay(self):
-        engine = self.engine_with_mines(4, 1, {(1, 0)})
-
-        result, _, trace = self.run_traced(engine)
-
-        self.assertEqual(result.moves[0], SimpleMove(Action.OPEN, 0, 0))
-        self.assertEqual(trace[1], ("analyze", [[1, H, H, H]]))
-        first = result.replay_data.events[0]
-        self.assertEqual((first.x, first.y, first.action), (0, 0, "OPEN"))
+    def test_fixed_all_hidden_board_obeys_guess_policy(self):
+        for accept_guesses in (False, True):
+            with self.subTest(accept_guesses=accept_guesses):
+                engine = self.engine_with_mines(3, 1, {(0, 0)})
+                result, decisions, trace = self.run_traced(engine, accept_guesses=accept_guesses)
+                self.assertEqual(trace[0], ("analyze", [[H, H, H]]))
+                self.assertEqual(decisions[0].kind, DecisionKind.PROBABILITY_GUESS)
+                if accept_guesses:
+                    self.assertEqual(result.moves, (decisions[0].move,))
+                    self.assertEqual(result.stop_reason, StopReason.LOST)
+                    self.assert_replays_to_engine(result, engine)
+                else:
+                    self.assertEqual(result.moves, ())
+                    self.assertEqual(result.stop_reason, StopReason.GUESS_REQUIRED)
+                    self.assertIs(result.pending_decision, decisions[0])
 
     def test_partially_opened_board_continues_at_its_current_position(self):
         engine = self.engine_with_mines(4, 1, {(1, 0)})
@@ -127,8 +145,35 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assertFalse(result.started_from_hidden)
         self.assertEqual(result.stop_reason, StopReason.WON)
 
+    def test_flag_then_unflag_all_hidden_pauses_before_risky_open(self):
+        engine = MinesweeperEngine(3, 1, 1)
+        with patch("core_engine.random.sample", return_value=[(0, 0)]):
+            engine.step(1, 0, Action.FLAG)
+        engine.step(1, 0, Action.FLAG)
+        observation = engine.get_observation()
+        counters = engine.get_counter_snapshot()
+        self.assertEqual(observation, [[H, H, H]])
+        self.assertTrue(engine.get_board_snapshot().mines_placed)
+
+        with (
+            patch("simple_runner.analyze_position", wraps=analyze_position) as analyze,
+            patch.object(engine, "step", wraps=engine.step) as step,
+        ):
+            result = run_simple(engine, accept_guesses=False)
+
+        self.assertEqual(result.stop_reason, StopReason.GUESS_REQUIRED)
+        self.assertEqual(result.status, GameStatus.PLAYING)
+        self.assertEqual(result.moves, ())
+        self.assertEqual(result.replay_data.events, ())
+        self.assertTrue(result.started_from_hidden)
+        self.assertEqual(result.pending_decision.kind, DecisionKind.PROBABILITY_GUESS)
+        analyze.assert_called_once_with(observation, 1)
+        step.assert_not_called()
+        self.assertEqual(engine.get_observation(), observation)
+        self.assertEqual(engine.get_counter_snapshot(), counters)
+
     def test_local_and_global_safe_decisions_execute_with_guesses_disabled(self):
-        engine = self.engine_with_mines(4, 1, {(1, 0)})
+        engine = self.fresh_engine_with_placement(4, 1, {(1, 0)})
 
         result, decisions, _ = self.run_traced(engine)
 
@@ -163,7 +208,7 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assertIs(result.pending_decision, decisions[-1])
 
     def test_guess_pause_preserves_local_moves_and_does_not_step_the_guess(self):
-        engine = self.engine_with_mines(5, 1, {(1, 0), (2, 0)})
+        engine = self.fresh_engine_with_placement(5, 1, {(1, 0), (2, 0)})
 
         result, decisions, _ = self.run_traced(engine, accept_guesses=False)
 
@@ -221,7 +266,7 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assert_replays_to_engine(result, engine)
 
     def test_flag_is_followed_by_fresh_observation_and_global_analysis(self):
-        engine = self.engine_with_mines(4, 1, {(1, 0)})
+        engine = self.fresh_engine_with_placement(4, 1, {(1, 0)})
 
         _, decisions, trace = self.run_traced(engine)
 
@@ -231,7 +276,7 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assertIsNotNone(decisions[1].probability_result)
 
     def test_multiple_certain_cells_are_reanalyzed_after_each_single_action(self):
-        engine = self.engine_with_mines(3, 2, {(1, 0), (0, 1), (1, 1)})
+        engine = self.fresh_engine_with_placement(3, 2, {(1, 0), (0, 1), (1, 1)})
 
         result, decisions, _ = self.run_traced(engine)
 
@@ -248,7 +293,7 @@ class SimpleRunnerTests(unittest.TestCase):
     def test_first_open_win_stops_without_any_analysis(self):
         for width, height, mines in ((1, 1, set()), (3, 2, set()), (2, 1, {(1, 0)})):
             with self.subTest(size=(width, height)):
-                engine = self.engine_with_mines(width, height, mines)
+                engine = self.fresh_engine_with_placement(width, height, mines)
                 with patch("simple_runner.analyze_position") as analyze:
                     result = run_simple(engine)
 
@@ -282,7 +327,7 @@ class SimpleRunnerTests(unittest.TestCase):
                 self.assertIsNone(result.pending_decision)
 
     def test_replay_records_post_step_elapsed_time_then_captures_board_once(self):
-        engine = self.engine_with_mines(4, 1, {(1, 0)})
+        engine = self.fresh_engine_with_placement(4, 1, {(1, 0)})
         recorder = ReplayRecorder(4, 1, 1, SOURCE_ALGORITHM)
         trace = []
         stepped = []
@@ -314,17 +359,19 @@ class SimpleRunnerTests(unittest.TestCase):
             patch.object(engine, "get_elapsed_time", side_effect=lambda: 100.0 + len(stepped)),
             patch.object(engine, "get_board_snapshot", wraps=engine.get_board_snapshot) as snapshot,
             patch.object(recorder, "record_event", side_effect=record),
-            patch.object(recorder, "capture_board", side_effect=capture),
+            patch.object(recorder, "capture_board", side_effect=capture) as capture_board,
         ):
             result = run_simple(engine)
 
         constructor.assert_called_once_with(4, 1, 1, SOURCE_ALGORITHM)
-        snapshot.assert_called_once_with()
+        # Policy boolean, engine placement analysis, and one Replay capture.
+        self.assertEqual(snapshot.call_count, 3)
+        capture_board.assert_called_once()
         self.assertEqual(trace, ["step", "record", "capture"] + ["step", "record"] * 3)
         self.assertEqual([event.elapsed_time for event in result.replay_data.events], [101, 102, 103, 104])
 
     def test_partial_replay_round_trips_json_and_restores_playing_position(self):
-        engine = self.engine_with_mines(5, 1, {(1, 0), (2, 0)})
+        engine = self.fresh_engine_with_placement(5, 1, {(1, 0), (2, 0)})
         result = run_simple(engine)
 
         restored = replay_data_from_dict(replay_data_to_dict(result.replay_data))
@@ -335,7 +382,7 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assert_replays_to_engine(result, engine)
 
     def test_completed_replay_matches_every_intermediate_position_in_existing_player(self):
-        engine = self.engine_with_mines(3, 2, {(1, 0), (0, 1), (1, 1)})
+        engine = self.fresh_engine_with_placement(3, 2, {(1, 0), (0, 1), (1, 1)})
         result, _, trace = self.run_traced(engine)
         player = ReplayPlayer(result.replay_data)
         analyzed = [value for tag, value in trace if tag == "analyze"]
@@ -346,7 +393,7 @@ class SimpleRunnerTests(unittest.TestCase):
         self.assertEqual(result.stop_reason, StopReason.WON)
 
     def test_continuation_replay_keeps_only_real_new_actions_and_can_join_prior_history(self):
-        engine = self.engine_with_mines(5, 1, {(1, 0), (4, 0)})
+        engine = self.fresh_engine_with_placement(5, 1, {(1, 0), (4, 0)})
         paused = run_simple(engine)
 
         continued = run_simple(engine, accept_guesses=True)
@@ -396,7 +443,7 @@ class SimpleRunnerTests(unittest.TestCase):
         # Deliberately different replay metadata must not influence any move.
         other_snapshot = self.engine_with_mines(4, 1, {(2, 0)}).get_board_snapshot()
         with patch.object(engine, "get_board_snapshot", return_value=other_snapshot):
-            result, _, _ = self.run_traced(engine)
+            result, _, _ = self.run_traced(engine, accept_guesses=True)
 
         self.assertEqual(result.moves, (
             SimpleMove(Action.OPEN, 0, 0), SimpleMove(Action.FLAG, 1, 0),
@@ -404,6 +451,27 @@ class SimpleRunnerTests(unittest.TestCase):
         ))
         self.assertEqual(result.replay_data.board.mine_positions, {(2, 0)})
         self.assertEqual(result.status, GameStatus.WON)
+
+    def test_first_open_policy_reads_only_placement_boolean_before_recording(self):
+        decisions = []
+        for mines in ({(0, 0)}, {(2, 0)}):
+            engine = self.engine_with_mines(3, 1, mines)
+            snapshot_for_recording = engine.get_board_snapshot()
+            # The policy snapshot deliberately has no mines/adjacent attributes.
+            with (
+                patch.object(engine, "get_board_snapshot", side_effect=[
+                    SimpleNamespace(mines_placed=True), snapshot_for_recording,
+                ]) as snapshot,
+                patch("simple_runner.analyze_position", wraps=analyze_position) as analyze,
+                patch.object(engine, "step") as step,
+            ):
+                result = run_simple(engine)
+            self.assertEqual(snapshot.call_count, 2)
+            analyze.assert_called_once_with([[H, H, H]], 1)
+            step.assert_not_called()
+            self.assertEqual(result.replay_data.board.mine_positions, mines)
+            decisions.append(result.pending_decision)
+        self.assertEqual(decisions[0], decisions[1])
 
     def test_none_decision_while_playing_raises_explicit_runner_error(self):
         engine = self.engine_with_mines(3, 1, {(0, 0)})
@@ -420,13 +488,13 @@ class SimpleRunnerTests(unittest.TestCase):
         engine = self.engine_with_mines(4, 1, {(1, 0)})
         with (
             patch.object(engine, "step") as step,
-            patch("simple_runner.analyze_position") as analyze,
+            patch("simple_runner.analyze_position", wraps=analyze_position) as analyze,
             self.assertRaisesRegex(SimpleRunnerError, "no progress"),
         ):
-            run_simple(engine)
+            run_simple(engine, accept_guesses=True)
 
         step.assert_called_once_with(0, 0, Action.OPEN)
-        analyze.assert_not_called()
+        analyze.assert_called_once_with([[H, H, H, H]], 1)
 
     def test_stale_flag_decision_cannot_toggle_a_flag_or_loop(self):
         engine = self.engine_with_mines(4, 1, {(1, 0)})

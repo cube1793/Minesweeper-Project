@@ -1,7 +1,7 @@
 """Stage 2-3 synchronous engine runner using the observation-only analyzer.
 
-Replay capture is a separate output path: snapshots go only to ReplayRecorder.
-No replay or answer-board data participates in analysis or move selection.
+First-OPEN policy reads only the public snapshot's mines_placed boolean.
+Hidden layout data goes only to ReplayRecorder, never analysis or move selection.
 """
 
 from dataclasses import dataclass
@@ -51,7 +51,7 @@ def _hidden_count(observation: Observation) -> int:
 
 
 def _capture_replay_board(engine: MinesweeperEngine, recorder: ReplayRecorder):
-    """The only runner path that receives hidden data; used only for recording."""
+    """The only runner path that consumes hidden layout fields, for recording."""
     if recorder.board is None:
         snapshot = engine.get_board_snapshot()
         if not snapshot.mines_placed:
@@ -64,12 +64,12 @@ def run_simple(
 ) -> SimpleRunResult:
     """Continue the current game until terminal, or pause before an actual guess.
 
-    An all-HIDDEN start always executes OPEN (0, 0), even with guesses disabled.
-    On a fresh random game the engine guarantees this click is safe. Fixed
-    boards retain their supplied layout and should use a safe (0, 0) fixture.
-    Any opened/flagged start goes directly to analysis; terminal engines receive
-    no actions or analysis. Existing flags retain the solver's assumed-mine
-    semantics; observation/solver errors propagate without a fallback.
+    An all-HIDDEN start executes the guaranteed-safe OPEN (0, 0) without
+    analysis only if mines have not been placed yet. Already placed boards
+    (including FLAG then unflag) go directly to normal analysis and obey
+    accept_guesses. Opened/flagged starts also go directly to analysis;
+    terminal engines receive no actions or analysis. Existing flags retain the
+    solver's assumed-mine semantics; solver errors propagate without a fallback.
 
     Each decision supplies exactly one physical action, followed by a fresh
     observation. Targets must be HIDDEN and each nonterminal action must reduce
@@ -85,7 +85,8 @@ def run_simple(
     observation = engine.get_observation()
     hidden_count = _hidden_count(observation)
     started_from_hidden = hidden_count == engine.width * engine.height
-    first_open = started_from_hidden
+    # started_from_hidden describes the replay's starting observation, not safety.
+    first_open = started_from_hidden and not engine.get_board_snapshot().mines_placed
     recorder = ReplayRecorder(
         engine.width, engine.height, engine.num_mines, SOURCE_ALGORITHM,
     )

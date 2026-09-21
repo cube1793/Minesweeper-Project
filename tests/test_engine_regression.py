@@ -9,6 +9,26 @@ from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 
 
 class MinesweeperEngineRegressionTests(unittest.TestCase):
+    def test_flag_then_unflag_keeps_layout_and_next_open_can_lose(self):
+        engine = MinesweeperEngine(3, 1, 1)
+        unopened = engine.get_observation()
+        self.assertFalse(engine.get_board_snapshot().mines_placed)
+
+        # Arrange only the RNG; exercise the real placement and action handlers.
+        with patch("core_engine.random.sample", return_value=[(0, 0)]) as sample:
+            engine.step(1, 0, Action.FLAG)
+            self.assertTrue(engine.get_board_snapshot().mines_placed)
+            engine.step(1, 0, Action.FLAG)
+            self.assertEqual(engine.get_observation(), unopened)
+            self.assertTrue(engine.get_board_snapshot().mines_placed)
+            self.assertEqual(engine.status, GameStatus.PLAYING)
+
+            engine.step(0, 0, Action.OPEN)
+
+        sample.assert_called_once()
+        self.assertEqual(engine.status, GameStatus.LOST)
+        self.assertEqual(engine.get_observation()[0][0], CellState.EXPLODED)
+
     def _engine_with_mines(self, width, height, mine_positions):
         engine = MinesweeperEngine(
             width=width,
