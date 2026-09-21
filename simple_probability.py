@@ -5,14 +5,15 @@ and num_mines has equal weight. Only numbers 0..8, HIDDEN and FLAGGED are
 accepted, using Stage 2-1's observation validation and Constraint model.
 Coordinates are (x, y); returned cells are in (y, x) reading order.
 
-Future runner integration, after its separate first-click policy:
+simple_decision gives local inference priority before calling this module:
     constraints = build_constraints(observation)
     move = choose_deterministic_move(infer_deterministic(constraints))
     if move is None:
         result = calculate_probabilities(observation, num_mines)
         move = choose_probability_move(result)
 
-The runner must obtain a fresh observation after each action. This module
+simple_runner applies its separate first-click policy before calling
+simple_decision and obtains a fresh observation after each action. This module
 neither executes actions nor inspects an engine or a hidden answer board.
 On a completely unopened grid the fixed-layout probability is num_mines / H;
 this does not represent the engine's first-OPEN safety guarantee.

@@ -25,7 +25,7 @@ _ZiniStateKey = tuple[frozenset[Coordinate], frozenset[Coordinate]]
 
 @dataclass(frozen=True)
 class _Static3BvUnit:
-    """One static 3BV unit used as input for future G.ZiNi simulation."""
+    """One static 3BV unit used as input for G.ZiNi simulation."""
 
     kind: str
     representative: Coordinate
@@ -148,8 +148,8 @@ def _extract_static_3bv_units(snapshot: BoardSnapshot) -> tuple[_Static3BvUnit, 
 
     Opening units are represented by the top-leftmost zero cell in the opening.
     The cells stored here are only the zero-cell group that identifies the 3BV
-    unit; future reveal simulation must still reveal the surrounding border
-    ring when an opening is clicked.  Border numbers are not independent 3BV
+    unit; reveal simulation also opens the surrounding border ring when an
+    opening is clicked.  Border numbers are not independent 3BV
     units and are intentionally excluded.
     """
     analysis = analyze_board(snapshot)

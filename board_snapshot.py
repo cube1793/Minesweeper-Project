@@ -2,8 +2,8 @@
 board_snapshot.py
 Immutable read-only board snapshot for analysis modules.
 
-This module intentionally has no PyQt5 dependency.  It gives future analysis
-code, such as 3BV/Ops extraction or ZiNi calculators, a stable input object
+This module intentionally has no PyQt5 dependency.  It gives analysis modules,
+such as 3BV/Ops extraction and ZiNi calculators, a stable immutable input object
 without exposing mutable engine internals.
 """
 

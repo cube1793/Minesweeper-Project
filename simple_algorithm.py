@@ -12,8 +12,8 @@ Usage for one observation:
 
 The caller must obtain a new observation and repeat this pipeline after each
 action. No actions are executed or queued here. None means these two rules
-cannot choose a move, including on a completely unopened board; it is the
-future Stage 2-2 probability solver's entry point.
+cannot choose a move, including on a completely unopened board.
+simple_decision calls simple_probability when no local move is available.
 """
 
 from collections.abc import Iterable, Sequence

@@ -1,10 +1,11 @@
 """
 zini_calculator.py
-G.ZiNi calculator scaffolding for immutable board snapshots.
+Public G.ZiNi calculation APIs for immutable board snapshots.
 
-This module intentionally stays outside MinesweeperEngine.  It will grow into
-the dynamic G.ZiNi simulation layer, while BoardSnapshot and board_analyzer keep
-providing the static board facts.
+This module stays outside MinesweeperEngine and exposes deterministic G.ZiNi,
+maximum-Premium min-ties search, and bounded advanced search. Shared simulation
+lives in zini_core; zini_min_ties and zini_advanced implement search strategies.
+BoardSnapshot and board_analyzer provide the static board facts.
 """
 
 from dataclasses import dataclass
@@ -129,10 +130,10 @@ class ZiniNeighborhoodBeamConfig:
 
 @dataclass(frozen=True)
 class ZiniAdvancedSearchResult:
-    """Heuristic best-so-far result from a future advanced bounded search.
+    """Heuristic best-so-far result from an advanced bounded search.
 
     Advanced neighborhood-beam search does not prove a minimum or optimum, so
-    future APIs returning this type must always set exact to False.
+    search APIs returning this type always set exact to False.
     """
 
     result: ZiniResult
@@ -149,7 +150,7 @@ class ZiniAdvancedSearchResult:
 
 
 def _validate_neighborhood_beam_config(config: ZiniNeighborhoodBeamConfig):
-    """Validate bounds for a future neighborhood-beam search."""
+    """Validate bounds for bounded neighborhood-beam search."""
     if config.premium_window < 0:
         raise ValueError("premium_window cannot be negative.")
     if config.beam_size <= 0:
