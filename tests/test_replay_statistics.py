@@ -173,6 +173,9 @@ class _TimerProbe:
     def setInterval(self, interval):
         self.interval = interval
 
+    def setSingleShot(self, single_shot):
+        self.single_shot = single_shot
+
     def start(self):
         self.active = True
 
@@ -478,6 +481,10 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         ui.probability_checkbox.isChecked.return_value = True
         ui.reduction_checkbox = Mock()
         ui.reduction_checkbox.isChecked.return_value = False
+        ui.simple_auto_checkbox = Mock()
+        ui.simple_auto_checkbox.isChecked.return_value = False
+        ui.allow_guess_checkbox = Mock()
+        ui.allow_guess_checkbox.isChecked.return_value = False
         return ui
 
     def _prepare_lifecycle_ui(self, live_engine):

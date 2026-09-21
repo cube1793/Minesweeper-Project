@@ -64,7 +64,7 @@ from live_analysis import (
     format_mine_probability, is_all_hidden, present_decision, reduced_number,
 )
 from simple_algorithm import InconsistentObservationError
-from simple_decision import analyze_position
+from simple_decision import DecisionKind, analyze_position
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
 from replay_recorder import ReplayRecorder
@@ -87,6 +87,7 @@ NUMBER_COLORS = {
 MIN_CELL_SIZE = 10
 MAX_CELL_SIZE = 60
 DEFAULT_CELL_SIZE = 28
+SIMPLE_AUTO_STEP_INTERVAL_MS = 180
 MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
 
 # 통계 패널 폭(px). 150~180 권장 범위 내.
@@ -352,6 +353,13 @@ class MinesweeperUI(QWidget):
         self._game_over = False
         self._buttons = {}
         self._analysis_result: LiveAnalysis | None = None
+        self._analysis_observation = None
+        self._analysis_first_click = False
+        self._simple_auto_pending = False
+        self._simple_auto_timer = QTimer(self)
+        self._simple_auto_timer.setSingleShot(True)
+        self._simple_auto_timer.setInterval(SIMPLE_AUTO_STEP_INTERVAL_MS)
+        self._simple_auto_timer.timeout.connect(self._on_simple_auto_timeout)
         self._chord_mode = ChordMode.LEFT_CLICK
         self._cell_size = DEFAULT_CELL_SIZE
         self._replay_mode = False
@@ -408,6 +416,7 @@ class MinesweeperUI(QWidget):
 
     def closeEvent(self, event):
         """Stop any running ZiNi worker when the UI is closing."""
+        self._stop_simple_auto()
         self._terminate_zini_metric_process()
         super().closeEvent(event)
 
@@ -712,6 +721,9 @@ class MinesweeperUI(QWidget):
         self.probability_checkbox.setChecked(True)
         self.reduction_checkbox = QCheckBox("Reduction")
         self.analyze_button = QPushButton("현재 상태 분석")
+        self.simple_auto_checkbox = QCheckBox("확정 수 자동 진행")
+        self.allow_guess_checkbox = QCheckBox("추측 허용")
+        self.allow_guess_checkbox.setEnabled(False)
         self.analyze_button.setFocusPolicy(Qt.NoFocus)
         self.analysis_checkbox.setToolTip("현재 보드를 분석하고 사용자 액션 후 자동 갱신")
         self.probability_checkbox.setToolTip("계산된 정확한 지뢰 확률이 있을 때만 숫자 표시")
@@ -721,8 +733,11 @@ class MinesweeperUI(QWidget):
         self.probability_checkbox.toggled.connect(self._render_live_analysis)
         self.reduction_checkbox.toggled.connect(self.render_board)
         self.analyze_button.clicked.connect(self.on_analyze_current)
+        self.simple_auto_checkbox.toggled.connect(self.on_simple_auto_toggled)
+        self.allow_guess_checkbox.toggled.connect(self.on_allow_guess_toggled)
         for control in (self.analysis_checkbox, self.probability_checkbox,
-                        self.reduction_checkbox, self.analyze_button):
+                        self.reduction_checkbox, self.analyze_button,
+                        self.simple_auto_checkbox, self.allow_guess_checkbox):
             analysis_bar.addWidget(control)
         analysis_bar.addStretch()
         main_layout.addLayout(analysis_bar)
@@ -1632,6 +1647,7 @@ class MinesweeperUI(QWidget):
 
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
+        self._stop_simple_auto()
         self._clear_live_analysis("Replay에서는 분석을 사용할 수 없습니다.")
         self._normal_game_config = (
             self.engine.width,
@@ -1657,6 +1673,7 @@ class MinesweeperUI(QWidget):
 
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
+        self._stop_simple_auto()
         self._clear_live_analysis()
         self._stop_replay_autoplay()
         self._reset_counter_metrics_for_board_change()
@@ -1809,8 +1826,12 @@ class MinesweeperUI(QWidget):
         self.chord_combo.setEnabled(not self._replay_mode)
         self.cell_size_spin.setEnabled(not self._replay_mode)
         for control in (self.analysis_checkbox, self.probability_checkbox,
-                        self.reduction_checkbox, self.analyze_button):
+                        self.reduction_checkbox, self.analyze_button,
+                        self.simple_auto_checkbox):
             control.setEnabled(not self._replay_mode)
+        self.allow_guess_checkbox.setEnabled(
+            not self._replay_mode and self.simple_auto_checkbox.isChecked()
+        )
         self.replay_control_bar.setVisible(in_replay)
         self.replay_status_label.setVisible(in_replay)
         self.replay_play_button.setVisible(in_replay)
@@ -1852,6 +1873,8 @@ class MinesweeperUI(QWidget):
         self.render_board()
 
     def on_difficulty_changed(self, text: str):
+        # Stop before a custom-difficulty dialog starts a nested Qt event loop.
+        self._stop_simple_auto()
         preset = DIFFICULTY_PRESETS.get(text)
         if preset is None:
             dims = self._ask_custom_dimensions()
@@ -1889,6 +1912,7 @@ class MinesweeperUI(QWidget):
 
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
+        self._stop_simple_auto()
         self._clear_live_analysis()
         self._reset_counter_metrics_for_board_change()
         self.engine.configure(width=width, height=height, num_mines=mines)
@@ -1923,32 +1947,21 @@ class MinesweeperUI(QWidget):
         if self._game_over:
             return
 
-        info = None
         if self._is_revealed_number(x, y):
             if self._chord_mode == ChordMode.LEFT_CLICK:
-                _, _, _, _, info = self.engine.step(x, y, Action.CHORD)
-                self._record_replay_event(x, y, Action.CHORD)
+                action = Action.CHORD
             else:
                 return
         else:
-            _, _, _, _, info = self.engine.step(x, y, Action.OPEN)
-            self._start_timer()
-            self._record_replay_event(x, y, Action.OPEN)
-
-        self._refresh_live_board()
-        self._apply_stats_from_info(info)
-        self._check_end_state()
+            action = Action.OPEN
+        self._apply_live_action(x, y, action)
 
     def on_right_click(self, x: int, y: int):
         if self._replay_mode:
             return
         if self._game_over:
             return
-        _, _, _, _, info = self.engine.step(x, y, Action.FLAG)
-        self._start_timer()
-        self._record_replay_event(x, y, Action.FLAG)
-        self._refresh_live_board()
-        self._apply_stats_from_info(info)
+        self._apply_live_action(x, y, Action.FLAG)
 
     def on_both_click(self, x: int, y: int):
         if self._replay_mode:
@@ -1957,13 +1970,19 @@ class MinesweeperUI(QWidget):
             return
         if self._chord_mode == ChordMode.DISABLED:
             return
-        _, _, _, _, info = self.engine.step(x, y, Action.CHORD)
-        self._record_replay_event(x, y, Action.CHORD)
-        self._refresh_live_board()
-        self._apply_stats_from_info(info)
-        self._check_end_state()
+        self._apply_live_action(x, y, Action.CHORD)
+
+    def _apply_live_action(self, x, y, action, *, auto_observation=None):
+        """One physical action, one event in the existing live recorder."""
+        self._cancel_simple_auto_step()
+        _, _, _, _, info = self.engine.step(x, y, action)
+        if action in (Action.OPEN, Action.FLAG):
+            self._start_timer()
+        self._record_replay_event(x, y, action)
+        self._refresh_live_board(info, auto_observation=auto_observation)
 
     def on_reset(self):
+        self._stop_simple_auto()
         if self._replay_mode:
             return
         self._clear_live_analysis()
@@ -1989,10 +2008,13 @@ class MinesweeperUI(QWidget):
             self._update_statistics_panel(info["stats"])
 
     # ------------------------------------------------------------------
-    # Live analysis: a recommendation is never an engine action.
+    # Live analysis and single-action auto control.
     # ------------------------------------------------------------------
     def _clear_live_analysis(self, status="분석 대기"):
+        self._cancel_simple_auto_step()
         self._analysis_result = None
+        self._analysis_observation = None
+        self._analysis_first_click = False
         for button in self._buttons.values():
             button.set_analysis_overlay(None)
         self.analysis_status_label.setText(status)
@@ -2007,42 +2029,170 @@ class MinesweeperUI(QWidget):
         if enabled:
             self.on_analyze_current()
         else:
+            self._stop_simple_auto()
             self._clear_live_analysis()
 
     def on_analyze_current(self):
         if self._replay_mode:
             return
         if self.engine.status != GameStatus.PLAYING:
+            self._stop_simple_auto()
             self._clear_live_analysis("게임 종료")
             return
         self._clear_live_analysis()
-        observation = self.engine.get_observation()
         try:
+            observation = self.engine.get_observation()
             # FLAG then unflag can hide every cell on an already fixed board.
             # Only the public placement boolean participates in this UI policy.
-            if (is_all_hidden(observation)
-                    and not self.engine.get_board_snapshot().mines_placed):
+            first_click = (is_all_hidden(observation)
+                           and not self.engine.get_board_snapshot().mines_placed)
+            if first_click:
                 result = first_click_presentation()
             else:
                 decision = analyze_position(observation, self.engine.num_mines)
                 result = present_decision(observation, decision)
         except InconsistentObservationError:
+            self._stop_simple_auto()
             self._clear_live_analysis("분석 불가 - 공개 상태가 모순됩니다.")
             return
         except Exception as error:
             # Solver validation/failure must not escape a Qt slot or trigger moves.
+            self._stop_simple_auto()
             self._clear_live_analysis(f"분석 불가 - {error}")
             return
         self._analysis_result = result
+        self._analysis_observation = tuple(tuple(row) for row in observation)
+        self._analysis_first_click = first_click
         self.analysis_status_label.setText(result.status_text)
         self._render_live_analysis()
+        self._schedule_simple_auto_step()
 
-    def _refresh_live_board(self):
+    def _refresh_live_board(self, info=None, *, auto_observation=None):
         """After each physical action: invalidate, render, analyze fresh, overlay."""
         self._clear_live_analysis()
         self.render_board()
-        if not self._replay_mode and self.analysis_checkbox.isChecked():
+        if info is not None:
+            self._apply_stats_from_info(info)
+            self._check_end_state()
+        if self._replay_mode or self.engine.status != GameStatus.PLAYING:
+            return
+        if auto_observation is not None:
+            hidden_before = sum(value == CellState.HIDDEN
+                                for row in auto_observation for value in row)
+            hidden_after = sum(value == CellState.HIDDEN
+                               for row in self.engine.get_observation() for value in row)
+            if hidden_after >= hidden_before:
+                self._fail_simple_auto("실행 후 보드가 진행되지 않았습니다.")
+                return
+        if self.analysis_checkbox.isChecked():
             self.on_analyze_current()
+
+    def _cancel_simple_auto_step(self):
+        self._simple_auto_timer.stop()
+        self._simple_auto_pending = False
+
+    def _stop_simple_auto(self):
+        self._cancel_simple_auto_step()
+        for checkbox in (self.simple_auto_checkbox, self.allow_guess_checkbox):
+            blocked = checkbox.blockSignals(True)
+            checkbox.setChecked(False)
+            checkbox.blockSignals(blocked)
+        self.allow_guess_checkbox.setEnabled(False)
+
+    def _fail_simple_auto(self, message):
+        self._stop_simple_auto()
+        self._clear_live_analysis(f"자동 진행 중지 - {message}")
+
+    def on_simple_auto_toggled(self, enabled):
+        if (not enabled or self._replay_mode
+                or self.engine.status != GameStatus.PLAYING):
+            self._stop_simple_auto()
+            return
+        self.allow_guess_checkbox.setEnabled(True)
+        if not self.analysis_checkbox.isChecked():
+            # The toggled signal performs exactly one fresh analysis.
+            self.analysis_checkbox.setChecked(True)
+        else:
+            self.on_analyze_current()
+
+    def on_allow_guess_toggled(self, _enabled):
+        if not self.simple_auto_checkbox.isChecked() or self._replay_mode:
+            self._stop_simple_auto()
+            return
+        # Reuse the current decision, including its original guess tie-break.
+        self._schedule_simple_auto_step()
+
+    def _simple_auto_move(self, observation):
+        """Validate against public state, then apply policy; None means guess wait."""
+        if tuple(tuple(row) for row in observation) != self._analysis_observation:
+            raise ValueError("추천이 현재 보드와 일치하지 않습니다.")
+        result = self._analysis_result
+        if result is None or result.move is None:
+            raise ValueError("진행 중인 보드에 추천 수가 없습니다.")
+        if self._analysis_first_click:
+            # No hidden layout fields enter move selection, even at timeout.
+            if (not is_all_hidden(observation)
+                    or self.engine.get_board_snapshot().mines_placed):
+                raise ValueError("첫 클릭 추천이 더 이상 유효하지 않습니다.")
+        elif result.decision is None or result.decision.kind not in (
+            DecisionKind.LOCAL_DETERMINISTIC, DecisionKind.GLOBAL_CERTAINTY,
+            DecisionKind.PROBABILITY_GUESS,
+        ):
+            raise ValueError("지원하지 않는 추천 종류입니다.")
+        move = result.move
+        if (
+            not isinstance(move.action, Action)
+            or move.action not in (Action.OPEN, Action.FLAG)
+            or any(isinstance(value, bool) or not isinstance(value, int)
+                   for value in (move.x, move.y))
+            or not (0 <= move.x < self.engine.width and 0 <= move.y < self.engine.height)
+            or observation[move.y][move.x] != CellState.HIDDEN
+        ):
+            raise ValueError("추천은 범위 내 닫힌 칸의 OPEN 또는 FLAG여야 합니다.")
+        if (not self._analysis_first_click
+                and result.decision.kind == DecisionKind.PROBABILITY_GUESS
+                and not self.allow_guess_checkbox.isChecked()):
+            return None
+        return move
+
+    def _simple_auto_can_run(self):
+        if (self._replay_mode or not self.analysis_checkbox.isChecked()
+                or self.engine.status != GameStatus.PLAYING):
+            self._stop_simple_auto()
+            return False
+        return self.simple_auto_checkbox.isChecked()
+
+    def _schedule_simple_auto_step(self):
+        self._cancel_simple_auto_step()
+        if not self._simple_auto_can_run():
+            return
+        try:
+            move = self._simple_auto_move(self.engine.get_observation())
+        except Exception as error:
+            self._fail_simple_auto(str(error))
+            return
+        status = self._analysis_result.status_text
+        if move is None:
+            self.analysis_status_label.setText(status + " | 추측 대기 (추측 허용 꺼짐)")
+            return
+        self.analysis_status_label.setText(status)
+        self._simple_auto_pending = True
+        self._simple_auto_timer.start()
+
+    def _on_simple_auto_timeout(self):
+        # Also makes canceled/duplicate timeout delivery harmless in tests or Qt.
+        pending = self._simple_auto_pending
+        self._cancel_simple_auto_step()
+        if not pending or not self._simple_auto_can_run():
+            return
+        try:
+            observation = self.engine.get_observation()
+            move = self._simple_auto_move(observation)
+            if move is not None:
+                self._apply_live_action(move.x, move.y, move.action,
+                                        auto_observation=observation)
+        except Exception as error:
+            self._fail_simple_auto(str(error))
 
     # ------------------------------------------------------------------
     # 렌더링 (엔진 -> UI)
@@ -2051,6 +2201,7 @@ class MinesweeperUI(QWidget):
         """engine.get_observation() 결과만으로 전체 보드를 다시 그린다."""
         engine = self._engine_for_current_mode()
         if not self._replay_mode and engine.status != GameStatus.PLAYING:
+            self._stop_simple_auto()
             self._clear_live_analysis("게임 종료")
         obs = engine.get_observation()
         font_size = self._current_font_size()
