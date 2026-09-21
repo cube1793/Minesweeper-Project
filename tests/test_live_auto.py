@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
@@ -14,7 +15,7 @@ from simple_probability import CellProbability, ProbabilityResult
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QMessageBox
 except ImportError:
     QApplication = None
 else:
@@ -556,6 +557,122 @@ class LiveAutoUITests(unittest.TestCase):
         with patch.object(self.ui, "_ask_custom_dimensions", side_effect=dialog):
             self.ui.on_difficulty_changed("커스텀")
         self.assert_stopped()
+
+    def assert_replay_modal_stops_auto(self, entry, dialog_method, result):
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.ui.allow_guess_checkbox.setChecked(True)
+        self.assertTrue(self.ui._simple_auto_pending)
+        self.assertTrue(self.ui._simple_auto_timer.isActive())
+        recorder = self.ui._replay_recorder
+        analysis = self.ui._analysis_result
+
+        def live_state():
+            return (self.engine.get_observation(), self.engine.get_counter_snapshot(),
+                    self.engine.get_board_snapshot(), recorder.board, recorder.events)
+
+        before = live_state()
+
+        def dialog(*args, **kwargs):
+            self.assert_stopped()
+            self.assertTrue(self.ui.analysis_checkbox.isChecked())
+            self.assertIs(self.ui._analysis_result, analysis)
+            # Deliver the canceled timeout through its real connected Qt signal.
+            self.tick()
+            self.assertEqual(live_state(), before)
+            self.assert_stopped()
+            return result
+
+        with (
+            patch("ui_manager." + dialog_method, side_effect=dialog) as modal,
+            patch.object(self.engine, "step", wraps=self.engine.step) as step,
+        ):
+            entry()
+            modal.assert_called_once()
+            self.tick()
+        step.assert_not_called()
+        self.assertEqual(live_state(), before)
+        self.assertIs(self.ui.engine, self.engine)
+        self.assertIs(self.ui._replay_recorder, recorder)
+        self.assert_stopped()
+
+    def test_replay_file_dialogs_cancel_pending_live_auto(self):
+        self.prepare_board()
+        for entry, dialog_method, result in (
+            (self.ui.on_save_replay, "QFileDialog.getExistingDirectory", ""),
+            (self.ui.on_save_replay_as, "QFileDialog.getSaveFileName", ("", "")),
+            (self.ui.on_load_replay, "QFileDialog.getOpenFileName", ("", "")),
+        ):
+            with self.subTest(entry=entry.__name__):
+                self.assert_replay_modal_stops_auto(entry, dialog_method, result)
+                self.assertFalse(self.ui._replay_mode)
+                self.assertTrue(self.ui.simple_auto_checkbox.isEnabled())
+
+    def test_replay_unavailable_messages_cancel_pending_live_auto(self):
+        # Before the first click, Save/Save As show a message before any file dialog.
+        for entry in (self.ui.on_save_replay, self.ui.on_save_replay_as):
+            with self.subTest(entry=entry.__name__):
+                self.assert_replay_modal_stops_auto(
+                    entry, "QMessageBox.information", QMessageBox.Ok,
+                )
+                self.assertFalse(self.engine.get_board_snapshot().mines_placed)
+
+    def test_replay_save_result_messages_cancel_pending_live_auto(self):
+        self.prepare_board()
+        with TemporaryDirectory() as directory:
+            self.ui._last_replay_directory = directory
+            for error, dialog_method in (
+                (None, "QMessageBox.information"),
+                (OSError("save failed"), "QMessageBox.warning"),
+            ):
+                with (
+                    self.subTest(error=error),
+                    patch("ui_manager.save_replay_json", side_effect=error) as save,
+                    patch("ui_manager.QFileDialog.getExistingDirectory") as directory_dialog,
+                ):
+                    self.assert_replay_modal_stops_auto(
+                        self.ui.on_save_replay, dialog_method, QMessageBox.Ok,
+                    )
+                    directory_dialog.assert_not_called()
+                    save.assert_called_once()
+                    self.assertEqual(save.call_args.args[0],
+                                     self.ui._replay_recorder.to_replay_data())
+
+    def test_replay_save_as_overwrite_dialog_cancels_pending_live_auto(self):
+        self.prepare_board()
+        with TemporaryDirectory() as directory:
+            path = os.path.join(directory, "existing.json")
+            with open(path, "w", encoding="utf-8") as replay_file:
+                replay_file.write("unchanged")
+            with (
+                patch("ui_manager.QFileDialog.getSaveFileName", return_value=(path, "")),
+                patch("ui_manager.save_replay_json") as save,
+            ):
+                self.assert_replay_modal_stops_auto(
+                    self.ui.on_save_replay_as, "QMessageBox.question", QMessageBox.No,
+                )
+            save.assert_not_called()
+
+    def test_replay_load_failure_message_cancels_pending_live_auto(self):
+        self.prepare_board()
+        with (
+            patch("ui_manager.QFileDialog.getOpenFileName", return_value=("invalid.json", "")),
+            patch("ui_manager.load_replay_json", side_effect=ValueError("invalid replay")),
+        ):
+            self.assert_replay_modal_stops_auto(
+                self.ui.on_load_replay, "QMessageBox.warning", QMessageBox.Ok,
+            )
+        self.assertFalse(self.ui._replay_mode)
+
+    def test_replay_load_success_cancels_pending_live_auto(self):
+        self.prepare_board()
+        replay = self.ui._replay_recorder.to_replay_data()
+        with patch("ui_manager.load_replay_json", return_value=replay):
+            self.assert_replay_modal_stops_auto(
+                self.ui.on_load_replay, "QFileDialog.getOpenFileName", ("replay.json", ""),
+            )
+        self.assertTrue(self.ui._replay_mode)
+        self.assertEqual(self.ui._replay_player.replay_data, replay)
+        self.assertFalse(self.ui.simple_auto_checkbox.isEnabled())
 
     def test_replay_disables_auto_never_steps_either_engine_and_exit_stays_off(self):
         self.ui.simple_auto_checkbox.setChecked(True)

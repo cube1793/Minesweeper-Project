@@ -1376,6 +1376,7 @@ class MinesweeperUI(QWidget):
 
     def on_save_replay(self):
         """Save the current replay with a fresh timestamped filename."""
+        self._stop_simple_auto()
         replay_data = self._build_current_replay_data(
             "Replay 저장",
             allow_replay_mode=True,
@@ -1392,6 +1393,7 @@ class MinesweeperUI(QWidget):
 
     def on_save_replay_as(self):
         """Save the current replay to a user-selected file."""
+        self._stop_simple_auto()
         replay_data = self._build_current_replay_data(
             "Replay 다른 이름으로 저장",
             allow_replay_mode=True,
@@ -1426,6 +1428,7 @@ class MinesweeperUI(QWidget):
 
     def on_load_replay(self):
         """JSON 리플레이 파일을 불러와 리플레이 모드로 진입한다."""
+        self._stop_simple_auto()
         path, _ = QFileDialog.getOpenFileName(
             self,
             "리플레이 불러오기",
