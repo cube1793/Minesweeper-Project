@@ -1,7 +1,7 @@
 """Subprocess worker for Counters ZiNi calculation.
 
 This module intentionally has no PyQt dependency. The UI launches it as a
-separate Python process so long-running advanced ZiNi searches can be
+separate process so long-running advanced ZiNi searches can be
 terminated when the board changes.
 """
 

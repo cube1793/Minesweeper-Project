@@ -1015,7 +1015,13 @@ class MinesweeperUI(QWidget):
                 snapshot,
             )
             process = subprocess.Popen(
-                [sys.executable, ZINI_WORKER_SCRIPT, payload_path, result_path],
+                [
+                    sys.executable,
+                    "--zini-metric-worker" if getattr(sys, "frozen", False)
+                    else ZINI_WORKER_SCRIPT,
+                    payload_path,
+                    result_path,
+                ],
                 cwd=os.path.dirname(ZINI_WORKER_SCRIPT),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
