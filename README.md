@@ -53,6 +53,11 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 ## 실행 방법
 
+Windows 배포본은 [Releases](https://github.com/cube1793/Minesweeper-Project/releases)에서
+ZIP 전체를 압축 해제한 뒤 `Minesweeper/Minesweeper.exe`를 실행합니다.
+`_internal` 폴더를 EXE와 함께 유지해야 하며 Python 설치는 필요하지 않습니다.
+배포본 빌드와 검증 방법은 [BUILDING.md](BUILDING.md)에 정리되어 있습니다.
+
 Python 3.10 이상과 PyQt5가 필요합니다. Repository 루트에서 실행합니다.
 
 ```powershell

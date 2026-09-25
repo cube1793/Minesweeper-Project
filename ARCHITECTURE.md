@@ -75,7 +75,7 @@ Solver가 `core_engine`에서 가져오는 것은 `Action`, `CellState` 같은 �
 
 | 모듈 | 책임 |
 | --- | --- |
-| `main.py` | Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
+| `main.py` | Qt import 전 ZiNi worker 모드 분기, Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
 | `core_engine.py` | 지뢰 배치, OPEN/FLAG/CHORD, flood fill, 승패 판정, 타이머, active/wasted 클릭 및 진행량 집계 |
 | `board_snapshot.py` | 크기·지뢰 수·배치 여부·mine layout·adjacent를 담은 불변 `BoardSnapshot` |
 | `board_analyzer.py` | 확정 보드의 opening 그룹과 OPENING/BORDER/ISOLATED 분류, 정적 3BV/Ops |
