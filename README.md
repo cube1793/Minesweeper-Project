@@ -129,3 +129,14 @@ Expert seed 1003의 알려진 **120-click trace**는 `tests/test_zini_core.py`�
 - 향후 후보는 UI controller/worker 관리 분리, 분석 성능 개선, Replay checkpoint, subprocess 실패·취소 검증 확대입니다. AI 학습 환경은 아직 구현하지 않았습니다.
 
 설계 목표, 모듈별 책임, 데이터 흐름과 invariants는 **[ARCHITECTURE.md](ARCHITECTURE.md)**에서 설명합니다.
+
+## 라이선스 / License
+
+Copyright © 2026 cube1793
+
+이 프로젝트는 GNU General Public License v3.0 only (`GPL-3.0-only`)에 따라 배포됩니다.  
+소스 코드는 해당 라이선스의 조건에 따라 사용, 수정 및 재배포할 수 있습니다.  
+자세한 내용은 [`LICENSE`](LICENSE) 파일을 참고하세요.
+
+This project is licensed under the GNU General Public License v3.0 only (`GPL-3.0-only`).  
+See [`LICENSE`](LICENSE) for details.
