@@ -285,6 +285,18 @@ def fetch_run(connection: sqlite3.Connection, run_id: int) -> sqlite3.Row | None
     ).fetchone()
 
 
+def fetch_game_indices(connection: sqlite3.Connection, run_id: int) -> tuple[int, ...]:
+    """Return stored game indices in order, without applying coverage policy.
+
+    Missing runs and runs without games both return an empty tuple. The query
+    uses the supplied connection and does not open or finish a transaction.
+    """
+    _require_integer("run_id", run_id)
+    return tuple(row[0] for row in connection.execute(
+        "SELECT game_index FROM games WHERE run_id = ? ORDER BY game_index", (run_id,),
+    ).fetchall())
+
+
 def _encode_game(record: GameRecord) -> tuple:
     if not isinstance(record.result, str) or record.result not in _RESULT_TO_DB:
         raise ValueError(f"Unsupported game result: {record.result!r}.")

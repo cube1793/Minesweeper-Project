@@ -256,6 +256,7 @@ class RepositoryRunTests(RepositoryTestCase):
         record, events = completed_game()
         operations = (
             lambda value: repository.fetch_run(self.connection, value),
+            lambda value: repository.fetch_game_indices(self.connection, value),
             lambda value: repository.update_run_status(self.connection, value, schema.RUN_STATUS_RUNNING),
             lambda value: repository.persist_completed_game(self.connection, value, record, events),
         )
@@ -316,6 +317,43 @@ class RepositoryRunTests(RepositoryTestCase):
         for name in ("started_at", "finished_at", "app_version", "difficulty_name", "failure_code"):
             self.assertIsNone(row[name])
         self.assertIsNone(repository.fetch_run(self.connection, second + 1000))
+
+    def test_game_indices_are_sorted_run_scoped_facts_without_prefix_policy(self):
+        run_id = self.create_run()
+        other_run_id = self.create_run()
+        for index in (12, 3, 7):
+            self.persist(run_id, index)
+        self.persist(other_run_id, 1)
+
+        self.assertEqual(repository.fetch_game_indices(self.connection, run_id), (3, 7, 12))
+        self.assertEqual(repository.fetch_game_indices(self.connection, other_run_id), (1,))
+        self.assertEqual(repository.fetch_run(self.connection, run_id)["processed_games"], 3)
+        self.assertEqual(repository.fetch_run(self.connection, run_id)["run_status"], schema.RUN_STATUS_CREATED)
+        self.assertFalse(self.connection.in_transaction)
+
+    def test_game_indices_are_empty_for_empty_or_missing_runs(self):
+        run_id = self.create_run()
+        self.assertEqual(repository.fetch_game_indices(self.connection, run_id), ())
+        self.assertEqual(repository.fetch_game_indices(self.connection, run_id + 1000), ())
+        self.assertFalse(self.connection.in_transaction)
+
+    def test_game_indices_preserve_the_supplied_connection_transaction(self):
+        run_id = self.create_run()
+        self.persist(run_id, 0)
+        reader = repository.connect_database(self.database_path)
+        self.addCleanup(reader.close)
+        self.connection.execute("BEGIN")
+        try:
+            self.connection.execute(
+                "UPDATE games SET game_index = 9 WHERE run_id = ?", (run_id,),
+            )
+            self.assertEqual(repository.fetch_game_indices(self.connection, run_id), (9,))
+            self.assertTrue(self.connection.in_transaction)
+            self.assertEqual(repository.fetch_game_indices(reader, run_id), (0,))
+            self.assertFalse(reader.in_transaction)
+        finally:
+            self.connection.rollback()
+        self.assertEqual(repository.fetch_game_indices(self.connection, run_id), (0,))
 
     def test_snapshot_serialization_is_compact_deterministic_json(self):
         first = self.create_run(
