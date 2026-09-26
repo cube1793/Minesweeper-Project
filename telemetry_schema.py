@@ -9,6 +9,11 @@ import sqlite3
 
 PHYSICAL_SCHEMA_VERSION = 1
 
+# Run telemetry semantics are versioned independently of SQLite's physical DDL.
+TELEMETRY_SCHEMA_VERSION = 1
+SOLVER_STAGE_STAGE_2 = "STAGE_2"
+SOLVER_POLICY_SIMPLE_MINIMUM_RISK = "SIMPLE_MINIMUM_RISK"
+
 # These database meanings are literals, independent of Engine/model enum values.
 ACTION_OPEN = 1
 ACTION_FLAG = 2

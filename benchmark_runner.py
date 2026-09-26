@@ -32,10 +32,6 @@ import telemetry_repository as repository
 import telemetry_schema as schema
 
 
-# Telemetry semantics are distinct from SQLite's physical schema version.
-_TELEMETRY_SCHEMA_VERSION = 1
-
-
 class BenchmarkInvariantError(RuntimeError):
     """Execution or persisted coverage violates the benchmark contract."""
 
@@ -175,9 +171,11 @@ def run_benchmark(
     """Execute a V1 prefix and return its run_id after COMPLETED or ABORTED.
 
     Own a file connection opened/closed through the repository boundary.
-    Provenance defaults to this module's repository; callers may supply a root.
-    Official mode rejects dirty provenance before even opening the database.
-    Development mode records the actual dirty state without claiming eligibility.
+    Official provenance comes only from this module's repository; supplying
+    repository_root or dirty provenance is rejected before opening the database.
+    Development mode allows a provenance root override and records its dirty state.
+    The reserved EXPERT_GENERAL_V1 identity requires the exact canonical spec
+    in both modes; custom set IDs retain their generic configuration support.
 
     stop_requested() is polled before each game, including the first. A request
     during play takes effect after that game's commit; completing the requested
@@ -194,8 +192,12 @@ def run_benchmark(
         raise ValueError("requested_games must be a positive SQLite int, excluding bool.")
     if not isinstance(spec, BenchmarkSetSpec):
         raise ValueError("spec must be a BenchmarkSetSpec.")
+    if spec.benchmark_set_id == EXPERT_GENERAL_V1.benchmark_set_id and spec != EXPERT_GENERAL_V1:
+        raise ValueError("EXPERT_GENERAL_V1 requires the exact canonical benchmark specification.")
     if not isinstance(official, bool):
         raise ValueError("official must be a bool.")
+    if official and repository_root is not None:
+        raise ValueError("Official benchmark execution does not allow a repository_root override.")
     for name, callback in (("stop_requested", stop_requested), ("progress", progress)):
         if callback is not None and not callable(callback):
             raise ValueError(f"{name} must be callable or None.")
@@ -212,9 +214,10 @@ def run_benchmark(
     connection = repository.connect_database(database)
     try:
         run_id = repository.create_run(
-            connection, telemetry_schema_version=_TELEMETRY_SCHEMA_VERSION,
+            connection, telemetry_schema_version=schema.TELEMETRY_SCHEMA_VERSION,
             created_at=_utc_now(), git_commit=git_commit, git_dirty=git_dirty,
-            solver_stage="STAGE_2", solver_policy="SIMPLE_MINIMUM_RISK",
+            solver_stage=schema.SOLVER_STAGE_STAGE_2,
+            solver_policy=schema.SOLVER_POLICY_SIMPLE_MINIMUM_RISK,
             solver_config_snapshot={"accept_guesses": True, "initial_open": list(first_click)},
             width=spec.width, height=spec.height, num_mines=spec.num_mines,
             first_click_policy=first_click_policy,

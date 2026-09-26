@@ -19,7 +19,9 @@ from unittest.mock import Mock, patch
 import benchmark_runner as runner
 import telemetry_repository as repository
 import telemetry_schema as schema
-from benchmark_board import BenchmarkSetSpec, calculate_board_fingerprint, generate_board
+from benchmark_board import (
+    EXPERT_GENERAL_V1, BenchmarkSetSpec, calculate_board_fingerprint, generate_board,
+)
 from board_analyzer import analyze_board
 from core_engine import Action, GameStatus, MinesweeperEngine
 from simple_runner import StopReason, run_simple
@@ -84,6 +86,11 @@ class BenchmarkRunnerTests(BenchmarkTestCase):
         self.assertEqual(row["benchmark_set_id"], SMALL_SPEC.benchmark_set_id)
         self.assertEqual(row["board_generator_version"], "V1")
         self.assertEqual(row["first_click_policy"], schema.FIRST_CLICK_FIXED_0_0)
+        self.assertEqual(
+            (row["telemetry_schema_version"], row["solver_stage"], row["solver_policy"]),
+            (schema.TELEMETRY_SCHEMA_VERSION, schema.SOLVER_STAGE_STAGE_2,
+             schema.SOLVER_POLICY_SIMPLE_MINIMUM_RISK),
+        )
         self.assertEqual((row["width"], row["height"], row["num_mines"]), (5, 1, 2))
         self.assertEqual(json.loads(row["solver_config_snapshot"]),
                          {"accept_guesses": True, "initial_open": [0, 0]})
@@ -116,6 +123,61 @@ class BenchmarkRunnerTests(BenchmarkTestCase):
             self.assertTrue(all(event["inference_category"] is not None for event in own[1:]))
             self.assertEqual(game["local_deterministic_count"] + game["global_certainty_count"]
                              + game["probability_guess_count"], game["total_actions"] - 1)
+
+    def test_canonical_expert_and_value_equal_copy_are_accepted_in_both_modes(self):
+        copied_spec = replace(EXPERT_GENERAL_V1)
+        self.assertIsNot(copied_spec, EXPERT_GENERAL_V1)
+        self.assertEqual(copied_spec, EXPERT_GENERAL_V1)
+        for spec in (EXPERT_GENERAL_V1, copied_spec):
+            for official in (False, True):
+                with self.subTest(copied=spec is copied_spec, official=official):
+                    self.execute(1, spec=spec, official=official)
+                    row = self.run_row()
+                    self.assertEqual(row["run_status"], "COMPLETED")
+                    self.assertEqual(row["benchmark_set_id"], "EXPERT_GENERAL_V1")
+                    self.assertEqual((row["width"], row["height"], row["num_mines"]),
+                                     (30, 16, 99))
+                    self.assertEqual(self.rows("games", "game_index")[0]["board_fingerprint"],
+                                     generate_board(EXPERT_GENERAL_V1, 0).board_fingerprint)
+
+    def test_reserved_expert_id_rejects_changed_configuration_before_run_metadata_or_database(self):
+        for changes in (
+            dict(width=9, height=9, num_mines=10),
+            dict(width=29), dict(height=15), dict(num_mines=98),
+            dict(first_click_x=5), dict(first_click_y=5),
+            dict(first_click_x=5, first_click_y=5),
+        ):
+            spec = replace(EXPERT_GENERAL_V1, **changes)
+            for official in (False, True):
+                with (
+                    self.subTest(changes=changes, official=official),
+                    patch.object(runner, "_capture_environment") as environment,
+                    patch.object(repository, "connect_database") as connect,
+                    patch.object(repository, "create_run") as create,
+                    self.assertRaisesRegex(ValueError, "EXPERT_GENERAL_V1.*canonical"),
+                ):
+                    self.execute(1, spec=spec, official=official)
+                self.provenance.assert_not_called()
+                environment.assert_not_called()
+                connect.assert_not_called()
+                create.assert_not_called()
+                self.assertFalse(self.database.exists())
+
+    def test_run_identity_uses_public_constants_independently_of_physical_schema(self):
+        # Distinct sentinel values detect copied literals or a physical-version alias.
+        with patch.multiple(
+            schema, TELEMETRY_SCHEMA_VERSION=17, SOLVER_STAGE_STAGE_2="TEST_STAGE",
+            SOLVER_POLICY_SIMPLE_MINIMUM_RISK="TEST_POLICY",
+        ):
+            self.execute(1, spec=EMPTY_SPEC)
+        row = self.run_row()
+        self.assertEqual(
+            (row["telemetry_schema_version"], row["solver_stage"], row["solver_policy"]),
+            (17, "TEST_STAGE", "TEST_POLICY"),
+        )
+        with closing(repository.connect_database(self.database)) as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0],
+                             schema.PHYSICAL_SCHEMA_VERSION)
 
     def test_real_probability_guess_mine_hit_is_a_committed_loss(self):
         self.execute(2)
@@ -690,9 +752,37 @@ class BenchmarkProvenanceTests(BenchmarkTestCase):
         return subprocess.run(["git", "-C", str(self.git_root), *arguments],
                               check=True, capture_output=True, text=True).stdout
 
-    def test_clean_official_run_records_checked_out_commit(self):
+    def test_clean_official_run_uses_executing_module_root(self):
+        captured = runner._capture_git_provenance(self.git_root)
+        self.assertEqual(captured, (self.commit, False))
+        # Inject captured facts without allowing callers to change the official root.
+        with patch.object(runner, "_capture_git_provenance", return_value=captured) as provenance:
+            self.execute(1, spec=EMPTY_SPEC, official=True)
+        provenance.assert_called_once_with(Path(runner.__file__).resolve().parent)
+        row = self.run_row()
+        self.assertEqual((row["run_status"], row["git_commit"], row["git_dirty"]),
+                         ("COMPLETED", self.commit, 0))
+
+    def test_official_root_override_rejects_even_clean_repository_before_any_lifecycle(self):
         self.assertEqual(runner._capture_git_provenance(self.git_root), (self.commit, False))
-        self.execute(1, spec=EMPTY_SPEC, official=True, repository_root=self.git_root)
+        for root in (self.git_root, str(self.git_root), Path(runner.__file__).resolve().parent, ""):
+            with (
+                self.subTest(root=root),
+                patch.object(runner, "_capture_git_provenance") as provenance,
+                patch.object(runner, "_capture_environment") as environment,
+                patch.object(repository, "connect_database") as connect,
+                patch.object(repository, "create_run") as create,
+                self.assertRaisesRegex(ValueError, "Official.*repository_root override"),
+            ):
+                self.execute(1, spec=EMPTY_SPEC, official=True, repository_root=root)
+            provenance.assert_not_called()
+            environment.assert_not_called()
+            connect.assert_not_called()
+            create.assert_not_called()
+            self.assertFalse(self.database.exists())
+
+    def test_development_clean_override_persists_supplied_repository_provenance(self):
+        self.execute(1, spec=EMPTY_SPEC, official=False, repository_root=self.git_root)
         row = self.run_row()
         self.assertEqual((row["run_status"], row["git_commit"], row["git_dirty"]),
                          ("COMPLETED", self.commit, 0))
@@ -724,18 +814,24 @@ class BenchmarkProvenanceTests(BenchmarkTestCase):
         ignored = self.git_root / "ignored"
         ignored.mkdir()
         (ignored / "benchmark.sqlite3").write_text("ignored output", encoding="utf-8")
-        self.assertEqual(runner._capture_git_provenance(self.git_root), (self.commit, False))
-        self.execute(1, spec=EMPTY_SPEC, official=True, repository_root=self.git_root)
+        captured = runner._capture_git_provenance(self.git_root)
+        self.assertEqual(captured, (self.commit, False))
+        with patch.object(runner, "_capture_git_provenance", return_value=captured) as provenance:
+            self.execute(1, spec=EMPTY_SPEC, official=True)
+        provenance.assert_called_once_with(Path(runner.__file__).resolve().parent)
         self.assertEqual(self.run_row()["git_dirty"], 0)
 
     def assert_official_rejected_before_lifecycle(self):
+        captured = runner._capture_git_provenance(self.git_root)
+        self.assertEqual(captured, (self.commit, True))
         with closing(repository.connect_database(self.database)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM benchmark_runs").fetchone()[0], 0)
-        with patch.object(repository, "connect_database", wraps=repository.connect_database) as connect, \
+        with patch.object(runner, "_capture_git_provenance", return_value=captured) as provenance, \
+                patch.object(repository, "connect_database", wraps=repository.connect_database) as connect, \
                 patch.object(repository, "create_run", wraps=repository.create_run) as create, \
-                self.assertRaises((ValueError, RuntimeError)):
-            runner.run_benchmark(self.database, 1, spec=EMPTY_SPEC,
-                                 official=True, repository_root=self.git_root)
+                self.assertRaisesRegex(ValueError, "clean Git working tree"):
+            runner.run_benchmark(self.database, 1, spec=EMPTY_SPEC, official=True)
+        provenance.assert_called_once_with(Path(runner.__file__).resolve().parent)
         create.assert_not_called()
         connect.assert_not_called()
         with closing(repository.connect_database(self.database)) as connection:
@@ -754,10 +850,10 @@ class BenchmarkProvenanceTests(BenchmarkTestCase):
         def report(run_id, processed, requested):
             (self.git_root / "new-file.txt").write_text("changed after capture\n", encoding="utf-8")
 
-        with patch.object(runner, "_capture_git_provenance", wraps=capture) as provenance:
-            self.execute(2, spec=EMPTY_SPEC, official=True,
-                         repository_root=self.git_root, progress=report)
-        provenance.assert_called_once()
+        with patch.object(runner, "_capture_git_provenance",
+                          side_effect=lambda root: capture(self.git_root)) as provenance:
+            self.execute(2, spec=EMPTY_SPEC, official=True, progress=report)
+        provenance.assert_called_once_with(Path(runner.__file__).resolve().parent)
         self.assertEqual(self.run_row()["git_dirty"], 0)
         self.assertEqual(capture(self.git_root), (self.commit, True))
 
