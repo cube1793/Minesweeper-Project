@@ -23,6 +23,10 @@ import telemetry_schema as schema
 
 
 _CANONICAL_PROBABILITY = re.compile(r"(0|[1-9][0-9]*)/([1-9][0-9]*)")
+_UTC_TIMESTAMP = re.compile(
+    r"(?:[0-9]{4}-?[0-9]{2}-?[0-9]{2}|[0-9]{4}-?W[0-9]{2}(?:-?[1-7])?)"
+    r"[T ][0-9:.,]+(?:Z|[+-][0-9:.,]+)"
+)
 
 
 def encode_probability(value: Fraction | None) -> str | None:
@@ -136,9 +140,21 @@ def _require_run_status(run_status: str) -> None:
         raise ValueError(f"Unsupported run_status: {run_status!r}.")
 
 
+def _require_integer(name: str, value: int) -> None:
+    if type(value) is not int:
+        raise ValueError(f"{name} must be an int, excluding bool.")
+
+
+def _require_text(name: str, value: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a str.")
+
+
 def _require_utc_timestamp(name: str, value: str) -> None:
     """Validate supplied ISO-8601 UTC text without formatting or clock ownership."""
-    if not isinstance(value, str):
+    # Keep calendar/week dates and basic/extended UTC forms, but reject the
+    # arbitrary Unicode date/time separators accepted by fromisoformat().
+    if not isinstance(value, str) or _UTC_TIMESTAMP.fullmatch(value) is None:
         raise ValueError(f"{name} must be UTC ISO-8601 text.")
     try:
         parsed = datetime.fromisoformat(value)
@@ -164,8 +180,27 @@ def create_run(
     A new run has no committed games, so processed_games starts at zero.
     Lifecycle choices and provenance collection belong to the caller. Snapshot
     inputs are JSON values, serialized with sorted keys and compact separators.
-    Timestamp text is preserved as supplied, after checking its UTC offset.
+    Timestamp text is preserved after checking its ISO syntax and UTC offset.
     """
+    for name, value in (
+        ("telemetry_schema_version", telemetry_schema_version),
+        ("width", width), ("height", height), ("num_mines", num_mines),
+        ("requested_games", requested_games),
+    ):
+        _require_integer(name, value)
+    for name, value in (
+        ("git_commit", git_commit), ("solver_stage", solver_stage),
+        ("solver_policy", solver_policy), ("first_click_policy", first_click_policy),
+        ("board_generator_version", board_generator_version),
+        ("benchmark_set_id", benchmark_set_id),
+    ):
+        _require_text(name, value)
+    for name, value in (
+        ("app_version", app_version), ("difficulty_name", difficulty_name),
+        ("failure_code", failure_code),
+    ):
+        if value is not None:
+            _require_text(name, value)
     _require_run_status(run_status)
     _require_utc_timestamp("created_at", created_at)
     for name, value in (("started_at", started_at), ("finished_at", finished_at)):
@@ -215,6 +250,7 @@ def update_run_status(
     policy or prefix validation is applied. SQLite enforces COMPLETED's processed
     count requirement. A missing run raises ValueError rather than a silent no-op.
     """
+    _require_integer("run_id", run_id)
     _require_run_status(run_status)
     assignments = ["run_status = ?"]
     parameters = [run_status]
@@ -224,8 +260,11 @@ def update_run_status(
     ):
         if value is _UNCHANGED:
             continue
-        if name != "failure_code" and value is not None:
-            _require_utc_timestamp(name, value)
+        if value is not None:
+            if name == "failure_code":
+                _require_text(name, value)
+            else:
+                _require_utc_timestamp(name, value)
         assignments.append(f"{name} = ?")
         parameters.append(value)
     parameters.append(run_id)
@@ -240,6 +279,7 @@ def update_run_status(
 
 def fetch_run(connection: sqlite3.Connection, run_id: int) -> sqlite3.Row | None:
     """Fetch stored run metadata/progress, or None; no read transaction is held."""
+    _require_integer("run_id", run_id)
     return connection.execute(
         "SELECT * FROM benchmark_runs WHERE run_id = ?", (run_id,),
     ).fetchone()
@@ -300,6 +340,7 @@ def persist_completed_game(
     including COMMIT failure, rolls back this game without touching earlier games.
     The run status is never changed here. Return the generated game_id.
     """
+    _require_integer("run_id", run_id)
     if not isinstance(game_record, GameRecord):
         raise TypeError("game_record must be a GameRecord.")
     if not isinstance(events, tuple) or any(not isinstance(event, ActionEvent) for event in events):

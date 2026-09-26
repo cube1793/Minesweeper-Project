@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import asdict, replace
+from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import patch
@@ -212,6 +213,83 @@ class RepositoryConnectionTests(RepositoryTestCase):
 
 
 class RepositoryRunTests(RepositoryTestCase):
+    def test_run_integer_fields_reject_non_integers_before_sql(self):
+        for field in ("telemetry_schema_version", "width", "height", "num_mines", "requested_games"):
+            for value in (True, False, 2.0, 2.5, "2", "abc", "1,000", "v1",
+                          b"2", Decimal(2), Fraction(2), None):
+                with self.subTest(field=field, value=value):
+                    statements = []
+                    self.connection.set_trace_callback(statements.append)
+                    try:
+                        with self.assertRaisesRegex(ValueError, field):
+                            self.create_run(**{field: value})
+                    finally:
+                        self.connection.set_trace_callback(None)
+                    self.assertEqual(statements, [])
+                    self.assertFalse(self.connection.in_transaction)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM benchmark_runs").fetchone()[0], 0)
+
+    def test_run_text_fields_reject_affinity_conversion_and_blob_inputs(self):
+        required = ("git_commit", "solver_stage", "solver_policy", "first_click_policy",
+                    "board_generator_version", "benchmark_set_id")
+        nullable = ("app_version", "difficulty_name", "failure_code")
+        for field in required + nullable:
+            invalid_values = (True, False, 0, 2.5, b"abc", bytearray(b"abc"),
+                              memoryview(b"abc"), Decimal(2), Fraction(2))
+            if field in required:
+                invalid_values += (None,)
+            for value in invalid_values:
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(ValueError, field):
+                        self.create_run(**{field: value})
+                    self.assertFalse(self.connection.in_transaction)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM benchmark_runs").fetchone()[0], 0)
+        # TEXT identity and nullability do not imply a nonempty-string policy.
+        run_id = self.create_run(**dict.fromkeys(required + nullable, ""))
+        row = repository.fetch_run(self.connection, run_id)
+        for field in required + nullable:
+            self.assertEqual(row[field], "")
+
+    def test_public_run_ids_reject_boolean_and_coercible_identities_before_sql(self):
+        run_id = self.create_run()
+        self.assertEqual(run_id, 1)  # True would otherwise address this row.
+        record, events = completed_game()
+        operations = (
+            lambda value: repository.fetch_run(self.connection, value),
+            lambda value: repository.update_run_status(self.connection, value, schema.RUN_STATUS_RUNNING),
+            lambda value: repository.persist_completed_game(self.connection, value, record, events),
+        )
+        for index, operation in enumerate(operations):
+            for value in (True, False, 1.0, 1.5, "1", "abc", b"1", Decimal(1), Fraction(1), None):
+                with self.subTest(operation=index, value=value):
+                    statements = []
+                    self.connection.set_trace_callback(statements.append)
+                    try:
+                        with self.assertRaisesRegex(ValueError, "run_id"):
+                            operation(value)
+                    finally:
+                        self.connection.set_trace_callback(None)
+                    self.assertEqual(statements, [])
+                    self.assert_empty_run(run_id)
+        self.assertEqual(repository.fetch_run(self.connection, run_id)["run_status"], schema.RUN_STATUS_CREATED)
+
+    def test_status_failure_code_requires_nullable_text(self):
+        run_id = self.create_run(failure_code="original")
+        for value in (True, 0, 2.5, b"abc", bytearray(b"abc"), memoryview(b"abc")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "failure_code"):
+                    repository.update_run_status(
+                        self.connection, run_id, schema.RUN_STATUS_FAILED, failure_code=value,
+                    )
+                row = repository.fetch_run(self.connection, run_id)
+                self.assertEqual((row["run_status"], row["failure_code"]), (schema.RUN_STATUS_CREATED, "original"))
+                self.assertFalse(self.connection.in_transaction)
+        for value in ("", None):
+            repository.update_run_status(
+                self.connection, run_id, schema.RUN_STATUS_FAILED, failure_code=value,
+            )
+            self.assertEqual(repository.fetch_run(self.connection, run_id)["failure_code"], value)
+
     def test_all_run_fields_and_generated_identity_persist(self):
         values = run_inputs(
             started_at=STARTED_AT, finished_at=FINISHED_AT,
@@ -283,13 +361,47 @@ class RepositoryRunTests(RepositoryTestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM benchmark_runs").fetchone()[0], 0)
 
     def test_utc_timestamp_strings_are_preserved_without_local_conversion(self):
-        for timestamp in (CREATED_AT, STARTED_AT, FINISHED_AT, "2026-09-26T00:00:00+0000"):
+        for timestamp in (CREATED_AT, STARTED_AT, FINISHED_AT, "2026-09-26T00:00:00+0000",
+                          "20260926T000000Z", "2026-W39-6T00:00:00Z",
+                          "2026W396T000000+0000", "2026-09-26 00:00:00Z",
+                          "2026-09-26T00:00:02,123456Z"):
             with self.subTest(timestamp=timestamp):
-                run_id = self.create_run(created_at=timestamp)
-                self.assertEqual(repository.fetch_run(self.connection, run_id)["created_at"], timestamp)
+                run_id = self.create_run(created_at=timestamp, started_at=timestamp, finished_at=timestamp)
+                row = repository.fetch_run(self.connection, run_id)
+                for field in ("created_at", "started_at", "finished_at"):
+                    self.assertEqual(row[field], timestamp)
+                repository.update_run_status(
+                    self.connection, run_id, schema.RUN_STATUS_RUNNING,
+                    started_at=None, finished_at=None,
+                )
+                repository.update_run_status(
+                    self.connection, run_id, schema.RUN_STATUS_RUNNING,
+                    started_at=timestamp, finished_at=timestamp,
+                )
+                row = repository.fetch_run(self.connection, run_id)
+                self.assertEqual((row["started_at"], row["finished_at"]), (timestamp, timestamp))
         for timestamp in ("2026-09-26", "2026-09-26T09:00:00+09:00", "invalid", None):
             with self.subTest(timestamp=timestamp), self.assertRaises((TypeError, ValueError)):
                 self.create_run(created_at=timestamp)
+
+    def test_invalid_timestamp_separators_are_rejected_at_every_write_boundary(self):
+        run_id = self.create_run()
+        original = dict(repository.fetch_run(self.connection, run_id))
+        invalid = [f"2026-09-26{separator}00:00:00Z" for separator in ("X", "é", "\x00", "\n", "\t", "1")]
+        invalid += ["2026-09-26T00:00:00Z\n", "2026-09-26T00:00:\x000Z", "2026-02-30T00:00:00Z"]
+        for timestamp in invalid:
+            for field in ("created_at", "started_at", "finished_at"):
+                with self.subTest(timestamp=timestamp, field=field):
+                    with self.assertRaises(ValueError):
+                        self.create_run(**{field: timestamp})
+                    if field != "created_at":
+                        with self.assertRaises(ValueError):
+                            repository.update_run_status(
+                                self.connection, run_id, schema.RUN_STATUS_RUNNING, **{field: timestamp},
+                            )
+                    self.assertEqual(dict(repository.fetch_run(self.connection, run_id)), original)
+                    self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM benchmark_runs").fetchone()[0], 1)
+                    self.assertFalse(self.connection.in_transaction)
 
     def test_status_update_preserves_omitted_values_and_clears_explicit_none(self):
         run_id = self.create_run()
@@ -345,6 +457,34 @@ class RepositoryRunTests(RepositoryTestCase):
 
 
 class RepositoryGameTests(RepositoryTestCase):
+    def test_distinct_coordinates_and_counts_detect_game_column_swaps(self):
+        _, templates = completed_game()
+        collector = TelemetryCollector()
+        # OPEN/FLAG/CHORD = 4/1/2; LOCAL/GLOBAL/GUESS = 1/2/3.
+        sequence = (templates[0], templates[1], templates[2], templates[2],
+                    templates[3], templates[3], templates[3])
+        for index, template in enumerate(sequence):
+            values = asdict(template)
+            values.pop("action_index")
+            values["status_after"] = GameStatus.WON if index == len(sequence) - 1 else GameStatus.PLAYING
+            if index == 0:
+                values.update(x=1, y=2)
+            collector.record_action(**values)
+        record = collector.finalize(
+            game_index=6, seed=42, board_fingerprint="cd" * 32, board_3bv=19, board_ops=5,
+        )
+        self.assertEqual((record.first_click_x, record.first_click_y), (1, 2))
+        self.assertEqual((record.open_count, record.flag_count, record.chord_count), (4, 1, 2))
+        self.assertEqual((record.local_deterministic_count, record.global_certainty_count,
+                          record.probability_guess_count), (1, 2, 3))
+        run_id = self.create_run()
+        game_id = repository.persist_completed_game(self.connection, run_id, record, collector.events)
+        expected = dict(asdict(record), run_id=run_id, game_id=game_id,
+                        result=schema.GAME_RESULT_WIN, had_probability_guess=1)
+        row = self.connection.execute("SELECT * FROM games WHERE game_id = ?", (game_id,)).fetchone()
+        self.assertEqual(dict(row), expected)
+        self.assertEqual(self.counts(run_id), (1, 1, 7))
+
     def test_every_game_and_event_field_uses_stable_exact_persistence(self):
         run_id = self.create_run(requested_games=2)
         action_mapping = {Action.OPEN: schema.ACTION_OPEN, Action.FLAG: schema.ACTION_FLAG,
@@ -508,6 +648,115 @@ class RepositoryGameTests(RepositoryTestCase):
 
 
 class RepositoryRollbackTests(RepositoryTestCase):
+    def test_keyboard_interrupt_rolls_back_active_game_and_propagates_unchanged(self):
+        interruption = KeyboardInterrupt("interrupted after event inserts")
+
+        class InterruptingConnection(sqlite3.Connection):
+            interrupt_events = False
+
+            def executemany(connection, sql, parameters):
+                cursor = super().executemany(sql, parameters)
+                if connection.interrupt_events:
+                    self.assertTrue(connection.in_transaction)
+                    self.assertEqual(self.counts(run_id), (1, 2, 8))
+                    raise interruption
+                return cursor
+
+        self.connection.close()
+        connection = sqlite3.connect(
+            self.database_path, isolation_level=None, factory=InterruptingConnection,
+        )
+        self.addCleanup(connection.close)
+        with patch.object(repository.sqlite3, "connect", return_value=connection):
+            self.connection = repository.connect_database(self.database_path)
+        run_id = self.create_run()
+        previous_id = self.persist(run_id)
+        statements = []
+        self.connection.set_trace_callback(statements.append)
+        self.connection.interrupt_events = True
+        try:
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                self.persist(run_id, 1)
+        finally:
+            self.connection.interrupt_events = False
+            self.connection.set_trace_callback(None)
+        self.assertIs(caught.exception, interruption)
+        self.assertEqual(statements.count("ROLLBACK"), 1)
+        self.assertNotIn("COMMIT", statements)
+        self.assertFalse(self.connection.in_transaction)
+        self.assertEqual(self.counts(run_id), (1, 1, 4))
+        self.assertEqual(self.connection.execute("SELECT game_id FROM games").fetchone()[0], previous_id)
+        self.persist(run_id, 1)
+        self.assertEqual(self.counts(run_id), (2, 2, 8))
+
+    def test_rollback_failure_preserves_original_error_closes_connection_and_durable_work(self):
+        run_id = self.create_run()
+        previous_id = self.persist(run_id)
+        previous_run = dict(repository.fetch_run(self.connection, run_id))
+        previous_events = [tuple(row) for row in self.connection.execute(
+            "SELECT * FROM action_events ORDER BY game_id, action_index",
+        )]
+        self.connection.execute(
+            "CREATE TRIGGER reject_progress BEFORE UPDATE OF processed_games ON benchmark_runs "
+            "BEGIN SELECT RAISE(ABORT, 'original persistence failure'); END"
+        )
+        transaction_operations = []
+
+        def refuse_rollback(operation, argument, unused, database, source):
+            if operation == sqlite3.SQLITE_TRANSACTION:
+                transaction_operations.append(argument)
+                if argument == "ROLLBACK":
+                    return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        self.connection.set_authorizer(refuse_rollback)
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "original persistence failure") as caught:
+            self.persist(run_id, 1)
+        self.assertEqual(caught.exception.sqlite_errorcode, sqlite3.SQLITE_CONSTRAINT_TRIGGER)
+        self.assertEqual(caught.exception.__notes__, ["SQLite rollback failed: not authorized"])
+        self.assertEqual(transaction_operations, ["BEGIN", "ROLLBACK"])
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+            self.connection.execute("SELECT 1")
+        self.connection = repository.connect_database(self.database_path)
+        self.addCleanup(self.connection.close)
+        self.assertEqual(dict(repository.fetch_run(self.connection, run_id)), previous_run)
+        self.assertEqual(self.counts(run_id), (1, 1, 4))
+        self.assertEqual([tuple(row) for row in self.connection.execute(
+            "SELECT game_id, game_index FROM games",
+        )], [(previous_id, 0)])
+        self.assertEqual([tuple(row) for row in self.connection.execute(
+            "SELECT * FROM action_events ORDER BY game_id, action_index",
+        )], previous_events)
+
+    def test_sqlite_rollback_trigger_skips_second_rollback_and_connection_stays_usable(self):
+        run_id = self.create_run()
+        previous_id = self.persist(run_id)
+        self.connection.execute(
+            "CREATE TRIGGER rollback_progress BEFORE UPDATE OF processed_games ON benchmark_runs "
+            "BEGIN SELECT RAISE(ROLLBACK, 'SQLite ended the transaction'); END"
+        )
+        transaction_operations = []
+
+        def observe_transactions(operation, argument, unused, database, source):
+            if operation == sqlite3.SQLITE_TRANSACTION:
+                transaction_operations.append(argument)
+            return sqlite3.SQLITE_OK
+
+        self.connection.set_authorizer(observe_transactions)
+        try:
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "SQLite ended the transaction") as caught:
+                self.persist(run_id, 1)
+        finally:
+            self.connection.set_authorizer(None)
+        self.assertEqual(transaction_operations, ["BEGIN"])
+        self.assertFalse(hasattr(caught.exception, "__notes__"))
+        self.assertFalse(self.connection.in_transaction)
+        self.assertEqual(self.counts(run_id), (1, 1, 4))
+        self.assertEqual(self.connection.execute("SELECT game_id FROM games").fetchone()[0], previous_id)
+        self.connection.execute("DROP TRIGGER rollback_progress")
+        self.persist(run_id, 1)
+        self.assertEqual(self.counts(run_id), (2, 2, 8))
+
     def test_game_insert_failure_rolls_back_without_progress(self):
         run_id = self.create_run()
         record, events = completed_game()
