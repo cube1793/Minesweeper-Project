@@ -272,6 +272,42 @@ class RunStatisticsTests(StatisticsTestCase):
                          ((50, base), (90, base + 2), (95, base + 2), (99, base + 2)))
         self.assertTrue(all(type(value) is int for _, value in result.decision_compute_percentiles_ns))
 
+    def test_percentiles_exclude_nulls_include_duplicate_zeros_and_stay_run_scoped(self):
+        run_id = self.create_run(requested_games=12)
+        self.persist(run_id, decisions=tuple(global_certainty(t) for t in (9, 0, 2, 0, 2, 0)))
+        # Each policy-only game contributes a NULL timing, not an observation.
+        for index in range(1, 12):
+            self.persist(run_id, index)
+        other_run = self.create_run(requested_games=1)
+        self.persist(other_run, decisions=(global_certainty(999),))
+
+        result = statistics.calculate_run_statistics(self.connection, run_id)
+
+        self.assertEqual(result.decision_compute_count, 6)
+        self.assertEqual(result.compute_time_total_ns, 13)
+        self.assertEqual(result.mean_decision_compute_ns, Fraction(13, 6))
+        self.assertEqual(result.max_decision_compute_ns, 9)
+        self.assertEqual(result.decision_compute_percentiles_ns,
+                         ((50, 0), (90, 9), (95, 9), (99, 9)))
+
+    def test_percentiles_use_one_ordered_timing_traversal(self):
+        run_id = self.create_run(requested_games=1)
+        self.persist(run_id, decisions=tuple(global_certainty(t) for t in reversed(range(101))))
+        statements = []
+        self.connection.set_trace_callback(statements.append)
+        try:
+            result = statistics.calculate_run_statistics(self.connection, run_id)
+        finally:
+            self.connection.set_trace_callback(None)
+
+        # Nearest ranks ceil(p * 101) are 51, 91, 96, and 100.
+        self.assertEqual(result.decision_compute_percentiles_ns,
+                         ((50, 50), (90, 90), (95, 95), (99, 99)))
+        queries = [" ".join(sql.upper().split()) for sql in statements]
+        ordered_timings = [sql for sql in queries if "DECISION_COMPUTE_NS" in sql and "ORDER BY" in sql]
+        self.assertEqual(len(ordered_timings), 1, ordered_timings)
+        self.assertNotIn("OFFSET", ordered_timings[0])
+
     def test_compute_total_uses_summary_while_decision_statistics_use_raw_events(self):
         run_id = self.create_run()
         game_id = self.persist(run_id, decisions=(global_certainty(9),))

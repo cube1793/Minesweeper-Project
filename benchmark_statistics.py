@@ -14,6 +14,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from fractions import Fraction
+from itertools import islice
 
 from telemetry_repository import decode_probability, fetch_game_indices
 import telemetry_schema as schema
@@ -228,18 +229,23 @@ def calculate_run_statistics(connection: sqlite3.Connection, run_id: int) -> Run
     ).fetchone()
     percentiles = []
     if decision_count:
-        for percent, numerator, denominator in ((50, 1, 2), (90, 9, 10), (95, 19, 20), (99, 99, 100)):
-            rank = (numerator * decision_count + denominator - 1) // denominator
-            # Only one ordered observation crosses into Python per percentile.
-            timing = connection.execute(
-                """
-                SELECT e.decision_compute_ns
-                FROM games g JOIN action_events e ON e.game_id = g.game_id
-                WHERE g.run_id = ? AND g.result IN (?, ?) AND e.decision_compute_ns IS NOT NULL
-                ORDER BY e.decision_compute_ns LIMIT 1 OFFSET ?
-                """, (*game_parameters, rank - 1),
-            ).fetchone()[0]
-            percentiles.append((percent, timing))
+        with closing(connection.execute(
+            """
+            SELECT e.decision_compute_ns
+            FROM games g JOIN action_events e ON e.game_id = g.game_id
+            WHERE g.run_id = ? AND g.result IN (?, ?) AND e.decision_compute_ns IS NOT NULL
+            ORDER BY e.decision_compute_ns
+            """, game_parameters,
+        )) as timings:
+            previous_rank = 0
+            for percent, numerator, denominator in ((50, 1, 2), (90, 9, 10), (95, 19, 20), (99, 99, 100)):
+                rank = (numerator * decision_count + denominator - 1) // denominator
+                # Stream to each rank without retaining skipped rows. Shared
+                # ranks reuse the last value without advancing the cursor.
+                if rank > previous_rank:
+                    timing = next(islice(timings, rank - previous_rank - 1, None))[0]
+                    previous_rank = rank
+                percentiles.append((percent, timing))
 
     probability_distribution = []
     probability_rows = connection.execute(
