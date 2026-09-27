@@ -85,6 +85,21 @@ _RUN_STATUSES = frozenset((
 _UNCHANGED = object()
 
 
+def _configure_writer(connection: sqlite3.Connection) -> None:
+    for setting, requested, expected in (
+        ("foreign_keys", "ON", 1),
+        ("journal_mode", "WAL", "wal"),
+        ("synchronous", "FULL", 2),
+    ):
+        connection.execute(f"PRAGMA {setting} = {requested}")
+        effective = connection.execute(f"PRAGMA {setting}").fetchone()[0]
+        if effective != expected:
+            raise RuntimeError(
+                f"Required SQLite {setting}={requested} was not established: "
+                f"effective value is {effective!r}."
+            )
+
+
 def connect_database(path: str | Path) -> sqlite3.Connection:
     """Open a file database, verify FK/WAL/FULL, and initialize/check its schema.
 
@@ -94,19 +109,26 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     """
     connection = sqlite3.connect(path, isolation_level=None)
     try:
-        for setting, requested, expected in (
-            ("foreign_keys", "ON", 1),
-            ("journal_mode", "WAL", "wal"),
-            ("synchronous", "FULL", 2),
-        ):
-            connection.execute(f"PRAGMA {setting} = {requested}")
-            effective = connection.execute(f"PRAGMA {setting}").fetchone()[0]
-            if effective != expected:
-                raise RuntimeError(
-                    f"Required SQLite {setting}={requested} was not established: "
-                    f"effective value is {effective!r}."
-                )
+        _configure_writer(connection)
         schema.initialize_schema(connection)
+        connection.row_factory = sqlite3.Row
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+def connect_database_for_continuation(path: str | Path) -> sqlite3.Connection:
+    """Open a preflight-approved existing file for FK/WAL/FULL writes.
+
+    The runner must finish every continuation check through a read-only
+    connection before calling this. mode=rw cannot recreate a missing file.
+    No schema initialization or migration is performed. Caller owns close.
+    """
+    uri = Path(path).resolve().as_uri() + "?mode=rw"
+    connection = sqlite3.connect(uri, uri=True, isolation_level=None)
+    try:
+        _configure_writer(connection)
         connection.row_factory = sqlite3.Row
     except BaseException:
         connection.close()

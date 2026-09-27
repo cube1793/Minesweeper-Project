@@ -213,6 +213,49 @@ class RepositoryConnectionTests(RepositoryTestCase):
             repository.connect_database(":memory:")
 
 
+class ContinuationConnectionTests(RepositoryTestCase):
+    def test_existing_writer_preserves_schema_and_uses_normal_repository_modes(self):
+        run_id = self.create_run()
+        before = tuple(self.connection.iterdump())
+        with patch.object(schema, "initialize_schema") as initialize:
+            writer = repository.connect_database_for_continuation(self.database_path)
+        self.addCleanup(writer.close)
+        initialize.assert_not_called()
+        self.assertIsNone(writer.isolation_level)
+        self.assertIs(writer.row_factory, sqlite3.Row)
+        self.assertFalse(writer.in_transaction)
+        self.assertEqual(writer.total_changes, 0)
+        self.assertEqual(tuple(writer.iterdump()), before)
+        for setting, expected in (("foreign_keys", 1), ("journal_mode", "wal"), ("synchronous", 2)):
+            self.assertEqual(writer.execute(f"PRAGMA {setting}").fetchone()[0], expected)
+        repository.update_run_status(writer, run_id, schema.RUN_STATUS_RUNNING)
+        self.assertEqual(repository.fetch_run(self.connection, run_id)["run_status"], "RUNNING")
+
+    def test_missing_file_is_never_recreated_after_preflight(self):
+        missing = self.database_path.with_name("gone.sqlite3")
+        with patch.object(schema, "initialize_schema") as initialize, self.assertRaises(sqlite3.OperationalError):
+            repository.connect_database_for_continuation(missing)
+        initialize.assert_not_called()
+        self.assertFalse(missing.exists())
+
+    def test_existing_writer_uri_escapes_literal_filename(self):
+        self.connection.close()
+        renamed = self.database_path.with_name("계속 #100%.sqlite3")
+        self.database_path.rename(renamed)
+        writer = repository.connect_database_for_continuation(renamed)
+        self.addCleanup(writer.close)
+        self.assertEqual(writer.execute("PRAGMA user_version").fetchone()[0], 1)
+
+    def test_refused_writer_setting_closes_connection(self):
+        candidate = sqlite3.connect(self.database_path, isolation_level=None, factory=RefusedPragmaConnection)
+        candidate.refused_pragma = "synchronous"
+        candidate.refused_value = 1
+        with patch.object(repository.sqlite3, "connect", return_value=candidate), \
+                self.assertRaisesRegex(RuntimeError, "synchronous=FULL"):
+            repository.connect_database_for_continuation(self.database_path)
+        self.assertTrue(candidate.closed)
+
+
 class ReadonlyConnectionTests(RepositoryTestCase):
     def test_supported_database_is_readonly_and_caller_owns_close(self):
         run_id = self.create_run()

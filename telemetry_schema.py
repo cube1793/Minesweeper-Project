@@ -146,6 +146,34 @@ _V1_DDL = (
 )
 
 
+def validate_existing_schema(connection: sqlite3.Connection) -> None:
+    """Read-only validation of the current V1 tables and database integrity.
+
+    Continuation accepts the tables installed by this module, including their
+    constraints, not merely a file tagged user_version=1. Whitespace in DDL is
+    insignificant. No installation, migration or connection reconfiguration
+    occurs here; extra indexes do not change the table contract.
+    """
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version != PHYSICAL_SCHEMA_VERSION:
+        raise ValueError(f"Unsupported SQLite physical schema version: {version}.")
+    for table, statement in zip(("benchmark_runs", "games", "action_events"), _V1_DDL):
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,),
+        ).fetchone()
+        if row is None or row[0].split() != statement.split():
+            raise ValueError(f"Expected current V1 table definition: {table}.")
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'trigger' "
+        "AND tbl_name IN ('benchmark_runs', 'games', 'action_events') LIMIT 1"
+    ).fetchone() is not None:
+        raise ValueError("Unexpected trigger on V1 telemetry tables.")
+    if [row[0] for row in connection.execute("PRAGMA quick_check")] != ["ok"]:
+        raise ValueError("Invalid telemetry database integrity.")
+    if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+        raise ValueError("Invalid telemetry database foreign keys.")
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Install V1 for user_version 0, accept V1, and reject other versions.
 

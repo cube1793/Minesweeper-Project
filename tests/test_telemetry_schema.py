@@ -224,6 +224,44 @@ class TelemetrySchemaTests(unittest.TestCase):
         self.assertEqual(list(self.connection.iterdump()), before)
         self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone(), (1,))
 
+    def test_existing_schema_validation_reads_without_writing_or_changing_modes(self):
+        self.add_parents()
+        insert(self.connection, "action_events", event_values())
+        self.connection.commit()
+        before = list(self.connection.iterdump())
+        changes = self.connection.total_changes
+        statements = []
+        self.connection.set_trace_callback(statements.append)
+        schema.validate_existing_schema(self.connection)
+        self.connection.set_trace_callback(None)
+        self.assertTrue(all(sql.startswith("SELECT ") or sql in {
+            "PRAGMA user_version", "PRAGMA quick_check", "PRAGMA foreign_key_check",
+        } for sql in statements))
+        self.assertFalse(self.connection.in_transaction)
+        self.assertEqual(self.connection.total_changes, changes)
+        self.assertEqual(list(self.connection.iterdump()), before)
+
+    def test_existing_schema_validation_requires_v1_without_installing(self):
+        for version in (0, 2):
+            with self.subTest(version=version):
+                connection = self.new_connection()
+                connection.execute(f"PRAGMA user_version = {version}")
+                before = list(connection.iterdump())
+                with self.assertRaisesRegex(ValueError, "physical schema version"):
+                    schema.validate_existing_schema(connection)
+                self.assertEqual(list(connection.iterdump()), before)
+                self.assertEqual(self.tables(connection), set())
+
+    def test_existing_schema_validation_rejects_missing_uniqueness_not_just_columns(self):
+        connection = self.new_connection()
+        for statement in schema._V1_DDL:
+            connection.execute(statement.replace("UNIQUE (run_id, game_index),", ""))
+        connection.execute("PRAGMA user_version = 1")
+        before = list(connection.iterdump())
+        with self.assertRaisesRegex(ValueError, "table definition: games"):
+            schema.validate_existing_schema(connection)
+        self.assertEqual(list(connection.iterdump()), before)
+
     def test_unsupported_nonzero_versions_fail_without_changes(self):
         for version in (-1, 2, 2147483647):
             with self.subTest(version=version):
