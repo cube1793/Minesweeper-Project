@@ -143,6 +143,28 @@ ZiNi trace의 `ZiniMove`는 `ReplayEvent`와 다른 모델이다. 예를 들어 
 
 ## 4. 핵심 데이터 흐름
 
+### Benchmark Statistics: Pre-Stage 3 / Stage 1 통계·시각화 확장
+
+```text
+ui_manager.py                    진입 버튼과 보조 창 생명주기
+    └─▶ benchmark_statistics_ui.py
+            ├─▶ benchmark_statistics_presentation.py   순수 표시·KO/EN·plot 좌표
+            ├─▶ benchmark_statistics.py                실행 탐색·통계 의미
+            │       └─▶ telemetry_repository.py / telemetry_schema.py
+            └─▶ telemetry_repository.connect_database_readonly()
+```
+
+- `benchmark_statistics.py`는 불변 `BenchmarkRunSummary` 목록을 run_id 내림차순으로 반환하고, 기존 `RunStatistics`와 `RunCoverage`를 계산한다. 통계 공식과 공식 사용 가능 판정은 이 계층에만 있다. UI에는 SQL이나 통계 공식이 없다.
+- Repository의 읽기 전용 연결은 URI `mode=ro`, autocommit을 사용한다. 물리 스키마 버전과 필수 테이블을 확인하며 schema 초기화·migration·journal/synchronous 변경·checkpoint를 하지 않는다. 기존 writer 연결의 FK/WAL/FULL 동작은 유지한다.
+- 보조 창이 연결을 소유한다. 새 DB의 연결·목록·첫 실행 조회 성공 후 이전 연결을 닫는다. 실패 시 기존 선택을 유지하고 오류를 표시한다. 창 닫기와 Escape에서도 연결을 닫는다. 실행 선택 시 짧은 동기 조회를 수행하며 여러 쿼리에 걸친 동시 writer의 snapshot 일관성을 보장하지 않는다.
+- Presentation은 Qt/SQL 없이 분수·비율·나노초와 불변 plot point를 표시용으로 변환한다. 확률의 exact Fraction 순서와 원본 identity를 유지하고 X 좌표만 float으로 변환한다. float이 겹쳐도 점을 합치지 않는다. 추측 횟수와 보드 3BV는 backend 분포 그대로 숫자 막대에 표시한다.
+- 100게임 pilot의 추측 이벤트 396개/정확한 위험 255개에 맞춰 위험 그래프는 연속 확률 축의 scatter를 쓴다. Hover·점 선택·분수 목록으로 exact risk를 확인하며 categorical label 255개나 새로운 확률 bin을 만들지 않는다.
+- 한국어/영어는 이 창 전용 텍스트 사전과 runtime selector로 전환한다. 도메인 식별자는 그대로 유지한다. 번역 시 현재 결과와 plot item을 유지하고 통계를 다시 조회하지 않는다.
+- 계산 시간은 환경 영향을 받는 진단 지표다. 평균·최대와 네 percentile을 함께 표시한다. 100게임 측정은 thread, cache, index 추가의 근거가 아니므로 도입하지 않는다. 확장성은 1k/10k pilot에서 재평가한다.
+- **Pairing UI: DEFER / REVISIT WHEN STAGE 3 COMPARISON UI EXISTS.** 실제 Stage 3 비교 흐름이 생길 때 두 실행·접두 범위 선택 GUI를 재검토한다. `validate_paired_prefix()`, paired identity, 공식/진단 규칙과 Batch 8 테스트는 유지된다.
+
+검증은 repository 읽기 전용/파일 보존, 실행 목록의 불변성·SELECT-only, 순수 포맷/정확한 확률 순서, 실제 offscreen Qt의 연결·언어·그래프·main engine ownership 경계를 포함한다. 자동 테스트는 자체 임시 DB를 쓰며 외부 pilot artifact에 의존하지 않는다.
+
 ### 4.1 Live 입력과 분석·자동 진행
 
 ```text

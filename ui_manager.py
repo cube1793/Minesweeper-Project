@@ -351,6 +351,7 @@ class MinesweeperUI(QWidget):
     def __init__(self, engine: MinesweeperEngine):
         super().__init__()
         self.engine = engine
+        self._benchmark_statistics_window = None
         self._game_over = False
         self._buttons = {}
         self._analysis_result: LiveAnalysis | None = None
@@ -418,10 +419,22 @@ class MinesweeperUI(QWidget):
         self._update_statistics_panel(self.engine.get_stats())
 
     def closeEvent(self, event):
-        """Stop any running ZiNi worker when the UI is closing."""
+        """Close auxiliary statistics and stop the worker when the UI closes."""
+        if self._benchmark_statistics_window is not None:
+            self._benchmark_statistics_window.close()
         self._stop_simple_auto()
         self._terminate_zini_metric_process()
         super().closeEvent(event)
+
+    def on_benchmark_statistics(self):
+        """Own only the auxiliary viewer's lifetime; leave gameplay untouched."""
+        from benchmark_statistics_ui import BenchmarkStatisticsWindow
+
+        if self._benchmark_statistics_window is None:
+            self._benchmark_statistics_window = BenchmarkStatisticsWindow(self)
+        self._benchmark_statistics_window.show()
+        self._benchmark_statistics_window.raise_()
+        self._benchmark_statistics_window.activateWindow()
 
     def _engine_for_current_mode(self) -> MinesweeperEngine:
         """Return the current Replay engine without replacing the live engine."""
@@ -483,6 +496,10 @@ class MinesweeperUI(QWidget):
         # 통계 테이블
         self.stats_table = self._build_stats_table()
         layout.addWidget(self.stats_table)
+
+        self.benchmark_statistics_button = QPushButton("벤치마크 통계")
+        self.benchmark_statistics_button.clicked.connect(self.on_benchmark_statistics)
+        layout.addWidget(self.benchmark_statistics_button)
 
         return panel
 

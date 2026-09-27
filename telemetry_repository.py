@@ -114,6 +114,36 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     return connection
 
 
+def connect_database_readonly(path: str | Path) -> sqlite3.Connection:
+    """Open an existing V1 telemetry file for passive reads and verify FK=ON.
+
+    The caller owns close. URI escaping preserves literal filename characters;
+    mode=ro rejects missing files and prevents writes to the database. No schema
+    initialization, journal/synchronous changes, or checkpointing occurs here.
+    """
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True, isolation_level=None)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        effective = connection.execute("PRAGMA foreign_keys").fetchone()[0]
+        if effective != 1:
+            raise RuntimeError(
+                "Required SQLite foreign_keys=ON was not established: "
+                f"effective value is {effective!r}."
+            )
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version != schema.PHYSICAL_SCHEMA_VERSION:
+            raise ValueError(f"Unsupported SQLite physical schema version: {version}.")
+        # Even an empty viewer must reject a V1-tagged, non-telemetry database.
+        for table in ("benchmark_runs", "games", "action_events"):
+            connection.execute(f"SELECT 1 FROM {table} LIMIT 0").close()
+        connection.row_factory = sqlite3.Row
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
 @contextmanager
 def _transaction(connection: sqlite3.Connection):
     """Own one transaction without committing or rolling back caller work."""

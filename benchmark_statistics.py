@@ -24,6 +24,44 @@ class BenchmarkStatisticsError(ValueError):
 
 
 @dataclass(frozen=True)
+class BenchmarkRunSummary:
+    run_id: int
+    created_at: str
+    run_status: str
+    solver_stage: str
+    solver_policy: str
+    benchmark_set_id: str
+    width: int
+    height: int
+    num_mines: int
+    first_click_policy: str
+    board_generator_version: str
+    telemetry_schema_version: int
+    requested_games: int
+    processed_games: int
+    git_dirty: bool
+
+
+def list_benchmark_runs(connection: sqlite3.Connection) -> tuple[BenchmarkRunSummary, ...]:
+    """List persisted identities, highest run_id first, without changing the caller."""
+    with closing(connection.cursor()) as cursor:
+        cursor.row_factory = sqlite3.Row
+        rows = cursor.execute(
+            """
+            SELECT run_id, created_at, run_status, solver_stage, solver_policy,
+                   benchmark_set_id, width, height, num_mines, first_click_policy,
+                   board_generator_version, telemetry_schema_version,
+                   requested_games, processed_games, git_dirty
+            FROM benchmark_runs ORDER BY run_id DESC
+            """
+        ).fetchall()
+    return tuple(
+        BenchmarkRunSummary(**{**dict(row), "git_dirty": bool(row["git_dirty"])})
+        for row in rows
+    )
+
+
+@dataclass(frozen=True)
 class RunCoverage:
     run_id: int
     run_status: str

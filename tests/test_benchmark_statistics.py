@@ -122,6 +122,49 @@ class StatisticsTestCase(unittest.TestCase):
         return left, right
 
 
+class RunDiscoveryTests(StatisticsTestCase):
+    def test_empty_database_returns_immutable_empty_tuple(self):
+        self.assertEqual(statistics.list_benchmark_runs(self.connection), ())
+
+    def test_exact_metadata_and_newest_id_first(self):
+        first = self.create_run(requested_games=1)
+        self.persist(first)
+        self.finish(first)
+        first_summary, = statistics.list_benchmark_runs(self.connection)
+        self.assertEqual(first_summary, statistics.BenchmarkRunSummary(
+            first, "2026-09-27T00:00:00Z", "COMPLETED", "STAGE_2", "SIMPLE_MINIMUM_RISK",
+            "TEST_STATISTICS_V1", 8, 6, 7, "FIRST_CLICK_FIXED_0_0", "V1", 1, 1, 1, False,
+        ))
+        second = self.create_run(git_dirty=True, run_status="FAILED",
+                                 solver_stage="TEST_STAGE", created_at="2020-01-01T00:00:00Z")
+        rows = statistics.list_benchmark_runs(self.connection)
+        self.assertEqual(tuple(row.run_id for row in rows), (second, first))
+        self.assertEqual(rows[0].solver_stage, "TEST_STAGE")
+        self.assertEqual(rows[0].processed_games, 0)
+        self.assertIs(rows[0].git_dirty, True)
+        with self.assertRaises(FrozenInstanceError):
+            rows[0].run_id = 999
+
+    def test_select_only_preserves_reader_configuration_and_caller_transaction(self):
+        self.create_run()
+        reader = repository.connect_database_readonly(self.database)
+        self.addCleanup(reader.close)
+        reader.row_factory = None
+        reader.execute("BEGIN")
+        changes = reader.total_changes
+        statements = []
+        reader.set_trace_callback(statements.append)
+        result = statistics.list_benchmark_runs(reader)
+        reader.set_trace_callback(None)
+        self.assertEqual(len(result), 1)
+        self.assertTrue(all(sql.lstrip().upper().startswith("SELECT ") for sql in statements))
+        self.assertTrue(reader.in_transaction)
+        self.assertIsNone(reader.row_factory)
+        self.assertIsNone(reader.isolation_level)
+        self.assertEqual(reader.total_changes, changes)
+        self.assertEqual(reader.execute("SELECT 1").fetchone(), (1,))
+
+
 class RunStatisticsTests(StatisticsTestCase):
     def test_unknown_run_rejected_by_both_statistics_entry_points(self):
         for function in (statistics.get_run_coverage, statistics.calculate_run_statistics):

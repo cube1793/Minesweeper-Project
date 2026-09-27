@@ -2,6 +2,7 @@
 
 import ast
 import copy
+import hashlib
 import json
 import sqlite3
 import sys
@@ -210,6 +211,104 @@ class RepositoryConnectionTests(RepositoryTestCase):
     def test_memory_database_is_rejected_instead_of_weakening_wal(self):
         with self.assertRaises(RuntimeError):
             repository.connect_database(":memory:")
+
+
+class ReadonlyConnectionTests(RepositoryTestCase):
+    def test_supported_database_is_readonly_and_caller_owns_close(self):
+        run_id = self.create_run()
+        with patch.object(schema, "initialize_schema") as initialize:
+            reader = repository.connect_database_readonly(self.database_path)
+        self.addCleanup(reader.close)
+        initialize.assert_not_called()
+        self.assertIsNone(reader.isolation_level)
+        self.assertIs(reader.row_factory, sqlite3.Row)
+        self.assertFalse(reader.in_transaction)
+        self.assertEqual(reader.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+        self.assertEqual(repository.fetch_run(reader, run_id)["run_id"], run_id)
+        with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+            reader.execute("INSERT INTO benchmark_runs SELECT * FROM benchmark_runs")
+        with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+            reader.execute("CREATE TABLE accidental_write (value)")
+        self.assertEqual(reader.execute("SELECT 1").fetchone()[0], 1)
+        reader.close()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            reader.execute("SELECT 1")
+
+    def test_foreign_keys_must_be_established_or_candidate_is_closed(self):
+        for effective in (0, 2, None):
+            with self.subTest(effective=effective):
+                reader = sqlite3.connect(
+                    self.database_path.as_uri() + "?mode=ro", uri=True,
+                    isolation_level=None, factory=RefusedPragmaConnection,
+                )
+                self.addCleanup(reader.close)
+                reader.refused_pragma = "foreign_keys"
+                reader.refused_value = effective
+                with patch.object(repository.sqlite3, "connect", return_value=reader):
+                    with self.assertRaisesRegex(
+                        RuntimeError, f"foreign_keys=ON was not established: effective value is {effective!r}",
+                    ):
+                        repository.connect_database_readonly(self.database_path)
+                self.assertTrue(reader.closed)
+
+    def test_missing_path_is_not_created(self):
+        missing = self.database_path.with_name("missing.sqlite3")
+        with self.assertRaises(sqlite3.OperationalError):
+            repository.connect_database_readonly(missing)
+        self.assertFalse(missing.exists())
+
+    def test_unsupported_version_including_zero_closes_failed_reader(self):
+        real_connect = sqlite3.connect
+        for version in (0, 2, 99):
+            self.connection.execute(f"PRAGMA user_version = {version}")
+            reader = real_connect(self.database_path, factory=ClosingConnection)
+            with patch.object(repository.sqlite3, "connect", return_value=reader):
+                with self.assertRaisesRegex(ValueError, "physical schema version"):
+                    repository.connect_database_readonly(self.database_path)
+            self.assertTrue(reader.closed)
+
+    def test_invalid_file_and_missing_tables_rejected_without_repair(self):
+        invalid = self.database_path.with_name("invalid.db")
+        invalid.write_bytes(b"not SQLite")
+        with self.assertRaises(sqlite3.DatabaseError):
+            repository.connect_database_readonly(invalid)
+        for table in ("action_events", "games", "benchmark_runs"):
+            self.connection.execute(f"DROP TABLE {table}")
+            with self.assertRaisesRegex(sqlite3.OperationalError, "no such table"):
+                repository.connect_database_readonly(self.database_path)
+
+    def test_reader_setup_preserves_file_schema_and_journal(self):
+        self.create_run()
+        before_schema = tuple(self.connection.iterdump())
+        self.connection.close()
+        before_hash = hashlib.sha256(self.database_path.read_bytes()).hexdigest()
+        statements = []
+        real_connect = sqlite3.connect
+
+        def traced_connect(*args, **kwargs):
+            reader = real_connect(*args, **kwargs)
+            reader.set_trace_callback(statements.append)
+            return reader
+
+        with patch.object(repository.sqlite3, "connect", side_effect=traced_connect):
+            reader = repository.connect_database_readonly(self.database_path)
+        self.addCleanup(reader.close)
+        allowed_pragmas = {"PRAGMA foreign_keys = ON", "PRAGMA foreign_keys", "PRAGMA user_version"}
+        self.assertEqual(statements[:2], ["PRAGMA foreign_keys = ON", "PRAGMA foreign_keys"])
+        self.assertTrue(all(sql.startswith("SELECT ") or sql in allowed_pragmas
+                            for sql in statements))
+        self.assertEqual(reader.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        self.assertEqual(tuple(reader.iterdump()), before_schema)
+        reader.close()
+        self.assertEqual(hashlib.sha256(self.database_path.read_bytes()).hexdigest(), before_hash)
+
+    def test_uri_filename_escaping_preserves_unicode_hash_and_percent(self):
+        self.connection.close()
+        renamed = self.database_path.with_name("통계 #100%.sqlite3")
+        self.database_path.rename(renamed)
+        reader = repository.connect_database_readonly(str(renamed))
+        self.addCleanup(reader.close)
+        self.assertEqual(reader.execute("PRAGMA user_version").fetchone()[0], 1)
 
 
 class RepositoryRunTests(RepositoryTestCase):
