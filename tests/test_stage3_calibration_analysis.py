@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "calibration/stage3_calibration_manifest_v1.json"
 FROZEN_SHA = "07ce6943abec4f47474f50bfb317fea3dcd9c51afcf87c316adef674f58ce61d"
 CONSTANT_TABLE_SHA = "a93610593cc0fc723857790e2ff95a3b0a4d75a91c480f4e92c1d7082bf3b3e0"
+SYNTHETIC_FLOOR_TABLE_SHA = "5460a64cf365029f554c0c689f70eabe49d7618d526f5e582c0a14c0a78c76ba"
 SCHEDULE = json.loads(MANIFEST_PATH.read_bytes())
 
 
@@ -56,7 +57,7 @@ def synthetic_fixture(*, constant=False):
         for trial in SCHEDULE["trials"]:
             start = [28 * v + 14.0 for v in trial["start_cell"]]
             target = [28 * v + 14.0 for v in trial["target_cell"]]
-            duration = 100_000_000 if constant else int((100_000_000 + 25_000_000 *
+            duration = 100_000_000 if constant else int(max(Decimal(100_000_000), 90_000_000 *
                       reference_x(trial["abs_dx"], trial["abs_dy"])).to_integral_value())
             if trial["phase"] == "WARMUP":
                 duration = 9_999_999_999  # Deliberately unrelated to fitted costs.
@@ -137,7 +138,7 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(len(report["offsets"]), 16)
         self.assertTrue(all(row["count"] == 24 for row in report["offsets"]))
         self.assertEqual(profile["fitted_c_us"], "100000")
-        self.assertLess(abs(Decimal(profile["fitted_b_us"]) - 25000), Decimal("0.0002"))
+        self.assertLess(abs(Decimal(profile["fitted_k_us"]) - 90000), Decimal("0.0002"))
 
     def test_canonical_source_filenames_are_recorded_in_provenance(self):
         report, profile = self.analyze()
@@ -341,7 +342,7 @@ class SessionAnalysisTests(unittest.TestCase):
         retime(self.records)
         report2, profile2 = self.analyze()
         self.assertEqual(profile1["table_sha256"], profile2["table_sha256"])
-        self.assertEqual(report1["anchored_fit"], report2["anchored_fit"])
+        self.assertEqual(report1["authoritative_fit"], report2["authoritative_fit"])
         self.assertEqual(report1["button_transitions"], report2["button_transitions"])
 
     def test_slow_valid_observation_retained_but_fit_uses_medians(self):
@@ -354,7 +355,7 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(offset["count"], 24)
         self.assertEqual(offset["max_ns"], 10**16)
         self.assertEqual(profile1["table_sha256"], profile2["table_sha256"])
-        self.assertEqual(report1["anchored_fit"], report2["anchored_fit"])
+        self.assertEqual(report1["authoritative_fit"], report2["authoritative_fit"])
 
     def test_majority_slow_valid_observations_change_median_and_fit(self):
         selected = [r for r in self.records if r["phase"] == "OFFICIAL" and r["offset_id"] == "O04"]
@@ -364,7 +365,7 @@ class SessionAnalysisTests(unittest.TestCase):
         report, profile = self.analyze()
         offset = next(o for o in report["offsets"] if o["offset_id"] == "O04")
         self.assertEqual(offset["median_ns"], "1000000000000")
-        self.assertGreater(Decimal(profile["fitted_b_us"]), 25000)
+        self.assertGreater(Decimal(profile["fitted_k_us"]), 90000)
 
     def test_exact_even_median_and_anchored_c(self):
         selected = [r for r in self.records if r["phase"] == "OFFICIAL" and r["offset_id"] == "O00"]
@@ -375,13 +376,16 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(report["offsets"][0]["median_ns"], "100000011.5")
         self.assertEqual(profile["fitted_c_us"], "100000.0115")
 
-    def test_negative_anchored_slope_is_rejected(self):
+    def test_nonzero_medians_below_floor_choose_zero_k_without_additive_rejection(self):
         for r in self.records:
             if r["phase"] == "OFFICIAL" and r["offset_id"] == "O00":
                 r["duration_ns"] = 10**12
         retime(self.records)
-        with self.assertRaisesRegex(ValueError, "b >= 0"):
-            self.analyze()
+        report, profile = self.analyze()
+        self.assertEqual(profile["fitted_k_us"], "0")
+        self.assertEqual(profile["timing_table_us"], [[10**9] * 16 for _ in range(30)])
+        self.assertLess(Decimal(report["additive_anchored_diagnostic"]["b_us"]), 0)
+        self.assertFalse(report["additive_anchored_diagnostic"]["authoritative"])
 
     def test_free_fit_and_equal_distance_diagnostics_do_not_replace_anchor(self):
         for r in self.records:
@@ -393,7 +397,14 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertFalse(free["authoritative"])
         self.assertNotEqual(free["c_hat_us"], profile["fitted_c_us"])
         self.assertEqual(profile["fitted_c_us"], "100000")
-        self.assertEqual(profile["fitted_b_us"], report["anchored_fit"]["b_us"])
+        self.assertEqual(profile["fitted_k_us"], report["authoritative_fit"]["k_us"])
+        self.assertNotEqual(free["b_hat_us"], profile["fitted_k_us"])
+        old = report["additive_anchored_diagnostic"]
+        self.assertFalse(old["authoritative"])
+        with localcontext(analysis.numeric_context()):
+            self.assertEqual(Decimal(free["b_hat_minus_b_us"]), Decimal(free["b_hat_us"]) - Decimal(old["b_us"]))
+            self.assertEqual(Decimal(free["b_hat_minus_k_us"]), Decimal(free["b_hat_us"]) - Decimal(profile["fitted_k_us"]))
+        self.assertNotEqual(old["b_us"], profile["fitted_k_us"])
         shape = report["shape_sanity"]["equal_distance_families"]
         self.assertEqual(shape["observed_median_difference_us"], "100000")
         self.assertTrue(shape["equal_prediction"] and shape["equal_table_ticks"])
@@ -407,6 +418,44 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(len(orientations), 89)
         self.assertEqual(sum(r["count"] for r in orientations), 384)
         self.assertTrue(all("median_residual_us" in r for r in orientations))
+
+    def test_all_report_predictions_and_residuals_use_floor_model(self):
+        report, profile = self.analyze()
+        fit = report["authoritative_fit"]
+        self.assertEqual(fit["table_sha256"], profile["table_sha256"])
+        self.assertEqual(fit["residual_definition"], "observed median minus predicted median, us")
+        self.assertEqual(fit["floor_offset_ids"], ["O01"])
+        self.assertEqual(fit["active_offset_ids"], [f"O{i:02}" for i in range(2, 16)])
+        with localcontext(Context(prec=120, rounding=ROUND_HALF_EVEN)):
+            c, k = Decimal(fit["c_us"]), Decimal(fit["k_us"])
+            predictions = {name: max(c, k * reference_x(dx, dy)) for name, dx, dy in SCHEDULE["offsets"]}
+            for row in report["offsets"]:
+                self.assertLess(abs(Decimal(row["predicted_median_us"]) - predictions[row["offset_id"]]), Decimal("1e-70"))
+            for rows, key in ((report["offsets"], "residual_us"),
+                              (report["offset_button_transitions"], "median_residual_us"),
+                              (report["orientations"], "median_residual_us")):
+                for row in rows:
+                    expected = Decimal(row["median_ns"]) / 1000 - predictions[row["offset_id"]]
+                    self.assertLess(abs(Decimal(row[key]) - expected), Decimal("1e-70"))
+            residuals = [Decimal(row["residual_us"]) for row in report["offsets"]]
+            sse = sum(r*r for r in residuals[1:])
+            self.assertLess(abs(Decimal(fit["objective_sse_us2"]) - sse), Decimal("1e-70"))
+            for count, metrics in ((16, {"mae_us": fit["residual_mae_us"], "rmse_us": fit["residual_rmse_us"]}),
+                                   (15, fit["nonzero_residual_metrics"])):
+                self.assertLess(abs(Decimal(metrics["mae_us"]) - sum(abs(r) for r in residuals) / count), Decimal("1e-70"))
+                self.assertLess(abs(Decimal(metrics["rmse_us"]) - (sse / count).sqrt()), Decimal("1e-70"))
+            self.assertLess(abs(Decimal(fit["crossover_x"]) - c/k), Decimal("1e-77"))
+            distance = ((c/k)*Decimal(2).ln()).exp() - 1
+            self.assertLess(abs(Decimal(fit["crossover_distance_cells"]) - distance), Decimal("1e-77"))
+        self.assertEqual(fit["nonzero_residual_metrics"]["count"], 15)
+        self.assertEqual(fit["crossover_status"], "finite")
+
+    def test_fitted_profile_permits_t00_equal_t10(self):
+        _, profile = self.analyze()
+        table = profile["timing_table_us"]
+        self.assertEqual(table[0][0], 100000)
+        self.assertEqual(table[1][0], table[0][0])
+        self.assertGreater(table[1][1], table[0][0])
 
     def test_click_and_path_diagnostics_do_not_define_duration(self):
         chosen = next(r for r in self.records if r["phase"] == "OFFICIAL" and r["offset_id"] == "O01")
@@ -432,7 +481,7 @@ class SessionAnalysisTests(unittest.TestCase):
             length = sum(((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2).sqrt() for a, b in zip(points, points[1:]))
             self.assertLess(abs(Decimal(item["path_ratio"]) - length / 28), Decimal("1e-70"))
         self.assertEqual(profile["fitted_c_us"], "100000")
-        self.assertLess(abs(Decimal(profile["fitted_b_us"]) - 25000), Decimal("0.0002"))
+        self.assertLess(abs(Decimal(profile["fitted_k_us"]) - 90000), Decimal("0.0002"))
         self.assertTrue(all(x["path_ratio"] is None for x in diagnostic["trials"] if x["offset_id"] == "O00"))
 
     def test_profile_schema_and_exact_provenance(self):
@@ -450,7 +499,26 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(profile["table_order"], "dx_major_dy_minor")
         self.assertEqual(profile["numeric_contract"]["precision"], 80)
         self.assertIsInstance(profile["fitted_c_us"], str)
-        self.assertIsInstance(profile["fitted_b_us"], str)
+        self.assertIsInstance(profile["fitted_k_us"], str)
+        self.assertEqual(report["analysis_report_version"], 1)
+        self.assertEqual(profile["model_id"], "overlap_floor_log2_distance_v1")
+        self.assertEqual(profile["model_formula"], "T_us(dx,dy)=max(c_us,k_us*log2(1+sqrt(dx^2+dy^2)))")
+        for key in ("model_id", "model_formula", "parameter_semantics"):
+            self.assertEqual(profile[key], report["authoritative_fit"][key])
+        self.assertEqual(profile["parameter_semantics"], {
+            "c_us": "empirical same-cell execution-time floor",
+            "k_us": "distance-dependent execution coefficient",
+        })
+        self.assertEqual(profile["physical_execution"], {
+            "includes": ["pre-presented target execution", "LEFT/RIGHT button selection",
+                         "ordinary motor preparation", "cursor movement", "target press"],
+            "excludes": ["Minesweeper board reading", "safe/mine inference",
+                         "probability reasoning", "strategic deliberation"],
+        })
+        self.assertNotIn("fitted_b_us", profile)
+        self.assertNotIn("b_us", report["authoritative_fit"])
+        self.assertNotIn("anchored_fit", report)
+        self.assertNotIn(b"c_us+b_us", analysis.canonical_output_bytes(profile))
         self.assertNotIn(b"trajectory", analysis.canonical_output_bytes(profile))
         self.assertEqual(report["session_metadata"], self.session)
 
@@ -461,17 +529,23 @@ class SessionAnalysisTests(unittest.TestCase):
                             display_refresh_rate_unavailable_reason=None, device_pixel_ratio=2.0)
         report2, profile2 = self.analyze()
         self.assertEqual(profile1["table_sha256"], profile2["table_sha256"])
-        self.assertEqual(report1["anchored_fit"], report2["anchored_fit"])
+        self.assertEqual(report1["authoritative_fit"], report2["authoritative_fit"])
         self.assertEqual(report2["session_metadata"]["display_refresh_rate_hz"], 144.0)
 
     def test_constant_synthetic_profile_literal_golden(self):
         self.session, self.records = synthetic_fixture(constant=True)
-        _, profile = self.analyze()
+        report, profile = self.analyze()
         expected = ",".join(["100000"] * 480).encode("ascii")
-        self.assertEqual(profile["fitted_b_us"], "0")
+        self.assertEqual(profile["fitted_k_us"], "0")
         self.assertEqual(profile["table_sha256"], CONSTANT_TABLE_SHA)
         self.assertEqual(hashlib.sha256(expected).hexdigest(), CONSTANT_TABLE_SHA)
         self.assertEqual(profile["timing_table_us"], [[100000] * 16 for _ in range(30)])
+        fit = report["authoritative_fit"]
+        self.assertEqual(fit["crossover_status"], "no_finite_crossover_k_zero")
+        self.assertIsNone(fit["crossover_x"])
+        self.assertIsNone(fit["crossover_distance_cells"])
+        self.assertEqual(fit["active_offset_ids"], [])
+        self.assertEqual(fit["floor_offset_ids"], [f"O{i:02}" for i in range(1, 16)])
 
     def test_repeated_analysis_identical_and_raw_files_unchanged(self):
         self.save()
@@ -552,23 +626,101 @@ class NumericContractTests(unittest.TestCase):
             self.assertLess(abs(d - Decimal(1066).sqrt()), Decimal("1e-77"))
             self.assertLess(abs(x - reference_x(29, 15)), Decimal("1e-77"))
 
-    def test_fit_matches_independent_median_formula_and_residuals(self):
+    def test_fit_matches_independent_120_digit_enumeration_and_keeps_additive_diagnostics(self):
         medians = {name: Decimal(100_000_000 + i * i * 10_000_000)
                    for i, (name, _, _) in enumerate(SCHEDULE["offsets"])}
         fit = analysis.fit_offset_medians(medians)
         with localcontext(Context(prec=120)):
             xs = [reference_x(dx, dy) for _, dx, dy in SCHEDULE["offsets"]]
             ys = [medians[name] / 1000 for name, _, _ in SCHEDULE["offsets"]]
-            b = sum(x * (y - ys[0]) for x, y in zip(xs[1:], ys[1:])) / sum(x**2 for x in xs[1:])
-            self.assertEqual(fit["c_us"], ys[0])
-            self.assertLess(abs(fit["b_us"] - b), Decimal("1e-70"))
-            residuals = [y - (ys[0] + b * x) for x, y in zip(xs, ys)]
+            c = ys[0]
+            # Independently enumerate all active prefixes in descending x order.
+            # Even infeasible stationary points may be scored: this superset
+            # includes every optimum, and the actual max() objective ranks it.
+            descending = sorted(zip(xs[1:], ys[1:]), reverse=True)
+            candidates = [Decimal(0)] + [c/x for x in xs[1:]]
+            for length in range(1, 16):
+                active = descending[:length]
+                candidates.append(sum(x*y for x, y in active) / sum(x*x for x, _ in active))
+            k = min(candidates, key=lambda v: (sum((y-max(c, v*x))**2 for x, y in zip(xs[1:], ys[1:])), v))
+            self.assertEqual(fit["c_us"], c)
+            self.assertLess(abs(fit["k_us"] - k), Decimal("1e-70"))
+            residuals = [y - max(c, k*x) for x, y in zip(xs, ys)]
             self.assertLess(abs(fit["residual_mae_us"] - sum(abs(r) for r in residuals) / 16), Decimal("1e-70"))
             self.assertLess(abs(fit["residual_rmse_us"] - (sum(r*r for r in residuals) / 16).sqrt()), Decimal("1e-70"))
+            # The previous additive fit retains the same observations and values,
+            # but only under an explicitly non-authoritative diagnostic section.
+            b = sum(x * (y - ys[0]) for x, y in zip(xs[1:], ys[1:])) / sum(x**2 for x in xs[1:])
+            old = fit["additive_anchored_diagnostic"]
+            self.assertFalse(old["authoritative"])
+            self.assertLess(abs(old["b_us"] - b), Decimal("1e-70"))
+            residuals = [y - (ys[0] + b * x) for x, y in zip(xs, ys)]
+            self.assertLess(abs(old["residual_mae_us"] - sum(abs(r) for r in residuals) / 16), Decimal("1e-70"))
+            self.assertLess(abs(old["residual_rmse_us"] - (sum(r*r for r in residuals) / 16).sqrt()), Decimal("1e-70"))
             x_mean, y_mean = sum(xs) / 16, sum(ys) / 16
             b_hat = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys)) / sum((x - x_mean)**2 for x in xs)
             self.assertLess(abs(fit["b_hat_us"] - b_hat), Decimal("1e-70"))
             self.assertLess(abs(fit["c_hat_us"] - (y_mean - b_hat * x_mean)), Decimal("1e-70"))
+
+    def test_stationary_point_strictly_inside_region(self):
+        # Breakpoints are 5 and 10. Only x=2 is active at the optimum 8.
+        self.assertEqual(analysis._fit_floor_coefficient(Decimal(10), [Decimal(1), Decimal(2)],
+                                                       [Decimal(5), Decimal(16)]), Decimal(8))
+
+    def test_optimum_exactly_at_breakpoint(self):
+        # Left stationary point 12 and right point 9.8 are both infeasible.
+        self.assertEqual(analysis._fit_floor_coefficient(Decimal(10), [Decimal(1), Decimal(2)],
+                                                       [Decimal(1), Decimal(24)]), Decimal(10))
+
+    def test_exact_equal_sse_at_distinct_minima_selects_smaller_k(self):
+        c, xs, ys = Decimal(12), [Decimal(3), Decimal(4)], [Decimal(18), Decimal(14)]
+        for k in (Decimal("3.5"), Decimal("4.4")):
+            self.assertEqual(sum((y-max(c, k*x))**2 for x, y in zip(xs, ys)), Decimal(36))
+        self.assertEqual(analysis._fit_floor_coefficient(c, xs, ys), Decimal("3.5"))
+        self.assertEqual(analysis._fit_floor_coefficient(c, xs[::-1], ys[::-1]), Decimal("3.5"))
+
+    def test_global_optimum_after_earlier_local_minimum(self):
+        self.assertEqual(analysis._fit_floor_coefficient(Decimal(12), [Decimal(3), Decimal(4)],
+                                                       [Decimal(20), Decimal(14)]), Decimal("4.64"))
+
+    def test_duplicate_breakpoints_and_final_unbounded_region(self):
+        with localcontext(analysis.numeric_context()):
+            expected = Decimal(70) / 3
+        self.assertEqual(analysis._fit_floor_coefficient(Decimal(10), [Decimal(1), Decimal(1), Decimal(2)],
+                                                       [Decimal(30), Decimal(30), Decimal(40)]), expected)
+
+    def test_flat_objective_selects_zero_even_when_positive_k_ties(self):
+        medians = {name: Decimal(100_000_000) for name, _, _ in SCHEDULE["offsets"]}
+        fit = analysis.fit_offset_medians(medians)
+        self.assertEqual(fit["k_us"], Decimal(0))
+        self.assertEqual(fit["objective_sse_us2"], Decimal(0))
+        self.assertIsNone(fit["crossover_x"])
+        self.assertIsNone(fit["crossover_distance_cells"])
+
+    def test_invalid_floor_and_medians_rejected(self):
+        medians = {name: Decimal(100_000_000) for name, _, _ in SCHEDULE["offsets"]}
+        for name in ("O00", "O04"):
+            for value in (0, -1, 100_000_000.0, Decimal("NaN"), Decimal("Infinity")):
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    analysis.fit_offset_medians({**medians, name: value})
+
+    def test_fit_is_repeatable_and_uses_frozen_order_not_mapping_order(self):
+        medians = {name: Decimal(100_000_000 + i*i*10_000_000)
+                   for i, (name, _, _) in enumerate(SCHEDULE["offsets"])}
+        fit = analysis.fit_offset_medians(medians)
+        self.assertEqual(fit, analysis.fit_offset_medians(medians))
+        self.assertEqual(fit, analysis.fit_offset_medians(dict(reversed(list(medians.items())))))
+
+    def test_authoritative_fit_and_table_have_no_binary_float_dependency(self):
+        medians = {name: Decimal(100_000_000 + i*10_000_000)
+                   for i, (name, _, _) in enumerate(SCHEDULE["offsets"])}
+        with patch.object(analysis, "float", create=True, side_effect=AssertionError("no float conversion")), \
+                patch("math.sqrt", side_effect=AssertionError("no binary sqrt")), \
+                patch("math.log2", side_effect=AssertionError("no binary log2")), \
+                patch("math.log", side_effect=AssertionError("no binary log")):
+            fit = analysis.fit_offset_medians(medians)
+            table = analysis.build_timing_table(fit["c_us"], fit["k_us"])
+            self.assertEqual(len(table), 30)
 
     def test_table_shape_positive_and_t00(self):
         table = analysis.build_timing_table(Decimal("12345.6"), Decimal("23456.7"))
@@ -581,21 +733,34 @@ class NumericContractTests(unittest.TestCase):
     def test_half_even_rounding_boundaries(self):
         self.assertEqual(analysis.build_timing_table(Decimal("1000.5"), Decimal(0))[0][0], 1000)
         self.assertEqual(analysis.build_timing_table(Decimal("1001.5"), Decimal(0))[0][0], 1002)
-        self.assertEqual(analysis.build_timing_table(Decimal(1000), Decimal("0.5"))[1][0], 1000)
-        self.assertEqual(analysis.build_timing_table(Decimal(1001), Decimal("0.5"))[1][0], 1002)
-        self.assertEqual(analysis.build_timing_table(Decimal(1000), Decimal("0.25"))[3][0], 1000)
-        self.assertEqual(analysis.build_timing_table(Decimal(1001), Decimal("0.25"))[3][0], 1002)
+        self.assertEqual(analysis.build_timing_table(Decimal(1), Decimal("1000.5"))[1][0], 1000)
+        self.assertEqual(analysis.build_timing_table(Decimal(1), Decimal("1001.5"))[1][0], 1002)
+        self.assertEqual(analysis.build_timing_table(Decimal(1), Decimal("500.25"))[3][0], 1000)
+        self.assertEqual(analysis.build_timing_table(Decimal(1), Decimal("500.75"))[3][0], 1002)
 
     def test_table_matches_120_digit_reference_for_all_entries(self):
-        c, b = Decimal("12345.6789"), Decimal("23456.78901")
-        table = analysis.build_timing_table(c, b)
+        c, k = Decimal("12345.6789"), Decimal("23456.78901")
+        table = analysis.build_timing_table(c, k)
         with localcontext(Context(prec=120, rounding=ROUND_HALF_EVEN)):
-            expected = [[int((c + b * reference_x(dx, dy)).to_integral_value()) for dy in range(16)] for dx in range(30)]
+            expected = [[int(max(c, k * reference_x(dx, dy)).to_integral_value()) for dy in range(16)] for dx in range(30)]
         self.assertEqual(table, expected)
 
+    def test_floor_table_is_not_additive_and_has_independent_synthetic_golden(self):
+        c, k = Decimal(100000), Decimal(90000)
+        table = analysis.build_timing_table(c, k)
+        with localcontext(Context(prec=120, rounding=ROUND_HALF_EVEN)):
+            values = [int(max(c, k * reference_x(dx, dy)).to_integral_value())
+                      for dx in range(30) for dy in range(16)]
+        independent_bytes = ",".join(str(v) for v in values).encode("ascii")
+        self.assertEqual(analysis.canonical_timing_table_bytes(table), independent_bytes)
+        self.assertEqual(hashlib.sha256(independent_bytes).hexdigest(), SYNTHETIC_FLOOR_TABLE_SHA)
+        self.assertEqual(table[0][0], table[1][0])
+        self.assertEqual(table[3][0], 180000)
+        self.assertNotEqual(table[3][0], 280000)  # Obsolete c + k*x.
+
     def test_monotonicity_by_physical_distance_including_equal_ticks(self):
-        for slope in (Decimal("0"), Decimal("0.01"), Decimal("9876.543")):
-            table = analysis.build_timing_table(Decimal("1000"), slope)
+        for coefficient in (Decimal("0"), Decimal("0.01"), Decimal("9876.543")):
+            table = analysis.build_timing_table(Decimal("1000"), coefficient)
             cells = sorted((dx*dx + dy*dy, table[dx][dy]) for dx in range(30) for dy in range(16))
             self.assertTrue(all(a[1] <= b[1] for a, b in zip(cells, cells[1:])))
             self.assertEqual(table[8][6], table[10][0])
@@ -617,10 +782,10 @@ class NumericContractTests(unittest.TestCase):
                     analysis.validate_timing_table(damaged, 1000)
 
     def test_invalid_parameters_and_rounded_zero_rejected(self):
-        for c, b in ((0, 1), (-1, 1), (1, -1), (1.0, 1), (1, 1.0),
+        for c, k in ((0, 1), (-1, 1), (1, -1), (1.0, 1), (1, 1.0),
                      (Decimal("NaN"), 1), (1, Decimal("Infinity")), (Decimal("0.5"), 0)):
-            with self.subTest(c=c, b=b), self.assertRaises(ValueError):
-                analysis.build_timing_table(c, b)
+            with self.subTest(c=c, k=k), self.assertRaises(ValueError):
+                analysis.build_timing_table(c, k)
 
     def test_canonical_dx_major_byte_encoding_and_hash_independent(self):
         table = [[dx * 100 + dy + 1 for dy in range(16)] for dx in range(30)]
@@ -638,13 +803,13 @@ class NumericContractTests(unittest.TestCase):
         medians = {name: Decimal(100_000_000 + i * 10_000_000)
                    for i, (name, _, _) in enumerate(SCHEDULE["offsets"])}
         baseline_fit = analysis.fit_offset_medians(medians)
-        baseline_table = analysis.build_timing_table(baseline_fit["c_us"], baseline_fit["b_us"])
+        baseline_table = analysis.build_timing_table(baseline_fit["c_us"], baseline_fit["k_us"])
         with localcontext(Context(prec=6, rounding=ROUND_DOWN)) as context:
             context.traps[Inexact] = True
             before = str(context)
             fit = analysis.fit_offset_medians(medians)
             self.assertEqual(fit, baseline_fit)
-            self.assertEqual(analysis.build_timing_table(fit["c_us"], fit["b_us"]), baseline_table)
+            self.assertEqual(analysis.build_timing_table(fit["c_us"], fit["k_us"]), baseline_table)
             self.assertEqual(str(getcontext()), before)
             with self.assertRaises(ValueError):
                 analysis.build_timing_table(0, 1)
@@ -710,7 +875,7 @@ class OutputAndImportTests(unittest.TestCase):
 import builtins
 original = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name.startswith(("PyQt", "core_engine", "solver", "simple_", "benchmark", "stage3_calibration_tool", "qt_bootstrap", "main", "sqlite")):
+    if name.startswith(("PyQt", "core_engine", "solver", "simple_", "benchmark", "stage3_calibration_tool", "qt_bootstrap", "main", "sqlite", "scipy", "numpy")):
         raise AssertionError("Forbidden dependency: " + name)
     return original(name, *args, **kwargs)
 builtins.__import__ = guarded

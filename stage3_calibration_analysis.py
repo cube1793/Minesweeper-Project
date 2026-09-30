@@ -14,6 +14,12 @@ Decimal.ln(1 + distance) / Decimal.ln(2), with exact integer results when
 runs in that context in frozen offset order. No binary float enters the fit or
 table. Decimal strings preserve the computed values exactly, not an assertion
 that irrational logarithms have a finite exact representation.
+
+The authoritative model is max(c, k*x): c is the O00 execution-time floor;
+k minimizes the nonzero-median SSE by finite piecewise-quadratic enumeration.
+Additive fits remain explicitly non-authoritative report diagnostics only.
+The output versions remain 1: this format has no frozen profile or runtime
+consumer yet. model_id identifies the revised pre-freeze model semantics.
 """
 
 import argparse
@@ -40,6 +46,18 @@ from stage3_calibration import (
 FROZEN_MANIFEST_PATH = Path(__file__).resolve().parent / "calibration/stage3_calibration_manifest_v1.json"
 FROZEN_MANIFEST_SHA256 = "07ce6943abec4f47474f50bfb317fea3dcd9c51afcf87c316adef674f58ce61d"
 DECIMAL_PRECISION = 80
+MODEL_ID = "overlap_floor_log2_distance_v1"
+MODEL_FORMULA = "T_us(dx,dy)=max(c_us,k_us*log2(1+sqrt(dx^2+dy^2)))"
+PARAMETER_SEMANTICS = {
+    "c_us": "empirical same-cell execution-time floor",
+    "k_us": "distance-dependent execution coefficient",
+}
+PHYSICAL_EXECUTION = {
+    "includes": ["pre-presented target execution", "LEFT/RIGHT button selection",
+                 "ordinary motor preparation", "cursor movement", "target press"],
+    "excludes": ["Minesweeper board reading", "safe/mine inference",
+                 "probability reasoning", "strategic deliberation"],
+}
 NUMERIC_CONTRACT = {
     "reference_python": "CPython 3.12 Decimal",
     "precision": DECIMAL_PRECISION,
@@ -51,7 +69,9 @@ NUMERIC_CONTRACT = {
     "traps": ["InvalidOperation", "DivisionByZero", "Overflow", "FloatOperation"],
     "distance": "Decimal(dx*dx + dy*dy).sqrt()",
     "log2": "Exact integer log2 for integer powers of two; otherwise (Decimal(1) + distance).ln() / Decimal(2).ln()",
-    "summation_order": "frozen offset order O00..O15; anchored slope omits O00",
+    "summation_order": "frozen offset order O00..O15; floor coefficient objective uses O01..O15",
+    "coefficient_fit": "Enumerate all c/x_i breakpoints, k=0 and feasible region stationary points; minimize (SSE, k)",
+    "crossover_distance": "((c/k)*Decimal(2).ln()).exp()-1; null when k=0",
     "parameter_encoding": "fixed-point decimal strings; fractional trailing zeros removed",
 }
 
@@ -314,25 +334,77 @@ def distance_and_log2(dx, dy):
         return distance, (Decimal(1) + distance).ln() / Decimal(2).ln()
 
 
+def _fit_floor_coefficient(c, xs, ys):
+    """Global k>=0 optimum for validated positive Decimal observations.
+
+    Breakpoints delimit quadratic regions with a fixed active set k*x_i>c.
+    Compare all boundaries and feasible stationary points, including k=0.
+    All observations enter each SSE, including those on the floor. Exact SSE
+    ties select the smaller k; a flat optimum therefore selects zero. No
+    tolerance, iterative convergence or clamping is used.
+    """
+    with localcontext(numeric_context()):
+        bounds = sorted({Decimal(0)} | {c / x for x in xs})
+        candidates = list(bounds)
+        for index, lower in enumerate(bounds):
+            upper = bounds[index + 1] if index + 1 < len(bounds) else None
+            probe = (lower + upper) / 2 if upper is not None else 2 * lower
+            active = [(x, y) for x, y in zip(xs, ys) if probe * x > c]
+            if active:
+                stationary = sum(x * y for x, y in active) / sum(x * x for x, _ in active)
+                if stationary >= lower and (upper is None or stationary <= upper):
+                    candidates.append(stationary)
+
+        def score(k):
+            residuals = [y - max(c, k * x) for x, y in zip(xs, ys)]
+            return sum(r * r for r in residuals), k
+
+        return min(candidates, key=score)
+
+
 def fit_offset_medians(medians):
-    """Fit 16 medians in ns; return authoritative and diagnostic fits in us."""
+    """Fit Model C to the 15 nonzero medians; O00 fixes c. Input unit: ns.
+
+    Return Decimal microseconds. Free-intercept and old additive anchored fits
+    remain diagnostic, including when an additive slope would be negative.
+    """
     _require(set(medians) == {offset[0] for offset in OFFSET_FAMILIES}, "Expected all 16 offset medians")
     with localcontext(numeric_context()):
         ys = [_decimal(medians[name]) / 1000 for name, _, _ in OFFSET_FAMILIES]
         _require(all(y > 0 for y in ys), "Offset medians must be positive")
         xs = [distance_and_log2(dx, dy)[1] for _, dx, dy in OFFSET_FAMILIES]
         c = ys[0]
+        k = _fit_floor_coefficient(c, xs[1:], ys[1:])
+        _require(c > 0 and k >= 0, "Floor fit requires c > 0 and k >= 0")
+        residuals = [y - max(c, k * x) for x, y in zip(xs, ys)]
+        sse = sum(r * r for r in residuals[1:])
+        crossover = c / k if k else None
+        # KEEP both existing additive diagnostics; neither supplies table costs.
         b = sum(x * (y - c) for x, y in zip(xs[1:], ys[1:])) / sum(x * x for x in xs[1:])
-        _require(c > 0 and b >= 0, "Anchored fit requires c > 0 and b >= 0; no clamping")
         x_mean, y_mean = sum(xs) / 16, sum(ys) / 16
         b_hat = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys)) / sum((x - x_mean) ** 2 for x in xs)
         c_hat = y_mean - b_hat * x_mean
-        residuals = [y - (c + b * x) for x, y in zip(xs, ys)]
+        additive_residuals = [y - (c + b * x) for x, y in zip(xs, ys)]
         return {
-            "c_us": c, "b_us": b,
+            "c_us": c, "k_us": k,
+            "objective_sse_us2": sse,
+            "crossover_x": crossover,
+            "crossover_distance_cells": (crossover * Decimal(2).ln()).exp() - 1 if k else None,
+            "crossover_status": "finite" if k else "no_finite_crossover_k_zero",
+            "active_offset_ids": [name for (name, _, _), x in zip(OFFSET_FAMILIES[1:], xs[1:]) if k * x > c],
+            "floor_offset_ids": [name for (name, _, _), x in zip(OFFSET_FAMILIES[1:], xs[1:]) if k * x <= c],
             "c_hat_us": c_hat, "b_hat_us": b_hat,
             "residual_mae_us": sum(abs(r) for r in residuals) / 16,
-            "residual_rmse_us": (sum(r * r for r in residuals) / 16).sqrt(),
+            "residual_rmse_us": (sse / 16).sqrt(),
+            "nonzero_residual_metrics": {"count": 15, "mae_us": sum(abs(r) for r in residuals[1:]) / 15,
+                                         "rmse_us": (sse / 15).sqrt()},
+            "additive_anchored_diagnostic": {
+                "authoritative": False, "c_us": c, "b_us": b, "model_formula": "T_us(d)=c_us+b_us*log2(1+d)",
+                "observations": "15 nonzero offset medians for slope; O00 anchors intercept",
+                "residual_definition": "observed median minus predicted median, us", "residual_metric_count": 16,
+                "residual_mae_us": sum(abs(r) for r in additive_residuals) / 16,
+                "residual_rmse_us": (sum(r * r for r in additive_residuals) / 16).sqrt(),
+            },
         }
 
 
@@ -360,11 +432,11 @@ def validate_timing_table(table, c_us):
     _require(all(a <= b for a, b in zip(ticks, ticks[1:])), "Timing table decreases with physical distance")
 
 
-def build_timing_table(c_us, b_us):
+def build_timing_table(c_us, k_us):
     with localcontext(numeric_context()):
-        c, b = _decimal(c_us), _decimal(b_us)
-        _require(c > 0 and b >= 0, "Timing table requires c > 0 and b >= 0")
-        table = [[int((c + b * distance_and_log2(dx, dy)[1]).to_integral_value(rounding=ROUND_HALF_EVEN))
+        c, k = _decimal(c_us), _decimal(k_us)
+        _require(c > 0 and k >= 0, "Timing table requires c > 0 and k >= 0")
+        table = [[int(max(c, k * distance_and_log2(dx, dy)[1]).to_integral_value(rounding=ROUND_HALF_EVEN))
                   for dy in range(16)] for dx in range(30)]
         validate_timing_table(table, c)
         return table
@@ -409,8 +481,8 @@ def _build_outputs(session, accepted, invalid, provenance):
              "Fitting requires 384 official attempts and 24 per offset")
     medians = {name: median_ns([r["duration_ns"] for r in group]) for name, group in groups.items()}
     fit = fit_offset_medians(medians)
-    c, b = fit["c_us"], fit["b_us"]
-    table = build_timing_table(c, b)
+    c, k = fit["c_us"], fit["k_us"]
+    table = build_timing_table(c, k)
     table_sha = hashlib.sha256(canonical_timing_table_bytes(table)).hexdigest()
     profile = {
         "physical_profile_version": 1, "schema_version": 1, **provenance,
@@ -420,10 +492,10 @@ def _build_outputs(session, accepted, invalid, provenance):
         "table_encoding": "ASCII decimal integers, comma-separated, no whitespace or trailing comma",
         "canonical_chord_input": "LEFT", "canonical_chord_action": "LEFT_CLICK",
         "canonical_chord_target": "revealed_clue",
-        "model_id": "anchored_log2_distance_v1",
-        "model_formula": "T_us(dx,dy)=c_us+b_us*log2(1+sqrt(dx^2+dy^2))",
-        "action_cost_scope": "common OPEN/FLAG/CHORD cost",
-        "fitted_c_us": c, "fitted_b_us": b, "numeric_contract": NUMERIC_CONTRACT,
+        "model_id": MODEL_ID, "model_formula": MODEL_FORMULA,
+        "parameter_semantics": PARAMETER_SEMANTICS, "physical_execution": PHYSICAL_EXECUTION,
+        "action_cost_scope": "common OPEN/FLAG/CHORD execution model; pooled button transitions",
+        "fitted_c_us": c, "fitted_k_us": k, "numeric_contract": NUMERIC_CONTRACT,
         "runtime_cost_source": "timing_table_us; do not regenerate from fitted parameters",
         "timing_table_us": table, "table_sha256": table_sha,
     }
@@ -431,7 +503,7 @@ def _build_outputs(session, accepted, invalid, provenance):
     predictions = {}
     for name, dx, dy in OFFSET_FAMILIES:
         distance, x = distance_and_log2(dx, dy)
-        predictions[name] = c + b * x
+        predictions[name] = max(c, k * x)
         offsets.append({"offset_id": name, "abs_dx": dx, "abs_dy": dy,
                         "distance_cells": distance, "log2_one_plus_distance": x,
                         **_duration_summary(groups[name]), "median_us": medians[name] / 1000,
@@ -471,14 +543,30 @@ def _build_outputs(session, accepted, invalid, provenance):
                                                      "duration_ns", "end_ns")} for r in invalid],
         "fitting_input": "24 accepted official durations per offset; pooled transitions/orientations; no outlier rejection",
         "offsets": offsets,
-        "anchored_fit": {"c_us": c, "b_us": b, "observations": "15 nonzero offset medians for slope; O00 anchors intercept",
-                         "residual_definition": "observed median minus predicted median, us",
-                         "residual_metric_count": 16, "residual_mae_us": fit["residual_mae_us"],
-                         "residual_rmse_us": fit["residual_rmse_us"]},
+        "authoritative_fit": {
+            "model_id": MODEL_ID, "model_formula": MODEL_FORMULA, "c_us": c, "k_us": k,
+            "parameter_semantics": PARAMETER_SEMANTICS,
+            "observations": "c = O00 median; all 15 nonzero offset medians in the k objective; 24 official trials per median",
+            "method": "global piecewise-quadratic enumeration; exact equal-SSE ties select smaller k",
+            "objective": "sum_i (M_i-max(c,k*x_i))^2 over O01..O15; x_i=log2(1+d_i)",
+            "objective_sse_us2": fit["objective_sse_us2"],
+            "active_offset_ids": fit["active_offset_ids"], "floor_offset_ids": fit["floor_offset_ids"],
+            "crossover_x": fit["crossover_x"], "crossover_distance_cells": fit["crossover_distance_cells"],
+            "crossover_status": fit["crossover_status"],
+            "residual_definition": "observed median minus predicted median, us",
+            "residual_metric_count": 16, "residual_mae_us": fit["residual_mae_us"],
+            "residual_rmse_us": fit["residual_rmse_us"], "nonzero_residual_metrics": fit["nonzero_residual_metrics"],
+            "table_sha256": table_sha,
+        },
+        "additive_anchored_diagnostic": fit["additive_anchored_diagnostic"],
         "free_intercept_diagnostic": {"authoritative": False, "observations": "all 16 offset medians",
+                                      "model_formula": "T_us(d)=c_hat_us+b_hat_us*log2(1+d)",
+                                      "purpose": "diagnose the additive/intercept assumption; never supplies runtime costs",
                                       "c_hat_us": fit["c_hat_us"], "b_hat_us": fit["b_hat_us"],
                                       "c_hat_minus_c_us": fit["c_hat_us"] - c,
-                                      "b_hat_minus_b_us": fit["b_hat_us"] - b},
+                                      "b_hat_minus_b_us": fit["b_hat_us"] - fit["additive_anchored_diagnostic"]["b_us"],
+                                      "b_hat_minus_b_reference": "additive_anchored_diagnostic.b_us",
+                                      "b_hat_minus_k_us": fit["b_hat_us"] - k},
         "button_transitions": transitions, "offset_button_transitions": offset_transitions,
         "orientations": orientation_report,
         "shape_sanity": {
