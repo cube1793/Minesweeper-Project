@@ -1,7 +1,7 @@
 """Independent protocol counts, geometry, determinism and rejection checks.
 
-The official manifest and literal SHA-256 golden are deliberately deferred
-until Milestone B review. These tests do not write any calibration artifacts.
+The frozen seed-20260930 manifest is read from disk and checked against a
+literal SHA-256 golden. These tests do not write any calibration artifacts.
 """
 
 import builtins
@@ -15,6 +15,7 @@ import sys
 import unittest
 from collections import Counter
 from dataclasses import FrozenInstanceError, fields, replace
+from pathlib import Path
 from unittest.mock import patch
 
 import stage3_calibration as calibration
@@ -35,6 +36,7 @@ EXPECTED_OFFSETS = (
 EXPECTED_TRANSITIONS = (("LEFT", "LEFT"), ("LEFT", "RIGHT"),
                         ("RIGHT", "LEFT"), ("RIGHT", "RIGHT"))
 SEEDS = (0, 1, 42, 20260930, (1 << 80) + 123)
+FROZEN_MANIFEST_SHA256 = "07ce6943abec4f47474f50bfb317fea3dcd9c51afcf87c316adef674f58ce61d"
 
 
 def legal_deltas(abs_dx, abs_dy):
@@ -400,6 +402,39 @@ class ModelValidationTests(ManifestTestCase):
         # Manifest construction invokes validate_manifest().
         with self.assertRaisesRegex(ValueError, "transition orientation counts.*O04"):
             replace(self.manifest, trials=trials)
+
+
+class FrozenManifestTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / "calibration" / "stage3_calibration_manifest_v1.json"
+        cls.file_bytes = path.read_bytes()
+        data = json.loads(cls.file_bytes)
+        data["trials"] = [CalibrationTrial(**trial) for trial in data["trials"]]
+        cls.manifest = CalibrationManifest(**data)
+
+    def test_frozen_manifest_reconstructs_and_validates_through_production_models(self):
+        self.assertIsNone(validate_manifest(self.manifest))
+        self.assertEqual(self.manifest.seed, 20260930)
+        self.assertEqual((self.manifest.grid_width, self.manifest.grid_height,
+                          self.manifest.cell_size_px), (30, 16, 28))
+        self.assertEqual(self.manifest.offsets, EXPECTED_OFFSETS)
+        self.assertEqual(self.manifest.button_transitions, EXPECTED_TRANSITIONS)
+        self.assertEqual(Counter(t.phase for t in self.manifest.trials),
+                         Counter({"WARMUP": 24, "OFFICIAL": 384}))
+        self.assertEqual(Counter(t.block_index for t in self.manifest.trials if t.phase == "OFFICIAL"),
+                         Counter({1: 128, 2: 128, 3: 128}))
+
+    def test_frozen_file_bytes_are_exactly_canonical(self):
+        self.assertEqual(canonical_manifest_bytes(self.manifest), self.file_bytes)
+
+    def test_frozen_manifest_matches_literal_sha256_golden(self):
+        self.assertEqual(hashlib.sha256(self.file_bytes).hexdigest(), FROZEN_MANIFEST_SHA256)
+        self.assertEqual(calculate_manifest_sha256(self.manifest), FROZEN_MANIFEST_SHA256)
+
+    def test_official_seed_regenerates_identical_file_bytes(self):
+        regenerated = generate_manifest_v1(20260930)
+        self.assertEqual(canonical_manifest_bytes(regenerated), self.file_bytes)
 
 
 class SerializationTests(ManifestTestCase):
