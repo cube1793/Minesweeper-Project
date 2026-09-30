@@ -1,6 +1,7 @@
-"""Synthetic offline fixtures only; these are not human calibration evidence.
+"""Synthetic offline inputs plus the committed frozen runtime profile.
 
-Records follow the committed collector format, but no Qt events are generated.
+Synthetic records follow the collector format; they are not human evidence.
+Frozen-profile tests need only the runtime artifact, never raw human inputs.
 Independent 120-digit calculations and byte encodings check the 80-digit model.
 """
 
@@ -820,6 +821,74 @@ class NumericContractTests(unittest.TestCase):
         with localcontext(Context(prec=3)):
             self.assertEqual(analysis.decimal_text(value), "123456789.123456789")
             self.assertEqual(analysis.decimal_text(Decimal("-0.00")), "0")
+
+
+class FrozenPhysicalProfileTests(unittest.TestCase):
+    """Protect the accepted runtime artifact without collecting or fitting data."""
+
+    def setUp(self):
+        path = ROOT / "calibration/stage3_physical_profile_v1.json"
+        self.assertTrue(path.is_file())
+        self.raw = path.read_bytes()
+        self.profile = json.loads(self.raw)
+
+    def test_canonical_json_and_literal_whole_file_sha256(self):
+        self.assertEqual(analysis.canonical_output_bytes(self.profile), self.raw)
+        self.assertEqual(hashlib.sha256(self.raw).hexdigest(),
+                         "52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b")
+
+    def test_accepted_model_and_source_provenance(self):
+        expected = {
+            "physical_profile_version": 1, "schema_version": 1,
+            "model_id": "overlap_floor_log2_distance_v1",
+            "model_formula": "T_us(dx,dy)=max(c_us,k_us*log2(1+sqrt(dx^2+dy^2)))",
+            "fitted_c_us": "126004.7",
+            "fitted_k_us": "113948.22229792871759145720547680405050991560898536508405341934986759339499353944",
+            "source_protocol_version": "STAGE3_CALIBRATION_V1",
+            "source_manifest_sha256": "07ce6943abec4f47474f50bfb317fea3dcd9c51afcf87c316adef674f58ce61d",
+            "source_session_id": "20260930T070603783802Z_3b8a5654",
+            "source_session_filename": "calibration_session_20260930T070603783802Z_3b8a5654.json",
+            "source_session_sha256": "65c03acc1bc041b3f8aee135743303b9f018f5d1519afea3bb8b38e0f67ccad8",
+            "source_trials_filename": "calibration_trials_20260930T070603783802Z_3b8a5654.jsonl",
+            "source_trials_sha256": "8409a953dad29d6bd4bff8b0c5cbbb7aee070ca9a422ce75d69c4a065c3b4685",
+            "grid_width": 30, "grid_height": 16, "cell_size_px": 28,
+            "distance_unit": "cell_width", "timing_unit": "us", "timing_tick_unit": "1_us",
+            "table_dimensions": [30, 16], "table_order": "dx_major_dy_minor",
+            "table_encoding": "ASCII decimal integers, comma-separated, no whitespace or trailing comma",
+        }
+        for key, value in expected.items():
+            with self.subTest(field=key):
+                self.assertEqual(self.profile[key], value)
+        self.assertNotIn("fitted_b_us", self.profile)
+        self.assertEqual(self.profile["numeric_contract"]["precision"], 80)
+        self.assertEqual(self.profile["numeric_contract"]["rounding"], "ROUND_HALF_EVEN")
+
+    def test_accepted_table_ticks_invariants_and_independent_hash(self):
+        table = self.profile["timing_table_us"]
+        self.assertEqual(len(table), 30)
+        self.assertTrue(all(len(row) == 16 for row in table))
+        self.assertEqual(sum(len(row) for row in table), 480)
+        self.assertTrue(all(type(tick) is int and tick > 0 for row in table for tick in row))
+        by_distance = {}
+        for dx in range(30):
+            for dy in range(16):
+                squared = dx*dx + dy*dy
+                self.assertEqual(by_distance.setdefault(squared, table[dx][dy]), table[dx][dy])
+        ticks = [by_distance[d] for d in sorted(by_distance)]
+        self.assertTrue(all(a <= b for a, b in zip(ticks, ticks[1:])))
+        expected = {(0, 0): 126005, (1, 0): 126005, (1, 1): 144891, (3, 0): 227896,
+                    (4, 3): 294552, (8, 6): 394196, (10, 0): 394196,
+                    (20, 10): 518010, (29, 15): 578005}
+        for (dx, dy), tick in expected.items():
+            with self.subTest(dx=dx, dy=dy):
+                self.assertEqual(table[dx][dy], tick)
+        self.assertEqual(table[0][0], table[1][0])  # Intentional same-cell floor regime.
+        analysis.validate_timing_table(table, Decimal(self.profile["fitted_c_us"]))
+        independent_bytes = ",".join(str(table[dx][dy]) for dx in range(30) for dy in range(16)).encode("ascii")
+        self.assertEqual(analysis.canonical_timing_table_bytes(table), independent_bytes)
+        expected_sha = "7c284c66f7ddbd5f0c7de96f5f4e6a26b12d31fddb4ebb931674866d1041123b"
+        self.assertEqual(hashlib.sha256(independent_bytes).hexdigest(), expected_sha)
+        self.assertEqual(self.profile["table_sha256"], expected_sha)
 
 
 class OutputAndImportTests(unittest.TestCase):
