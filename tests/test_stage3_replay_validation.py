@@ -1,4 +1,4 @@
-"""Offline V1 contract tests. All frames/videos are generated; no human evidence.
+"""Offline V1.1 contract tests. All frames/videos are generated; no human evidence.
 
 Optional image/video tests skip without requirements-replay-validation.txt.
 The standard-library measurement/profile tests always run.
@@ -295,6 +295,30 @@ class MetadataAndTimingTests(unittest.TestCase):
         value = {"b": v.rational(Fraction(6, 8)), "a": 2}
         self.assertEqual(v.canonical_bytes(value), b'{"a":2,"b":{"denominator":4,"numerator":3}}\n')
 
+    def test_pts_terminal_tail_exception_contract(self):
+        tick = Fraction(1, 120)
+        final_issue = (99, "NON_CFR_INTERVAL", 2 * tick)
+        blocking, exception = v.classify_pts_issues([final_issue], 100, 90)
+        self.assertEqual(blocking, [])
+        self.assertEqual(exception, final_issue)
+
+    def test_pts_terminal_tail_exception_is_intentionally_narrow(self):
+        tick = Fraction(1, 120)
+        cases = (
+            ([(98, "NON_CFR_INTERVAL", 2 * tick)], 100, 90),  # not the final decoded frame
+            ([(99, "MISSING_PTS", None)], 100, 90),          # missing PTS is never exempt
+            ([(99, "NON_CFR_INTERVAL", tick / 2)], 100, 90), # short final interval
+            ([(99, "NON_CFR_INTERVAL", 2 * tick)], 100, 95), # inside last-event +4 guard
+            ([(98, "NON_CFR_INTERVAL", 2 * tick),
+              (99, "NON_CFR_INTERVAL", 2 * tick)], 100, 90), # more than one issue
+            ([(99, "NON_CFR_INTERVAL", 2 * tick)], 100, None), # no proven event tail
+        )
+        for issues, decoded, last_event in cases:
+            with self.subTest(issues=issues, last_event=last_event):
+                blocking, exception = v.classify_pts_issues(issues, decoded, last_event)
+                self.assertEqual(blocking, issues)
+                self.assertIsNone(exception)
+
 
 class EventAndCursorTests(unittest.TestCase):
     def test_increment_and_no_increment(self):
@@ -505,7 +529,7 @@ class FixedImageTests(unittest.TestCase):
         self.assertEqual([e["event_frame"] for e in detector.events], [1, 3, 4])
 
 
-def make_video(path, *, fps=120, pts_gap=False, layout_shift=False):
+def make_video(path, *, fps=120, pts_gap=False, layout_shift=False, frame_count=20):
     import av
     import numpy as np
     with av.open(str(path), "w") as container:
@@ -513,16 +537,20 @@ def make_video(path, *, fps=120, pts_gap=False, layout_shift=False):
         stream.width, stream.height, stream.pix_fmt = 1920, 1080, "yuv444p"
         stream.codec_context.time_base = Fraction(1, fps * 2)
         stream.options = {"crf": "0", "preset": "ultrafast"}
-        for index in range(20):
+        for index in range(frame_count):
             text = "3" if index < 2 or index >= 17 else "1/3" if index < 9 else "2/3"
             cell = (0, 0) if 2 <= index < 7 else (2, 2) if 7 <= index < 14 else (4, 2) if 14 <= index < 17 else None
             image = synthetic_frame(text, cell=cell)
             if layout_shift:
                 image = np.roll(image, 8, axis=1)
             frame = av.VideoFrame.from_ndarray(image, format="bgr24")
-            # One late frame, then recovery: average FPS remains 120, but the
-            # two affected frame intervals are 3/240 and 1/240 seconds.
-            frame.pts = index * 2 + (1 if pts_gap and index == 10 else 0)
+            # pts_gap creates one late middle frame and a recovery interval.
+            # Do not synthesize a terminal-only anomaly through the MP4 muxer:
+            # changing the final PTS also changes/normalizes container-level
+            # average-rate metadata on some PyAV/FFmpeg builds. Terminal-tail
+            # integration cases use a deterministic fake demuxer below.
+            extra = 1 if pts_gap and index == 10 else 0
+            frame.pts = index * 2 + extra
             frame.time_base = Fraction(1, fps * 2)
             for packet in stream.encode(frame):
                 container.mux(packet)
@@ -598,8 +626,114 @@ class SyntheticVideoTests(unittest.TestCase):
         self.assertEqual(result["capture_declaration_status"], "SUPPLIED_COMPATIBLE")
         self.assertEqual(result["video"]["fps"], {"numerator": 120, "denominator": 1})
         self.assertEqual(result["video"]["bad_pts_frames"], [10, 11])
+        self.assertEqual(result["video"]["blocking_bad_pts_frames"], [10, 11])
+        self.assertIsNone(result["video"]["terminal_tail_pts_exception"])
         self.assertIn("INCOMPATIBLE_NON_CFR_OR_MISSING_PTS", result["review_flags"])
         self.assertIsNone(result["modeled_physical_time_us"])
+
+    def _analyze_fake_pts(self, pts_values):
+        """Run analyze_video with exact demuxed PTS independent of MP4 muxer policy."""
+        import av
+        from types import SimpleNamespace
+
+        time_base = Fraction(1, 240)
+
+        class FakeFrame:
+            width, height = 1920, 1080
+
+            def __init__(self, index, pts):
+                self.index = index
+                self.pts = pts
+                self.time_base = time_base
+
+            def to_ndarray(self, format=None):
+                return self.index
+
+        class FakeStream:
+            width, height = 1920, 1080
+            average_rate = Fraction(120, 1)
+
+            def __init__(self):
+                self.time_base = time_base
+                self.frames = len(pts_values)
+                self.duration = pts_values[-1] if pts_values else 0
+
+        class FakeContainer:
+            def __init__(self):
+                self.streams = SimpleNamespace(video=[FakeStream()])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def decode(self, video=0):
+                return iter(FakeFrame(index, pts) for index, pts in enumerate(pts_values))
+
+        class FakeUI:
+            cv2 = SimpleNamespace(__version__="fake")
+            np = SimpleNamespace(__version__="fake")
+
+            @staticmethod
+            def layout(frame_index):
+                return True
+
+            @staticmethod
+            def counter(frame_index):
+                if frame_index < 2:
+                    return reading(3, mode="SUMMARY")
+                if frame_index < 9:
+                    return reading(1)
+                if frame_index < 17:
+                    return reading(2)
+                return reading(3, mode="SUMMARY")
+
+            @staticmethod
+            def cursor(frame_index):
+                if frame_index < 7:
+                    return observation((0, 0))
+                if frame_index < 14:
+                    return observation((2, 2))
+                return observation((4, 2))
+
+        with (patch.object(av, "open", side_effect=lambda *args, **kwargs: FakeContainer()),
+              patch.object(v, "FixedUI", FakeUI),
+              patch.object(v, "file_sha256", return_value="a" * 64)):
+            return v.analyze_video("synthetic-pts.mp4", final_metadata())
+
+    def test_single_long_final_interval_after_cursor_guard_is_nonblocking(self):
+        pts = [index * 2 for index in range(24)]
+        pts[-1] += 2  # final interval = 4/240 = 2/120 seconds
+        result = self._analyze_fake_pts(pts)
+        self.assertEqual(result["last_event_frame"], 17)
+        self.assertEqual(result["video"]["bad_pts_frames"], [23])
+        self.assertEqual(result["video"]["blocking_bad_pts_frames"], [])
+        self.assertEqual(result["video"]["cfr_compatibility_status"],
+                         "COMPATIBLE_WITH_TERMINAL_TAIL_EXCEPTION")
+        self.assertEqual(result["video"]["terminal_tail_pts_exception"]["frame"], 23)
+        self.assertEqual(result["replay_status"], "RECONSTRUCTED", result["review_flags"])
+        self.assertIsNotNone(result["modeled_physical_time_us"])
+
+    def test_long_final_interval_inside_cursor_guard_is_rejected(self):
+        pts = [index * 2 for index in range(21)]
+        pts[-1] += 2
+        result = self._analyze_fake_pts(pts)
+        self.assertEqual(result["last_event_frame"], 17)
+        self.assertEqual(result["video"]["bad_pts_frames"], [20])
+        self.assertEqual(result["video"]["blocking_bad_pts_frames"], [20])
+        self.assertIsNone(result["video"]["terminal_tail_pts_exception"])
+        self.assertEqual(result["replay_status"], "INCOMPATIBLE_INPUT")
+
+    def test_short_final_interval_is_rejected_even_after_cursor_guard(self):
+        pts = [index * 2 for index in range(24)]
+        pts[-1] -= 1  # final interval = 1/240 second
+        result = self._analyze_fake_pts(pts)
+        self.assertEqual(result["last_event_frame"], 17)
+        self.assertEqual(result["video"]["bad_pts_frames"], [23])
+        self.assertEqual(result["video"]["blocking_bad_pts_frames"], [23])
+        self.assertIsNone(result["video"]["terminal_tail_pts_exception"])
+        self.assertEqual(result["replay_status"], "INCOMPATIBLE_INPUT")
 
     def test_wrong_fps_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,4 +1,4 @@
-"""REPLAY_VALIDATION_V1: offline, fixed-layout Minesweeper.Online video validation.
+"""REPLAY_VALIDATION_V1_1: offline, fixed-layout Minesweeper.Online video validation.
 
 Usage (outputs should stay under the already ignored results/ directory)::
 
@@ -30,8 +30,13 @@ and absence of transport manipulation cannot be proved from pixels; the capture
 operator must supply capture_declaration for FINAL inputs, including session
 OBS Stats assertions of zero frames missed due to rendering lag and zero frames
 skipped due to encoding lag. Exact CFR PTS cannot prove every source frame was
-captured: OBS can duplicate frames while maintaining CFR. The independent PTS
-check remains mandatory, alongside board layout and counter continuity checks.
+captured: OBS can duplicate frames while maintaining CFR. PTS is therefore an
+independent timing-integrity check, alongside board layout and counter continuity.
+V1.1 keeps whole-file PTS diagnostics but permits exactly one narrow exception:
+a single long non-CFR interval entering the final decoded frame, only when that
+frame is strictly later than the last event's +/-4-frame cursor search guard.
+Missing PTS, short/backward final intervals, multiple anomalies, or any anomaly
+at/before that guard remain incompatible.
 
 Numeric JSON contract: integer microseconds for table costs and supplied H;
 every rational quantity (including frame durations and P/H) is a reduced object
@@ -41,13 +46,15 @@ Canonical ASCII JSON: sorted keys, compact separators, one terminal LF.
 Frame indices are zero-based; event indices are one-based. Completeness difference
 is reconstructed minus displayed. Unresolved/noncontiguous event transitions are
 omitted; their known subtotal is diagnostic. Authoritative P and P/H are null
-unless reconstruction, layout, metadata and CFR are all complete/compatible.
+unless reconstruction, layout, metadata and timing integrity are complete/compatible.
+The accepted terminal-tail exception applies only to post-analysis tail timing:
+it does not relax any event/cursor/counter requirement and never changes event timing.
 
 Cursor: a unique 32 px replay ring at the event frame is primary. Only +/-4
 frames are searched on failure, nearest first; fallback requires a same-cell
 consecutive-frame witness and no conflicting nearest candidate. Full diagnostics
 are retained. No board-effect timestamps, interpolation, or inferred game logic.
-Action type remains UNKNOWN/NOT_CLASSIFIED, because V1 uses one common table.
+Action type remains UNKNOWN/NOT_CLASSIFIED, because V1.1 uses one common table.
 
 Detector constants describe this UI's pixels, never performance thresholds.
 Digits are small abstract font masks, not human replay images. Recognition uses
@@ -70,12 +77,13 @@ import re
 import sys
 
 
-PROTOCOL_VERSION = "REPLAY_VALIDATION_V1"
+PROTOCOL_VERSION = "REPLAY_VALIDATION_V1_1"
 PROFILE_PATH = Path(__file__).resolve().parent / "calibration/stage3_physical_profile_v1.json"
 PROFILE_SHA256 = "52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b"
 TABLE_SHA256 = "7c284c66f7ddbd5f0c7de96f5f4e6a26b12d31fddb4ebb931674866d1041123b"
 MODEL_ID = "overlap_floor_log2_distance_v1"
 FPS = Fraction(120, 1)
+CURSOR_SEARCH_RADIUS = 4
 BOARD_X, BOARD_Y, CELL, COLS, ROWS = 582, 332, 32, 30, 16
 COUNTER_ROI = (1672, 385, 1825, 402)
 ORIGINAL_TARGET_RANKS = {
@@ -233,6 +241,36 @@ def validate_metadata(metadata):
 
 def validate_video_metadata(width, height, fps):
     return [] if (width, height, fps) == (1920, 1080, FPS) else ["INCOMPATIBLE_DIMENSIONS_OR_FPS"]
+
+
+def classify_pts_issues(issues, decoded_frame_count, last_event_frame):
+    """Split blocking PTS issues from the one permitted terminal-tail exception.
+
+    Each issue is ``(frame_index, kind, delta)`` where kind is MISSING_PTS or
+    NON_CFR_INTERVAL and delta is an exact Fraction for interval issues. The
+    exception is intentionally narrower than a general post-game CFR relaxation.
+    """
+    if not issues:
+        return [], None
+    issue = issues[0]
+    frame_index, kind, delta = issue
+    terminal_tail = (
+        len(issues) == 1
+        and kind == "NON_CFR_INTERVAL"
+        and delta is not None
+        and delta > 1 / FPS
+        and decoded_frame_count > 0
+        and frame_index == decoded_frame_count - 1
+        and last_event_frame is not None
+        and frame_index > last_event_frame + CURSOR_SEARCH_RADIUS
+    )
+    return ([], issue) if terminal_tail else (list(issues), None)
+
+
+def pts_issue_json(issue):
+    frame_index, kind, delta = issue
+    return {"frame": frame_index, "kind": kind,
+            "delta_seconds": rational(delta) if delta is not None else None}
 
 
 def pixel_to_cell(x, y):
@@ -530,7 +568,7 @@ class EventDetector:
 
 def resolve_target(event, observations):
     frame = event["event_frame"]
-    available = {f: o for f, o in observations.items() if abs(f - frame) <= 4}
+    available = {f: o for f, o in observations.items() if abs(f - frame) <= CURSOR_SEARCH_RADIUS}
     event["cursor_diagnostics"] = [{"frame": f, **available[f]} for f in sorted(available)]
     exact = available.get(frame, {})
     if exact.get("cell") is not None:
@@ -604,7 +642,7 @@ def analyze_video(video_path, metadata, profile_path=PROFILE_PATH):
     import av
     ui = FixedUI()
     detector = EventDetector()
-    layout_bad, pts_bad = [], []
+    layout_bad, pts_issues = [], []
     pts_first = pts_last = None
     decoded = 0
     with av.open(str(video_path)) as container:
@@ -622,8 +660,12 @@ def analyze_video(video_path, metadata, profile_path=PROFILE_PATH):
             for index, frame in enumerate(container.decode(video=0)):
                 decoded += 1
                 pts = frame.pts * frame.time_base if frame.pts is not None else None
-                if pts is None or (pts_last is not None and pts - pts_last != 1 / FPS):
-                    pts_bad.append(index)
+                if pts is None:
+                    pts_issues.append((index, "MISSING_PTS", None))
+                elif pts_last is not None:
+                    delta = pts - pts_last
+                    if delta != 1 / FPS:
+                        pts_issues.append((index, "NON_CFR_INTERVAL", delta))
                 if index == 0:
                     pts_first = pts
                 pts_last = pts
@@ -633,19 +675,34 @@ def analyze_video(video_path, metadata, profile_path=PROFILE_PATH):
                 detector.feed(index, ui.counter(image))
             if not decoded:
                 flags.append("INCOMPATIBLE_EMPTY_VIDEO")
-            if pts_bad:
+            last_event_frame = detector.events[-1]["event_frame"] if detector.events else None
+            blocking_pts, terminal_tail_pts = classify_pts_issues(pts_issues, decoded, last_event_frame)
+            if blocking_pts:
                 flags.append("INCOMPATIBLE_NON_CFR_OR_MISSING_PTS")
             if stream.frames and decoded != stream.frames:
                 flags.append("DECODED_FRAME_COUNT_MISMATCH")
             if layout_bad:
                 flags.append("LAYOUT_REVIEW_REQUIRED")
-            video["cfr_compatibility_status"] = "COMPATIBLE" if decoded and not pts_bad else "INCOMPATIBLE"
-    video.update({"frame_count": decoded, "bad_pts_frames": pts_bad,
+            if not decoded or blocking_pts:
+                video["cfr_compatibility_status"] = "INCOMPATIBLE"
+            elif terminal_tail_pts is not None:
+                video["cfr_compatibility_status"] = "COMPATIBLE_WITH_TERMINAL_TAIL_EXCEPTION"
+            else:
+                video["cfr_compatibility_status"] = "COMPATIBLE"
+        else:
+            blocking_pts, terminal_tail_pts = [], None
+    video.update({"frame_count": decoded,
+                  "bad_pts_frames": [issue[0] for issue in pts_issues],
+                  "blocking_bad_pts_frames": [issue[0] for issue in blocking_pts],
+                  "pts_issues": [pts_issue_json(issue) for issue in pts_issues],
+                  "terminal_tail_pts_exception": pts_issue_json(terminal_tail_pts)
+                  if terminal_tail_pts is not None else None,
                   "first_pts_seconds": rational(pts_first) if pts_first is not None else None,
                   "last_pts_seconds": rational(pts_last) if pts_last is not None else None,
                   "video_duration_us": rational((pts_last - pts_first + 1 / FPS) * 1_000_000)
-                  if pts_first is not None and pts_last is not None and not pts_bad else None})
-    needed = {f for e in detector.events for f in range(max(0, e["event_frame"] - 4), min(decoded, e["event_frame"] + 5))}
+                  if pts_first is not None and pts_last is not None and not blocking_pts else None})
+    needed = {f for e in detector.events for f in range(max(0, e["event_frame"] - CURSOR_SEARCH_RADIUS),
+                                      min(decoded, e["event_frame"] + CURSOR_SEARCH_RADIUS + 1))}
     observations = {}
     if needed:
         with av.open(str(video_path)) as container:
