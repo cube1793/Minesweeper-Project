@@ -3,6 +3,8 @@
 > **Version:** Official Revision 2 — frozen implementation specification  
 > **Status:** FROZEN FOR PRE-STAGE 3 IMPLEMENTATION  
 > **Implementation status:** IMPLEMENTATION MAY PROCEED UNDER THIS SPECIFICATION  
+> **10k continuation amendment:** FROZEN AFTER INDEPENDENT DELTA REVIEW
+>
 > **Purpose:** Define the minimum telemetry, reproducible benchmark, persistence, and statistics infrastructure required to measure the Stage 2 solver fairly before Stage 3 begins.
 
 ---
@@ -161,7 +163,7 @@ Other adjudicated changes in this revision include:
 - paired comparison requires explicit coverage and rejects missing/mismatched pairs rather than silently dropping them;
 - DB failure can prevent even the `FAILED` status update, so failure finalization is best-effort;
 - `action_events` uses `WITHOUT ROWID` in v1;
-- custom PRNG, resume, chunking, no-replay mode, parallelism, and Stage 3 physical telemetry remain deferred until evidence requires them.
+- custom PRNG, resume, chunking, no-replay mode, parallelism, and Stage 3 physical telemetry were deferred pending evidence; the 10k pilot activates only the narrow continuation exception in §47.2.1.
 
 ---
 
@@ -216,7 +218,7 @@ Do **not** implement the following merely because this document mentions future 
 - multi-process SQLite writer
 - database sharding
 - database archival/compaction
-- resumable interrupted runs
+- resumable interrupted runs beyond the explicit continuation exception in §47.2.1
 - sophisticated migration framework
 - plugin/event-bus architecture
 - general dependency-injection framework
@@ -528,7 +530,7 @@ A `COMPLETED` run must contain exactly that index set with no missing or extra g
 
 `game_index` and `seed` are both retained even though equal in this set because their meanings differ: corpus position versus generator input.
 
-Chunked/non-prefix runs and a `first_game_index` field are deferred. The 10k pilot determines whether 100k operational risk justifies adding them.
+Chunked/non-prefix runs and a `first_game_index` field remain deferred. The 10k decision in §47.2.1 authorizes only continuation of an existing exact-prefix run.
 
 ## 7.3 Generator V1
 
@@ -1351,6 +1353,7 @@ benchmark_runner.py
 Responsibilities:
 
 - create a BenchmarkRun
+- explicitly continue an eligible existing run under §47.2.1 when requested
 - iterate requested game indices
 - generate deterministic BenchmarkBoard
 - create fresh Engine per game in v1
@@ -1441,7 +1444,7 @@ Caught fatal benchmark failure:
 RUNNING → FAILED
 ```
 
-`INTERRUPTED` is reserved for a stale run later identified as having died without normal finalization, such as process kill, crash, or power loss. Automatic stale-run recovery is deferred.
+`INTERRUPTED` remains reserved for a stale run later identified as having died without normal finalization, but is unused by the first continuation implementation. Automatic stale-run recovery remains deferred. Explicit continuation under §47.2.1 keeps an eligible run `RUNNING` until a normal terminal transition; it introduces no new status.
 
 A database failure can make even the final `FAILED` status update impossible. Therefore fatal-failure behavior is:
 
@@ -1452,7 +1455,7 @@ rollback current game transaction when possible
 → propagate the failure
 ```
 
-If that status update also fails, a persisted `RUNNING` row may remain. This is an acknowledged v1 limitation tied to deferred stale-run recovery, not a reason to implement a recovery framework now.
+If that status update also fails, a persisted `RUNNING` row may remain. It may be explicitly continued only if every §47.2.1 precondition passes. Generic stale-run recovery remains deferred.
 
 ---
 
@@ -1942,6 +1945,8 @@ AND exact requested v1 prefix coverage is verified
 
 Official execution mode must reject a dirty working tree before creating the benchmark run row. Development pilots may be dirty, but they retain `git_dirty=true` and are not official-baseline eligible.
 
+Explicit continuation under §47.2.1 must revalidate the current clean tree and exact stored commit using the canonical module-root repository with no `repository_root` override. The stored provenance fields retain their original values.
+
 This rule intentionally favors a simple reproducible provenance contract over trying to classify which individual untracked source files are "execution-relevant."
 
 ## 34.2 Minimum environment snapshot
@@ -1964,6 +1969,8 @@ Also record relevant application version metadata when available.
 Do not turn environment capture into a hardware inventory framework.
 
 Compute-time comparisons should be treated as directly comparable only when the relevant environment/provenance keys are compatible. Modeled Stage 3 physical time is a separate metric and must not be conflated with Python elapsed compute time.
+
+Continuation under §47.2.1 requires the newly captured environment snapshot to exactly equal the stored snapshot, which is preserved.
 
 ---
 
@@ -2334,6 +2341,8 @@ Validate and record:
 
 After the 10k run, explicitly decide whether the expected 100k operational duration justifies adding chunked/non-prefix run support or resume. Do not add those mechanisms before evidence.
 
+The completed 10k pilot supplied that evidence for the narrow official-run continuation contract in §47.2.1. Chunked/non-prefix runs and generic resume/recovery remain deferred.
+
 Then proceed to:
 
 ```text
@@ -2378,9 +2387,124 @@ The intended full Stage 2 baseline target is:
 100,000 games of EXPERT_GENERAL_V1
 ```
 
-If the 10k pilot proves a concrete operational need for chunking/resume, resolve that narrowly before the 100k run rather than redesigning the telemetry model.
+The completed 10k pilot established a concrete operational need for the narrow official-run continuation capability in §47.2.1 before the 100k run.
 
 The completed full baseline must retain its database/results together with commit, configuration, environment, benchmark-set identity, and specification version.
+
+### 47.2.1 Narrow official-run continuation after 10k evidence
+
+The completed 10k pilot activates the decision gate in §46/§47.2. This is the only exception to Revision 2's earlier deferral of resume/recovery before evidence. It changes no telemetry schema or schema version, benchmark corpus, solver semantics, probability representation, event semantics, or official-eligibility predicate.
+
+#### Scope and preserved run identity
+
+Continuation is allowed only for an existing `EXPERT_GENERAL_V1` exact-prefix run that started from index 0 and remains persisted as `RUNNING` because execution ended without normal finalization. Its stored metadata and current continuation preflight must satisfy the canonical official provenance/configuration requirements below. The operator must explicitly select the existing run for continuation.
+
+The run continues in place with the same `run_id`, all committed games/events, `created_at`, `started_at`, `git_commit`, `git_dirty`, `environment_snapshot`, and original `requested_games`. Previously committed rows must not be rewritten. A smaller persisted run must never be extended into a larger run; in particular, a 10k run cannot become a 100k run. No disjoint ranges or chunk abstraction are introduced.
+
+The existing run's stored `requested_games` is authoritative. Continuation must not accept a caller-supplied replacement or override, whether to extend or shrink the run.
+
+#### Eligible state and single-writer precondition
+
+Continuation targets an existing database file and an existing run within it. Continuation precondition failures are side-effect-free rejections, not fatal benchmark failures. Evaluate all continuation preconditions before any database write, and reject a missing, empty, unsupported/non-V1, or otherwise invalid continuation database without creating a database file, initializing schema, reconfiguring the database, or otherwise changing the database. A missing path must be rejected before any connection helper can create an empty SQLite file. A rejected attempt leaves every stored run, game, and event field unchanged: an existing `RUNNING` run remains `RUNNING`, and no `FAILED` or other terminal transition, `failure_code`, or `finished_at` is written. §26 failure finalization applies only after all continuation preconditions have passed and continued game execution or finalize-only completion has begun.
+
+Every continuation attempt must validate:
+
+```text
+run_status == RUNNING
+git_dirty == false
+failure_code IS NULL
+finished_at IS NULL
+0 <= processed_games <= requested_games
+stored game indices == [0, processed_games)
+```
+
+Reject gaps, duplicates, shifted starts, missing rows, extra indices, incompatible identity, incompatible provenance, or incompatible environment. `CREATED`, `COMPLETED`, `ABORTED`, `INTERRUPTED`, and `FAILED` runs are not continuable in this first implementation. No new run status is introduced.
+
+Before continuation, the operator must verify that the previous writer process is no longer running. Single-writer execution is an operational precondition. Do not add persistent writer-owner columns, lease/heartbeat fields, generic locking infrastructure, or automatic process-liveness detection.
+
+#### Provenance, configuration, and environment revalidation
+
+Before new game work begins, revalidate all of the following:
+
+- the current working tree is clean under the canonical §34.1 rule;
+- current HEAD exactly equals the stored `git_commit`;
+- official provenance uses the canonical module-root repository with no `repository_root` override;
+- the continuation request matches the original run's `telemetry_schema_version`, `benchmark_set_id`, width, height, mine count, first-click policy, board-generator version, solver stage, solver policy, and `solver_config_snapshot`;
+- the stored benchmark identity/configuration matches canonical `EXPERT_GENERAL_V1` (§7) and the Stage 2 baseline configuration (§25);
+- the newly captured environment snapshot exactly equals the stored `environment_snapshot` under the deterministic serialization contract in §34.
+
+Stored provenance, configuration, and environment fields must not be rewritten. In particular, stored `git_dirty` remains the value captured at the original run start; the current clean-tree check is a separate revalidation. Exact environment equality is intentionally conservative for the first 100k baseline because one run currently stores only one environment snapshot. Relaxing this rule or adding segment-level environment schema remains deferred.
+
+#### Continuation point and atomicity
+
+After all validation succeeds:
+
+```text
+next_game_index = processed_games
+continue over range(next_game_index, requested_games)
+```
+
+Use the same benchmark generation and Stage 2 execution semantics as a fresh official run, with a fresh Engine per game.
+
+Progress reports use absolute `processed_games` counts for the existing run, including games committed before continuation.
+
+The one-completed-game transaction boundary in §35 is unchanged: complete the game, then atomically persist its GameRecord, all ActionEvents, and the `processed_games` increment. Do not hold a database transaction open while the solver plays. If execution terminates during an in-progress game, that incomplete game must not enter the committed prefix; the next continuation attempt replays that game index from the beginning. Previously committed game/event rows remain intact.
+
+#### Lifecycle and finalization
+
+```text
+normal continuation:
+    RUNNING -> RUNNING -> COMPLETED
+caught fatal continuation failure:
+    RUNNING -> FAILED
+intentional stop_requested:
+    RUNNING -> ABORTED
+```
+
+Fatal failure follows §26's rollback, best-effort failure finalization, and propagation rules. Intentional stop retains §27's behavior, including completion when the requested range is already fully committed.
+
+`KeyboardInterrupt`, `SystemExit`, process kill, crash, or power loss may leave a stale `RUNNING` run. It may later be explicitly continued only after the operator verifies that the previous writer has ended and all other continuation checks pass. Ctrl+C is not a formal pause UI/API. `INTERRUPTED` remains reserved and unused by this first continuation implementation.
+
+Before marking the run `COMPLETED`, verify:
+
+```text
+stored game indices == [0, requested_games)
+processed_games == requested_games
+```
+
+If the run is still `RUNNING` with `processed_games == requested_games` because the prior process ended before final status update, continuation must support a finalize-only path: perform all continuation validation, verify exact requested-prefix coverage, and mark the run `COMPLETED` without replaying any game.
+
+#### Timestamps and official eligibility
+
+Preserve the original `created_at` and `started_at`. Write `finished_at` only through a normal terminal lifecycle transition. Interruption time can lie between `started_at` and `finished_at`, so their difference must not be treated as uninterrupted execution duration. Operational launcher logs may separately record continuation times without adding schema fields.
+
+The official-eligibility predicate in §34.1 remains unchanged:
+
+```text
+run_status == COMPLETED
+AND git_dirty == false
+AND exact requested V1 prefix coverage is verified
+```
+
+Continuation itself does not confer official eligibility. A continued run must satisfy every continuation precondition above and ultimately meet the unchanged eligibility predicate.
+
+#### Still deferred
+
+This exception does not authorize:
+
+- arbitrary chunk ranges or `first_game_index`;
+- continuation of `ABORTED` or `FAILED`;
+- mandatory use of `INTERRUPTED`;
+- automatic stale-run detection/recovery;
+- persistent writer ownership, leases, or heartbeats;
+- multi-process or parallel benchmark execution;
+- cross-machine continuation;
+- mixed environment snapshots within one run;
+- a generic checkpoint/resume framework;
+- deep cancellation inside probability enumeration;
+- a formal pause/resume UI.
+
+These require separate evidence and design decisions.
 
 ## 47.3 Graph/UI completion
 
@@ -2481,6 +2605,20 @@ At minimum, add tests for:
 - completed-run processed-count invariant;
 - best-effort FAILED path behavior tested where practical.
 
+## Benchmark continuation
+
+- eligible stale `RUNNING` exact prefix continues from `processed_games`;
+- interrupted continuation preserves already committed rows and replays only an uncommitted in-progress game index;
+- continued result matches an uninterrupted reference run semantically, excluding timing;
+- finalize-only path when `processed_games == requested_games` validates coverage and completes without replaying a game;
+- all non-`RUNNING` statuses are rejected;
+- dirty current tree, current-commit mismatch, environment mismatch, identity/configuration mismatch, and non-prefix/gapped coverage are rejected before new game work;
+- missing database path is rejected without creating a database file;
+- every rejected continuation attempt is side-effect-free: the database and all stored fields remain unchanged, an existing `RUNNING` run remains `RUNNING`, no terminal status, `failure_code`, or `finished_at` is written, and missing/invalid database input is not created, initialized, or reconfigured;
+- stored provenance/configuration, original `created_at`/`started_at`, and `requested_games` are preserved; `finished_at` is written only by a terminal transition;
+- progress uses absolute processed counts, including games committed before continuation;
+- a successfully completed continued run can satisfy the unchanged official-eligibility and pairing contracts.
+
 ## Statistics / pairing
 
 - completed prefix coverage validation;
@@ -2541,7 +2679,37 @@ remaining implementation blockers:
 none
 ```
 
-The candidate SPEC hash above identifies the exact pre-freeze document reviewed by both reviewers. This frozen file differs from that candidate only by the accepted non-blocking corrections summarized in §49 and the status/freeze-record updates.
+The candidate SPEC hash above identifies the exact pre-freeze document reviewed by both reviewers. The original frozen file differed from that candidate only by the accepted non-blocking corrections summarized in §49 and the status/freeze-record updates. §47.2.1 and its consistency cross-references record the later 10k continuation amendment.
+
+## 50.1 10k continuation amendment freeze
+
+```text
+amendment:
+Revision 2 — 10k narrow official-run continuation amendment
+
+amendment date:
+2026-09-28
+
+reviewed implementation baseline commit:
+42da6acafe6cfa520b805433356036372a4af1f2
+
+pre-freeze amendment candidate SPEC SHA-256:
+f36768e9b46d97cabb12d41f8233a52eb6c1ed2a3972f283f437d70deaf44716
+
+independent review result:
+initial review — NEEDS CHANGES (R1 only; no blocker)
+R1 delta review — PASS
+
+remaining amendment blockers:
+none
+
+amendment status:
+FROZEN FOR IMPLEMENTATION
+```
+
+The pre-freeze amendment candidate hash above identifies the exact amendment text independently reviewed before these freeze-record/header metadata edits. These metadata edits do not change continuation semantics.
+
+§47.2.1, its consistency cross-references, and the §48 continuation test requirements constitute the frozen continuation contract. Later implementation/runbook observations do not reopen this frozen SPEC unless concrete evidence reveals a correctness or consistency defect.
 
 # 51. Revision 2 decisions summary
 
@@ -2582,8 +2750,8 @@ Intentional v1 deferrals:
 ```text
 custom stable PRNG/sampling implementation
 parallelism / multi-process writer
-resume/recovery implementation
-chunked/non-prefix run ranges unless 10k pilot justifies them
+generic resume/recovery implementation beyond the narrow §47.2.1 exception
+chunked/non-prefix run ranges
 archive/sharding
 per-game technical ERROR rows / termination_reason / error_code
 record_replay=False optimization
@@ -2598,7 +2766,7 @@ generic research-platform abstractions
 Items that must be revisited only if pilot evidence demands it:
 
 ```text
-100k operational chunking/resume
+100k operational chunking/resume beyond the narrow §47.2.1 exception
 synchronous=NORMAL
 additional indexes
 Engine reuse

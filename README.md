@@ -51,6 +51,19 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 계산 전략과 결과 해석은 [ZiNi 설계](ARCHITECTURE.md#zini-results)에 정리되어 있습니다.
 
+## Benchmark Statistics / 벤치마크 통계
+
+Counters 패널 아래 **벤치마크 통계** 버튼으로 별도 창을 열고, **데이터베이스 열기**에서 기존 텔레메트리 SQLite 파일을 선택합니다. 데이터베이스는 읽기 전용으로 열며 생성·초기화·마이그레이션하지 않습니다. 게임, Live Auto, Replay 상태는 유지됩니다.
+
+- 실행 선택: 저장된 실행의 ID·솔버·보드·첫 클릭 정책, 요청/처리/저장 수와 정확한 접두 범위, Git dirty 및 공식 사용 가능 여부를 표시합니다. 부분/실패 실행에는 **진단용 실행** 표시가 붙습니다.
+- 실행 요약: 승패·승률·추측 비율/평균, 행동/추론 횟수, 계산 시간의 총합·평균·최대·P50/P90/P95/P99를 표시합니다.
+- 그래프: 0회 추측 게임을 포함한 추측 횟수 분포, 이벤트별 확률 추측 위험 분포, 정적 보드 3BV 분포를 제공합니다. 위험 그래프의 점을 가리키거나 아래 선택 목록을 사용하면 정확한 분수를 확인할 수 있습니다.
+- 언어: 기본 한국어이며 창 안에서 English로 전환할 수 있습니다. 선택 실행과 그래프 데이터는 유지됩니다.
+
+의사결정 계산 시간은 **진단용이며 실행 환경에 영향을 받습니다**. 조회는 실행 선택 시 동기적으로 이루어집니다. 진행 중인 실행을 다시 조회하려면 다른 실행을 선택했다가 돌아오거나 DB를 다시 엽니다.
+
+이 기능은 Pre-Stage 3 그래프/통계 결과물이자 Stage 1 통계/시각화 확장입니다. 두 실행의 pairing GUI는 실제 Stage 3 비교 흐름이 생길 때 재검토하도록 의도적으로 보류했습니다. 기존 `validate_paired_prefix()` 백엔드는 유지됩니다.
+
 ## 실행 방법
 
 Windows 배포본은 [Releases](https://github.com/cube1793/Minesweeper-Project/releases)에서
@@ -58,7 +71,7 @@ ZIP 전체를 압축 해제한 뒤 `Minesweeper/Minesweeper.exe`를 실행합니
 `_internal` 폴더를 EXE와 함께 유지해야 하며 Python 설치는 필요하지 않습니다.
 배포본 빌드와 검증 방법은 [BUILDING.md](BUILDING.md)에 정리되어 있습니다.
 
-Python 3.10 이상과 PyQt5가 필요합니다. Repository 루트에서 실행합니다.
+Python 3.10 이상과 PyQt5, PyQtGraph가 필요합니다. Repository 루트에서 실행합니다.
 
 ```powershell
 python -m pip install -r requirements.txt

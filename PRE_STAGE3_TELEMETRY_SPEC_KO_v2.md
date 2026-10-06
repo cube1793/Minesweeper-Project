@@ -3,6 +3,8 @@
 > **버전:** 공식 개정 2 — 동결된 구현 명세  
 > **상태:** FROZEN FOR PRE-STAGE 3 IMPLEMENTATION  
 > **구현 상태:** 이 명세를 기준으로 구현 진행 가능  
+> **10k continuation 개정:** FROZEN AFTER INDEPENDENT DELTA REVIEW
+>
 > **용도:** Stage 3 시작 전에 Stage 2 solver를 공정하게 측정하기 위해 필요한 최소 telemetry, 재현 가능한 benchmark, persistence, statistics 기반을 정의한다.  
 > **주의:** 이 문서는 이해와 검토를 위한 한국어 번역본이다. 교차검증과 최종 구현 기준은 영어 원본 `PRE_STAGE3_TELEMETRY_SPEC_v2.md`를 우선한다. 두 문서가 충돌하면 영어 원본을 authoritative source로 취급한다.
 
@@ -162,7 +164,7 @@ v1 committed game outcome
 - paired comparison은 coverage를 명시적으로 검증하며 missing/mismatched pair를 조용히 제외하지 않는다.
 - DB 자체 failure 때문에 `FAILED` status 기록도 실패할 수 있으므로 failure finalization은 best-effort다.
 - v1 `action_events`는 `WITHOUT ROWID`를 사용한다.
-- custom PRNG, resume, chunking, no-replay mode, parallelism, Stage 3 physical telemetry는 evidence가 필요해질 때까지 defer한다.
+- custom PRNG, resume, chunking, no-replay mode, parallelism, Stage 3 physical telemetry는 evidence가 확보될 때까지 defer했던 항목이다. 10k pilot의 근거로 허용되는 것은 §47.2.1의 제한된 continuation 예외뿐이다.
 
 ---
 
@@ -217,7 +219,7 @@ Pre-Stage 3의 목적은 속도 중심 Stage 3 작업을 시작하기 전에 신
 - multi-process SQLite writer
 - database sharding
 - database archive/compaction
-- 중단된 run의 resume
+- §47.2.1의 명시적 continuation 예외를 넘어서는 중단된 run의 resume
 - 복잡한 migration framework
 - plugin/event-bus architecture
 - 범용 dependency-injection framework
@@ -531,7 +533,7 @@ game_index ∈ [0, requested_games)
 
 이 set에서는 `game_index`와 `seed`가 같지만 둘 다 유지한다. 의미가 각각 corpus position과 generator input으로 다르기 때문이다.
 
-Chunked/non-prefix run과 `first_game_index` field는 defer한다. 10k pilot 이후 100k 운영 위험이 실제로 이를 정당화하는지 판단한다.
+Chunked/non-prefix run과 `first_game_index` field는 계속 defer한다. §47.2.1의 10k 결정은 기존 exact-prefix run의 continuation만 허용한다.
 
 ## 7.3 Generator V1
 
@@ -1366,6 +1368,7 @@ benchmark_runner.py
 책임:
 
 - BenchmarkRun 생성
+- 요청이 있으면 §47.2.1에 따라 조건을 충족하는 기존 run의 명시적 continuation 수행
 - 요청된 game index 순회
 - deterministic BenchmarkBoard 생성
 - v1에서 game마다 fresh Engine 생성
@@ -1456,7 +1459,7 @@ Caught fatal benchmark failure:
 RUNNING → FAILED
 ```
 
-`INTERRUPTED`는 process kill, crash, power loss처럼 정상 finalization 없이 죽은 stale run을 나중에 식별하기 위한 예약 상태다. Automatic stale-run recovery는 defer한다.
+`INTERRUPTED`는 정상 finalization 없이 종료된 것으로 나중에 식별된 stale run을 위한 예약 상태로 유지하며, 첫 continuation 구현에서는 사용하지 않는다. Automatic stale-run recovery는 계속 defer한다. §47.2.1의 명시적 continuation은 조건을 충족하는 run을 정상 terminal transition까지 `RUNNING`으로 유지하며, 새 status를 도입하지 않는다.
 
 Database failure는 최종 `FAILED` status update마저 불가능하게 만들 수 있다. 따라서 fatal-failure behavior는:
 
@@ -1469,7 +1472,7 @@ Database failure는 최종 `FAILED` status update마저 불가능하게 만들 �
 
 이다.
 
-그 status update도 실패하면 persisted `RUNNING` row가 남을 수 있다. 이는 deferred stale-run recovery와 연결된 v1의 알려진 한계이지 지금 recovery framework를 만들 이유는 아니다.
+그 status update도 실패하면 persisted `RUNNING` row가 남을 수 있다. §47.2.1의 모든 precondition을 통과한 경우에만 이를 명시적으로 continuation할 수 있다. Generic stale-run recovery는 계속 defer한다.
 
 ---
 
@@ -1961,6 +1964,8 @@ AND requested v1 prefix의 exact coverage가 검증됨
 
 Official execution mode는 benchmark run row를 만들기 전에 dirty working tree를 거부해야 한다. Development pilot은 dirty를 허용하지만 `git_dirty=true`를 유지하고 official-baseline eligible하지 않다.
 
+§47.2.1의 명시적 continuation은 `repository_root` override 없이 canonical module-root repository를 사용하여 현재 tree가 clean이고 현재 commit이 저장된 commit과 정확히 같은지 다시 검증해야 한다. 저장된 provenance field는 원래 값을 유지한다.
+
 이 규칙은 어떤 untracked source가 "execution-relevant"인지 분류하는 별도 framework를 만들지 않고 단순하고 재현 가능한 provenance contract를 유지하기 위한 것이다.
 
 ## 34.2 Minimum environment snapshot
@@ -1983,6 +1988,8 @@ perf_counter clock information
 Environment capture를 hardware inventory framework로 확장하지 않는다.
 
 Compute-time comparison은 relevant environment/provenance key가 compatible할 때만 직접 비교 가능한 값으로 본다. Modeled Stage 3 physical time은 별도 metric이며 Python elapsed compute time과 혼동하면 안 된다.
+
+§47.2.1의 continuation에서는 새로 수집한 environment snapshot이 저장된 snapshot과 정확히 같아야 하며, 저장된 snapshot은 그대로 보존한다.
 
 ---
 
@@ -2368,6 +2375,8 @@ unit/integration fixtures
 
 10k run 이후 예상 100k 운영 시간이 chunked/non-prefix run 또는 resume를 정당화하는지 명시적으로 결정한다. Evidence 전에 그 mechanism을 추가하지 않는다.
 
+완료된 10k pilot은 §47.2.1의 제한된 official-run continuation contract를 위한 근거를 제공했다. Chunked/non-prefix run과 generic resume/recovery는 계속 defer한다.
+
 그 다음 같은 core data model이 안정적이면:
 
 ```text
@@ -2414,9 +2423,124 @@ EXPERT_GENERAL_V1 100,000 games
 
 이다.
 
-10k pilot이 concrete chunking/resume 필요성을 증명하면 telemetry model을 재설계하지 말고 100k run 전에 필요한 범위만 좁게 해결한다.
+완료된 10k pilot은 100k run 전에 §47.2.1의 제한된 official-run continuation 기능이 필요하다는 구체적인 운영 근거를 제공했다.
 
 Completed full baseline은 database/results와 함께 commit, configuration, environment, benchmark-set identity, specification version을 보존해야 한다.
+
+### 47.2.1 10k 근거에 따른 제한된 official-run continuation
+
+완료된 10k pilot의 근거에 따라 §46/§47.2의 decision gate가 활성화된다. 이는 evidence가 확보되기 전 resume/recovery를 defer했던 Revision 2의 기존 결정에 대한 유일한 예외다. Telemetry schema와 schema version, benchmark corpus, solver semantics, probability representation, event semantics, official-eligibility predicate는 변경하지 않는다.
+
+#### 범위와 보존할 run identity
+
+Continuation은 index 0에서 시작했고 정상 finalization 없이 실행이 종료되어 `RUNNING`으로 저장된 상태가 남아 있는 기존 `EXPERT_GENERAL_V1` exact-prefix run에만 허용된다. 저장된 metadata와 현재 continuation preflight는 아래의 canonical official provenance/configuration 요구사항을 만족해야 한다. 운영자는 continuation할 기존 run을 명시적으로 선택해야 한다.
+
+기존 run을 그대로 이어서 실행하며, 동일한 `run_id`, 이미 commit된 모든 game/event, `created_at`, `started_at`, `git_commit`, `git_dirty`, `environment_snapshot`, 원래의 `requested_games`를 유지한다. 이미 commit된 row를 다시 써서는 안 된다. 더 작은 규모로 저장된 run을 더 큰 run으로 확장해서는 안 된다. 특히 10k run을 100k run으로 바꿀 수 없다. 서로 분리된 range나 chunk abstraction을 도입하지 않는다.
+
+기존 run에 저장된 `requested_games`가 authoritative하다. Continuation은 run을 확장하거나 축소하기 위한 caller의 대체 값 또는 override를 받아서는 안 된다.
+
+#### 허용되는 상태와 single-writer precondition
+
+Continuation은 기존 database file과 그 안의 기존 run을 대상으로 한다. Continuation precondition 실패는 부작용 없는 거부이며, fatal benchmark failure가 아니다. 모든 continuation precondition은 어떠한 database write보다 먼저 평가해야 한다. 존재하지 않거나, 비어 있거나, 지원되지 않거나 V1이 아니거나, 그 밖의 이유로 유효하지 않은 continuation database는 database file 생성, schema 초기화, database 재설정 또는 그 밖의 database 변경 없이 거부해야 한다. 존재하지 않는 경로는 어떤 connection helper도 빈 SQLite file을 생성하기 전에 거부해야 한다. 거부된 시도는 저장된 모든 run, game, event field를 그대로 유지한다. 기존 `RUNNING` run은 `RUNNING`으로 남으며, `FAILED` 또는 그 밖의 terminal transition, `failure_code`, `finished_at`을 기록하지 않는다. §26의 failure finalization은 모든 continuation precondition을 통과하고 이어서 수행할 game 실행 또는 finalize-only completion이 시작된 뒤에만 적용한다.
+
+모든 continuation 시도는 다음을 검증해야 한다.
+
+```text
+run_status == RUNNING
+git_dirty == false
+failure_code IS NULL
+finished_at IS NULL
+0 <= processed_games <= requested_games
+stored game indices == [0, processed_games)
+```
+
+Gap, duplicate, 시작 index의 이동, 누락된 row, extra index, 호환되지 않는 identity, provenance 또는 environment를 거부한다. 첫 구현에서는 `CREATED`, `COMPLETED`, `ABORTED`, `INTERRUPTED`, `FAILED` run을 continuation할 수 없다. 새 run status는 도입하지 않는다.
+
+Continuation 전에 운영자는 이전 writer process가 더 이상 실행 중이 아님을 확인해야 한다. Single-writer 실행은 운영상 precondition이다. Persistent writer-owner column, lease/heartbeat field, generic locking infrastructure, 자동 process-liveness detection을 추가하지 않는다.
+
+#### Provenance, configuration, environment 재검증
+
+새 game 작업을 시작하기 전에 다음을 모두 다시 검증한다.
+
+- 현재 working tree가 §34.1의 canonical 규칙에 따라 clean이다.
+- 현재 HEAD가 저장된 `git_commit`과 정확히 같다.
+- official provenance는 `repository_root` override 없이 canonical module-root repository를 사용한다.
+- continuation 요청이 원래 run의 `telemetry_schema_version`, `benchmark_set_id`, width, height, mine count, first-click policy, board-generator version, solver stage, solver policy, `solver_config_snapshot`과 일치한다.
+- 저장된 benchmark identity/configuration이 canonical `EXPERT_GENERAL_V1` (§7) 및 Stage 2 baseline configuration (§25)과 일치한다.
+- §34의 deterministic serialization contract에 따라 새로 수집한 environment snapshot이 저장된 `environment_snapshot`과 정확히 같다.
+
+저장된 provenance, configuration, environment field를 다시 써서는 안 된다. 특히 저장된 `git_dirty`는 원래 run 시작 시 수집한 값을 유지하며, 현재 clean-tree check는 별도의 재검증이다. 현재 하나의 run에는 하나의 environment snapshot만 저장하므로, 첫 100k baseline에서는 의도적으로 보수적인 exact environment equality 규칙을 적용한다. 이 규칙의 완화나 segment별 environment schema 추가는 계속 defer한다.
+
+#### Continuation 시작점과 atomicity
+
+모든 검증을 통과한 뒤:
+
+```text
+next_game_index = processed_games
+continue over range(next_game_index, requested_games)
+```
+
+새 official run과 동일한 benchmark generation 및 Stage 2 execution semantics를 사용하며, game마다 fresh Engine을 사용한다.
+
+Progress report는 continuation 전에 commit된 game을 포함한 기존 run 전체의 절대 `processed_games` count를 사용한다.
+
+§35의 one-completed-game transaction boundary는 변경하지 않는다. Game을 완료한 뒤 그 GameRecord, 모든 ActionEvent, `processed_games` 증가를 원자적으로 저장한다. Solver가 game을 실행하는 동안 database transaction을 열린 상태로 유지해서는 안 된다. 진행 중인 game에서 실행이 종료되면 그 미완료 game은 committed prefix에 포함되어서는 안 된다. 다음 continuation 시도에서는 해당 game index를 처음부터 다시 실행한다. 이미 commit된 game/event row는 그대로 보존한다.
+
+#### Lifecycle과 finalization
+
+```text
+normal continuation:
+    RUNNING -> RUNNING -> COMPLETED
+caught fatal continuation failure:
+    RUNNING -> FAILED
+intentional stop_requested:
+    RUNNING -> ABORTED
+```
+
+Fatal failure는 §26의 rollback, best-effort failure finalization, failure 전파 규칙을 따른다. Intentional stop은 요청된 range가 이미 전부 commit된 경우 `COMPLETED`로 완료하는 동작을 포함하여 §27의 동작을 유지한다.
+
+`KeyboardInterrupt`, `SystemExit`, process kill, crash, power loss는 stale `RUNNING` run을 남길 수 있다. 이후 운영자가 이전 writer의 종료를 확인하고 다른 모든 continuation 검증도 통과한 경우에만 그 run을 명시적으로 continuation할 수 있다. Ctrl+C는 정식 pause UI/API가 아니다. `INTERRUPTED`는 예약 상태로 유지하며 첫 continuation 구현에서는 사용하지 않는다.
+
+Run을 `COMPLETED`로 표시하기 전에 다음을 검증한다.
+
+```text
+stored game indices == [0, requested_games)
+processed_games == requested_games
+```
+
+이전 process가 최종 status update 전에 종료되어 `processed_games == requested_games`인데도 run이 `RUNNING`으로 남아 있다면, continuation은 finalize-only 경로를 지원해야 한다. 모든 continuation 검증을 수행하고 요청된 prefix의 exact coverage를 확인한 뒤, 어떤 game도 다시 실행하지 않고 run을 `COMPLETED`로 표시한다.
+
+#### Timestamp와 official eligibility
+
+원래의 `created_at`과 `started_at`을 보존한다. `finished_at`은 정상 terminal lifecycle transition을 통해서만 기록한다. `started_at`과 `finished_at` 사이에 실행이 중단된 시간이 포함될 수 있으므로, 두 timestamp의 차이를 중단 없는 실행 시간으로 해석해서는 안 된다. 운영용 launcher log는 schema field 추가 없이 continuation 시각을 별도로 기록할 수 있다.
+
+§34.1의 official-eligibility predicate는 변경하지 않는다.
+
+```text
+run_status == COMPLETED
+AND git_dirty == false
+AND exact requested V1 prefix coverage is verified
+```
+
+Continuation 자체가 official eligibility를 부여하지는 않는다. Continuation한 run은 위의 모든 continuation precondition을 만족해야 하며, 최종적으로 변경되지 않은 eligibility predicate를 충족해야 한다.
+
+#### 계속 defer하는 항목
+
+이 예외는 다음을 허용하지 않는다.
+
+- 임의의 chunk range 또는 `first_game_index`;
+- `ABORTED` 또는 `FAILED`의 continuation;
+- `INTERRUPTED`의 필수 사용;
+- 자동 stale-run detection/recovery;
+- persistent writer ownership, lease, heartbeat;
+- multi-process 또는 parallel benchmark execution;
+- machine 간 continuation;
+- 하나의 run 안에서 서로 다른 environment snapshot 혼합;
+- generic checkpoint/resume framework;
+- probability enumeration 내부의 deep cancellation;
+- 정식 pause/resume UI.
+
+이 항목에는 별도의 evidence와 design decision이 필요하다.
 
 ## 47.3 Graph/UI 완료
 
@@ -2517,6 +2641,20 @@ Stage 3-A는 frozen Stage 2 baseline과 명시적으로 paired board에서 비�
 - completed-run processed-count invariant;
 - 가능한 범위에서 best-effort FAILED path behavior test.
 
+## Benchmark continuation
+
+- 조건을 충족하는 stale `RUNNING` exact prefix가 `processed_games`부터 continuation됨;
+- continuation 도중 중단되어도 이미 commit된 row를 보존하고 commit되지 않은 진행 중 game index만 다시 실행함;
+- continuation 결과가 timing을 제외하면 중단 없이 실행한 reference run과 의미상 일치함;
+- `processed_games == requested_games`인 finalize-only 경로가 coverage를 검증하고 game 재실행 없이 완료됨;
+- `RUNNING`이 아닌 모든 status를 거부함;
+- dirty current tree, current-commit mismatch, environment mismatch, identity/configuration mismatch, non-prefix/gapped coverage를 새 game 작업 전에 거부함;
+- 존재하지 않는 database path를 database file 생성 없이 거부함;
+- 거부된 모든 continuation 시도에 부작용이 없음: database와 저장된 모든 field가 그대로 유지되고, 기존 `RUNNING` run은 `RUNNING`으로 남으며, terminal status, `failure_code`, `finished_at`을 기록하지 않고, 존재하지 않거나 유효하지 않은 database 입력을 생성, 초기화, 재설정하지 않음;
+- 저장된 provenance/configuration, 원래의 `created_at`/`started_at`, `requested_games`를 보존하며, `finished_at`은 terminal transition을 통해서만 기록함;
+- progress가 continuation 전에 commit된 game을 포함한 절대 processed count를 사용함;
+- continuation 후 성공적으로 완료된 run이 변경되지 않은 official-eligibility 및 pairing contract를 충족할 수 있음.
+
 ## Statistics / pairing
 
 - completed prefix coverage validation;
@@ -2577,7 +2715,37 @@ YES / YES
 none
 ```
 
-위 candidate SPEC hash는 두 reviewer가 실제로 검토한 pre-freeze 문서를 식별한다. 현재 frozen 파일은 §49에 요약한 non-blocking correction과 status/freeze-record update만 추가 반영한 문서다.
+위 candidate SPEC hash는 두 reviewer가 실제로 검토한 정확한 pre-freeze 문서를 식별한다. 원래 frozen 파일은 그 candidate에 §49에 요약한 승인된 non-blocking correction과 status/freeze-record update만 추가 반영한 문서였다. §47.2.1과 관련 일관성 cross-reference에는 이후의 10k continuation 개정이 기록되어 있다.
+
+## 50.1 10k continuation 개정 동결
+
+```text
+amendment:
+Revision 2 — 10k narrow official-run continuation amendment
+
+amendment date:
+2026-09-28
+
+reviewed implementation baseline commit:
+42da6acafe6cfa520b805433356036372a4af1f2
+
+pre-freeze amendment candidate SPEC SHA-256:
+f36768e9b46d97cabb12d41f8233a52eb6c1ed2a3972f283f437d70deaf44716
+
+independent review result:
+initial review — NEEDS CHANGES (R1 only; no blocker)
+R1 delta review — PASS
+
+remaining amendment blockers:
+none
+
+amendment status:
+FROZEN FOR IMPLEMENTATION
+```
+
+위 pre-freeze amendment candidate hash는 이 freeze-record/header metadata 수정 전에 독립 검토한 정확한 amendment 본문을 식별한다. 이 metadata 수정은 continuation semantics를 변경하지 않는다.
+
+§47.2.1, 관련 일관성 cross-reference, §48의 continuation test 요구사항이 동결된 continuation contract를 구성한다. 이후 implementation/runbook 관련 observation만으로 이 frozen SPEC을 다시 열지 않는다. Correctness 또는 consistency defect를 드러내는 구체적인 evidence가 있을 때만 재검토한다.
 
 # 51. Revision 2 decision 요약
 
@@ -2618,8 +2786,8 @@ Intentional v1 deferral:
 ```text
 custom stable PRNG/sampling implementation
 parallelism / multi-process writer
-resume/recovery implementation
-10k pilot이 정당화하기 전 chunked/non-prefix run range
+§47.2.1의 제한된 예외를 넘어서는 generic resume/recovery implementation
+chunked/non-prefix run range
 archive/sharding
 per-game technical ERROR row / termination_reason / error_code
 record_replay=False optimization
@@ -2634,7 +2802,7 @@ generic research-platform abstraction
 Pilot evidence가 요구할 때만 재검토할 항목:
 
 ```text
-100k operational chunking/resume
+§47.2.1의 제한된 예외를 넘어서는 100k operational chunking/resume
 synchronous=NORMAL
 additional indexes
 Engine reuse
