@@ -1,4 +1,4 @@
-"""Synchronous Stage 2 benchmark execution under the frozen V1 contract.
+"""Stage-2 benchmark API and the private shared exact-prefix lifecycle.
 
 The runner owns lifecycle, provenance and exact-prefix completion policy.
 Execution, inference translation, collection and persistence stay in their
@@ -185,6 +185,7 @@ def _execute_running_run(
     processed_games: int, requested_games: int,
     stop_requested: Callable[[], bool] | None,
     progress: Callable[[int, int, int], None] | None,
+    *, play_game: Callable[[BenchmarkSetSpec, int], tuple[GameRecord, tuple[ActionEvent, ...]]],
 ) -> int:
     """Run the remaining prefix or finalize it; caller has admitted execution."""
     failure_code = "STOP_REQUEST_FAILED"
@@ -198,7 +199,7 @@ def _execute_running_run(
                 )
                 return run_id
             failure_code = "GAME_EXECUTION_FAILED"
-            record, events = _play_game(spec, game_index)
+            record, events = play_game(spec, game_index)
             failure_code = "GAME_PERSISTENCE_FAILED"
             repository.persist_completed_game(connection, run_id, record, events)
             if progress is not None:
@@ -227,10 +228,12 @@ def _execute_running_run(
     return run_id
 
 
-def continue_benchmark(
+def _continue_benchmark(
     database: str | Path, run_id: int, *,
     stop_requested: Callable[[], bool] | None = None,
     progress: Callable[[int, int, int], None] | None = None,
+    benchmark_identity: Callable[[BenchmarkSetSpec], dict],
+    play_game: Callable[[BenchmarkSetSpec, int], tuple[GameRecord, tuple[ActionEvent, ...]]],
 ) -> int:
     """Explicitly continue an existing official EXPERT_GENERAL_V1 RUNNING run.
 
@@ -276,7 +279,7 @@ def continue_benchmark(
             raise ValueError("Official continuation requires a clean Git working tree.")
         if git_commit != run["git_commit"]:
             raise ValueError("Continuation requires the original git_commit.")
-        identity = _benchmark_identity(EXPERT_GENERAL_V1)
+        identity = benchmark_identity(EXPERT_GENERAL_V1)
         identity["solver_config_snapshot"] = json.dumps(
             identity["solver_config_snapshot"], sort_keys=True, separators=(",", ":"), allow_nan=False,
         )
@@ -294,17 +297,20 @@ def continue_benchmark(
     with closing(repository.connect_database_for_continuation(path)) as connection:
         return _execute_running_run(
             connection, run_id, EXPERT_GENERAL_V1, processed, requested, stop_requested, progress,
+            play_game=play_game,
         )
 
 
-def run_benchmark(
+def _run_benchmark(
     database: str | Path, requested_games: int, *,
     spec: BenchmarkSetSpec = EXPERT_GENERAL_V1, official: bool = False,
     stop_requested: Callable[[], bool] | None = None,
     progress: Callable[[int, int, int], None] | None = None,
     repository_root: str | Path | None = None,
+    benchmark_identity: Callable[[BenchmarkSetSpec], dict],
+    play_game: Callable[[BenchmarkSetSpec, int], tuple[GameRecord, tuple[ActionEvent, ...]]],
 ) -> int:
-    """Execute a V1 prefix and return its run_id after COMPLETED or ABORTED.
+    """Execute the concrete solver's prefix; return after COMPLETED or ABORTED.
 
     Own a file connection opened/closed through the repository boundary.
     Official provenance comes only from this module's repository; supplying
@@ -342,10 +348,13 @@ def run_benchmark(
     if official and git_dirty:
         raise ValueError("Official benchmark execution requires a clean Git working tree.")
     environment = _capture_environment()
+    # Identity construction may authenticate stage-specific runtime artifacts.
+    # It must succeed before a fresh writer can create or configure a database.
+    identity = benchmark_identity(spec)
     connection = repository.connect_database(database)
     try:
         run_id = repository.create_run(
-            connection, **_benchmark_identity(spec),
+            connection, **identity,
             created_at=_utc_now(), git_commit=git_commit, git_dirty=git_dirty,
             requested_games=requested_games,
             environment_snapshot=environment,
@@ -355,6 +364,46 @@ def run_benchmark(
         )
         return _execute_running_run(
             connection, run_id, spec, 0, requested_games, stop_requested, progress,
+            play_game=play_game,
         )
     finally:
         connection.close()
+
+
+def run_benchmark(
+    database: str | Path, requested_games: int, *,
+    spec: BenchmarkSetSpec = EXPERT_GENERAL_V1, official: bool = False,
+    stop_requested: Callable[[], bool] | None = None,
+    progress: Callable[[int, int, int], None] | None = None,
+    repository_root: str | Path | None = None,
+) -> int:
+    """Run Stage 2 V1 with its unchanged identity, selector and lifecycle.
+
+    Official execution requires clean module-root provenance. Development may
+    use a provenance root override. Stop is checked before games; progress
+    follows each game commit. Ordinary execution errors attempt FAILED, while
+    KeyboardInterrupt/SystemExit may leave RUNNING for explicit continuation.
+    """
+    return _run_benchmark(
+        database, requested_games, spec=spec, official=official,
+        stop_requested=stop_requested, progress=progress, repository_root=repository_root,
+        benchmark_identity=_benchmark_identity, play_game=_play_game,
+    )
+
+
+def continue_benchmark(
+    database: str | Path, run_id: int, *,
+    stop_requested: Callable[[], bool] | None = None,
+    progress: Callable[[int, int, int], None] | None = None,
+) -> int:
+    """Continue only an official Stage-2 V1 RUNNING EXPERT_GENERAL_V1 run.
+
+    The operator must ensure the previous writer is dead. All preflight checks
+    are passive; rejection leaves the database unchanged. Original metadata,
+    requested count and committed rows are preserved. Progress is absolute;
+    an already complete prefix is finalized only after the same full preflight.
+    """
+    return _continue_benchmark(
+        database, run_id, stop_requested=stop_requested, progress=progress,
+        benchmark_identity=_benchmark_identity, play_game=_play_game,
+    )

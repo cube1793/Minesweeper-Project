@@ -125,9 +125,9 @@ class TelemetryCollectorTests(unittest.TestCase):
 
     def test_analyzed_metadata_requires_its_structural_nonnull_fields(self):
         for category in InferenceCategory:
-            required = ["selection_candidate_count", "target_mine_probability", "decision_compute_ns"]
+            required = ["decision_compute_ns"]
             if category == InferenceCategory.PROBABILITY_GUESS:
-                required.append("minimum_available_mine_probability")
+                required.extend(("target_mine_probability", "minimum_available_mine_probability"))
             for name in required:
                 with self.subTest(category=category, field=name), self.assertRaises(ValueError):
                     TelemetryCollector().record_action(**analyzed_facts(category, **{name: None}))
@@ -137,13 +137,37 @@ class TelemetryCollectorTests(unittest.TestCase):
                         category, minimum_available_mine_probability=Fraction(0),
                     ))
 
-    def test_model_itself_rejects_partial_null_metadata(self):
+    def test_analyzed_optional_fields_are_independently_nullable(self):
+        # Stage 2's non-null selector semantics remain adapter responsibilities.
+        for category in InferenceCategory:
+            targets = (
+                (Fraction(0),) if category == InferenceCategory.PROBABILITY_GUESS
+                else (Fraction(0), None)
+            )
+            for count in (None, 1):
+                for target in targets:
+                    with self.subTest(category=category, count=count, target=target):
+                        event = TelemetryCollector().record_action(**analyzed_facts(
+                            category, selection_candidate_count=count,
+                            target_mine_probability=target,
+                        ))
+                        self.assertEqual(event.selection_candidate_count, count)
+                        self.assertIs(event.target_mine_probability, target)
+                        self.assertIs(event.inference_category, category)
+                        self.assertEqual(event.decision_compute_ns, 7)
+
+    def test_model_itself_enforces_policy_timing_and_guess_nullability(self):
         event = TelemetryCollector().record_action(**physical_facts())
         with self.assertRaises(ValueError):
             replace(event, decision_compute_ns=0)
         analyzed = TelemetryCollector().record_action(**analyzed_facts())
         with self.assertRaises(ValueError):
-            replace(analyzed, target_mine_probability=None)
+            replace(analyzed, decision_compute_ns=None)
+        self.assertIsNone(replace(analyzed, target_mine_probability=None).target_mine_probability)
+        guessed = TelemetryCollector().record_action(**analyzed_facts(InferenceCategory.PROBABILITY_GUESS))
+        for name in ("target_mine_probability", "minimum_available_mine_probability"):
+            with self.subTest(field=name), self.assertRaises(ValueError):
+                replace(guessed, **{name: None})
 
     def test_rejected_action_between_events_leaves_no_gap(self):
         collector = TelemetryCollector()
@@ -191,11 +215,11 @@ class TelemetryCollectorTests(unittest.TestCase):
             "y": (-1, False, 2.0),
             "safe_cells_opened_delta": (-1, False, 1.0),
             "explicit_flag_delta": (-2, 2, True, 0.0),
-            "inference_category": ("local_deterministic", 1),
-            "selection_candidate_count": (0, -1, True, 1.0),
-            "decision_compute_ns": (-1, True, 1.0),
-            "target_mine_probability": (0, 0.5, "1/2", Fraction(-1, 2), Fraction(3, 2)),
-            "minimum_available_mine_probability": (0, 0.5, "1/2", Fraction(-1, 2), Fraction(3, 2)),
+            "inference_category": ("local_deterministic", 1, True, False),
+            "selection_candidate_count": (0, -1, True, False, 1.0),
+            "decision_compute_ns": (-1, True, False, 1.0),
+            "target_mine_probability": (0, True, False, 0.5, "1/2", Fraction(-1, 2), Fraction(3, 2)),
+            "minimum_available_mine_probability": (0, True, False, 0.5, "1/2", Fraction(-1, 2), Fraction(3, 2)),
         }
         for name, values in invalid_values.items():
             for value in values:
@@ -265,13 +289,17 @@ class TelemetryCollectorTests(unittest.TestCase):
                            explicit_flag_delta=1, decision_compute_ns=10),
             analyzed_facts(InferenceCategory.GLOBAL_CERTAINTY, decision_compute_ns=0),
             analyzed_facts(InferenceCategory.PROBABILITY_GUESS, decision_compute_ns=15),
-            analyzed_facts(action_type=Action.CHORD, decision_compute_ns=7),
+            analyzed_facts(action_type=Action.CHORD, decision_compute_ns=7,
+                           selection_candidate_count=None, target_mine_probability=None),
             analyzed_facts(InferenceCategory.PROBABILITY_GUESS, action_type=Action.CHORD,
                            status_after=GameStatus.LOST, safe_cells_opened_delta=2,
                            decision_compute_ns=12),
         )
         for fact in facts:
             collector.record_action(**fact)
+        self.assertIsNone(collector.events[4].selection_candidate_count)
+        self.assertIsNone(collector.events[4].target_mine_probability)
+        self.assertIsNone(collector.events[4].minimum_available_mine_probability)
         record = finalize(collector)
         self.assertEqual((record.total_actions, record.open_count, record.flag_count, record.chord_count),
                          (6, 3, 1, 2))

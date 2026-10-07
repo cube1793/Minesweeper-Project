@@ -122,8 +122,9 @@ class PairedComparison:
 
 _PAIR_COMPATIBILITY_FIELDS = (
     "benchmark_set_id", "width", "height", "num_mines", "first_click_policy",
-    "board_generator_version", "telemetry_schema_version",
+    "board_generator_version",
 )
+_PAIR_SEMANTIC_VERSIONS = frozenset(((1, 1), (1, 2), (2, 1), (2, 2)))
 
 
 def _fetch_run(connection: sqlite3.Connection, run_id: int) -> sqlite3.Row:
@@ -307,23 +308,49 @@ def validate_paired_prefix(
     connection: sqlite3.Connection, left_run_id: int, right_run_id: int,
     prefix_games: int, *, require_official: bool = False,
 ) -> PairedComparison:
-    """Validate every identity in explicit [0, prefix_games), or raise.
+    """Validate explicit [0, prefix_games) from two runs in one caller source.
 
-    V1 requires equal telemetry semantic versions. Solver identity, commit and
-    environment may differ. Official mode requires each run's entire requested
-    prefix to be eligible, even when the comparison selects a smaller prefix.
+    See ``validate_paired_prefix_sources`` for compatibility and stable-source
+    requirements. This wrapper retains the existing same-source API.
+    """
+    return validate_paired_prefix_sources(
+        connection, left_run_id, connection, right_run_id, prefix_games,
+        require_official=require_official,
+    )
+
+
+def validate_paired_prefix_sources(
+    left_connection: sqlite3.Connection, left_run_id: int,
+    right_connection: sqlite3.Connection, right_run_id: int,
+    prefix_games: int, *, require_official: bool = False,
+) -> PairedComparison:
+    """Validate every board identity in explicit [0, prefix_games), or raise.
+
+    Semantic versions 1 and 2 may pair in either direction. This validates common
+    board/run identity, not equivalence of every telemetry field. Solver identity,
+    commit and environment may differ. Official mode requires each run's entire
+    requested prefix to be eligible, even when selecting a smaller prefix.
     Diagnostic mode stays diagnostic even if both runs happen to be eligible.
+
+    Connections remain caller-owned: no configuration, transaction or attachment
+    is created. Official comparisons require completed artifacts or sources the
+    caller has verified to be stable snapshots. Two read-only connections alone
+    do not guarantee an atomic snapshot across live files. Reports built on this
+    identity check must distinguish the sources as well as their run IDs.
     """
     if type(prefix_games) is not int or prefix_games <= 0:
         raise BenchmarkStatisticsError("prefix_games must be a positive int, excluding bool.")
     if not isinstance(require_official, bool):
         raise BenchmarkStatisticsError("require_official must be a bool.")
-    left = _fetch_run(connection, left_run_id)
-    right = _fetch_run(connection, right_run_id)
+    left = _fetch_run(left_connection, left_run_id)
+    right = _fetch_run(right_connection, right_run_id)
+    versions = (left["telemetry_schema_version"], right["telemetry_schema_version"])
+    if any(type(version) is not int for version in versions) or versions not in _PAIR_SEMANTIC_VERSIONS:
+        raise BenchmarkStatisticsError(f"Unsupported telemetry_schema_version pair: {versions!r}.")
     for field in _PAIR_COMPATIBILITY_FIELDS:
         if left[field] != right[field]:
             raise BenchmarkStatisticsError(f"Run compatibility mismatch: {field}.")
-    for run in (left, right):
+    for connection, run in ((left_connection, left), (right_connection, right)):
         if prefix_games > run["requested_games"]:
             raise BenchmarkStatisticsError(
                 f"prefix_games exceeds requested_games for run {run['run_id']}."
@@ -332,8 +359,8 @@ def validate_paired_prefix(
             raise BenchmarkStatisticsError(f"Run {run['run_id']} is not official-eligible.")
 
     # Read each side independently so absent rows cannot disappear in a join.
-    left_identities = _read_prefix(connection, left_run_id, prefix_games)
-    right_identities = _read_prefix(connection, right_run_id, prefix_games)
+    left_identities = _read_prefix(left_connection, left_run_id, prefix_games)
+    right_identities = _read_prefix(right_connection, right_run_id, prefix_games)
     for left_game, right_game in zip(left_identities, right_identities, strict=True):
         for field in ("seed", "board_fingerprint", "first_click_x", "first_click_y"):
             if getattr(left_game, field) != getattr(right_game, field):

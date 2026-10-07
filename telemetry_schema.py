@@ -11,8 +11,11 @@ PHYSICAL_SCHEMA_VERSION = 1
 
 # Run telemetry semantics are versioned independently of SQLite's physical DDL.
 TELEMETRY_SCHEMA_VERSION = 1
+TELEMETRY_SCHEMA_VERSION_STAGE_3 = 2
 SOLVER_STAGE_STAGE_2 = "STAGE_2"
+SOLVER_STAGE_STAGE_3 = "STAGE_3"
 SOLVER_POLICY_SIMPLE_MINIMUM_RISK = "SIMPLE_MINIMUM_RISK"
+SOLVER_POLICY_E_FIRST_FIRST_REVEAL_V1 = "E_FIRST_FIRST_REVEAL_V1"
 
 # These database meanings are literals, independent of Engine/model enum values.
 ACTION_OPEN = 1

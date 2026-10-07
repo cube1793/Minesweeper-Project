@@ -181,11 +181,14 @@ class SimpleTelemetryTests(unittest.TestCase):
         )
         self.assertEqual(decision_to_telemetry(decision).selection_candidate_count, 3)
 
-    def test_probability_values_are_fractions_without_float_conversion(self):
+    def test_stage_two_metadata_remains_nonnull_and_exact_without_float_conversion(self):
         with patch.object(Fraction, "__float__", side_effect=AssertionError("No float conversion")):
             for decision in selector_cases():
                 with self.subTest(kind=decision.kind, action=decision.move.action):
                     telemetry = decision_to_telemetry(decision)
+                    # Generic nullability does not relax the Stage 2 V1 contract.
+                    self.assertIs(type(telemetry.selection_candidate_count), int)
+                    self.assertGreater(telemetry.selection_candidate_count, 0)
                     self.assertIs(type(telemetry.target_mine_probability), Fraction)
                     if decision.kind == DecisionKind.PROBABILITY_GUESS:
                         self.assertIs(type(telemetry.minimum_available_mine_probability), Fraction)

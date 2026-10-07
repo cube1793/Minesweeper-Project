@@ -470,7 +470,7 @@ class PairingTests(StatisticsTestCase):
             ("benchmark_set_id", "OTHER_SET"), ("width", 9), ("height", 7), ("num_mines", 8),
             ("first_click_policy", "TEST_OTHER_FIRST_CLICK"),
             ("board_generator_version", "TEST_OTHER_GENERATOR"),
-            ("telemetry_schema_version", schema.TELEMETRY_SCHEMA_VERSION + 1),
+            ("telemetry_schema_version", 3),
         ):
             for official in (False, True):
                 with self.subTest(field=field, official=official):

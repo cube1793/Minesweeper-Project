@@ -32,7 +32,9 @@ class ActionEvent:
     Null inference metadata explicitly denotes an unanalyzed policy action;
     index zero alone does not. Only metadata structure and numeric domains are
     checked here, never solver priorities, certainty values or minimum-risk
-    selection. Public Engine types are annotations only at model import time.
+    selection. Analyzed candidate counts and non-guess target probabilities
+    may be absent when the solver-specific adapter's semantics permit it.
+    Public Engine types are annotations only at model import time.
     """
 
     action_index: int
@@ -68,9 +70,12 @@ class ActionEvent:
 
         if not isinstance(self.inference_category, InferenceCategory):
             raise ValueError("inference_category must be an InferenceCategory or None.")
-        _require_integer("selection_candidate_count", self.selection_candidate_count, 1)
+        if self.selection_candidate_count is not None:
+            _require_integer("selection_candidate_count", self.selection_candidate_count, 1)
         _require_integer("decision_compute_ns", self.decision_compute_ns)
-        _require_probability("target_mine_probability", self.target_mine_probability)
+        if (self.target_mine_probability is not None
+                or self.inference_category == InferenceCategory.PROBABILITY_GUESS):
+            _require_probability("target_mine_probability", self.target_mine_probability)
         if self.inference_category == InferenceCategory.PROBABILITY_GUESS:
             _require_probability(
                 "minimum_available_mine_probability", self.minimum_available_mine_probability,
