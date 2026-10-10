@@ -7,6 +7,7 @@
 - [Project README](../README.md): 실행 방법, 기능 범위와 프로젝트 개요.
 - [Architecture](../ARCHITECTURE.md): 앱·분석·알고리즘·Replay의 구조와 책임 경계.
 - [Building](../BUILDING.md): Windows 배포본 빌드 절차와 release 검증 안내.
+- [Current handoff](CURRENT_HANDOFF.md): 현재 완료된 기준선, 진행 중인 milestone, 다음 작업과 새 채팅 복구 지침.
 
 ## Stage 2 / Pre-Stage3
 
