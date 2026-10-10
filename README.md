@@ -64,6 +64,14 @@ Counters 패널 아래 **벤치마크 통계** 버튼으로 별도 창을 열고
 
 이 기능은 Pre-Stage 3 그래프/통계 결과물이자 Stage 1 통계/시각화 확장입니다. 두 실행의 pairing GUI는 실제 Stage 3 비교 흐름이 생길 때 재검토하도록 의도적으로 보류했습니다. 기존 `validate_paired_prefix()` 백엔드는 유지됩니다.
 
+## Stage-3 V1 — CLOSED
+
+2026-10-10 최종 판정으로 **동결 Stage-3 V1 알고리즘·텔레메트리·공식 100k 검증이 완료**되었습니다. Qualified implementation commit은 `611984133b83be11bcd2105f401ecdddcfd68a15`입니다. 이후 문서 정리 커밋은 공식 100k 실행 commit이 아닙니다.
+
+동결 Model C를 적용한 공식 `EXPERT_GENERAL_V1` 100,000보드 중 양쪽 모두 승리한 **WW 37,702게임에서 modeled time-to-win 합계가 Stage 2보다 약 30.089144% 감소**했습니다. 보드별 승패와 기록된 guess 시퀀스의 동등성은 이번 corpus의 관찰 결과입니다. CPU 계산시간·benchmark wall time·실제 인간 플레이 시간의 30% 감소나 모든 보드의 동등성을 뜻하지 않습니다.
+
+[최종 판정문 원문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [V1 기록·보존 위치 안내](docs/stage3-v1/README.md)를 참고하세요. 최종 감사 OPTIONAL 4건은 비차단 **DEFER**입니다. ZiNi 개선, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정 및 알고리즘 확장은 별도 **Extended** 범위입니다.
+
 ## 실행 방법
 
 Windows 배포본은 [Releases](https://github.com/cube1793/Minesweeper-Project/releases)에서

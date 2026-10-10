@@ -116,6 +116,20 @@ Exact probability는 local move가 없을 때만 호출한다. Clue constraint�
 
 Certainty는 정수 world 수로 판정하며 표시용 반올림이나 float을 사용하지 않는다. 선택할 HIDDEN이 없는 일관된 position은 `None`을 반환한다.
 
+### Stage-3 V1: 동결 구현과 완료 범위
+
+2026-10-10 **Stage-3 V1 CLOSED**: 동결 알고리즘·텔레메트리·공식 100k 검증을 수용했다. Qualified implementation commit은 `611984133b83be11bcd2105f401ecdddcfd68a15`로 유지하며, 이후 문서 커밋을 공식 실행 commit으로 취급하지 않는다.
+
+| 모듈 | V1 책임 |
+| --- | --- |
+| `stage3_planner.py`, `stage3_physical.py` | 공개 observation과 동결 timing profile/table로 OPEN·FLAG·CHORD 후보를 계획하고 E-first 정책으로 선택 |
+| `stage3_runner.py`, `stage3_benchmark_runner.py` | 검증된 첫 action 하나를 실행한 뒤 재계획하는 동기 실행 및 benchmark 흐름 |
+| `stage3_telemetry.py`, `benchmark_modeled_time.py`, `benchmark_comparison.py` | Stage-3 event 계약, modeled time 재구성, paired outcome 및 WW ratio-of-totals 비교 |
+
+공식 `EXPERT_GENERAL_V1` 100,000보드의 WW 37,702게임에서 동결 Model C의 modeled time-to-win 합계는 Stage 2보다 약 **30.089144% 감소**했다. 승패·기록된 guess 시퀀스 동등성은 이 corpus의 관찰 결과이며 보편적 회귀 불변식이 아니다. 이 수치는 CPU 계산시간·benchmark wall time·인간 플레이 시간의 30% 감소를 뜻하지 않는다. Model C의 OPEN·FLAG·CHORD 동일 비용 가정도 함께 적용한다.
+
+[최종 판정문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [동결 명세·감사 보존 위치](docs/stage3-v1/README.md)를 기준으로 읽는다. OPTIONAL 4건은 비차단 DEFER다. 현재 Live/Replay UI의 Simple Algorithm과 Stage-3 V1 실행 경계를 구분하며, ZiNi 개선, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정과 알고리즘 확장은 별도 Extended 범위다.
+
 ### Replay
 
 | 모듈 | 책임 |
@@ -405,7 +419,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 ## 7. 현재 한계와 기술 부채
 
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
-- **Solver 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
+- **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
