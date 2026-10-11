@@ -99,9 +99,13 @@ class PremiumLookupEquivalenceTests(unittest.TestCase):
 
     def assert_candidates_match_reference(self, state, context):
         expected = _reference_premium_candidates(state, context)
+        actual = _find_premium_candidates(state, context)
+        self.assertIs(type(actual), tuple)
+        for candidate in actual:
+            self.assertIs(type(candidate), _PremiumCandidate)
         # Tuple equality protects coordinates, Premium values, and row-major
         # order, including candidates that are already revealed.
-        self.assertEqual(_find_premium_candidates(state, context), expected)
+        self.assertEqual(actual, expected)
         self.assertEqual(
             tuple(_calculate_premium(state, item.coord, context) for item in expected),
             tuple(item.premium for item in expected),

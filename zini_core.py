@@ -410,8 +410,8 @@ def _find_premium_candidates(
     if context.number_cell_lookups is not None:
         return tuple(
             _PremiumCandidate(
-                coord=coord,
-                premium=_calculate_premium_from_lookup(state, coord, lookup),
+                coord,
+                _calculate_premium_from_lookup(state, coord, lookup),
             )
             for coord, lookup in context.number_cell_lookups.items()
         )
