@@ -274,6 +274,8 @@ class ReplayStatisticsTests(unittest.TestCase):
         ui._replay_mode = True
         ui._zini_job_token = 0
         ui._zini_explorer = ui_manager.ZiniExplorerController()
+        ui._zini_explorer_window = None
+        ui.zini_explorer_button = Mock()
         ui._replay_player = ReplayPlayer(replay_data)
         ui._display_time = 0.0
         ui._ensure_zini_metric_job = lambda: None
@@ -477,6 +479,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         ):
             ui = MinesweeperUI(live_engine)
         # This fixture bypasses _init_ui; supply the new presentation controls.
+        ui.zini_explorer_button = Mock()
         ui.analysis_status_label = _WidgetProbe()
         ui.analysis_checkbox = Mock()
         ui.analysis_checkbox.isChecked.return_value = False

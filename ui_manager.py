@@ -395,6 +395,7 @@ class MinesweeperUI(QWidget):
         self._stat_value_items = {}
         self._zini_job_token = 0
         self._zini_explorer = ZiniExplorerController()
+        self._zini_explorer_window = None
         self._zini_process = None
         self._zini_process_token = None
         self._zini_payload_path = None
@@ -500,6 +501,11 @@ class MinesweeperUI(QWidget):
         self.benchmark_statistics_button = QPushButton("벤치마크 통계")
         self.benchmark_statistics_button.clicked.connect(self.on_benchmark_statistics)
         layout.addWidget(self.benchmark_statistics_button)
+
+        self.zini_explorer_button = QPushButton("ZiNi Explorer")
+        self.zini_explorer_button.setEnabled(False)
+        self.zini_explorer_button.clicked.connect(self.on_open_zini_explorer)
+        layout.addWidget(self.zini_explorer_button)
 
         return panel
 
@@ -1002,8 +1008,10 @@ class MinesweeperUI(QWidget):
 
     def _reset_zini_metric_job(self):
         """Invalidate and stop any pending ZiNi calculation for a previous board."""
+        self._close_zini_explorer_window()
         self._zini_job_token += 1
         self._zini_explorer.invalidate()
+        self._update_zini_explorer_button()
         self._terminate_zini_metric_process()
         if self._zini_poll_timer.isActive():
             self._zini_poll_timer.stop()
@@ -1024,6 +1032,43 @@ class MinesweeperUI(QWidget):
             self._zini_explorer.token == self._zini_job_token
             and self._zini_explorer_is_eligible()
         )
+        self._update_zini_explorer_button()
+
+    def _update_zini_explorer_button(self):
+        usable = self._zini_explorer.state == "ready"
+        self.zini_explorer_button.setEnabled(usable)
+        if not usable:
+            self._close_zini_explorer_window()
+
+    def _close_zini_explorer_window(self):
+        window = self._zini_explorer_window
+        self._zini_explorer_window = None
+        if window is not None:
+            window.close()
+
+    def _on_zini_explorer_closed(self):
+        # A close preserves the controller's cached trace and logical position.
+        if self.sender() is self._zini_explorer_window:
+            self._zini_explorer_window = None
+
+    def on_open_zini_explorer(self):
+        """Open one auxiliary viewer at the explicit lazy-build boundary."""
+        trace = self.request_zini_explorer_trace()
+        if trace is None:
+            if self._zini_explorer.eligible and self._zini_explorer.error is not None:
+                QMessageBox.warning(
+                    self, "ZiNi Explorer", "현재 ZiNi 결과의 경로를 표시할 수 없습니다.",
+                )
+            return
+
+        if self._zini_explorer_window is None:
+            from zini_explorer_ui import ZiniExplorerWindow
+
+            self._zini_explorer_window = ZiniExplorerWindow(self._zini_explorer, self)
+            self._zini_explorer_window.closed.connect(self._on_zini_explorer_closed)
+        self._zini_explorer_window.show()
+        self._zini_explorer_window.raise_()
+        self._zini_explorer_window.activateWindow()
 
     def request_zini_explorer_trace(self):
         """Explicit, non-visual Explorer entry; never starts or repeats search.
@@ -1032,7 +1077,9 @@ class MinesweeperUI(QWidget):
         trace/player; the integrating caller is responsible for execution thread.
         """
         self._sync_zini_explorer_eligibility()
-        return self._zini_explorer.request_trace()
+        trace = self._zini_explorer.request_trace()
+        self._update_zini_explorer_button()
+        return trace
 
     def _ensure_zini_metric_job(self):
         """Low-level job orchestration, also callable directly by existing tests.
@@ -1064,6 +1111,7 @@ class MinesweeperUI(QWidget):
         self._zini_explorer.begin(
             token, snapshot, eligible=self._zini_explorer_is_eligible(),
         )
+        self._update_zini_explorer_button()
         try:
             payload_path, result_path = self._create_zini_worker_files(
                 token,
@@ -1091,6 +1139,7 @@ class MinesweeperUI(QWidget):
             self._zini_explorer.receive({
                 "token": token, "clicks": None, "moves": None, "error": repr(exc),
             }, expected_token=token)
+            self._update_zini_explorer_button()
             return
 
         self._zini_process = process
