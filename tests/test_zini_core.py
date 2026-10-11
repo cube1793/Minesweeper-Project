@@ -217,6 +217,126 @@ class PremiumLookupEquivalenceTests(unittest.TestCase):
                     self.assert_candidates_match_reference(state, context)
 
 
+def _reference_all_safe_cells_revealed(state):
+    """Keep the original row-major membership predicate independent of caches."""
+    snapshot = state.snapshot
+    return all(
+        (x, y) in state.revealed
+        for y in range(snapshot.height)
+        for x in range(snapshot.width)
+        if (x, y) not in snapshot.mines
+    )
+
+
+class SolvedCheckEquivalenceTests(unittest.TestCase):
+    def setUp(self):
+        self.snapshot = BoardSnapshot(
+            width=2, height=2, num_mines=1, mines_placed=True,
+            mines=frozenset({(1, 1)}), adjacent=((1, 1), (1, 0)),
+        )
+
+    def assert_solved_matches_reference(self, state):
+        self.assertEqual(
+            state.all_safe_cells_revealed(),
+            _reference_all_safe_cells_revealed(state),
+        )
+
+    def test_matches_reference_for_every_small_board_reveal_subset(self):
+        boards = (
+            self.snapshot,
+            BoardSnapshot(0, 0, 0, True, frozenset(), ()),
+            BoardSnapshot(0, 2, 0, True, frozenset(), ((), ())),
+            BoardSnapshot(2, 0, 0, True, frozenset(), ()),
+            BoardSnapshot(1, 1, 1, True, frozenset({(0, 0)}), ((0,),)),
+            BoardSnapshot(2, 2, 0, True, frozenset(), ((0, 0), (0, 0))),
+            BoardSnapshot(
+                3, 3, 1, True, frozenset({(1, 1)}),
+                ((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+            ),
+        )
+        for board_index, snapshot in enumerate(boards):
+            state = _ZiniBoardState.create(snapshot)
+            cells = [
+                (x, y)
+                for y in range(snapshot.height)
+                for x in range(snapshot.width)
+            ]
+            # Include mines in the exhaustive domain, even for abnormal states.
+            for mask in range(1 << len(cells)):
+                state.revealed = {
+                    coord for index, coord in enumerate(cells)
+                    if mask & (1 << index)
+                }
+                with self.subTest(board=board_index, revealed_mask=mask):
+                    self.assert_solved_matches_reference(state)
+
+    def test_mines_and_extra_cells_do_not_replace_missing_safe_cells(self):
+        state = _ZiniBoardState.create(self.snapshot)
+        safe_cells = {(0, 0), (1, 0), (0, 1)}
+        state.revealed = (safe_cells - {(0, 1)}) | {(1, 1)}
+        self.assertEqual(len(state.revealed), len(safe_cells))
+        self.assertFalse(state.all_safe_cells_revealed())
+        self.assert_solved_matches_reference(state)
+
+        state.revealed.update({(-1, -1), (2, 2)})
+        self.assertFalse(state.all_safe_cells_revealed())
+        self.assert_solved_matches_reference(state)
+        state.revealed.add((0, 1))
+        self.assertTrue(state.all_safe_cells_revealed())
+        self.assert_solved_matches_reference(state)
+
+    def test_matches_reference_after_replacing_and_clearing_revealed(self):
+        state = _ZiniBoardState.create(self.snapshot)
+        state.revealed.update({(0, 0), (1, 0), (0, 1)})
+        self.assert_solved_matches_reference(state)
+        state.revealed.remove((1, 0))
+        self.assert_solved_matches_reference(state)
+        state.revealed.clear()
+        self.assert_solved_matches_reference(state)
+        state.revealed = {(0, 0), (1, 0), (0, 1), (1, 1)}
+        self.assert_solved_matches_reference(state)
+        state.revealed = {(1, 1)}
+        self.assert_solved_matches_reference(state)
+
+    def test_matches_reference_on_all_expert_golden_trajectory_states(self):
+        snapshot = _expert_seed1003_snapshot()
+        context = _build_premium_context(snapshot)
+        for name, golden in GOLDEN.items():
+            if golden["inputs"]["board"] != "expert1003":
+                continue
+            state = _ZiniBoardState.create(snapshot)
+            for step, expected in enumerate(golden["expected"]["moves"]):
+                with self.subTest(workload=name, step=step):
+                    self.assert_solved_matches_reference(state)
+                    action, x, y, premium, _ = expected
+                    if action == "fallback_click":
+                        _click_fallback_cell(state, (x, y), context)
+                    else:
+                        _apply_premium_candidate(
+                            state, _PremiumCandidate((x, y), premium), context,
+                        )
+            with self.subTest(workload=name, step="solved"):
+                self.assert_solved_matches_reference(state)
+                self.assertTrue(state.all_safe_cells_revealed())
+
+    def test_three_argument_state_and_copy_share_only_immutable_safe_cells(self):
+        state = _ZiniBoardState(self.snapshot, {(0, 0)}, {(1, 1)})
+        copied = _copy_zini_state(state)
+        self.assertEqual(_zini_state_key(copied), _zini_state_key(state))
+        self.assertIsInstance(state._safe_cell_set, frozenset)
+        self.assertIs(copied._safe_cell_set, state._safe_cell_set)
+        self.assertIsNot(copied.revealed, state.revealed)
+        self.assertIsNot(copied.flagged_mines, state.flagged_mines)
+        self.assert_solved_matches_reference(state)
+        self.assert_solved_matches_reference(copied)
+        copied.revealed.update({(1, 0), (0, 1)})
+        copied.flagged_mines.clear()
+        self.assertTrue(copied.all_safe_cells_revealed())
+        self.assertFalse(state.all_safe_cells_revealed())
+        self.assertEqual(state.revealed, {(0, 0)})
+        self.assertEqual(state.flagged_mines, {(1, 1)})
+
+
 class ZiniCoreTests(unittest.TestCase):
     def test_copy_zini_state_preserves_key_without_sharing_mutable_sets(self):
         snapshot = BoardSnapshot(

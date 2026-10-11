@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from board_analyzer import BoardAnalysis, CellClass, analyze_board
@@ -66,11 +66,18 @@ class _PremiumCandidate:
 
 @dataclass
 class _ZiniBoardState:
-    """Dynamic board state used by the G.ZiNi simulation."""
+    """Dynamic G.ZiNi state tied to one immutable board snapshot."""
 
     snapshot: BoardSnapshot
     revealed: set[Coordinate]
     flagged_mines: set[Coordinate]
+    _safe_cell_set: frozenset[Coordinate] | None = field(
+        default=None, repr=False, compare=False,
+    )
+
+    def __post_init__(self):
+        if self._safe_cell_set is None:
+            self._safe_cell_set = frozenset(_safe_cells(self.snapshot))
 
     @classmethod
     def create(cls, snapshot: BoardSnapshot):
@@ -107,10 +114,8 @@ class _ZiniBoardState:
 
     def all_safe_cells_revealed(self) -> bool:
         """Return whether every non-mine cell has been revealed."""
-        return all(
-            coord in self.revealed
-            for coord in _safe_cells(self.snapshot)
-        )
+        # Subset semantics also tolerate extra mine coordinates in revealed.
+        return self._safe_cell_set <= self.revealed
 
 
 def _copy_zini_state(state: _ZiniBoardState) -> _ZiniBoardState:
@@ -119,6 +124,7 @@ def _copy_zini_state(state: _ZiniBoardState) -> _ZiniBoardState:
         snapshot=state.snapshot,
         revealed=set(state.revealed),
         flagged_mines=set(state.flagged_mines),
+        _safe_cell_set=state._safe_cell_set,
     )
 
 
