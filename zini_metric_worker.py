@@ -25,15 +25,20 @@ def calculate_counter_zini(payload: dict) -> dict:
             snapshot,
             config=config,
         )
+        moves = result.result.moves
+        if result.best_clicks != sum(move.clicks_added for move in moves):
+            raise ValueError("ZiNi click count does not match final moves.")
         return {
             "token": token,
             "clicks": result.best_clicks,
+            "moves": moves,
             "error": None,
         }
     except Exception as exc:
         return {
             "token": token,
             "clicks": None,
+            "moves": None,
             "error": repr(exc),
         }
 

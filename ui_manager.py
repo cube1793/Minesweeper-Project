@@ -71,6 +71,7 @@ from replay_analysis import ReplayStepAnalysis, analyze_replay_step
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
 from zini_calculator import ZiniNeighborhoodBeamConfig
+from zini_explorer import ZiniExplorerController
 
 
 # 타일 숫자별 클래식/Arbiter 스타일 색상
@@ -393,8 +394,7 @@ class MinesweeperUI(QWidget):
         self._replay_autoplay_timer.timeout.connect(self._advance_replay_autoplay)
         self._stat_value_items = {}
         self._zini_job_token = 0
-        self._zini_result_token = None
-        self._zini_result_clicks = None
+        self._zini_explorer = ZiniExplorerController()
         self._zini_process = None
         self._zini_process_token = None
         self._zini_payload_path = None
@@ -423,7 +423,7 @@ class MinesweeperUI(QWidget):
         if self._benchmark_statistics_window is not None:
             self._benchmark_statistics_window.close()
         self._stop_simple_auto()
-        self._terminate_zini_metric_process()
+        self._reset_zini_metric_job()
         super().closeEvent(event)
 
     def on_benchmark_statistics(self):
@@ -925,6 +925,7 @@ class MinesweeperUI(QWidget):
             time/est_time/bbbv/bbbv_per_sec/clicks/left/right/chord/cps 등
             엔진이 채워주는 키는 자동으로 해당 행에 반영된다.
         """
+        self._sync_zini_explorer_eligibility()
         merged_stats = dict(stats_dict)
         if self.engine.status != GameStatus.PLAYING:
             merged_stats.update(self._counter_metric_values())
@@ -1002,18 +1003,51 @@ class MinesweeperUI(QWidget):
     def _reset_zini_metric_job(self):
         """Invalidate and stop any pending ZiNi calculation for a previous board."""
         self._zini_job_token += 1
-        self._zini_result_token = None
-        self._zini_result_clicks = None
+        self._zini_explorer.invalidate()
         self._terminate_zini_metric_process()
         if self._zini_poll_timer.isActive():
             self._zini_poll_timer.stop()
 
+    def _zini_explorer_is_eligible(self) -> bool:
+        """Use the same completed-game policy as Counters, regardless of seek."""
+        if self._replay_mode:
+            timeline = self._replay_counter_timeline
+            return (
+                self._replay_player is not None
+                and timeline is not None
+                and timeline.is_completed
+            )
+        return self.engine.status in (GameStatus.WON, GameStatus.LOST)
+
+    def _sync_zini_explorer_eligibility(self):
+        self._zini_explorer.set_eligible(
+            self._zini_explorer.token == self._zini_job_token
+            and self._zini_explorer_is_eligible()
+        )
+
+    def request_zini_explorer_trace(self):
+        """Explicit, non-visual Explorer entry; never starts or repeats search.
+
+        Counters never call this method. The pure controller owns the cached
+        trace/player; the integrating caller is responsible for execution thread.
+        """
+        self._sync_zini_explorer_eligibility()
+        return self._zini_explorer.request_trace()
+
     def _ensure_zini_metric_job(self):
-        """Start bounded seeded-chain ZiNi calculation in a cancellable subprocess."""
+        """Low-level job orchestration, also callable directly by existing tests.
+
+        Normal Counters callers check completion before starting a job. Direct
+        calls may prepare a metric while playing, but cannot grant Explorer access.
+        """
+        self._sync_zini_explorer_eligibility()
+        if (
+            self._zini_explorer.token == self._zini_job_token
+            and self._zini_explorer.completed
+        ):
+            return
         snapshot = self._engine_for_current_mode().get_board_snapshot()
         if not snapshot.mines_placed:
-            return
-        if self._zini_result_token == self._zini_job_token:
             return
         if self._zini_process is not None:
             if (
@@ -1026,6 +1060,10 @@ class MinesweeperUI(QWidget):
             self._terminate_zini_metric_process()
 
         token = self._zini_job_token
+        # This exact immutable snapshot is both retained and serialized below.
+        self._zini_explorer.begin(
+            token, snapshot, eligible=self._zini_explorer_is_eligible(),
+        )
         try:
             payload_path, result_path = self._create_zini_worker_files(
                 token,
@@ -1050,8 +1088,9 @@ class MinesweeperUI(QWidget):
                 locals().get("payload_path"),
                 locals().get("result_path"),
             )
-            self._zini_result_token = token
-            self._zini_result_clicks = None
+            self._zini_explorer.receive({
+                "token": token, "clicks": None, "moves": None, "error": repr(exc),
+            }, expected_token=token)
             return
 
         self._zini_process = process
@@ -1108,7 +1147,7 @@ class MinesweeperUI(QWidget):
         self._clear_zini_metric_process()
 
     def _clear_zini_metric_process(self):
-        """Forget completed worker state and clean worker temp files."""
+        """Clear process/files only; retain the controller's completed session."""
         self._cleanup_zini_worker_files(
             self._zini_payload_path,
             self._zini_result_path,
@@ -1130,18 +1169,23 @@ class MinesweeperUI(QWidget):
             except OSError as exc:
                 print(f"[ZiNi warning] temp file cleanup failed: {exc}")
 
-    def _read_zini_worker_result(self) -> dict | None:
+    def _read_zini_worker_result(self) -> object | None:
         """Read the completed subprocess result if it has been written."""
         if not self._zini_result_path or not os.path.exists(self._zini_result_path):
             return None
         try:
             with open(self._zini_result_path, "rb") as result_file:
-                return pickle.load(result_file)
+                result = pickle.load(result_file)
+            if result is None:
+                # None is reserved here for an absent, still-pending result file.
+                raise ValueError("ZiNi worker wrote a null result.")
+            return result
         except Exception as exc:
             print(f"[ZiNi warning] counter ZiNi result read failed: {exc}")
             return {
                 "token": self._zini_process_token,
                 "clicks": None,
+                "moves": None,
                 "error": repr(exc),
             }
 
@@ -1176,15 +1220,16 @@ class MinesweeperUI(QWidget):
             result = {
                 "token": self._zini_process_token,
                 "clicks": None,
+                "moves": None,
                 "error": f"worker exited with code {self._zini_process.returncode}",
             }
 
-        token = result.get("token")
-        if token == self._zini_job_token:
-            if result.get("error"):
-                print(f"[ZiNi warning] counter ZiNi calculation failed: {result['error']}")
-            self._zini_result_token = token
-            self._zini_result_clicks = result.get("clicks")
+        self._sync_zini_explorer_eligibility()
+        if self._zini_explorer.receive(
+            result, expected_token=self._zini_process_token,
+        ):
+            if self._zini_explorer.error:
+                print(f"[ZiNi warning] {self._zini_explorer.error}")
             if self._replay_mode:
                 self._update_replay_statistics_panel()
             else:
@@ -1196,9 +1241,9 @@ class MinesweeperUI(QWidget):
 
     def _current_zini_clicks(self) -> int | None:
         """Return the completed bounded best-so-far ZiNi value, if any."""
-        if self._zini_result_token != self._zini_job_token:
+        if self._zini_explorer.token != self._zini_job_token:
             return None
-        return self._zini_result_clicks
+        return self._zini_explorer.clicks
 
     @staticmethod
     def _format_counter_decimal(numerator: int, denominator: int) -> str:
@@ -1234,6 +1279,7 @@ class MinesweeperUI(QWidget):
         self._set_statistics_panel_values(self._build_replay_statistics())
 
     def _build_replay_statistics(self) -> dict[str, str]:
+        self._sync_zini_explorer_eligibility()
         timeline = self._replay_counter_timeline
         if timeline is None or self._replay_player is None:
             return ReplayStatisticsAnalyzer.masked_statistics()

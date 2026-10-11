@@ -271,6 +271,9 @@ class ReplayStatisticsTests(unittest.TestCase):
 
     def _ui_for_replay(self, replay_data, zini=5):
         ui = MinesweeperUI.__new__(MinesweeperUI)
+        ui._replay_mode = True
+        ui._zini_job_token = 0
+        ui._zini_explorer = ui_manager.ZiniExplorerController()
         ui._replay_player = ReplayPlayer(replay_data)
         ui._display_time = 0.0
         ui._ensure_zini_metric_job = lambda: None
@@ -510,7 +513,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         create_files = Mock(side_effect=RuntimeError("stop before worker launch"))
         ui._create_zini_worker_files = create_files
         ui._cleanup_zini_worker_files = Mock()
-        ui._zini_result_token = None
+        ui._zini_explorer.invalidate()
         ui._zini_process = None
         ui._zini_process_token = None
 
