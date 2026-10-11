@@ -128,6 +128,9 @@ _EXPERT_SEED1003_MINES = frozenset(
 )
 
 
+# Historical replay-validity witness, not a fresh algorithm-output golden.
+# The UI-default 1000-evaluation search's 120-click solution follows a different
+# path. Keep this witness intact; fresh V1 output is locked in zini_v1_golden.py.
 _EXPERT_SEED1003_120_TRACE = (
     ("click", 19, 14, 5, 1),
     ("click", 5, 7, 3, 1),
