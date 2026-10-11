@@ -1,5 +1,7 @@
+import random
 import unittest
 
+from board_analyzer import CellClass
 from board_snapshot import BoardSnapshot
 from zini_core import (
     _PremiumCandidate,
@@ -21,8 +23,198 @@ from zini_core import (
 )
 from tests.zini_fixtures import (
     _EXPERT_SEED1003_120_TRACE,
+    _advanced_search_snapshot,
     _expert_seed1003_snapshot,
 )
+from tests.zini_golden_helpers import workload_snapshot
+from tests.zini_v1_golden import GOLDEN
+
+
+def _reference_premium_candidates(state, context):
+    """Express the pre-lookup Premium scan without production Premium helpers."""
+    snapshot = state.snapshot
+    candidates = []
+    for y in range(snapshot.height):
+        for x in range(snapshot.width):
+            coord = (x, y)
+            if coord in snapshot.mines or snapshot.adjacent[y][x] == 0:
+                continue
+            openings = set()
+            isolated = set()
+            unflagged_mines = 0
+            for ny in range(max(0, y - 1), min(snapshot.height, y + 2)):
+                for nx in range(max(0, x - 1), min(snapshot.width, x + 2)):
+                    neighbor = (nx, ny)
+                    if neighbor == coord:
+                        continue
+                    if neighbor in snapshot.mines:
+                        unflagged_mines += neighbor not in state.flagged_mines
+                        continue
+                    if neighbor in state.revealed:
+                        continue
+                    cell_class = context.analysis.cell_class[ny][nx]
+                    if cell_class == CellClass.OPENING:
+                        opening_id = context.analysis.opening_id[ny][nx]
+                        if opening_id in context.opening_units_by_id:
+                            openings.add(opening_id)
+                    elif (
+                        cell_class == CellClass.ISOLATED
+                        and neighbor in context.isolated_cells
+                    ):
+                        isolated.add(neighbor)
+            premium = len(openings) + len(isolated) - unflagged_mines - 1
+            if (
+                coord not in state.revealed
+                and context.analysis.cell_class[y][x] == CellClass.BORDER
+            ):
+                premium -= 1
+            candidates.append(_PremiumCandidate(coord=coord, premium=premium))
+    return tuple(candidates)
+
+
+class PremiumLookupEquivalenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.boards = {
+            name: workload_snapshot(name)
+            for name in ("board_c", "expert1003", "general0", "general42")
+        }
+        cls.boards.update({
+            "small_empty": BoardSnapshot(
+                width=1, height=1, num_mines=0, mines_placed=True,
+                mines=frozenset(), adjacent=((0,),),
+            ),
+            "small_corner": BoardSnapshot(
+                width=3, height=3, num_mines=1, mines_placed=True,
+                mines=frozenset({(0, 0)}),
+                adjacent=((0, 1, 0), (1, 1, 0), (0, 0, 0)),
+            ),
+            "small_center": BoardSnapshot(
+                width=3, height=3, num_mines=1, mines_placed=True,
+                mines=frozenset({(1, 1)}),
+                adjacent=((1, 1, 1), (1, 0, 1), (1, 1, 1)),
+            ),
+            "small_mixed": _advanced_search_snapshot(),
+        })
+
+    def assert_candidates_match_reference(self, state, context):
+        expected = _reference_premium_candidates(state, context)
+        # Tuple equality protects coordinates, Premium values, and row-major
+        # order, including candidates that are already revealed.
+        self.assertEqual(_find_premium_candidates(state, context), expected)
+        self.assertEqual(
+            tuple(_calculate_premium(state, item.coord, context) for item in expected),
+            tuple(item.premium for item in expected),
+        )
+        return expected
+
+    def test_lookup_matches_reference_on_all_golden_trajectory_states(self):
+        for name, golden in GOLDEN.items():
+            snapshot = self.boards[golden["inputs"]["board"]]
+            context = _build_premium_context(snapshot)
+            state = _ZiniBoardState.create(snapshot)
+            for step, expected in enumerate(golden["expected"]["moves"]):
+                with self.subTest(workload=name, step=step):
+                    self.assert_candidates_match_reference(state, context)
+                    action, x, y, premium, clicks_added = expected
+                    if action == "fallback_click":
+                        move = _click_fallback_cell(state, (x, y), context)
+                    else:
+                        move = _apply_premium_candidate(
+                            state, _PremiumCandidate((x, y), premium), context,
+                        )
+                    self.assertEqual(
+                        (move.action, move.x, move.y, move.premium, move.clicks_added),
+                        expected,
+                    )
+            with self.subTest(workload=name, step="solved"):
+                self.assertTrue(state.all_safe_cells_revealed())
+                self.assert_candidates_match_reference(state, context)
+
+    def test_lookup_matches_reference_on_small_board_trajectories(self):
+        for name, snapshot in self.boards.items():
+            if not name.startswith("small_"):
+                continue
+            context = _build_premium_context(snapshot)
+            state = _ZiniBoardState.create(snapshot)
+            for step in range(snapshot.width * snapshot.height * 4):
+                with self.subTest(board=name, step=step):
+                    self.assert_candidates_match_reference(state, context)
+                    if state.all_safe_cells_revealed():
+                        break
+                    self.assertIsNotNone(_apply_next_g_zini_move(state, context))
+            else:
+                self.fail(f"Small-board trajectory did not finish: {name}")
+
+    def test_lookup_matches_reference_after_seeded_direct_state_mutations(self):
+        rng = random.Random(1003)
+        for name, snapshot in self.boards.items():
+            context = _build_premium_context(snapshot)
+            state = _ZiniBoardState.create(snapshot)
+            cells = [
+                (x, y)
+                for y in range(snapshot.height)
+                for x in range(snapshot.width)
+            ]
+            for case in range(24):
+                # Replace both sets so coverage can shrink as well as grow.
+                # Include arbitrary mine/safe memberships: Premium only reads
+                # the relevant neighbor memberships from these public sets.
+                state.revealed = {coord for coord in cells if rng.random() < 0.5}
+                state.flagged_mines = {
+                    coord for coord in cells if rng.random() < 0.5
+                }
+                with self.subTest(board=name, case=case):
+                    self.assert_candidates_match_reference(state, context)
+
+    def test_lookup_counts_only_unrevealed_adjacent_zeros_in_partial_opening(self):
+        snapshot = self.boards["small_corner"]
+        context = _build_premium_context(snapshot)
+        state = _ZiniBoardState.create(snapshot)
+        coord = (1, 0)
+        for revealed, expected in (
+            (set(), -2),
+            ({(2, 0)}, -2),
+            ({(2, 0), (2, 1)}, -3),
+            ({(2, 1)}, -2),
+            (set(), -2),
+        ):
+            state.revealed.clear()
+            state.revealed.update(revealed)
+            with self.subTest(revealed=revealed):
+                self.assert_candidates_match_reference(state, context)
+                self.assertEqual(_calculate_premium(state, coord, context), expected)
+
+    def test_four_field_manual_contexts_preserve_reduced_memberships(self):
+        snapshot = self.boards["board_c"]
+        built = _build_premium_context(snapshot)
+        contexts = (
+            type(built)(
+                built.analysis, built.units,
+                built.opening_units_by_id, built.isolated_cells,
+            ),
+            type(built)(
+                analysis=built.analysis, units=built.units,
+                opening_units_by_id={}, isolated_cells=built.isolated_cells,
+            ),
+            type(built)(
+                analysis=built.analysis, units=built.units,
+                opening_units_by_id=built.opening_units_by_id,
+                isolated_cells=frozenset(),
+            ),
+            type(built)(
+                analysis=built.analysis, units=built.units,
+                opening_units_by_id={}, isolated_cells=frozenset(),
+            ),
+        )
+        state = _ZiniBoardState.create(snapshot)
+        for revealed in (set(), {(0, 0), (2, 3), (3, 3)}, set()):
+            state.revealed.clear()
+            state.revealed.update(revealed)
+            state.flagged_mines.symmetric_difference_update({(1, 0)})
+            for index, context in enumerate(contexts):
+                with self.subTest(context=index, revealed=revealed):
+                    self.assert_candidates_match_reference(state, context)
 
 
 class ZiniCoreTests(unittest.TestCase):

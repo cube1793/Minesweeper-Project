@@ -34,6 +34,16 @@ class _Static3BvUnit:
 
 
 @dataclass(frozen=True)
+class _NumberCellPremium:
+    """Static neighbors contributing to one number cell's Premium."""
+
+    adjacent_mines: tuple[Coordinate, ...]
+    adjacent_isolated: tuple[Coordinate, ...]
+    adjacent_openings: tuple[frozenset[Coordinate], ...]
+    is_border: bool
+
+
+@dataclass(frozen=True)
 class _PremiumContext:
     """Static lookup data used while calculating Premium values."""
 
@@ -41,6 +51,9 @@ class _PremiumContext:
     units: tuple[_Static3BvUnit, ...]
     opening_units_by_id: dict[int, _Static3BvUnit]
     isolated_cells: frozenset[Coordinate]
+    # Insertion order is the original row-major candidate order. None retains
+    # the reference path for callers constructing the legacy four-field context.
+    number_cell_lookups: dict[Coordinate, _NumberCellPremium] | None = None
 
 
 @dataclass(frozen=True)
@@ -196,21 +209,89 @@ def _build_premium_context(snapshot: BoardSnapshot) -> _PremiumContext:
     """Build static lookup data for Premium calculation."""
     analysis = analyze_board(snapshot)
     units = _extract_static_3bv_units(snapshot)
+    opening_units_by_id = {
+        unit.opening_id: unit
+        for unit in units
+        if unit.kind == _UNIT_OPENING and unit.opening_id is not None
+    }
+    isolated_cells = frozenset(
+        unit.representative
+        for unit in units
+        if unit.kind == _UNIT_ISOLATED
+    )
 
     return _PremiumContext(
         analysis=analysis,
         units=units,
-        opening_units_by_id={
-            unit.opening_id: unit
-            for unit in units
-            if unit.kind == _UNIT_OPENING and unit.opening_id is not None
-        },
-        isolated_cells=frozenset(
-            unit.representative
-            for unit in units
-            if unit.kind == _UNIT_ISOLATED
+        opening_units_by_id=opening_units_by_id,
+        isolated_cells=isolated_cells,
+        number_cell_lookups=_build_number_cell_lookups(
+            snapshot, analysis, opening_units_by_id, isolated_cells,
         ),
     )
+
+
+def _build_number_cell_lookups(
+    snapshot: BoardSnapshot,
+    analysis: BoardAnalysis,
+    opening_units_by_id: dict[int, _Static3BvUnit],
+    isolated_cells: frozenset[Coordinate],
+) -> dict[Coordinate, _NumberCellPremium]:
+    """Resolve static Premium relationships once, preserving row-major order."""
+    lookups = {}
+    for coord in _safe_cells(snapshot):
+        x, y = coord
+        if snapshot.adjacent[y][x] == 0:
+            continue
+        adjacent_mines = []
+        adjacent_isolated = []
+        opening_zeros: dict[int, set[Coordinate]] = {}
+        for neighbor in _neighbors(snapshot, coord):
+            if neighbor in snapshot.mines:
+                adjacent_mines.append(neighbor)
+                continue
+            nx, ny = neighbor
+            cell_class = analysis.cell_class[ny][nx]
+            if cell_class == CellClass.OPENING:
+                opening_id = analysis.opening_id[ny][nx]
+                if opening_id in opening_units_by_id:
+                    opening_zeros.setdefault(opening_id, set()).add(neighbor)
+            elif cell_class == CellClass.ISOLATED and neighbor in isolated_cells:
+                adjacent_isolated.append(neighbor)
+        lookups[coord] = _NumberCellPremium(
+            adjacent_mines=tuple(adjacent_mines),
+            adjacent_isolated=tuple(adjacent_isolated),
+            # Only this candidate's adjacent zeros count, not the whole opening
+            # or its representative: callers may reveal only part of a unit.
+            adjacent_openings=tuple(
+                frozenset(zeros) for zeros in opening_zeros.values()
+            ),
+            is_border=analysis.cell_class[y][x] == CellClass.BORDER,
+        )
+    return lookups
+
+
+def _calculate_premium_from_lookup(
+    state: _ZiniBoardState,
+    coord: Coordinate,
+    lookup: _NumberCellPremium,
+) -> int:
+    """Evaluate static relationships against the current mutable state sets."""
+    revealed = state.revealed
+    flagged_mines = state.flagged_mines
+    premium = -1
+    for neighbor in lookup.adjacent_isolated:
+        if neighbor not in revealed:
+            premium += 1
+    for zeros in lookup.adjacent_openings:
+        if not zeros <= revealed:
+            premium += 1
+    for mine in lookup.adjacent_mines:
+        if mine not in flagged_mines:
+            premium -= 1
+    if lookup.is_border and coord not in revealed:
+        premium -= 1
+    return premium
 
 
 def _calculate_premium(
@@ -231,6 +312,11 @@ def _calculate_premium(
     x, y = coord
     if state.snapshot.adjacent[y][x] == 0:
         raise ValueError("Premium candidates must be number cells.")
+
+    if context.number_cell_lookups is not None:
+        lookup = context.number_cell_lookups.get(coord)
+        if lookup is not None:
+            return _calculate_premium_from_lookup(state, coord, lookup)
 
     premium = (
         _count_adjacent_covered_3bv(state, coord, context)
@@ -315,6 +401,15 @@ def _find_premium_candidates(
     opening fallback clicks are handled by a later step, not by Premium
     selection.
     """
+    if context.number_cell_lookups is not None:
+        return tuple(
+            _PremiumCandidate(
+                coord=coord,
+                premium=_calculate_premium_from_lookup(state, coord, lookup),
+            )
+            for coord, lookup in context.number_cell_lookups.items()
+        )
+
     candidates = []
     for coord in _safe_cells(state.snapshot):
         x, y = coord
