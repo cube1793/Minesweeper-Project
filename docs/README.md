@@ -58,7 +58,9 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 - [ZiNi 개선 기록 안내](zini-improvement/README.md)
 - [최종 판정](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md): 수용 범위, 정확한 개발 결과, Family A NO-GO와 해석 한계.
 
-## Stage 3 Extended — Next active milestone
+## Stage 3 Extended — Active milestone
+
+현재는 **Stage-3 execution integration audit (read-only)** 단계다. 기존 `run_stage3 / Stage3ActionTrace`를 재사용하는 한 게임 실행 통합, 감사에서 결정할 재생 모델/컨트롤러 경계와 최소 Visualizer, OPEN / FLAG / CHORD 및 커서 위치·이동 시각화가 첫 목표다. Extended production 구현은 아직 수용되지 않았으며 V1은 frozen으로 유지한다.
 
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
 - [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.

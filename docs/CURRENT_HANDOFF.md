@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Recover the current project state safely when a chat is restarted or reaches its maximum length.  
-> Updated: 2026-10-13 (Asia/Seoul)
+> Updated: 2026-10-14 (Asia/Seoul)
 
 ---
 
@@ -28,38 +28,36 @@ Repository:
 
 `C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project`
 
-Stable branch:
+Approved development interpreter:
 
-`main`
+`C:\venvs\minesweeper\Scripts\python.exe`
 
-Merged/pushed main HEAD at ZiNi closeout:
+Live Git verified on 2026-10-14, before this documentation refresh:
 
-`aa0b252aa7c1510b313b511729034e5e74062b5b` — `fix: polish zini closeout ui`
+- branch: `main`
+- HEAD = local `origin/main`: `3622eed852c4e6808269b1b7815fc462359f65d7`
+- latest commit: `feat: add zini explorer answer display`
+- working tree: clean before the documentation edits
 
-ZiNi Improvement is **CLOSED**. The feature branch was merged into `main` and
-pushed; local `main` and `origin/main` were both at this commit before the
-ASCII path migration documentation closeout. Before merge,
-**1414/1414 tests PASS** and the **final manual GUI smoke PASS** were confirmed.
-The full ZiNi closeout smoke is complete.
+This is a dated snapshot of live Git, not a permanent HEAD pin. Recheck branch,
+HEAD, `origin/main` and working-tree status when recovering a later chat.
+The accepted closeout reports record the recent UI work as committed, merged
+and pushed to `main`; the corresponding commits are present in local
+`main` and `origin/main`. No remote fetch was performed for this refresh.
 
-On 2026-10-13, the local top-level project root moved from
-`C:\Users\User\Desktop\졸프` to `C:\Projects\GraduationProject`.
-The internal directory structure was not intentionally changed.
-Historical audit/evidence documents intentionally retain the paths that were
-true when those artifacts were produced.
-
-Current live branch / HEAD / working-tree status:
-
-Always verify from the live Git repository when needed.
-Do not treat this handoff document as authoritative for the latest HEAD after later commits.
-
-Important Stage-3 V1 identities:
+Important Stage-3 V1 identities, verified in live Git:
 
 - qualified implementation/evidence commit: `611984133b83be11bcd2105f401ecdddcfd68a15`
 - V1 closeout/archive state before Extended workspace: `3e60c6bc41260c094a868841cd7df179d46ad6c1`
 - Stage-3 V1 implementation branch was merged into `main` and its job is finished.
 
-If the live repository disagrees with this section, trust the live repository and update this handoff rather than forcing Git back to these values.
+On 2026-10-13, the local top-level project root moved from
+`C:\Users\User\Desktop\졸프` to `C:\Projects\GraduationProject`.
+The internal directory structure was not intentionally changed. Historical
+audit/evidence documents retain the paths that were true when produced.
+
+If live Git disagrees with this section, trust live Git and update the handoff
+rather than forcing Git back to these values.
 
 ---
 
@@ -85,16 +83,12 @@ The following are closed baselines, not work-in-progress:
 - official 100,000-game Stage-2 baseline
 - final architecture/engineering audit
 
-### Stage 3 V1
-- frozen speed-focused algorithm
-- frozen physical Model C
+### Stage 3 V1 — CLOSED
+- frozen speed-focused algorithm and physical Model C
 - telemetry / benchmark integration
-- official 100,000-game Stage-3 run
-- G0–G5 validation
-- independent Claude final audit
-- ChatGPT final adjudication
-- closeout / evidence preservation / housekeeping
-- main merge / remote push
+- official 100,000-game Stage-3 run and G0–G5 validation
+- independent Claude final audit and ChatGPT final adjudication
+- closeout / evidence preservation / housekeeping / main merge / remote push
 
 Final technical verdict:
 
@@ -109,7 +103,7 @@ Accepted official result under frozen Model C:
 
 Do not reopen Stage-3 V1 merely because an Extended design looks cleaner.
 
-### ZiNi improvement — CLOSED (2026-10-13)
+### ZiNi Improvement — CLOSED (2026-10-13)
 
 - TYPE S semantics-preserving optimizations accepted.
 - Post-hoc Trace backend, transport/controller and ZiNi Explorer UI implemented.
@@ -121,28 +115,56 @@ Do not reopen Stage-3 V1 merely because an Extended design looks cleaner.
   deliberately not consumed.
 
 See [final adjudication](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md).
-Final manual GUI smoke passed, and the accepted implementation was merged and
-pushed to `main` at `aa0b252aa7c1510b313b511729034e5e74062b5b`.
+The accepted closeout at `aa0b252aa7c1510b313b511729034e5e74062b5b`
+recorded **1414/1414 tests PASS** and **final manual GUI smoke PASS**, then
+merge/push to `main`.
+
+### Recent maintenance / usability — CLOSED (2026-10-13)
+
+These are concise accepted closeouts. Test counts and desktop smoke results below
+come from the supplied completion records; this documentation-only refresh did
+not rerun tests or desktop smoke. Commit identities were read from live Git.
+
+- **ASCII path migration:** moved to the current ASCII root; **1414/1414 PASS**,
+  **0 failures / 0 errors / 0 skips**, and post-migration normal-desktop smoke
+  **PASS**, including Replay. Documentation closeout: `9a5f144`.
+- **Mouse-release input semantics:** gameplay commits on release; held preview
+  follows the cursor; same-origin BOTH is one CHORD gesture, while
+  different-origin LEFT/RIGHT remain independent. Reset/rebuild/Replay
+  transitions invalidate stale held input. Final automated verification and
+  desktop smoke **PASS**; merged/pushed to `main` at `7b5ba45`.
+- **Usability Batch 1:** persistent Replay default directory; Simple Auto
+  interval **0..2000 ms**, default **180 ms**, **0 = "최대 속도"**; pending
+  single-shot timer safely reschedules. Final full suite **1492/1492 PASS** and
+  desktop smoke **PASS**; merged/pushed to `main` at `81c3d86`.
+- **ZiNi Explorer Answer Display:** unopened-answer display defaults **ON**;
+  safe numbers/mines appear faintly while cells remain covered, and **OFF**
+  restores the old hidden representation. Revealed/unopened numbers share
+  **Arial 14 Bold** typography/color; unopened answers use **35% opacity**.
+  Slider track clicks seek directly to the clicked logical index; manual
+  seeking stops autoplay. Trace/controller semantics are unchanged.
+  Explorer UI **50/50 PASS**, related ZiNi/UI **422/422 PASS**, full unittest
+  **1506/1506 PASS**, **0 failures / 0 errors / 0 skips**, desktop smoke **PASS**.
+  Committed/pushed/merged to `main` at `3622eed`, with final Git state checked.
 
 ---
 
 ## 4. Current milestone
 
-The next active milestone is **Stage-3 Extended**, separate from frozen Stage-3 V1.
-Its existing direction is retained in section 7 and `docs/stage3-extended/`.
-No Stage-3 Extended implementation is part of ZiNi closeout.
+**Active milestone: Stage-3 Extended.**
 
-ZiNi closeout, final manual GUI smoke, merge and push are complete.
+**Immediate task: Stage-3 execution integration audit (read-only).**
 
-The ASCII path migration is also **CLOSED**. On 2026-10-13, the project root
-was moved to `C:\Projects\GraduationProject`, automated verification passed
-**1414/1414 tests PASS**, with **0 failures / 0 errors / 0 skips**.
-The user confirmed **post-migration normal-desktop smoke PASS**, including Replay.
-The approved development interpreter remains
-`C:\venvs\minesweeper\Scripts\python.exe`.
+Stage-3 V1, ZiNi Improvement, ASCII path migration, mouse-release input semantics,
+Usability Batch 1 and ZiNi Explorer Answer Display are all **CLOSED**.
 
-The next immediate maintenance task is the mouse-release input semantics polish.
-After that, continue Stage-3 Extended.
+The existing `run_stage3()`, `Stage3ActionTrace` and `Stage3RunResult` belong
+to accepted V1 execution. Current `main.py` / `ui_manager.py` do not connect
+them to a Stage-3 execution UI or Visualizer. No Stage-3 Extended production
+implementation has been accepted at the verified HEAD.
+
+The present audit determines the minimal integration boundary; it is not
+authorization to change production code or frozen V1 behavior.
 
 ---
 
@@ -157,6 +179,7 @@ After that, continue Stage-3 Extended.
 - **Trace / Explorer:** the post-hoc backend, result transport/controller and
   separate Explorer UI are implemented. Trace is built lazily on request from
   the final result, without rerunning search. It is not a full search-tree record.
+  The later answer-display closeout changes presentation only.
 
 Replay = playback of actually executed game actions.
 ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
@@ -166,40 +189,93 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-The ASCII path migration is complete and requires no further migration work.
+Continue the **read-only Stage-3 execution integration audit** against current
+source/tests. Determine the smallest boundary connecting:
 
-Next, investigate and implement mouse-release input semantics polish: execute
-gameplay actions at mouse-release rather than mouse-press while preserving correct
-LEFT / RIGHT / BOTH-button CHORD behavior, Replay event semantics and timer behavior.
+`run_stage3()`
+→ `Stage3ActionTrace / Stage3RunResult`
+→ one-game Stage-3 execution
+→ step-based board playback / Visualizer
+→ OPEN / FLAG / CHORD and cursor position / movement visualization
+→ First / Previous / Play-Pause / Next / Last.
 
-Treat this as a separate maintenance task from ZiNi and from frozen Stage-3 V1.
-After it is verified and closed, proceed to Stage-3 Extended implementation.
+Inspect these existing seams first:
 
-Do not reopen ZiNi research or consume the reserved final quality holdout.
+- `stage3_runner.py`: synchronous canonical all-HIDDEN run, initial cursor and
+  OPEN at `(0,0)`, frozen board/profile limits, one executed action per trace,
+  and observer callback. Preserve replan-after-action and public-evidence rules.
+- `Stage3ActionTrace` already carries the move, cursor before the action,
+  modeled action cost, decision timing and effect/status data.
+  `Stage3RunResult` retains the ordered traces and modeled total; it does not
+  contain a board snapshot or a ready-made board player.
+- `core_engine.py`, `board_snapshot.py`, `benchmark_board.py`: determine
+  board identity/capture and state reconstruction for one completed execution.
+  Answer-layout data used for reconstruction must not become planner evidence.
+- Stage-2 and Replay modules: inspect execution/recording/playback boundaries
+  without weakening their contracts. ZiNi Explorer/Trace is a temporary
+  reference for controls and rendering, not a shared execution data model.
+
+The audit should select the playback model/controller boundary: reuse/adapt
+existing Replay concepts or use a dedicated Stage-3 playback model. Neither
+option is decided yet. Identify UI ownership/lifecycle boundaries and focused
+verification needs before proposing implementation. Do not rerun planning merely
+to seek through an already recorded run.
+
+Do not reopen closed mouse/usability/ZiNi work or consume the reserved ZiNi
+final quality holdout.
 
 ---
 
-## 7. Stage-3 Extended boundary
+## 7. Stage-3 Extended roadmap and boundaries
 
-Stage-3 Extended is the next active milestone, not unfinished V1 work.
+Stage-3 Extended is the **active milestone**, separate from frozen V1.
 
-Current direction:
+Natural dependency roadmap — not a rigid chronological schedule:
 
-- Stage-3 application execution integration
-- unified execution / replay / visualizer surface
-- same-board Human / Stage-2 / Stage-3 comparison
-- representative-board demonstrations
-- timeline analytics where useful
-- algorithm-version selection
-- physical-model configuration separated from algorithm version
-- playback/display settings separated from planning inputs
-- later Stage-3 V2/V3... algorithm extensions (distinct from closed ZiNi V2 research)
+1. **Current:** read-only execution integration audit.
+2. **Execution / playback / Visualizer foundation:** one-game Stage-3 execution
+   reusing `run_stage3 / Stage3ActionTrace`, the playback boundary selected by
+   the audit, board step playback, OPEN / FLAG / CHORD, cursor position/movement,
+   and First / Previous / Play-Pause / Next / Last.
+3. **Version/settings identity separation as concrete UI requirements emerge:**
+   application version, Stage-3 algorithm version, physical model/profile
+   version, and playback/display settings.
+4. **Same-board Human / Stage2 / Stage3 comparison.**
+5. **Representative-board demonstrations and Timeline Analytics where useful.**
+6. **First Stage-3 Extended algorithm extension.** The current likely first
+   candidate is nearest equal-risk guess selection using physical movement cost
+   among equal minimum-risk candidates; it is not yet an accepted algorithm change.
 
-Built-in screen recording is not currently a priority; external tools such as OBS can record the visualization.
+This is a dependency roadmap, NOT a rigid chronological schedule. If
+implementation evidence makes an adjacent task more natural earlier, the order
+may change without changing milestone boundaries.
 
-Primary documentation location for new Extended work:
+The following remain **DEFERRED / evidence-triggered** candidates, not mandatory work:
 
-`docs/stage3-extended/`
+- logical-known-mine / no-flag execution
+- action-specific OPEN / FLAG / CHORD timing
+- anisotropic movement
+- CPS / burst constraints
+- richer / longer planning
+
+Boundaries:
+
+- Stage-3 V1 and frozen Model C remain frozen. Do not alter V1 semantics merely
+  for UI convenience.
+- Prefer existing runner/trace interfaces and minimum necessary abstraction.
+  No generic solver registry, EventBus or plugin framework.
+- **Replay elapsed time != modeled physical time**; decision compute time is
+  separate as well. Display animation is not a new physical-time measurement.
+- **Playback/display settings != planner inputs.** Playback speed must not
+  change recorded actions, planner decisions or benchmark/model totals.
+- Keep application version, algorithm version and physical model/profile
+  identity separate. Future algorithm/profile changes require their own
+  specifications and evaluation; the backlog does not authorize them now.
+
+Built-in screen recording is not currently a priority; external tools can record
+the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
+the existing Extended README/backlog remains planning context, not proof of
+accepted production implementation.
 
 ---
 
@@ -211,13 +287,23 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- `STAGE3_ALGORITHM_SPEC_v1.md`
+- `STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md`
+- `STAGE3_EXTENSION_BACKLOG.md`
 - `docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md`
-- `README.md`
-- `ARCHITECTURE.md`
+- `README.md`, `ARCHITECTURE.md`, `BUILDING.md`
 
-Existing Stage-2 / Pre-Stage3 / Stage-3 V1 historical documents may intentionally remain at their existing paths for provenance.
+External recovery/source-panel companions verified on 2026-10-14:
 
-Do not reorganize frozen/evidence paths merely for visual neatness.
+- `C:\Users\User\Desktop\비상시 프롬프트.txt`
+- `C:\Users\User\Downloads\PROJECT_SOURCE_REFRESH_PLAN.md`
+
+Both exist **outside this repository**; they are not tracked repository files.
+Do not invent repository locations for them or assume Project attachments
+automatically match the local originals.
+
+Existing historical documents and frozen/evidence paths remain in place for
+provenance. Do not reorganize them merely for visual neatness.
 
 ---
 
@@ -261,61 +347,61 @@ For disputed findings, return to source/tests rather than choosing an AI by repu
 
 ## 11. New-chat recovery prompt
 
-The following prompt is intentionally generic so it can be used whether the previous chat ended immediately or much later.
+Use this dated starting point, then reconcile it with live Git and source.
 
 ```text
 이 채팅은 ChatGPT Project `졸업프로젝트`의
 Minesweeper 졸업프로젝트 작업을 이어가는 새 채팅입니다.
 
-이전 채팅이 최대 길이에 도달했거나 새 작업 단위로 분리한 것입니다.
+저장소: C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project
+Python: C:\venvs\minesweeper\Scripts\python.exe
 
-내 기억이나 과거 AI 답변만으로 현재 상태를 추정하지 말고,
-Project에 첨부된 최신 파일과 현재 Git 상태를 기준으로 먼저 현재 프로젝트 상태를 복원하세요.
+기억이나 과거 AI 답변으로 현재 상태를 추정하지 마세요.
+먼저 live Git의 branch / HEAD / origin/main / working tree를 확인하고,
+docs/CURRENT_HANDOFF.md, docs/README.md와 관련 최신 source/tests를 읽으세요.
+Project 첨부 파일은 현재 저장소와 일치하는지 확인해야 합니다.
 
 증거 우선순위:
-1. 현재 Git source code
-2. 현재 tests
-3. 실행 가능한 검증 결과
-4. frozen specification / final adjudication / handoff 문서
-5. README / ARCHITECTURE / documentation index
-6. 과거 ChatGPT / Codex / Claude 해석과 기억
+현재 Git source → tests → 실행 가능한 검증 결과
+→ frozen specification / final adjudication / handoff
+→ README / ARCHITECTURE / index → 과거 AI 해석과 기억.
 
-먼저 `docs/CURRENT_HANDOFF.md`와 `docs/README.md`를 읽고,
-현재 작업과 직접 관련된 source/tests를 확인하세요.
+2026-10-14 복원 기준:
+- Stage-3 V1, ZiNi Improvement, ASCII path migration,
+  Mouse-release input semantics, Usability Batch 1,
+  ZiNi Explorer Answer Display는 CLOSED입니다.
+- 현재 active milestone = Stage-3 Extended.
+- 즉시 작업 = Stage-3 execution integration audit (read-only).
+- 검증 당시 main HEAD = origin/main =
+  3622eed852c4e6808269b1b7815fc462359f65d7이며 문서 갱신 전 작업 트리는 clean.
+- 최신 accepted full unittest는 1506/1506 PASS,
+  failures/errors/skips 0, desktop smoke PASS입니다. 새 실행 결과로 오인하지 마세요.
+- 이 시점에 수용된 Stage-3 Extended production 구현은 없습니다.
 
-Stage-3 V1은 이미 CLOSED인 frozen baseline입니다.
-현재 작업 때문에 임의로 다시 열거나 과거 frozen semantics를 변경하지 마세요.
+첫 Visualizer 목표:
+기존 run_stage3() → Stage3ActionTrace / Stage3RunResult를 재사용하는
+한 게임 실행 → step-based 보드 재생 → OPEN / FLAG / CHORD,
+커서 위치·이동 표시 → First / Previous / Play-Pause / Next / Last.
+먼저 source를 읽고 최소 통합 경계를 정리하세요.
 
-현재 진행 중인 milestone은 최신 handoff/source를 기준으로 복원하세요.
-2026-10-13 ZiNi improvement는 CLOSED이며 다음 활성 milestone은 Stage-3 Extended입니다.
-ZiNi TYPE S와 Trace/Explorer는 수용되었고, V2 품질 연구는 미채택으로 종료했습니다.
-V1 품질 정책과 미개봉 최종 holdout을 유지하며 ZiNi 연구를 임의로 재개하지 마세요.
+Stage-3 V1은 frozen이며 UI 편의를 위해 semantics를 바꾸지 마세요.
+Replay elapsed time != modeled physical time.
+Playback/display settings != planner inputs.
+Generic solver registry / EventBus / plugin framework는 도입하지 마세요.
+Human vs Stage2 vs Stage3 비교, Timeline Analytics와 첫 Extended algorithm은 후순위입니다.
+ZiNi V1 품질 정책과 미개봉 최종 holdout을 유지하며 연구를 재개하지 마세요.
 
-현재 작업이 이미 그 단계를 지나갔다면 최신 handoff/source/tests를 우선하세요.
+SRP / Separation of Concerns, maintainability / extensibility / testability,
+backward compatibility, KISS / YAGNI, evidence before optimization,
+minimum necessary abstraction을 유지하세요.
+제거 제안은 이유·잃는 것·KEEP / DEFER / REMOVE를 먼저 설명하세요.
 
-프로젝트 원칙:
-- SRP / Separation of Concerns
-- maintainability / extensibility / testability
-- backward compatibility
-- KISS / YAGNI
-- evidence before optimization
-- minimum necessary abstraction
+역할: ChatGPT = 설계/review/최종 판정,
+Codex = 구현/실행/검증, Claude Code = 필요 시 독립 read-only audit.
 
-기존 요소가 불필요해 보이면 바로 제거하지 말고:
-1. 왜 불필요해 보이는지
-2. 제거하면 무엇을 잃는지
-3. KEEP / DEFER / REMOVE 중 무엇을 권하는지
-를 먼저 설명하세요.
-
-응답 시작 시 바로 구현안을 내지 말고 짧게:
-1. 복원한 현재 프로젝트 상태
-2. 현재 milestone
-3. 직전까지 완료된 것
-4. 다음으로 해야 할 한 단계
-5. 아직 불확실하거나 확인이 필요한 것
-을 정리한 뒤 이전 채팅의 연속 작업으로 진행하세요.
-
-이미 확인 가능한 내용을 다시 사용자에게 묻지 마세요.
+최신 Git/source가 더 진행됐다면 위 날짜의 상태보다 최신 증거를 우선하세요.
+처음에는 복원 상태, 현재 milestone, 직전 완료, 다음 한 단계,
+남은 불확실성을 짧게 정리하고 이미 확인 가능한 내용은 다시 묻지 마세요.
 ```
 
 ---
