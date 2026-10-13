@@ -48,6 +48,9 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **ZiNi:** 실제 mine layout을 사용하는 board metric입니다. 위 Simple Algorithm과 정보 경계 및 목적이 다릅니다.
 - deterministic G.ZiNi, maximum-Premium min-ties 탐색, neighborhood beam 및 seeded-chain 탐색을 제공합니다.
 - 화면의 ZiNi는 별도 subprocess에서 계산한 **bounded best-so-far**입니다. 전역 최적해나 정확한 최소 클릭 수를 보장하지 않습니다.
+- **ZiNi Explorer:** 종료된 Live 게임 또는 완료 Replay에서 ZiNi 결과가 준비되면 별도 창으로 최종 계산 경로를 확인합니다. 처음·이전·다음·마지막, slider와 Index 자동 재생을 지원하며 선택 좌표·새로 열린 칸·깃발·누적 클릭과 Premium 정보를 표시합니다. Trace는 요청 시 사후 구성하며, 실제 게임 행동을 기록한 Replay와 별도 모델입니다.
+
+2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. 다음 활성 마일스톤은 Stage-3 Extended입니다.
 
 계산 전략과 결과 해석은 [ZiNi 설계](ARCHITECTURE.md#zini-results)에 정리되어 있습니다.
 
@@ -70,7 +73,7 @@ Counters 패널 아래 **벤치마크 통계** 버튼으로 별도 창을 열고
 
 동결 Model C를 적용한 공식 `EXPERT_GENERAL_V1` 100,000보드 중 양쪽 모두 승리한 **WW 37,702게임에서 modeled time-to-win 합계가 Stage 2보다 약 30.089144% 감소**했습니다. 보드별 승패와 기록된 guess 시퀀스의 동등성은 이번 corpus의 관찰 결과입니다. CPU 계산시간·benchmark wall time·실제 인간 플레이 시간의 30% 감소나 모든 보드의 동등성을 뜻하지 않습니다.
 
-[최종 판정문 원문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [V1 기록·보존 위치 안내](docs/stage3-v1/README.md)를 참고하세요. 최종 감사 OPTIONAL 4건은 비차단 **DEFER**입니다. ZiNi 개선, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정 및 알고리즘 확장은 별도 **Extended** 범위입니다.
+[최종 판정문 원문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [V1 기록·보존 위치 안내](docs/stage3-v1/README.md)를 참고하세요. 최종 감사 OPTIONAL 4건은 비차단 **DEFER**입니다. ZiNi 개선은 별도 마일스톤으로 종료했으며, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정 및 알고리즘 확장은 **Extended** 범위입니다.
 
 ## 실행 방법
 
@@ -116,6 +119,9 @@ Minesweeper-Project/
 ├─ zini_min_ties.py             # maximum-Premium 동점 탐색
 ├─ zini_advanced.py             # bounded neighborhood beam·chain 정책
 ├─ zini_metric_worker.py        # UI ZiNi 계산용 subprocess
+├─ zini_trace.py                # 완료 경로의 사후 검증·진단과 논리 단계 재생
+├─ zini_explorer.py             # 결과 transport 검증·Trace 지연 생성·세션 제어
+├─ zini_explorer_ui.py          # 별도 읽기 전용 ZiNi Explorer 창
 ├─ scripts/
 │  └─ benchmark_zini_advanced.py
 └─ tests/                       # unittest 기반 단위·회귀·UI 테스트

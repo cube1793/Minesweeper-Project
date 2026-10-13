@@ -4,6 +4,8 @@
 
 Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED** 상태이며, Extended의 immutable baseline으로 취급한다.
 
+2026-10-13 ZiNi improvement 종료 후 **다음 활성 마일스톤은 Stage-3 Extended**다. [ZiNi 최종 판정](../zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)은 V1 품질 유지·V2 미채택을 확정한다. ZiNi closeout은 Extended 구현을 시작하지 않는다.
+
 - [V1 최종 판정](../stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
 - [Frozen V1 algorithm specification](../../STAGE3_ALGORITHM_SPEC_v1.md)
 - [Frozen V1 telemetry and benchmark specification](../../STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md)
@@ -24,7 +26,7 @@ V1의 공식 100k 결과, frozen Model C, 기존 audit·evidence·qualification�
 
 ### A. Existing-feature stabilization
 
-- ZiNi performance profiling / improvement: 성능 병목을 측정하고 개선 후보를 검토한다.
+- ZiNi performance profiling / improvement: 별도 ZiNi improvement 마일스톤으로 **CLOSED**. 구현된 TYPE S 최적화와 Trace/Explorer를 수용했으며 V2 품질 연구는 미채택으로 종료했다. 이 과거 후보가 추가 ZiNi 연구를 지시하지 않는다.
 
 ### B. Stage-3 application / visualization
 

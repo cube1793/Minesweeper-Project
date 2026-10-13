@@ -128,7 +128,7 @@ Certainty는 정수 world 수로 판정하며 표시용 반올림이나 float을
 
 공식 `EXPERT_GENERAL_V1` 100,000보드의 WW 37,702게임에서 동결 Model C의 modeled time-to-win 합계는 Stage 2보다 약 **30.089144% 감소**했다. 승패·기록된 guess 시퀀스 동등성은 이 corpus의 관찰 결과이며 보편적 회귀 불변식이 아니다. 이 수치는 CPU 계산시간·benchmark wall time·인간 플레이 시간의 30% 감소를 뜻하지 않는다. Model C의 OPEN·FLAG·CHORD 동일 비용 가정도 함께 적용한다.
 
-[최종 판정문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [동결 명세·감사 보존 위치](docs/stage3-v1/README.md)를 기준으로 읽는다. OPTIONAL 4건은 비차단 DEFER다. 현재 Live/Replay UI의 Simple Algorithm과 Stage-3 V1 실행 경계를 구분하며, ZiNi 개선, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정과 알고리즘 확장은 별도 Extended 범위다.
+[최종 판정문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [동결 명세·감사 보존 위치](docs/stage3-v1/README.md)를 기준으로 읽는다. OPTIONAL 4건은 비차단 DEFER다. 현재 Live/Replay UI의 Simple Algorithm과 Stage-3 V1 실행 경계를 구분한다. ZiNi 개선은 별도 마일스톤으로 종료했으며, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정과 알고리즘 확장은 다음 Extended 범위다.
 
 ### Replay
 
@@ -152,6 +152,9 @@ Replay 재생, Replay Analysis, Replay Statistics는 서로 다른 책임이다.
 | `zini_min_ties.py` | 최대 Premium 동점 후보의 경로 탐색, 시간·상태 수 제한 |
 | `zini_advanced.py` | Neighborhood beam, `standard_v1`·`chain_v1`·`standard_seeded_chain_v1` 정책 |
 | `zini_metric_worker.py` | 별도 Python process에서 계산하고 임시 결과 파일을 atomic replace로 기록 |
+| `zini_trace.py` | 완료된 V1 경로의 사후 검증, 불변 step delta와 적용 전 Premium 진단, engine/clock 없는 논리 index player |
+| `zini_explorer.py` | worker 결과와 전송 snapshot 소유, transport 검증, 요청 시 Trace 생성·cache 및 이동; Qt/search/I/O 없음 |
+| `zini_explorer_ui.py` | 별도 읽기 전용 보드, index 이동·자동 재생과 경로 진단 표시; controller를 참조하고 탐색은 실행하지 않음 |
 
 ZiNi trace의 `ZiniMove`는 `ReplayEvent`와 다른 모델이다. 예를 들어 `flag_chord` 한 항목의 `clicks_added`에는 새 깃발들과 CHORD의 클릭 비용이 함께 들어간다.
 
@@ -280,11 +283,24 @@ ReplayData
 
 ```text
 UI: snapshot + config + job token → 임시 payload
-→ Python subprocess: ZiNi 계산 → token + clicks/error 결과 파일
+→ Python subprocess: ZiNi 계산 → token + clicks + final moves + error 결과 파일
 → UI polling: 현재 token과 일치하면 반영 → process·임시 파일 정리
 ```
 
 현재 Counters 설정은 `standard_seeded_chain_v1`, 총 1000 evaluations, standard phase 500, seed 0이며 시간 제한은 없다. 계산 완료 전이나 실패 시 ZiNi는 `-`다. 보드 변경과 창 닫기는 기존 process를 정리한다. **오래된 token을 거르는 책임은 UI**에 있고 worker는 token을 결과에 돌려준다.
+
+### 4.7 ZiNi Trace / Explorer
+
+```text
+ui_manager → zini_explorer controller → zini_trace → V1 core simulation
+          └→ zini_explorer_ui → controller의 불변 결과와 index 탐색
+```
+
+Worker는 한 번의 탐색이 반환한 최종 moves를 전달한다. Controller는 해당 job에 전송한 snapshot을 유지하며, Counters 갱신 중에는 Trace를 만들지 않는다. 사용자가 Explorer를 열 때만 `build_zini_trace()`로 최종 경로를 검증·재구성하고 cache한다. 이 과정은 search/RNG를 호출하지 않는다. Trace 실패는 이미 유효한 숫자 ZiNi를 없애지 않는다.
+
+접근 조건은 Live WON/LOST 또는 완료 Replay이며, 완료 Replay에서는 현재 seek 위치와 무관하다. 진행 중 Live와 미완료 Replay에서는 접근할 수 없다. Board/mode 변경은 세션을 무효화하고 창을 닫는다. Explorer만 닫으면 Trace와 논리 index가 유지된다.
+
+Explorer는 처음·이전·다음·마지막, slider, 간격을 조절하는 Index 자동 재생과 선택 좌표·새 reveals/flags·누적 physical clicks·Premium/tie 관계를 표시한다. Index 0은 적용 전, N은 논리 move N개를 적용한 상태다. **Replay != ZiNi Trace**: 실제 행동 시간이나 ReplayEvent 모델을 공유하지 않으며, 적용 전 선택 관계는 탐색 phase·beam·RNG 이력을 뜻하지 않는다. Trace schema와 ZiNi semantics version은 각각 1이다.
 
 ## 5. 중요한 설계 경계와 invariants
 
@@ -385,6 +401,8 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 
 어느 bounded 결과도 전역 최적해, 이론적 최소 클릭 수, 모든 정책 중 최선을 증명하지 않는다. 고정 seed와 evaluation budget의 재현성은 테스트하지만 wall-time 제한이 있는 실행의 결과까지 동일하다고 보장하지 않는다.
 
+2026-10-13 [ZiNi 최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md): TYPE S 최적화와 Trace/Explorer를 수용하고 V1 품질 정책을 유지한다. V2 A/B/C 정책과 연구 semantics는 미채택이며 lambda는 production parameter가 아니다. 연구는 종료했고 최종 holdout은 미개봉 상태다.
+
 <a id="test-strategy"></a>
 
 ## 6. 테스트 전략
@@ -409,10 +427,13 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | Replay Analysis UI | `test_replay_analysis_ui.py` | 실제 Qt controls, 이동/자동 재생별 갱신, 같은 index 재계산 방지, 표시 전환, 오류 복구·engine ownership·Auto 차단 |
 | ZiNi deterministic / min-ties | `test_zini_core.py`, `test_zini_calculator.py` | Premium·unit·동작 의미, 고정 trace, 클릭 합계·안전 칸·깃발 유효성, bounded min-ties 종료 |
 | ZiNi advanced | `test_zini_advanced.py` | 정책별 rollout, budget·종료 metadata, baseline 유지, 고정 seed/evaluation 재현성, trace 재적용 |
+| ZiNi golden / TYPE S | `test_zini_golden.py`, `test_zini_core.py` | 고정 10 workloads의 전체 moves·clicks·non-elapsed metadata, reference Premium 및 solved 판정 동등성 |
+| ZiNi Trace / Explorer | `test_zini_trace.py`, `test_zini_explorer.py`, `test_zini_explorer_ui.py` | 사후 Trace 검증, lazy 생성, 정보 gate, index/delta·Qt 표시 및 세션 수명 |
+| ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
 정보 격리 테스트는 solver를 공개 enum만 있는 engine 대체 모듈로 로드하거나, hidden snapshot/layout 접근을 실패시키는 방식도 사용한다. Probability oracle은 answer board로 정답을 주입하지 않고 공개 조건을 직접 열거한다.
 
-Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 시 skip된다. Replay Statistics의 UI 책임 검증에는 probe/stub도 사용한다. 실제 QTimer 테스트가 있지만 모든 OS 입력·화면·이벤트 순서를 검증하는 것은 아니다. ZiNi worker 실행은 UI 테스트에서 대체하므로 실제 subprocess 실패·취소·종료를 포괄하는 테스트와 구분해야 한다.
+Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 시 skip된다. Replay Statistics의 UI 책임 검증에는 probe/stub도 사용한다. 실제 QTimer와 Explorer controls/표시 상태 테스트가 있지만 모든 OS 입력·화면·이벤트 순서를 검증하는 것은 아니다. Worker entry-point 테스트는 실제 subprocess를 실행하며, UI lifecycle 테스트의 process 대체와 구분한다. 배포 EXE 및 실제 화면의 worker 취소·종료는 별도 smoke 확인이 필요하다.
 
 실행 명령은 [README 테스트](README.md#테스트)를 참고한다. [Benchmark](README.md#benchmark)는 고정 보드의 전략 비교와 trace 검증 도구이며 단위 테스트나 최적성 증명을 대체하지 않는다.
 

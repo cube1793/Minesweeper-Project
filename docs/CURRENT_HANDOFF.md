@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Recover the current project state safely when a chat is restarted or reaches its maximum length.  
-> Updated: 2026-10-11 (Asia/Seoul)
+> Updated: 2026-10-13 (Asia/Seoul)
 
 ---
 
@@ -32,9 +32,16 @@ Stable branch:
 
 `main`
 
-Stage-3 V1 + documentation-index baseline commit:
+Local main / feature merge-base at closeout:
 
-`6ef0da7` — `docs: add documentation index and Stage 3 Extended workspace`
+`3213c7f9958b73be77f1739a2d1a68962005c1c2` — `docs: add current project handoff`
+
+Closeout working branch: `feature/zini-improvement`.
+Verified implementation HEAD before this documentation-only closeout commit:
+`2595ee67bf1b8e3ae06aae991ca13813a65aacba` — `feat: add zini explorer ui`.
+The initial working tree was clean with 142 tracked files. The closeout commit
+follows this implementation; obtain its identity from live Git rather than
+treating the pre-closeout hash as the current HEAD. This closeout does not merge or push.
 
 Current live branch / HEAD / working-tree status:
 
@@ -97,99 +104,65 @@ Accepted official result under frozen Model C:
 
 Do not reopen Stage-3 V1 merely because an Extended design looks cleaner.
 
+### ZiNi improvement — CLOSED (2026-10-13)
+
+- TYPE S semantics-preserving optimizations accepted.
+- Post-hoc Trace backend, transport/controller and ZiNi Explorer UI implemented.
+- V2 quality research closed without adoption; **V1 RETAINED**.
+- C3 fresh quality: **NO-SIGNAL**; C4 Family A: **NO-GO**.
+- Final `EXPERT_GENERAL_V1` holdout, indices 2,010,000..2,010,099 (100 boards),
+  remains unopened: not generated/fingerprinted/calculated/inspected for final
+  quality adjudication. Development failed before authorization, so it was
+  deliberately not consumed.
+
+See [final adjudication](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md).
+Milestone closure does not itself complete manual GUI smoke or merge the branch.
+
 ---
 
 ## 4. Current milestone
 
-The next active milestone is **ZiNi improvement**, separate from Stage-3 V1.
+The next active milestone is **Stage-3 Extended**, separate from frozen Stage-3 V1.
+Its existing direction is retained in section 7 and `docs/stage3-extended/`.
+No Stage-3 Extended implementation is part of ZiNi closeout.
 
-Recommended working branch:
-
-`feature/zini-improvement`
-
-Create it from the current `main` if it does not already exist.
-
-The ZiNi milestone has three distinct goals:
-
-### A. Speed
-Improve Expert-board calculation time.
-
-### B. Solution quality
-Improve how low a ZiNi result the calculator can find.
-
-The remembered relative quality versus external calculators
-(PTTACG / current project / LlamaSweeper) is only historical recollection until reproduced on the same boards.
-
-### C. ZiNi Trace / Explorer
-Make the calculation process inspectable step-by-step, Replay-style.
-
-Important distinction:
-
-- Replay = playback of actually executed game actions.
-- ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
-
-Do not force ZiNi Trace into the existing Replay data model merely because the controls look similar.
+The ZiNi feature branch first needs the closeout report's manual GUI smoke and
+an explicit later merge decision. Automated/offscreen checks are not a claim
+that the normal desktop UI has been visually verified.
 
 ---
 
-## 5. ZiNi improvement rules
+## 5. Accepted ZiNi boundaries
 
-Keep the following distinctions explicit:
+- **TYPE S:** implemented core optimizations preserve V1 semantics and are
+  protected by reference and frozen golden tests. No speed ratio is claimed here.
+- **TYPE Q:** V1 remains the production quality policy. V2 A/B/C policies,
+  experimental G6/F-2/K0/N-setupOFF and lambda are not production settings.
+  V2 research is closed; no Family A implementation or further lambda/search/
+  semantics tuning is authorized by this milestone.
+- **Trace / Explorer:** the post-hoc backend, result transport/controller and
+  separate Explorer UI are implemented. Trace is built lazily on request from
+  the final result, without rerunning search. It is not a full search-tree record.
 
-### TYPE S — semantics-preserving speed work
-The same result / click sequence, calculated faster.
-
-### TYPE Q — solution-quality algorithm change
-May change candidate selection or search semantics to find lower ZiNi.
-
-### TYPE SQ — search-structure improvement
-May improve both speed and solution quality.
-
-Current strategy should remain available as a comparison baseline when new strategies are introduced.
-
-Potential versioning:
-
-- ZiNi V1 — accepted/current behavior
-- ZiNi V2+ — later improved strategies
-
-Trace should be optional:
-
-- Trace OFF: near-zero avoidable overhead
-- Trace ON: record enough information for analysis and visualization
-
-A useful trace should support:
-- step index
-- selected cell/action
-- state delta / newly revealed area
-- cumulative click count
-- candidate count / tie information
-- selection score/reason where available
-
-Do not begin with full search-tree visualization unless evidence justifies it.
+Replay = playback of actually executed game actions.
+ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
+**Replay != ZiNi Trace**; similar controls do not justify merging their models.
 
 ---
 
-## 6. Recommended ZiNi investigation order
+## 6. Next action
 
-1. freeze a representative current baseline
-2. measure Expert-board performance
-3. identify real bottlenecks
-4. design minimal backend trace
-5. perform semantics-preserving speed optimization
-6. analyze quality gaps on identical boards
-7. design/implement improved ZiNi strategy versions
-8. add Replay-like ZiNi Explorer UI
-9. compare representative boards with external calculators using explicitly recorded same-board evidence
-
-For the first investigation, prefer a fresh Codex chat using **Ultra + Standard**.
-
-Do not edit production source during the first read-only investigation.
+Complete the normal desktop manual GUI smoke recorded in the external
+`ZINI_IMPROVEMENT_CLOSEOUT_REPORT.txt`: finished-game ZiNi, Explorer navigation/
+board display, pending-worker reset/close, and separate Replay use.
+Then make a separate merge decision before starting Stage-3 Extended planning.
+Do not reopen ZiNi research or consume the reserved final holdout as a merge check.
 
 ---
 
 ## 7. Stage-3 Extended boundary
 
-Stage-3 Extended is a later milestone, not unfinished V1 work.
+Stage-3 Extended is the next active milestone, not unfinished V1 work.
 
 Current direction:
 
@@ -201,7 +174,7 @@ Current direction:
 - algorithm-version selection
 - physical-model configuration separated from algorithm version
 - playback/display settings separated from planning inputs
-- later V2/V3... algorithm extensions
+- later Stage-3 V2/V3... algorithm extensions (distinct from closed ZiNi V2 research)
 
 Built-in screen recording is not currently a priority; external tools such as OBS can record the visualization.
 
@@ -219,6 +192,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- `docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md`
 - `README.md`
 - `ARCHITECTURE.md`
 
@@ -294,14 +268,11 @@ Stage-3 V1은 이미 CLOSED인 frozen baseline입니다.
 현재 작업 때문에 임의로 다시 열거나 과거 frozen semantics를 변경하지 마세요.
 
 현재 진행 중인 milestone은 최신 handoff/source를 기준으로 복원하세요.
-만약 ZiNi 개선 단계라면 목표는:
-A. 계산 속도
-B. solution quality
-C. ZiNiTrace / Explorer
-세 축이며, 속도 최적화와 algorithm semantics 변경을 구분하세요.
+2026-10-13 ZiNi improvement는 CLOSED이며 다음 활성 milestone은 Stage-3 Extended입니다.
+ZiNi TYPE S와 Trace/Explorer는 수용되었고, V2 품질 연구는 미채택으로 종료했습니다.
+V1 품질 정책과 미개봉 최종 holdout을 유지하며 ZiNi 연구를 임의로 재개하지 마세요.
 
-현재 작업이 이미 그 단계를 지나갔다면
-위 문구보다 최신 handoff/source/tests를 우선하세요.
+현재 작업이 이미 그 단계를 지나갔다면 최신 handoff/source/tests를 우선하세요.
 
 프로젝트 원칙:
 - SRP / Separation of Concerns

@@ -51,7 +51,14 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 - [Slice B — B8 adjudication](archive/stage3-v1/STAGE3_SLICE_B_B8_ADJUDICATION.md)
 - [Slice B — final adjudication](archive/stage3-v1/STAGE3_SLICE_B_FINAL_ADJUDICATION.md)
 
-## Stage 3 Extended
+## ZiNi Improvement — Closed
+
+현재 구현의 TYPE S 최적화와 Trace backend/controller/Explorer UI를 수용했다. 품질 기준은 **V1 유지**, **V2 연구 종료·미채택**이며 최종 holdout은 의도적으로 미개봉 상태다.
+
+- [ZiNi 개선 기록 안내](zini-improvement/README.md)
+- [최종 판정](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md): 수용 범위, 정확한 개발 결과, Family A NO-GO와 해석 한계.
+
+## Stage 3 Extended — Next active milestone
 
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
 - [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.
