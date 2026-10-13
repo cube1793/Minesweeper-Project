@@ -55,7 +55,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QCheckBox, QMenu, QToolButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize, QEvent
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QIcon, QPainter, QPixmap, QPolygon
 
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
@@ -230,9 +230,10 @@ def border_width_for(cell_size: int) -> int:
 
 class CellButton(QPushButton):
     """
-    좌/우클릭 및 동시 좌우클릭 시그널을 방출하는 커스텀 버튼.
-    동시 클릭(both)은 한쪽 버튼이 눌린 상태에서 다른 쪽이 눌릴 때 감지한다.
+    Forward physical mouse events to the board gesture coordinator.
+    Semantic click signals are emitted only for the resolved release target.
     """
+    mouse_input = pyqtSignal(object, object)
     left_clicked = pyqtSignal(int, int)
     right_clicked = pyqtSignal(int, int)
     both_clicked = pyqtSignal(int, int)
@@ -309,13 +310,18 @@ class CellButton(QPushButton):
         painter.end()
 
     def mousePressEvent(self, event):
-        buttons = event.buttons()
-        if buttons == (Qt.LeftButton | Qt.RightButton):
-            self.both_clicked.emit(self.x, self.y)
-        elif event.button() == Qt.LeftButton:
-            self.left_clicked.emit(self.x, self.y)
-        elif event.button() == Qt.RightButton:
-            self.right_clicked.emit(self.x, self.y)
+        # QWidget's default double-click handler also calls this method.
+        # Avoid QPushButton's automatic down state, especially on flags.
+        self.mouse_input.emit(self, event)
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        self.mouse_input.emit(self, event)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self.mouse_input.emit(self, event)
+        event.accept()
 
 
 class JumpSlider(QSlider):
@@ -355,6 +361,13 @@ class MinesweeperUI(QWidget):
         self._benchmark_statistics_window = None
         self._game_over = False
         self._buttons = {}
+        self._mouse_buttons = Qt.NoButton
+        self._mouse_origins = {}
+        self._mouse_left_suppressed = set()
+        self._mouse_both = False
+        self._mouse_consumed = False
+        self._mouse_position = None
+        self._mouse_preview = set()
         self._analysis_result: LiveAnalysis | None = None
         self._replay_analysis_result: ReplayStepAnalysis | None = None
         self._replay_view_index = None
@@ -421,11 +434,16 @@ class MinesweeperUI(QWidget):
 
     def closeEvent(self, event):
         """Close auxiliary statistics and stop the worker when the UI closes."""
+        self._invalidate_mouse_input()
         if self._benchmark_statistics_window is not None:
             self._benchmark_statistics_window.close()
         self._stop_simple_auto()
         self._reset_zini_metric_job()
         super().closeEvent(event)
+
+    def hideEvent(self, event):
+        self._invalidate_mouse_input()
+        super().hideEvent(event)
 
     def on_benchmark_statistics(self):
         """Own only the auxiliary viewer's lifetime; leave gameplay untouched."""
@@ -826,6 +844,7 @@ class MinesweeperUI(QWidget):
 
     def _build_grid(self):
         """엔진 크기에 맞춰 그리드 버튼을 (재)생성한다."""
+        self._invalidate_mouse_input()
         for btn in self._buttons.values():
             self.grid.removeWidget(btn)
             btn.deleteLater()
@@ -836,6 +855,7 @@ class MinesweeperUI(QWidget):
             for x in range(engine.width):
                 btn = CellButton(x, y)
                 btn.setFixedSize(self._cell_size, self._cell_size)
+                btn.mouse_input.connect(self._on_cell_mouse_input)
                 btn.left_clicked.connect(self.on_left_click)
                 btn.right_clicked.connect(self.on_right_click)
                 btn.both_clicked.connect(self.on_both_click)
@@ -1783,6 +1803,7 @@ class MinesweeperUI(QWidget):
 
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
+        self._invalidate_mouse_input()
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._replay_view_index = None
@@ -1807,6 +1828,7 @@ class MinesweeperUI(QWidget):
 
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
+        self._invalidate_mouse_input()
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._stop_replay_autoplay()
@@ -1998,9 +2020,11 @@ class MinesweeperUI(QWidget):
     # ------------------------------------------------------------------
     def on_chord_mode_changed(self, index: int):
         self._chord_mode = ChordMode(index)
+        self._update_mouse_preview()
 
     def on_cell_size_changed(self, value: int):
         """셀 크기 변경 시 모든 버튼과 컨테이너를 갱신."""
+        self._invalidate_mouse_input()
         self._cell_size = value
         for btn in self._buttons.values():
             btn.setFixedSize(value, value)
@@ -2008,6 +2032,7 @@ class MinesweeperUI(QWidget):
         self.render_board()
 
     def on_difficulty_changed(self, text: str):
+        self._invalidate_mouse_input()
         # Stop before a custom-difficulty dialog starts a nested Qt event loop.
         self._stop_simple_auto()
         preset = DIFFICULTY_PRESETS.get(text)
@@ -2047,6 +2072,7 @@ class MinesweeperUI(QWidget):
 
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
+        self._invalidate_mouse_input()
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._reset_counter_metrics_for_board_change()
@@ -2067,6 +2093,153 @@ class MinesweeperUI(QWidget):
     # ------------------------------------------------------------------
     # 클릭 핸들러
     # ------------------------------------------------------------------
+    def _set_mouse_preview(self, cells):
+        for cell in self._mouse_preview - cells:
+            self._buttons[cell].setDown(False)
+        for cell in cells - self._mouse_preview:
+            self._buttons[cell].setDown(True)
+        self._mouse_preview = cells
+
+    def _invalidate_mouse_input(self):
+        """Old releases cannot act on a reset, rebuilt, hidden or replay board."""
+        self._set_mouse_preview(set())
+        self._mouse_buttons = Qt.NoButton
+        self._mouse_origins = {}
+        self._mouse_left_suppressed = set()
+        self._mouse_both = False
+        self._mouse_consumed = False
+        self._mouse_position = None
+
+    def _cell_at_mouse_position(self, global_position):
+        # Qt grabs the original pressed widget until all buttons are released.
+        # Resolve from global position, also excluding clipped/scrolled cells.
+        viewport = self.scroll_area.viewport()
+        if not viewport.rect().contains(viewport.mapFromGlobal(global_position)):
+            return None
+        cell = self.board_container.childAt(
+            self.board_container.mapFromGlobal(global_position))
+        if (isinstance(cell, CellButton) and cell.isEnabled()
+                and self._buttons.get((cell.x, cell.y)) is cell):
+            return cell
+        return None
+
+    def _update_mouse_preview(self):
+        cells = set()
+        if (self._mouse_buttons & Qt.LeftButton and not self._mouse_consumed
+                and not self._replay_mode and not self._game_over
+                and self.engine.status == GameStatus.PLAYING
+                and self._mouse_position is not None):
+            target = self._cell_at_mouse_position(self._mouse_position)
+            if target is not None:
+                obs = self.engine.get_observation()
+                x, y = target.x, target.y
+                value = obs[y][x]
+                if value == CellState.HIDDEN and not self._mouse_both:
+                    cells.add((x, y))
+                elif (0 <= value <= 8
+                      and (self._chord_mode == ChordMode.LEFT_CLICK
+                           or (self._mouse_both
+                               and self._chord_mode == ChordMode.BOTH_CLICK))):
+                    # No flag-count validation: this previews an attempt only.
+                    cells = {
+                        (nx, ny)
+                        for ny in range(max(0, y - 1), min(len(obs), y + 2))
+                        for nx in range(max(0, x - 1), min(len(obs[ny]), x + 2))
+                        if obs[ny][nx] == CellState.HIDDEN
+                    }
+        self._set_mouse_preview(cells)
+
+    def _on_cell_mouse_input(self, source, event):
+        if (self._buttons.get((source.x, source.y)) is not source
+                or self._replay_mode or self._game_over or not self.isVisible()):
+            return
+        kind = event.type()
+        button = event.button()
+        buttons = event.buttons() & (Qt.LeftButton | Qt.RightButton)
+        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
+            if button not in (Qt.LeftButton, Qt.RightButton):
+                return
+            if not self._mouse_buttons:
+                # A second press after invalidation cannot revive an old hold.
+                if buttons != button:
+                    return
+                self._mouse_both = False
+                self._mouse_consumed = False
+            if button == Qt.LeftButton:
+                self._mouse_left_suppressed = set()
+            self._mouse_buttons = buttons
+            target = self._cell_at_mouse_position(event.globalPos())
+            origin = (target.x, target.y) if target is not None else None
+            self._mouse_origins[button] = origin
+            # A mouse grab routes both presses through the first widget, but
+            # only presses that began on the same cell form one BOTH gesture.
+            self._mouse_both |= (
+                buttons == (Qt.LeftButton | Qt.RightButton)
+                and origin is not None
+                and self._mouse_origins.get(Qt.LeftButton)
+                == self._mouse_origins.get(Qt.RightButton)
+            )
+        elif kind == QEvent.MouseMove:
+            if not self._mouse_buttons:
+                return
+            if buttons != self._mouse_buttons:
+                self._invalidate_mouse_input()
+                return
+        elif kind == QEvent.MouseButtonRelease:
+            if not self._mouse_buttons & button:
+                return
+            both, consumed = self._mouse_both, self._mouse_consumed
+            self._mouse_buttons = buttons
+            self._mouse_origins.pop(button, None)
+            self._mouse_consumed |= both
+            self._mouse_position = event.globalPos()
+            self._set_mouse_preview(set())
+            target = self._cell_at_mouse_position(self._mouse_position)
+            suppress_left = (
+                not both and button == Qt.LeftButton and target is not None
+                and (target.x, target.y) in self._mouse_left_suppressed
+                and self.engine.get_observation()[target.y][target.x]
+                == CellState.FLAGGED
+            )
+            if button == Qt.LeftButton:
+                self._mouse_left_suppressed = set()
+            if not buttons:
+                self._invalidate_mouse_input()
+            # Consume BOTH before dispatch; independent releases leave the
+            # other button active. Rendering may update its preview or reset.
+            if not consumed and not suppress_left and target is not None:
+                if both:
+                    if self._chord_mode != ChordMode.DISABLED:
+                        target.both_clicked.emit(target.x, target.y)
+                elif button == Qt.LeftButton:
+                    target.left_clicked.emit(target.x, target.y)
+                elif button == Qt.RightButton:
+                    # Remember only flags placed during this live LEFT hold,
+                    # at the actual RIGHT release target, never its origin.
+                    suppressed = self._mouse_left_suppressed
+                    was_flagged = (
+                        self.engine.get_observation()[target.y][target.x]
+                        == CellState.FLAGGED
+                    )
+                    target.right_clicked.emit(target.x, target.y)
+                    if (self._mouse_buttons & Qt.LeftButton
+                            and self._mouse_left_suppressed is suppressed):
+                        # Dispatch can invalidate the gesture via a callback.
+                        is_flagged = (
+                            self.engine.get_observation()[target.y][target.x]
+                            == CellState.FLAGGED
+                        )
+                        if is_flagged and not was_flagged:
+                            suppressed.add((target.x, target.y))
+                        elif not is_flagged:
+                            suppressed.discard((target.x, target.y))
+            self._update_mouse_preview()
+            return
+        else:
+            return
+        self._mouse_position = event.globalPos()
+        self._update_mouse_preview()
+
     def _is_revealed_number(self, x: int, y: int) -> bool:
         """obs 기반으로 해당 칸이 '열린 숫자 칸'인지 판단."""
         value = self.engine.get_observation()[y][x]
@@ -2085,6 +2258,8 @@ class MinesweeperUI(QWidget):
         if self._is_revealed_number(x, y):
             if self._chord_mode == ChordMode.LEFT_CLICK:
                 action = Action.CHORD
+            elif self._chord_mode == ChordMode.BOTH_CLICK:
+                action = Action.OPEN
             else:
                 return
         else:
@@ -2118,6 +2293,7 @@ class MinesweeperUI(QWidget):
         self._refresh_live_board(info, auto_observation=auto_observation)
 
     def on_reset(self):
+        self._invalidate_mouse_input()
         self._stop_simple_auto()
         if self._replay_mode:
             return
@@ -2380,6 +2556,7 @@ class MinesweeperUI(QWidget):
 
         remaining = engine.num_mines - engine.count_flags()
         self.mine_label.setText(f"💣 {remaining:03d}")
+        self._update_mouse_preview()
 
     def _current_font_size(self) -> int:
         """셀 크기에 비례한 폰트 크기."""
@@ -2432,7 +2609,9 @@ class MinesweeperUI(QWidget):
             f" {border_style}"
             " margin: 0px; padding: 0px;"
             "}"
-            "QPushButton:hover { background-color: #d0d0d0; }"
+            "QPushButton:pressed {"
+            " background-color: #c0c0c0; border: 1px solid #a0a0a0;"
+            "}"
         )
 
     @staticmethod
