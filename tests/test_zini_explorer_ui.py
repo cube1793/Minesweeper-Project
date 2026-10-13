@@ -22,9 +22,10 @@ from qt_bootstrap import configure_qt_plugin_path
 
 configure_qt_plugin_path()
 try:
-    from PyQt5.QtCore import Qt, QRect
+    from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt, QRect
+    from PyQt5.QtGui import QMouseEvent, QPalette
     from PyQt5.QtTest import QTest
-    from PyQt5.QtWidgets import QApplication, QLabel, QScrollArea
+    from PyQt5.QtWidgets import QApplication, QLabel, QScrollArea, QStyle, QStyleOptionSlider
 except ImportError:
     QApplication = None
 else:
@@ -175,6 +176,206 @@ class ExplorerWindowTests(unittest.TestCase):
         for key, label in self.window.diagnostic_labels.items():
             if key != "tie_count":
                 self.assertEqual(label.text(), "—", key)
+
+    def test_answer_display_defaults_on_for_each_new_window(self):
+        checkbox = self.window.answer_display_checkbox
+        self.assertEqual(checkbox.text(), "미공개 정답 표시")
+        self.assertTrue(checkbox.isChecked())
+        self.window.slider.setValue(2)
+        checkbox.click()
+        self.assertFalse(checkbox.isChecked())
+        self.window.close()
+        reopened = self.create_window(self.controller)
+        self.assertTrue(reopened.answer_display_checkbox.isChecked())
+        self.assertEqual(self.controller.current_index, 2)
+
+    def assert_covered_answer(self, cell, text, color):
+        self.assertEqual(cell.state, "closed")
+        self.assertEqual(cell.property("state"), "closed")
+        self.assertEqual(cell.text(), "")
+        self.assertIn("background-color: #c0c0c0", cell.styleSheet())
+        self.assertIn("border: 2px outset #ffffff", cell.styleSheet())
+        self.assertEqual(cell.answer_label.text(), text)
+        self.assertFalse(cell.answer_label.isHidden())
+        self.assertIn(color, cell.answer_label.styleSheet())
+        self.assertIn("background-color: transparent", cell.answer_label.styleSheet())
+        self.assertIn("border: none", cell.answer_label.styleSheet())
+        self.assertIsNone(cell.graphicsEffect())
+        opacity = cell.answer_label.graphicsEffect().opacity()
+        self.assertGreater(opacity, 0)
+        self.assertLessEqual(opacity, 0.5)
+
+    def test_unopened_number_is_faint_but_stays_covered_at_initial_and_early_step(self):
+        for index in (0, 1):
+            with self.subTest(index=index):
+                self.window.slider.setValue(index)
+                self.assert_covered_answer(self.window.cells[(0, 0)], "1", NUMBER_COLORS[1])
+                self.assertNotIn((0, 0), self.controller.revealed)
+
+    def test_unopened_answer_matches_revealed_number_font_and_color_after_polish(self):
+        window = self.window
+        self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+        window.next_button.click()
+        revealed = window.cells[(1, 0)]
+        covered = window.cells[(0, 0)]
+        for enabled in (True, False, True):
+            window.answer_display_checkbox.setChecked(enabled)
+            self.app.processEvents()
+            answer_font, revealed_font = covered.answer_label.font(), revealed.font()
+            self.assertEqual(answer_font.family(), revealed_font.family())
+            self.assertEqual(answer_font.pointSizeF(), revealed_font.pointSizeF())
+            self.assertEqual(answer_font.pixelSize(), revealed_font.pixelSize())
+            self.assertEqual(answer_font.weight(), revealed_font.weight())
+            self.assertEqual(answer_font.bold(), revealed_font.bold())
+            self.assertTrue(answer_font.bold())
+            self.assertEqual(answer_font, revealed_font)
+            self.assertEqual(covered.answer_label.palette().color(QPalette.WindowText),
+                             revealed.palette().color(QPalette.WindowText))
+            self.assertAlmostEqual(covered.answer_label.graphicsEffect().opacity(), 0.35)
+            self.assertEqual(covered.state, "closed")
+            self.assertEqual(revealed.state, "revealed")
+            self.assertEqual(covered.answer_label.isHidden(), not enabled)
+            if enabled:
+                self.assert_covered_answer(covered, revealed.text(), NUMBER_COLORS[1])
+
+    def test_unopened_mine_is_faint_but_stays_covered_at_initial_and_early_step(self):
+        for index in (0, 1):
+            with self.subTest(index=index):
+                self.window.slider.setValue(index)
+                self.assert_covered_answer(self.window.cells[(1, 1)], "💣", "#000000")
+                self.assertNotIn((1, 1), self.controller.flagged_mines)
+
+    def test_answer_toggle_off_restores_old_hidden_style_and_on_restores_answers(self):
+        window = self.window
+        answers = {coord: (cell.answer_label.text(), cell.answer_label.styleSheet())
+                   for coord, cell in window.cells.items()}
+        for enabled in (False, True, False, True):
+            window.answer_display_checkbox.click()
+            self.assertEqual(window.answer_display_checkbox.isChecked(), enabled)
+            for coord, cell in window.cells.items():
+                self.assertEqual(cell.state, "closed")
+                self.assertEqual(cell.text(), "")
+                self.assertEqual(cell.styleSheet(),
+                                 "QLabel { background-color: #c0c0c0; color: #000000;"
+                                 " border: 2px outset #ffffff; margin: 0px; padding: 0px; }")
+                self.assertEqual(cell.answer_label.isHidden(), not enabled)
+                self.assertEqual(cell.answer_label.text(), answers[coord][0] if enabled else "")
+                if enabled:
+                    self.assertEqual(cell.answer_label.styleSheet(), answers[coord][1])
+
+    def test_revealed_and_flagged_rendering_is_identical_in_both_display_modes(self):
+        window = self.window
+        for index in range(1, self.controller.step_count + 1):
+            window.slider.setValue(index)
+            normal = {coord: (cell.text(), cell.styleSheet(), cell.selected,
+                              cell.newly_revealed, cell.newly_flagged)
+                      for coord, cell in window.cells.items() if cell.state != "closed"}
+            for enabled in (False, True):
+                window.answer_display_checkbox.setChecked(enabled)
+                for coord, expected in normal.items():
+                    cell = window.cells[coord]
+                    self.assertEqual((cell.text(), cell.styleSheet(), cell.selected,
+                                      cell.newly_revealed, cell.newly_flagged), expected)
+                    self.assertTrue(cell.answer_label.isHidden())
+                    self.assertEqual(cell.answer_label.text(), "")
+                    if cell.state == "flagged":
+                        self.assertEqual(cell.text(), "🚩")
+                        self.assertIn("color: #c00000", cell.styleSheet())
+                        self.assertIn("border: 2px outset #ffffff", cell.styleSheet())
+                    else:
+                        self.assertEqual(cell.text(), "1")
+                        self.assertIn(NUMBER_COLORS[1], cell.styleSheet())
+
+    def test_answer_toggle_only_renders_board_without_state_changes_or_zini_work(self):
+        window, controller = self.window, self.controller
+        fields = ("token", "state", "eligible", "completed", "snapshot", "clicks", "moves",
+                  "trace", "current_index", "current_step", "step_count", "cumulative_clicks",
+                  "revealed", "flagged_mines", "worker_error", "trace_error")
+        for index in (0, 1, 2, 4):
+            window.slider.setValue(index)
+            window.interval_spin.setValue(5000)
+            window.play_button.click()
+            before = tuple(getattr(controller, field) for field in fields)
+            player = controller._player
+            trace, moves = controller.trace, controller.moves
+            player_before = (player.current_index, player.revealed, player.flagged_mines)
+            ui_before = (window.slider.value(), window.clicks_label.text(),
+                         tuple(label.text() for label in window.diagnostic_labels.values()),
+                         window.timer.isActive(), window.timer.timerId(), window.timer.interval())
+            with ExitStack() as stack:
+                forbid_search(stack)
+                for target in ("zini_explorer.build_zini_trace", "zini_trace._build_premium_context",
+                               "zini_trace._find_premium_candidates"):
+                    stack.enter_context(patch(target, side_effect=AssertionError(target)))
+                guards = [stack.enter_context(patch.object(controller, name)) for name in
+                          ("request_trace", "go_to", "next", "previous", "begin", "receive",
+                           "invalidate", "set_eligible")]
+                refresh = stack.enter_context(patch.object(window, "refresh"))
+                for _ in range(4):
+                    window.answer_display_checkbox.click()
+                    self.assertEqual(tuple(getattr(controller, field) for field in fields), before)
+                    self.assertIs(controller.trace, trace)
+                    self.assertIs(controller.moves, moves)
+                    self.assertIs(controller._player, player)
+                    self.assertEqual((player.current_index, player.revealed, player.flagged_mines),
+                                     player_before)
+                    self.assertEqual((window.slider.value(), window.clicks_label.text(),
+                                      tuple(label.text() for label in window.diagnostic_labels.values()),
+                                      window.timer.isActive(), window.timer.timerId(), window.timer.interval()),
+                                     ui_before)
+                for guard in guards:
+                    guard.assert_not_called()
+                refresh.assert_not_called()
+            window.timer.stop()
+
+    def test_prev_next_and_seek_render_current_answers_in_both_display_modes(self):
+        window, controller = self.window, self.controller
+        for enabled in (False, True):
+            window.answer_display_checkbox.setChecked(enabled)
+            window.first_button.click()
+            for action, index in ((window.next_button.click, 1), (window.next_button.click, 2),
+                                  (window.previous_button.click, 1),
+                                  (lambda: window.slider.setValue(3), 3),
+                                  (window.last_button.click, 4), (window.first_button.click, 0)):
+                with self.subTest(enabled=enabled, index=index):
+                    action()
+                    self.assertEqual(controller.current_index, index)
+                    self.assertEqual(window.clicks_label.text(), f"Clicks {controller.cumulative_clicks} / 5")
+                    for coord, cell in window.cells.items():
+                        state = ("flagged" if coord in controller.flagged_mines else
+                                 "revealed" if coord in controller.revealed else "closed")
+                        self.assertEqual(cell.state, state)
+                        self.assertEqual(cell.answer_label.isHidden(), not (enabled and state == "closed"))
+                        if state == "closed" and enabled:
+                            self.assert_covered_answer(cell, "💣" if coord in CENTER_SNAPSHOT.mines else "1",
+                                                       "#000000" if coord in CENTER_SNAPSHOT.mines else NUMBER_COLORS[1])
+
+    def test_answer_toggle_preserves_expert_layout_details_and_manual_size(self):
+        window = self.create_expert_window()
+        self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+        for expanded in (False, True, False):
+            window.details_button.setChecked(expanded)
+            self.app.processEvents()
+            window.resize(window.width() + 10, window.height() + 10)
+            self.app.processEvents()
+            before = (window.size(), window.pos(), window.scroll_area.viewport().size())
+            for enabled in (False, True):
+                window.answer_display_checkbox.setChecked(enabled)
+                self.app.processEvents()
+                self.assertEqual((window.size(), window.pos(), window.scroll_area.viewport().size()), before)
+                self.assertEqual(window.details_panel.isVisible(), expanded)
+                self.assertEqual(window.details_button.isChecked(), expanded)
+                self.assert_expert_board_fits(window)
+
+    def test_stale_session_hides_answers_when_toggled(self):
+        self.controller.invalidate()
+        for enabled in (False, True):
+            self.window.answer_display_checkbox.setChecked(enabled)
+            for cell in self.window.cells.values():
+                self.assertEqual(cell.state, "closed")
+                self.assertEqual(cell.text(), "")
+                self.assertEqual(cell.answer_label.text(), "")
+                self.assertTrue(cell.answer_label.isHidden())
 
     def test_final_board_reveals_exact_safe_cells_and_only_trajectory_flags(self):
         self.window.last_button.click()
@@ -435,10 +636,23 @@ class ExplorerWindowTests(unittest.TestCase):
         result = ZiniResult(1, (ZiniMove("fallback_click", 2, 0, None, 1),))
         controller = ready_controller(snapshot, result)
         window = self.create_window(controller)
+        for enabled in (False, True):
+            window.answer_display_checkbox.setChecked(enabled)
+            for coord, cell in window.cells.items():
+                if coord not in snapshot.mines and snapshot.adjacent[coord[1]][coord[0]] == 0:
+                    self.assertEqual(cell.state, "closed")
+                    self.assertEqual(cell.text(), "")
+                    self.assertEqual(cell.answer_label.text(), "")
+                    self.assertTrue(cell.answer_label.isHidden())
         window.last_button.click()
         self.assertEqual(controller.flagged_mines, frozenset())
         self.assertEqual(window.cells[(0, 0)].state, "closed")
         self.assertEqual(window.cells[(0, 0)].text(), "")
+        self.assert_covered_answer(window.cells[(0, 0)], "💣", "#000000")
+        for enabled in (False, True):
+            window.answer_display_checkbox.setChecked(enabled)
+            for coord in controller.revealed:
+                self.assertTrue(window.cells[coord].answer_label.isHidden())
         self.assertEqual({coord for coord, cell in window.cells.items() if cell.state == "revealed"},
                          set(window.cells) - snapshot.mines)
         for (x, y), cell in window.cells.items():
@@ -466,6 +680,119 @@ class ExplorerWindowTests(unittest.TestCase):
         self.assertFalse(window.last_button.isEnabled())
         self.assertFalse(window.play_button.isEnabled())
         self.assertEqual((window.slider.minimum(), window.slider.maximum()), (0, 4))
+
+    def slider_handle_rect(self, slider):
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        return slider.style().subControlRect(
+            QStyle.CC_Slider, option, QStyle.SC_SliderHandle, slider,
+        )
+
+    def test_slider_track_clicks_jump_immediately_and_stop_autoplay_without_recalculation(self):
+        window = self.create_expert_window()
+        self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+        controller, slider = window.controller, window.slider
+        trace, moves = controller.trace, controller.moves
+        window.interval_spin.setValue(5000)
+        with ExitStack() as stack:
+            forbid_search(stack)
+            for target in ("zini_explorer.build_zini_trace", "zini_trace._build_premium_context",
+                           "zini_trace._find_premium_candidates"):
+                stack.enter_context(patch(target, side_effect=AssertionError(target)))
+            request = stack.enter_context(patch.object(controller, "request_trace"))
+            go_to = stack.enter_context(patch.object(controller, "go_to", wraps=controller.go_to))
+            for enabled in (False, True):
+                window.answer_display_checkbox.setChecked(enabled)
+                for fraction in (0.25, 0.5, 0.75):
+                    with self.subTest(enabled=enabled, fraction=fraction):
+                        window.first_button.click()
+                        window.play_button.click()
+                        self.assertTrue(window.timer.isActive())
+                        go_to.reset_mock()
+                        point = QPoint(round((slider.width() - 1) * fraction), slider.height() // 2)
+                        QTest.mousePress(slider, Qt.LeftButton, pos=point)
+                        try:
+                            index = controller.current_index
+                            self.assertAlmostEqual(index, round(controller.step_count * fraction), delta=1)
+                            self.assertEqual(slider.value(), index)
+                            go_to.assert_called_once_with(index)
+                            self.assertFalse(window.timer.isActive())
+                            self.assertEqual(controller.revealed, frozenset(
+                                cell for step in trace.steps[:index] for cell in step.newly_revealed
+                            ))
+                            self.assertEqual(controller.flagged_mines, frozenset(
+                                cell for step in trace.steps[:index] for cell in step.newly_flagged
+                            ))
+                            self.assertEqual(window.clicks_label.text(),
+                                             f"Clicks {controller.cumulative_clicks} / {controller.clicks}")
+                        finally:
+                            QTest.mouseRelease(slider, Qt.LeftButton, pos=point)
+                        window._advance_autoplay()  # A queued timeout cannot undo the seek.
+                        self.assertEqual(controller.current_index, index)
+                        self.assertIs(controller.trace, trace)
+                        self.assertIs(controller.moves, moves)
+            request.assert_not_called()
+
+    def test_slider_track_exact_ends_seek_zero_and_step_count(self):
+        for window in (self.window, self.create_expert_window()):
+            self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+            slider, controller = window.slider, window.controller
+            for x, expected in ((0, 0), (slider.width() - 1, controller.step_count)):
+                with self.subTest(step_count=controller.step_count, expected=expected):
+                    slider.setValue(controller.step_count // 2)
+                    QTest.mouseClick(slider, Qt.LeftButton, pos=QPoint(x, slider.height() // 2))
+                    self.assertEqual(slider.value(), expected)
+                    self.assertEqual(controller.current_index, expected)
+                    self.assertEqual(window.previous_button.isEnabled(), expected > 0)
+                    self.assertEqual(window.next_button.isEnabled(), expected < controller.step_count)
+
+    def test_slider_track_click_at_same_index_stops_autoplay(self):
+        window = self.window
+        self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+        slider = window.slider
+        point = QPoint(self.slider_handle_rect(slider).right() + 1, slider.height() // 2)
+        window.interval_spin.setValue(5000)
+        window.play_button.click()
+        self.assertTrue(window.timer.isActive())
+        with patch.object(self.controller, "go_to", wraps=self.controller.go_to) as go_to:
+            QTest.mouseClick(slider, Qt.LeftButton, pos=point)
+        self.assertFalse(window.timer.isActive())
+        self.assertEqual(slider.value(), 0)
+        self.assertEqual(self.controller.current_index, 0)
+        go_to.assert_not_called()
+
+    def test_slider_handle_drag_keeps_grab_offset_and_navigation_working(self):
+        window = self.window
+        self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+        slider = window.slider
+        slider.setValue(1)
+        handle = self.slider_handle_rect(slider)
+        press = QPoint(handle.right() - 1, handle.center().y())
+        window.interval_spin.setValue(5000)
+        window.play_button.click()
+        QTest.mousePress(slider, Qt.LeftButton, pos=press)
+        try:
+            self.assertTrue(slider.isSliderDown())
+            self.assertEqual(self.controller.current_index, 1)
+            self.assertFalse(window.timer.isActive())
+            for expected in (2, 3):
+                point = press + QPoint(round((slider.width() - handle.width()) * (expected - 1) / 4), 0)
+                # Explicit held-button state makes native dragging deterministic offscreen.
+                event = QMouseEvent(QEvent.MouseMove, QPointF(point),
+                                    QPointF(slider.mapToGlobal(point)), Qt.NoButton,
+                                    Qt.LeftButton, Qt.NoModifier)
+                self.app.sendEvent(slider, event)
+                self.assertTrue(slider.isSliderDown())
+                self.assertEqual(slider.value(), expected)
+                self.assertEqual(self.controller.current_index, expected)
+        finally:
+            QTest.mouseRelease(slider, Qt.LeftButton, pos=press)
+        self.assertFalse(slider.isSliderDown())
+        for action, expected in ((window.previous_button.click, 2), (window.next_button.click, 3),
+                                 (window.first_button.click, 0), (window.last_button.click, 4)):
+            action()
+            self.assertEqual(slider.value(), expected)
+            self.assertEqual(self.controller.current_index, expected)
 
     def test_flag_chord_diagnostics_distinguish_logical_steps_and_physical_clicks(self):
         self.window.slider.setValue(2)
@@ -598,7 +925,7 @@ class ExplorerWindowTests(unittest.TestCase):
         self.assertEqual(reopened.clicks_label.text(), "Clicks 3 / 5")
         self.assertFalse(reopened.timer.isActive())
 
-    def test_empty_trace_has_no_enabled_navigation_or_hidden_mine_disclosure(self):
+    def test_empty_trace_has_no_enabled_navigation_and_mine_stays_covered(self):
         controller = ready_controller(BoardSnapshot(1, 1, 1, True, {(0, 0)}, ((0,),)), ZiniResult(0))
         window = self.create_window(controller)
         self.assertEqual((controller.current_index, controller.step_count), (0, 0))

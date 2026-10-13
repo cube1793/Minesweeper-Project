@@ -8,8 +8,9 @@ the window leaves the cached trace and the controller's current index intact.
 from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
-    QSpinBox, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
+    QPushButton, QScrollArea, QSlider,
+    QSpinBox, QStyle, QStyleOptionSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
 from zini_explorer import ZiniExplorerController
@@ -40,10 +41,20 @@ class ZiniExplorerCell(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setFont(QFont("Arial", 14, QFont.Bold))
         self.setToolTip(f"({x}, {y})")
+        # Fade only the answer glyph (including color emoji), never the cover.
+        self.answer_label = QLabel(self)
+        self.answer_label.setFont(self.font())
+        self.answer_label.setGeometry(self.rect())
+        self.answer_label.setAlignment(Qt.AlignCenter)
+        self.answer_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        opacity = QGraphicsOpacityEffect(self.answer_label)
+        opacity.setOpacity(0.35)
+        self.answer_label.setGraphicsEffect(opacity)
         self.render_state("closed")
 
     def render_state(self, state: str, value: int = 0, *, selected: bool = False,
-                     newly_revealed: bool = False, newly_flagged: bool = False):
+                     newly_revealed: bool = False, newly_flagged: bool = False,
+                     show_answer: bool = False, is_mine: bool = False):
         self.state = state
         self.selected = selected
         self.newly_revealed = newly_revealed
@@ -60,6 +71,17 @@ class ZiniExplorerCell(QLabel):
             text, color = "", "#000000"
         self.setText(text)
 
+        answer = ""
+        if state == "closed" and show_answer:
+            answer = "💣" if is_mine else str(value) if value else ""
+        self.answer_label.setText(answer)
+        answer_color = "#000000" if is_mine else NUMBER_COLORS.get(value, "#000000")
+        self.answer_label.setStyleSheet(
+            "QLabel { background-color: transparent; border: none;"
+            f" color: {answer_color}; margin: 0px; padding: 0px; }}"
+        )
+        self.answer_label.setVisible(bool(answer))
+
         background = "#e0e0e0" if state == "revealed" else "#c0c0c0"
         if newly_revealed:
             background = "#d8f0dd"
@@ -75,6 +97,32 @@ class ZiniExplorerCell(QLabel):
             f" background-color: {background}; color: {color}; border: {border};"
             " margin: 0px; padding: 0px; }"
         )
+
+
+class _JumpSlider(QSlider):
+    """Horizontal, handle-aware track seeking; handle drags stay native Qt."""
+
+    trackPressed = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            option = QStyleOptionSlider()
+            self.initStyleOption(option)
+            handle = self.style().subControlRect(
+                QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self,
+            )
+            if not handle.contains(event.pos()):
+                # Use the handle's travel span, as the main Replay slider does.
+                span = max(1, self.width() - handle.width())
+                position = max(0, min(span, event.x() - handle.width() // 2))
+                # Stop playback even when rounding maps to the current index.
+                self.trackPressed.emit()
+                self.setValue(QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), position, span, option.upsideDown,
+                ))
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 class ZiniExplorerWindow(QWidget):
@@ -108,6 +156,10 @@ class ZiniExplorerWindow(QWidget):
         self.clicks_label.setFont(QFont("Arial", 12, QFont.Bold))
         counts.addWidget(self.clicks_label)
         counts.addStretch()
+        self.answer_display_checkbox = QCheckBox("미공개 정답 표시")
+        self.answer_display_checkbox.setChecked(True)
+        self.answer_display_checkbox.toggled.connect(self._refresh_board)
+        counts.addWidget(self.answer_display_checkbox)
         layout.addLayout(counts)
 
         self.board_container = QWidget()
@@ -171,10 +223,11 @@ class ZiniExplorerWindow(QWidget):
         controls.addWidget(self.interval_spin)
         layout.addLayout(controls)
 
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = _JumpSlider(Qt.Horizontal)
         self.slider.setAccessibleName("논리 단계 Index")
         self.slider.valueChanged.connect(self.on_slider_changed)
         self.slider.sliderPressed.connect(self._stop_autoplay)
+        self.slider.trackPressed.connect(self._stop_autoplay)
         layout.addWidget(self.slider)
 
         self.details_button = QToolButton()
@@ -282,8 +335,8 @@ class ZiniExplorerWindow(QWidget):
             and self.controller.current_index is not None
         )
 
-    def refresh(self):
-        """Render only the controller's exposed snapshot, state, and current step."""
+    def _refresh_board(self):
+        """Rerender cells only; display changes never navigate or request a trace."""
         ready = self._session_ready()
         snapshot = self.controller.snapshot if ready else None
         step = self.controller.current_step if ready else None
@@ -298,13 +351,20 @@ class ZiniExplorerWindow(QWidget):
                 "flagged" if coordinate in flagged else
                 "revealed" if coordinate in revealed else "closed"
             )
-            value = snapshot.adjacent[y][x] if state == "revealed" else 0
+            value = snapshot.adjacent[y][x] if snapshot is not None else 0
             cell.render_state(
                 state, value, selected=coordinate == selected,
                 newly_revealed=coordinate in newly_revealed,
                 newly_flagged=coordinate in newly_flagged,
+                show_answer=ready and self.answer_display_checkbox.isChecked(),
+                is_mine=snapshot is not None and coordinate in snapshot.mines,
             )
 
+    def refresh(self):
+        """Render only the controller's exposed snapshot, state, and current step."""
+        self._refresh_board()
+        ready = self._session_ready()
+        step = self.controller.current_step if ready else None
         index = self.controller.current_index if ready else 0
         count = self.controller.step_count if ready else 0
         if not ready or index == count:
