@@ -26,22 +26,27 @@ Agreement between multiple AI reviews is not proof by itself.
 
 Repository:
 
-`C:\Users\User\Desktop\졸프\Minesweeper Project\Minesweeper-Project`
+`C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project`
 
 Stable branch:
 
 `main`
 
-Local main / feature merge-base at closeout:
+Merged/pushed main HEAD at ZiNi closeout:
 
-`3213c7f9958b73be77f1739a2d1a68962005c1c2` — `docs: add current project handoff`
+`aa0b252aa7c1510b313b511729034e5e74062b5b` — `fix: polish zini closeout ui`
 
-Closeout working branch: `feature/zini-improvement`.
-Verified implementation HEAD before this documentation-only closeout commit:
-`2595ee67bf1b8e3ae06aae991ca13813a65aacba` — `feat: add zini explorer ui`.
-The initial working tree was clean with 142 tracked files. The closeout commit
-follows this implementation; obtain its identity from live Git rather than
-treating the pre-closeout hash as the current HEAD. This closeout does not merge or push.
+ZiNi Improvement is **CLOSED**. The feature branch was merged into `main` and
+pushed; local `main` and `origin/main` were both at this commit before the
+ASCII path migration documentation closeout. Before merge,
+**1414/1414 tests PASS** and the **final manual GUI smoke PASS** were confirmed.
+The full ZiNi closeout smoke is complete.
+
+On 2026-10-13, the local top-level project root moved from
+`C:\Users\User\Desktop\졸프` to `C:\Projects\GraduationProject`.
+The internal directory structure was not intentionally changed.
+Historical audit/evidence documents intentionally retain the paths that were
+true when those artifacts were produced.
 
 Current live branch / HEAD / working-tree status:
 
@@ -116,7 +121,8 @@ Do not reopen Stage-3 V1 merely because an Extended design looks cleaner.
   deliberately not consumed.
 
 See [final adjudication](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md).
-Milestone closure does not itself complete manual GUI smoke or merge the branch.
+Final manual GUI smoke passed, and the accepted implementation was merged and
+pushed to `main` at `aa0b252aa7c1510b313b511729034e5e74062b5b`.
 
 ---
 
@@ -126,9 +132,17 @@ The next active milestone is **Stage-3 Extended**, separate from frozen Stage-3 
 Its existing direction is retained in section 7 and `docs/stage3-extended/`.
 No Stage-3 Extended implementation is part of ZiNi closeout.
 
-The ZiNi feature branch first needs the closeout report's manual GUI smoke and
-an explicit later merge decision. Automated/offscreen checks are not a claim
-that the normal desktop UI has been visually verified.
+ZiNi closeout, final manual GUI smoke, merge and push are complete.
+
+The ASCII path migration is also **CLOSED**. On 2026-10-13, the project root
+was moved to `C:\Projects\GraduationProject`, automated verification passed
+**1414/1414 tests PASS**, with **0 failures / 0 errors / 0 skips**.
+The user confirmed **post-migration normal-desktop smoke PASS**, including Replay.
+The approved development interpreter remains
+`C:\venvs\minesweeper\Scripts\python.exe`.
+
+The next immediate maintenance task is the mouse-release input semantics polish.
+After that, continue Stage-3 Extended.
 
 ---
 
@@ -152,11 +166,16 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-Complete the normal desktop manual GUI smoke recorded in the external
-`ZINI_IMPROVEMENT_CLOSEOUT_REPORT.txt`: finished-game ZiNi, Explorer navigation/
-board display, pending-worker reset/close, and separate Replay use.
-Then make a separate merge decision before starting Stage-3 Extended planning.
-Do not reopen ZiNi research or consume the reserved final holdout as a merge check.
+The ASCII path migration is complete and requires no further migration work.
+
+Next, investigate and implement mouse-release input semantics polish: execute
+gameplay actions at mouse-release rather than mouse-press while preserving correct
+LEFT / RIGHT / BOTH-button CHORD behavior, Replay event semantics and timer behavior.
+
+Treat this as a separate maintenance task from ZiNi and from frozen Stage-3 V1.
+After it is verified and closed, proceed to Stage-3 Extended implementation.
+
+Do not reopen ZiNi research or consume the reserved final quality holdout.
 
 ---
 

@@ -23,11 +23,11 @@
 ## 판정·보존 자료
 
 - [최종 판정문 원문](STAGE3_V1_FINAL_ADJUDICATION.md): Downloads 첨부의 bytes를 그대로 복사했다. 11,153 bytes, SHA-256 `e8c8d6a4126c82a03a0c3abd62342ce31dddde0402e057c3b2a3bfcb8f4bf427`.
-- 외부 마감 보존 폴더: `C:\Users\User\Desktop\졸프\STAGE3_V1_CLOSEOUT_20261010`
+- 외부 마감 보존 폴더: `C:\Projects\GraduationProject\STAGE3_V1_CLOSEOUT_20261010`
   - [보존 설명](<../../../../STAGE3_V1_CLOSEOUT_20261010/README.md>)
   - [원본 위치·보존 상대경로·size·SHA index](<../../../../STAGE3_V1_CLOSEOUT_20261010/closeout-index.json>)
   - [문서 정리 계획](<../../../../STAGE3_V1_CLOSEOUT_20261010/doc-organization-plan.md>)
-- 기존 G0–G5 evidence root: `C:\Users\User\Desktop\졸프\Minesweeper Project\stage3-official-100k-v1-6119841` ([로컬 폴더](<../../../stage3-official-100k-v1-6119841/>)). 기존 evidence/package/manifest는 수정하지 않는다.
+- 기존 G0–G5 evidence root: `C:\Projects\GraduationProject\Minesweeper Project\stage3-official-100k-v1-6119841` ([로컬 폴더](<../../../stage3-official-100k-v1-6119841/>)). 기존 evidence/package/manifest는 수정하지 않는다.
 
 외부 보존 자료는 Git 저장소와 별개이며 위 외부 링크는 현재 로컬 폴더 배치를 기준으로 한다.
 
