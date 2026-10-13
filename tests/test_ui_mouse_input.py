@@ -3,6 +3,8 @@
 from copy import deepcopy
 import os
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from unittest.mock import call, patch
 
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
@@ -28,6 +30,7 @@ class MouseInputTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.settings = isolate_ui_settings(self)
         # Worker execution is unrelated to pointer dispatch. Engine, recorder,
         # timers, rendering, and all mouse handlers remain real.
         worker = patch.object(MinesweeperUI, "_ensure_zini_metric_job")

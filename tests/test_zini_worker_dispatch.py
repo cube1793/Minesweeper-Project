@@ -8,6 +8,8 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from unittest.mock import Mock, patch
 
 from board_snapshot import BoardSnapshot
@@ -159,6 +161,7 @@ class WorkerLaunchTests(unittest.TestCase):
 
     def setUp(self):
         self.engine = MinesweeperEngine(3, 3, 1)
+        self.settings = isolate_ui_settings(self)
         self.ui = MinesweeperUI(self.engine)
         self.engine.reset_with_mines(3, 3, 1, {(1, 1)})
         self.result = calculate_g_zini(self.engine.get_board_snapshot())

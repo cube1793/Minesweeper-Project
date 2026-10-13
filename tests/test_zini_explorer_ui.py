@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import time
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from unittest.mock import Mock, patch
 
 # Bootstrap precedes every PyQt import as well as QApplication construction.
@@ -615,6 +617,7 @@ class ExplorerMainUITests(unittest.TestCase):
 
     def setUp(self):
         self.engine = MinesweeperEngine(3, 3, 1)
+        self.settings = isolate_ui_settings(self)
         self.ui = MinesweeperUI(self.engine)
         self.addCleanup(self.close_ui)
         warning = patch("ui_manager.QMessageBox.warning")

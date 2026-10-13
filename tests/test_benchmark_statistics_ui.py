@@ -5,6 +5,8 @@ import os
 import sqlite3
 import sys
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +39,7 @@ class StatisticsUITests(StatisticsTestCase):
 
     def setUp(self):
         super().setUp()
+        self.settings = isolate_ui_settings(self)
         self.window = viewer.BenchmarkStatisticsWindow()
         self.addCleanup(self.close_window)
 

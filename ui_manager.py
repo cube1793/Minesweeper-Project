@@ -55,7 +55,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QCheckBox, QMenu, QToolButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize, QEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize, QEvent, QSettings
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QIcon, QPainter, QPixmap, QPolygon
 
 from core_engine import MinesweeperEngine, CellState, GameStatus, Action
@@ -398,7 +398,7 @@ class MinesweeperUI(QWidget):
             height=self.engine.height,
             num_mines=self.engine.num_mines,
         )
-        self._last_replay_directory = None
+        self._replay_settings = QSettings("MinesweeperProject", "Minesweeper")
 
         # 통계 패널의 값 셀(QTableWidgetItem)을 stat_key로 보관.
         # _update_statistics_panel() 이 이 매핑을 통해 값을 갱신한다.
@@ -631,6 +631,8 @@ class MinesweeperUI(QWidget):
         tools_menu = QMenu(self.tools_button)
         self.benchmark_statistics_action = tools_menu.addAction("벤치마크 통계")
         self.benchmark_statistics_action.triggered.connect(self.on_benchmark_statistics)
+        self.replay_directory_action = tools_menu.addAction("Replay 저장 폴더...")
+        self.replay_directory_action.triggered.connect(self.on_replay_directory)
         self.tools_button.setMenu(tools_menu)
         settings_bar.addWidget(self.tools_button)
         main_layout.addLayout(settings_bar)
@@ -770,6 +772,18 @@ class MinesweeperUI(QWidget):
         self.reduction_checkbox = QCheckBox("Reduction")
         self.analyze_button = QPushButton("현재 상태 분석")
         self.simple_auto_checkbox = QCheckBox("확정 수 자동 진행")
+        self.simple_auto_interval_spin = QSpinBox()
+        self.simple_auto_interval_spin.setRange(0, 2000)
+        self.simple_auto_interval_spin.setSingleStep(10)
+        self.simple_auto_interval_spin.setSuffix(" ms")
+        self.simple_auto_interval_spin.setSpecialValueText("최대 속도")
+        self.simple_auto_interval_spin.setValue(SIMPLE_AUTO_STEP_INTERVAL_MS)
+        self.simple_auto_interval_spin.setFocusPolicy(Qt.ClickFocus)
+        self.simple_auto_interval_spin.valueChanged.connect(self.on_simple_auto_interval_changed)
+        self.simple_auto_interval_spin.lineEdit().textEdited.connect(
+            self._on_simple_auto_interval_edited)
+        auto_interval_label = QLabel("자동 간격:")
+        auto_interval_label.setBuddy(self.simple_auto_interval_spin)
         self.allow_guess_checkbox = QCheckBox("추측 허용")
         self.allow_guess_checkbox.setEnabled(False)
         self.analyze_button.setFocusPolicy(Qt.NoFocus)
@@ -785,7 +799,8 @@ class MinesweeperUI(QWidget):
         self.allow_guess_checkbox.toggled.connect(self.on_allow_guess_toggled)
         for control in (self.analysis_checkbox, self.probability_checkbox,
                         self.reduction_checkbox, self.analyze_button,
-                        self.simple_auto_checkbox, self.allow_guess_checkbox):
+                        self.simple_auto_checkbox, auto_interval_label,
+                        self.simple_auto_interval_spin, self.allow_guess_checkbox):
             analysis_bar.addWidget(control)
         analysis_bar.addStretch()
         main_layout.addLayout(analysis_bar)
@@ -1447,15 +1462,27 @@ class MinesweeperUI(QWidget):
             )
             return None
 
-    def _remember_replay_directory(self, path: str):
-        directory = os.path.dirname(os.path.abspath(path))
-        if directory:
-            self._last_replay_directory = directory
-
     def _replay_dialog_directory(self) -> str:
-        if self._last_replay_directory and os.path.isdir(self._last_replay_directory):
-            return self._last_replay_directory
+        """Use the configured save folder only while it is available."""
+        directory = self._replay_settings.value("replay/default_directory", "")
+        if isinstance(directory, str) and os.path.isdir(directory):
+            return directory
         return ""
+
+    def on_replay_directory(self) -> str | None:
+        """Change the default only through an explicit directory selection."""
+        # A directory dialog runs a nested event loop, just like Save/Load.
+        self._stop_simple_auto()
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Replay 저장 폴더 선택",
+            self._replay_dialog_directory(),
+        )
+        if not selected or not os.path.isdir(selected):
+            return None
+        self._replay_settings.setValue("replay/default_directory", selected)
+        self._replay_settings.sync()
+        return selected
 
     def _append_json_extension(self, path: str) -> str:
         if not path.lower().endswith(".json"):
@@ -1482,7 +1509,6 @@ class MinesweeperUI(QWidget):
             )
             return False
 
-        self._remember_replay_directory(path)
         QMessageBox.information(
             self,
             title,
@@ -1495,15 +1521,7 @@ class MinesweeperUI(QWidget):
         if directory:
             return directory
 
-        selected = QFileDialog.getExistingDirectory(
-            self,
-            "Replay 저장 폴더 선택",
-            "",
-        )
-        if not selected:
-            return None
-        self._last_replay_directory = selected
-        return selected
+        return self.on_replay_directory()
 
     def on_view_current_replay(self):
         """Open the just-finished game in replay mode without saving a file."""
@@ -1590,7 +1608,6 @@ class MinesweeperUI(QWidget):
             )
             return
 
-        self._remember_replay_directory(path)
         self._enter_replay_mode(replay_player)
 
     def on_exit_replay(self):
@@ -1986,6 +2003,7 @@ class MinesweeperUI(QWidget):
                         self.reduction_checkbox, self.analyze_button):
             control.setEnabled(True)
         self.simple_auto_checkbox.setEnabled(not self._replay_mode)
+        self.simple_auto_interval_spin.setEnabled(not self._replay_mode)
         self.allow_guess_checkbox.setEnabled(
             not self._replay_mode and self.simple_auto_checkbox.isChecked()
         )
@@ -2439,6 +2457,18 @@ class MinesweeperUI(QWidget):
     def _fail_simple_auto(self, message):
         self._stop_simple_auto()
         self._clear_live_analysis(f"자동 진행 중지 - {message}")
+
+    def _on_simple_auto_interval_edited(self, text: str):
+        spin = self.simple_auto_interval_spin
+        # textEdited precedes Qt's value update. Refresh valid zero input through
+        # setValue so specialValueText appears even when zero is entered again.
+        if spin.hasAcceptableInput() and spin.valueFromText(text) == 0:
+            spin.setValue(0)
+
+    def on_simple_auto_interval_changed(self, interval: int):
+        # Qt restarts an active timer when its interval changes. Keep the same
+        # pending step and analysis; even 0 waits for event-loop dispatch.
+        self._simple_auto_timer.setInterval(interval)
 
     def on_simple_auto_toggled(self, enabled):
         if (not enabled or self._replay_mode

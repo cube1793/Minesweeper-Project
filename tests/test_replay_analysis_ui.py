@@ -2,6 +2,8 @@
 
 import os
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -35,6 +37,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.settings = isolate_ui_settings(self)
         worker_patch = patch.object(MinesweeperUI, "_ensure_zini_metric_job")
         worker_patch.start()
         self.addCleanup(worker_patch.stop)

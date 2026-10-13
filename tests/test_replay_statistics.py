@@ -98,6 +98,7 @@ def _install_pyqt_stubs_if_needed():
     qt_core.Qt = _Qt
     qt_core.pyqtSignal = _pyqt_signal
     qt_core.QTimer = _Dummy
+    qt_core.QSettings = _Dummy
     qt_core.QPoint = _Dummy
     qt_core.QSize = _QSize
 
@@ -472,6 +473,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
     def _ui_with_live_engine(self, live_engine):
         with (
             patch.object(ui_manager, "QTimer", _TimerProbe),
+            patch.object(ui_manager, "QSettings"),
             patch.object(MinesweeperUI, "_init_ui"),
             patch.object(MinesweeperUI, "_init_shortcuts"),
             patch.object(MinesweeperUI, "render_board"),

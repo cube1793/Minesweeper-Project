@@ -2,6 +2,8 @@
 
 import os
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import call, patch
@@ -15,6 +17,8 @@ from simple_probability import CellProbability, ProbabilityResult
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
+    from PyQt5.QtCore import QAbstractEventDispatcher, Qt
+    from PyQt5.QtTest import QSignalSpy, QTest
     from PyQt5.QtWidgets import QApplication, QMessageBox
 except ImportError:
     QApplication = None
@@ -42,6 +46,7 @@ class LiveAutoUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.settings = isolate_ui_settings(self)
         worker = patch.object(MinesweeperUI, "_ensure_zini_metric_job")
         worker.start()
         self.addCleanup(worker.stop)
@@ -94,6 +99,235 @@ class LiveAutoUITests(unittest.TestCase):
         self.assert_stopped()
         self.assertTrue(self.ui.analysis_checkbox.isChecked())
         self.assertIsNotNone(self.ui._analysis_result)
+
+    def test_interval_defaults_range_step_and_display(self):
+        spin = self.ui.simple_auto_interval_spin
+        self.assertEqual(spin.value(), 180)
+        self.assertEqual(self.ui._simple_auto_timer.interval(), 180)
+        self.assertEqual((spin.minimum(), spin.maximum(), spin.singleStep()), (0, 2000, 10))
+        self.assertEqual(spin.text(), "180 ms")
+        self.assertTrue(spin.isEnabled())
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        for value, text in ((500, "500 ms"), (0, "최대 속도"), (2000, "2000 ms")):
+            spin.setValue(value)
+            self.assertEqual(spin.text(), text)
+            self.assertEqual(self.ui._simple_auto_timer.interval(), value)
+            self.assertFalse(self.ui._simple_auto_timer.isActive())
+            self.assertFalse(self.ui._simple_auto_pending)
+        self.assertEqual(spin.specialValueText(), "최대 속도")
+
+    def test_focused_interval_keyboard_edit_refreshes_zero_and_numeric_text(self):
+        spin = self.ui.simple_auto_interval_spin
+        spin.setValue(500)
+        self.ui.show()
+        self.ui.activateWindow()
+        spin.setFocus()
+        self.app.processEvents()
+        self.assertTrue(spin.hasFocus())
+        changes = QSignalSpy(spin.valueChanged)
+        with patch.object(self.engine, "step") as step:
+            for value in (0, 180, 0, 500, 0, 2000, 0, 0):
+                with self.subTest(value=value):
+                    previous = spin.value()
+                    change_count = len(changes)
+                    QTest.keyClick(spin, Qt.Key_A, Qt.ControlModifier)
+                    QTest.keyClicks(spin, str(value))
+                    self.app.processEvents()
+                    self.assertEqual(spin.value(), value)
+                    self.assertEqual(spin.text(), "최대 속도" if value == 0 else f"{value} ms")
+                    self.assertEqual(self.ui._simple_auto_timer.interval(), value)
+                    self.assertTrue(spin.hasFocus())
+                    self.assertFalse(self.ui._simple_auto_pending)
+                    self.assertFalse(self.ui._simple_auto_timer.isActive())
+                    step.assert_not_called()
+                    if value == 0:
+                        self.assertEqual(len(changes) - change_count, int(previous != 0))
+            # Deleting the contents is intermediate input, not a committed zero.
+            QTest.keyClick(spin, Qt.Key_A, Qt.ControlModifier)
+            QTest.keyClick(spin, Qt.Key_Backspace)
+            self.assertFalse(spin.hasAcceptableInput())
+            QTest.keyClicks(spin, "500")
+            self.app.processEvents()
+            self.assertEqual(spin.value(), 500)
+            self.assertEqual(spin.text(), "500 ms")
+            self.assertEqual(self.ui._simple_auto_timer.interval(), 500)
+            self.assertTrue(spin.hasFocus())
+            step.assert_not_called()
+
+    def test_focused_zero_edit_reschedules_one_pending_step_without_executing_it(self):
+        self.prepare_board()
+        self.ui.on_right_click(1, 1)
+        spin = self.ui.simple_auto_interval_spin
+        spin.setValue(500)
+        self.ui.show()
+        self.ui.activateWindow()
+        spin.setFocus()
+        self.app.processEvents()
+        self.ui.simple_auto_checkbox.setChecked(True)
+        result = self.ui._analysis_result
+        timer = self.ui._simple_auto_timer
+        changes = QSignalSpy(spin.valueChanged)
+        with (patch("ui_manager.analyze_position", wraps=analyze_position) as analyze,
+              patch.object(self.ui, "_simple_auto_move", wraps=self.ui._simple_auto_move) as select,
+              patch.object(timer, "setInterval", wraps=timer.setInterval) as reschedule,
+              patch.object(self.engine, "step", wraps=self.engine.step) as step):
+            QTest.keyClick(spin, Qt.Key_A, Qt.ControlModifier)
+            QTest.keyClicks(spin, "0")
+            # Inspect before event dispatch: a pending zero timer may then move.
+            self.assertEqual(spin.value(), 0)
+            self.assertEqual(spin.text(), "최대 속도")
+            self.assertTrue(spin.hasFocus())
+            self.assertEqual(timer.interval(), 0)
+            self.assertTrue(timer.isActive())
+            self.assertTrue(self.ui._simple_auto_pending)
+            self.assertIs(self.ui._analysis_result, result)
+            registrations = QAbstractEventDispatcher.instance().registeredTimers(timer)
+            self.assertEqual(len(registrations), 1)
+            self.assertEqual(registrations[0].interval, 0)
+            self.assertEqual(list(changes), [[0]])
+            reschedule.assert_called_once_with(0)
+            analyze.assert_not_called()
+            select.assert_not_called()
+            step.assert_not_called()
+            self.tick()
+            step.assert_called_once_with(result.move.x, result.move.y, result.move.action)
+            analyze.assert_called_once_with(self.engine.get_observation(), self.engine.num_mines)
+            self.assertTrue(self.ui._simple_auto_pending)
+            self.assertTrue(timer.isActive())
+
+    def test_interval_change_restarts_one_pending_timer_without_analysis_or_action(self):
+        self.prepare_board()
+        self.ui.on_right_click(1, 1)
+        self.ui.simple_auto_checkbox.setChecked(True)
+        timer = self.ui._simple_auto_timer
+        result = self.ui._analysis_result
+        observation = self.ui._analysis_observation
+        with (patch("ui_manager.analyze_position") as analyze,
+              patch.object(self.ui, "_simple_auto_move") as select,
+              patch.object(self.engine, "step") as step):
+            for interval in (500, 0, 2000, 180, 0):
+                self.ui.simple_auto_interval_spin.setValue(interval)
+                self.assertTrue(self.ui._simple_auto_pending)
+                self.assertTrue(timer.isActive())
+                self.assertTrue(timer.isSingleShot())
+                self.assertEqual(timer.interval(), interval)
+                registrations = QAbstractEventDispatcher.instance().registeredTimers(timer)
+                self.assertEqual(len(registrations), 1)
+                self.assertEqual(registrations[0].interval, interval)
+                self.assertIs(self.ui._analysis_result, result)
+                self.assertIs(self.ui._analysis_observation, observation)
+            analyze.assert_not_called()
+            select.assert_not_called()
+            step.assert_not_called()
+        with patch.object(self.engine, "step", wraps=self.engine.step) as step:
+            self.tick()
+        step.assert_called_once_with(result.move.x, result.move.y, result.move.action)
+        self.assertTrue(self.ui._simple_auto_pending)
+        self.assertEqual(timer.interval(), 0)
+
+    def test_zero_interval_executes_one_move_per_timeout_and_analyzes_fresh(self):
+        self.prepare_board()
+        self.ui.on_right_click(1, 1)
+        self.ui.simple_auto_interval_spin.setValue(0)
+        self.ui.simple_auto_checkbox.setChecked(True)
+        with (patch("ui_manager.analyze_position", wraps=analyze_position) as analyze,
+              patch.object(self.engine, "step", wraps=self.engine.step) as step):
+            for index in range(3):
+                before = self.engine.get_observation()
+                move = self.ui._analysis_result.move
+                count = len(self.ui._replay_recorder.events)
+                self.tick()
+                self.assertEqual(step.call_count, index + 1)
+                self.assertEqual(step.call_args, call(move.x, move.y, move.action))
+                self.assertEqual(len(self.ui._replay_recorder.events), count + 1)
+                self.assertEqual(analyze.call_count, index + 1)
+                self.assertEqual(analyze.call_args.args[0], self.engine.get_observation())
+                self.assertNotEqual(before, self.engine.get_observation())
+                self.assertTrue(self.ui._simple_auto_pending)
+                self.assertTrue(self.ui._simple_auto_timer.isActive())
+                self.assertEqual(self.ui._simple_auto_timer.interval(), 0)
+
+    def test_zero_interval_still_rejects_stale_public_state_at_timeout(self):
+        self.prepare_board()
+        self.ui.on_right_click(1, 1)
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.ui.simple_auto_interval_spin.setValue(0)
+        self.engine.step(2, 2, Action.OPEN)
+        with patch.object(self.engine, "step") as step:
+            self.tick()
+        step.assert_not_called()
+        self.assert_stopped()
+        self.assertIn("일치하지", self.ui.analysis_status_label.text())
+
+    def test_interval_change_keeps_guess_wait_without_new_selection(self):
+        self.engine.reset_with_mines(3, 3, 1, {(1, 1)})
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.assertEqual(self.ui._analysis_result.decision.kind, DecisionKind.PROBABILITY_GUESS)
+        result = self.ui._analysis_result
+        with (patch("ui_manager.analyze_position") as analyze,
+              patch.object(self.ui, "_simple_auto_move") as select,
+              patch.object(self.engine, "step") as step):
+            self.ui.simple_auto_interval_spin.setValue(0)
+            self.tick()
+        analyze.assert_not_called()
+        select.assert_not_called()
+        step.assert_not_called()
+        self.assertIs(self.ui._analysis_result, result)
+        self.assertTrue(self.ui.simple_auto_checkbox.isChecked())
+        self.assertFalse(self.ui._simple_auto_pending)
+        self.assertFalse(self.ui._simple_auto_timer.isActive())
+
+    def test_move_and_counters_are_invariant_across_intervals(self):
+        for scenario in ("first", "local", "global", "guess"):
+            expected = None
+            for interval in (0, 180, 500, 2000):
+                with self.subTest(scenario=scenario, interval=interval):
+                    self.ui.analysis_checkbox.setChecked(False)
+                    self.ui.on_reset()
+                    if scenario != "first":
+                        self.engine.reset_with_mines(3, 3, 1, {(1, 1)})
+                        if scenario == "local":
+                            self.ui.on_left_click(0, 0)
+                        if scenario != "guess":
+                            self.ui.on_right_click(1, 1)
+                    self.ui.simple_auto_interval_spin.setValue(interval)
+                    with patch("core_engine.random.sample", return_value=[(1, 1)]):
+                        self.ui.simple_auto_checkbox.setChecked(True)
+                        self.ui.allow_guess_checkbox.setChecked(scenario == "guess")
+                        result = self.ui._analysis_result
+                        kinds = {"local": DecisionKind.LOCAL_DETERMINISTIC,
+                                 "global": DecisionKind.GLOBAL_CERTAINTY,
+                                 "guess": DecisionKind.PROBABILITY_GUESS}
+                        if scenario == "first":
+                            self.assertTrue(self.ui._analysis_first_click)
+                        else:
+                            self.assertEqual(result.decision.kind, kinds[scenario])
+                        self.tick()
+                    last = self.ui._replay_recorder.events[-1]
+                    actual = (result, (last.x, last.y, last.action),
+                              self.engine.get_observation(), self.engine.get_counter_snapshot())
+                    if expected is None:
+                        expected = actual
+                    self.assertEqual(actual, expected)
+                    self.assertEqual((last.x, last.y, last.action),
+                                     (result.move.x, result.move.y, result.move.action.name))
+
+    def test_replay_disables_interval_and_exit_restores_editability(self):
+        self.ui.simple_auto_interval_spin.setValue(500)
+        player = ReplayPlayer(ReplayData(ReplayBoard(3, 3, 1, {(1, 1)}), ()))
+        self.ui._enter_replay_mode(player)
+        self.assertFalse(self.ui.simple_auto_interval_spin.isEnabled())
+        self.assertFalse(self.ui.simple_auto_checkbox.isEnabled())
+        for control in (self.ui.analysis_checkbox, self.ui.probability_checkbox,
+                        self.ui.reduction_checkbox):
+            self.assertTrue(control.isEnabled())
+        self.ui.on_exit_replay()
+        self.assertTrue(self.ui.simple_auto_interval_spin.isEnabled())
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.assertEqual(self.ui.simple_auto_interval_spin.value(), 500)
+        self.ui.simple_auto_interval_spin.setValue(0)
+        self.assertEqual(self.ui._simple_auto_timer.interval(), 0)
+        self.assertFalse(self.ui._simple_auto_timer.isActive())
 
     def test_analysis_off_also_stops_auto_and_clears_overlay(self):
         self.ui.simple_auto_checkbox.setChecked(True)
@@ -281,8 +515,8 @@ class LiveAutoUITests(unittest.TestCase):
             patch.object(self.engine, "step", wraps=self.engine.step) as step,
         ):
             self.ui.simple_auto_checkbox.setChecked(True)
-            # Exercise Qt dispatch without waiting for wall-clock time.
-            self.ui._simple_auto_timer.start(0)
+            # Exercise the speed control and Qt dispatch without wall-clock waits.
+            self.ui.simple_auto_interval_spin.setValue(0)
             self.app.processEvents()
             self.app.processEvents()
         analyze.assert_not_called()
@@ -599,6 +833,7 @@ class LiveAutoUITests(unittest.TestCase):
         self.prepare_board()
         for entry, dialog_method, result in (
             (self.ui.on_save_replay, "QFileDialog.getExistingDirectory", ""),
+            (self.ui.replay_directory_action.trigger, "QFileDialog.getExistingDirectory", ""),
             (self.ui.on_save_replay_as, "QFileDialog.getSaveFileName", ("", "")),
             (self.ui.on_load_replay, "QFileDialog.getOpenFileName", ("", "")),
         ):
@@ -619,7 +854,7 @@ class LiveAutoUITests(unittest.TestCase):
     def test_replay_save_result_messages_cancel_pending_live_auto(self):
         self.prepare_board()
         with TemporaryDirectory() as directory:
-            self.ui._last_replay_directory = directory
+            self.settings.setValue("replay/default_directory", directory)
             for error, dialog_method in (
                 (None, "QMessageBox.information"),
                 (OSError("save failed"), "QMessageBox.warning"),

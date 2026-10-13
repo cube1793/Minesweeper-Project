@@ -2,6 +2,8 @@
 
 import os
 import unittest
+
+from tests.ui_settings import isolate_ui_settings
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -162,6 +164,7 @@ class LiveAnalysisUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.settings = isolate_ui_settings(self)
         # ZiNi subprocess launch is unrelated; all live/replay/UI behavior is real.
         worker_patch = patch.object(MinesweeperUI, "_ensure_zini_metric_job")
         worker_patch.start()
