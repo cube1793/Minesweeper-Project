@@ -193,6 +193,125 @@ class WorkerLaunchTests(unittest.TestCase):
     def test_source_launch_poll_and_cleanup(self):
         self.check_completed_launch(frozen=False)
 
+    def test_unplaced_live_board_does_not_launch_worker(self):
+        self.ui.on_reset()
+        with patch("ui_manager.subprocess.Popen") as popen:
+            self.ui._ensure_zini_metric_job()
+            self.ui.on_both_click(0, 0)  # CHORD does not fix an unplaced board.
+            self.ui._update_statistics_panel(self.engine.get_stats())
+        popen.assert_not_called()
+        self.assertFalse(self.engine.get_board_snapshot().mines_placed)
+        self.assertIsNone(self.ui._zini_explorer.token)
+
+    def test_first_open_or_flag_starts_one_async_job_with_immutable_final_board(self):
+        for action in (self.ui.on_left_click, self.ui.on_right_click):
+            with self.subTest(action=action.__name__):
+                self.ui.on_reset()
+                process = Mock()
+                process.poll.return_value = None
+                with (patch("core_engine.random.sample", return_value=[(1, 1)]),
+                      patch("ui_manager.subprocess.Popen", return_value=process) as popen):
+                    action(0, 0)
+                    popen.assert_called_once()
+                    self.assertEqual(self.engine.status, GameStatus.PLAYING)
+                    sent = pickle.loads(Path(self.ui._zini_payload_path).read_bytes())["snapshot"]
+                    self.assertTrue(sent.mines_placed)
+                    self.assertEqual(sent.mines, frozenset({(1, 1)}))
+                    self.ui.on_left_click(0, 1)
+                    self.ui.on_right_click(2, 2)
+                    self.ui._poll_zini_metric_job()
+                    popen.assert_called_once()
+                process.wait.assert_not_called()
+                self.assertEqual(sent, self.engine.get_board_snapshot())
+                self.assertEqual(self.ui._stat_value_items["zini"].text(), "-")
+                self.assertFalse(self.ui.zini_explorer_button.isEnabled())
+                self.assertIsNone(self.ui.request_zini_explorer_trace())
+                self.assertIsNone(self.ui._zini_explorer_window)
+
+    def test_precomputed_result_is_silent_during_play_and_immediate_at_won_or_lost(self):
+        for outcome in ("won", "lost"):
+            with self.subTest(outcome=outcome):
+                self.ui.on_reset()
+                process = Mock()
+                process.poll.return_value = None
+                with (patch("core_engine.random.sample", return_value=[(1, 1)]),
+                      patch("ui_manager.subprocess.Popen", return_value=process) as popen,
+                      patch("zini_explorer.build_zini_trace") as build):
+                    self.ui.on_left_click(0, 0)
+                    popen.assert_called_once()
+                    self.finish_result()
+                    self.assertTrue(self.ui._zini_explorer.completed)
+                    self.assertEqual(self.ui._current_zini_clicks(), self.result.clicks)
+                    self.assertEqual(self.ui._stat_value_items["zini"].text(), "-")
+                    self.assertFalse(self.ui.zini_explorer_button.isEnabled())
+                    self.ui.on_open_zini_explorer()
+                    self.assertIsNone(self.ui._zini_explorer_window)
+                    self.assertIsNone(self.ui._zini_explorer.snapshot)
+                    self.assertIsNone(self.ui._zini_explorer.moves)
+                    self.ui.on_left_click(0, 1)
+                    if outcome == "lost":
+                        self.ui.on_left_click(1, 1)
+                    else:
+                        for y in range(3):
+                            for x in range(3):
+                                if (x, y) != (1, 1):
+                                    self.ui.on_left_click(x, y)
+                    self.assertEqual(self.engine.status, GameStatus.LOST if outcome == "lost" else GameStatus.WON)
+                    self.assertEqual(self.ui._stat_value_items["zini"].text(), str(self.result.clicks))
+                    self.assertTrue(self.ui.zini_explorer_button.isEnabled())
+                    popen.assert_called_once()
+                    build.assert_not_called()
+
+    def test_live_precompute_reset_rejects_old_result_on_next_board(self):
+        self.ui.on_reset()
+        process = Mock()
+        process.poll.return_value = None
+        with (patch("core_engine.random.sample", return_value=[(1, 1)]),
+              patch("ui_manager.subprocess.Popen", return_value=process)):
+            self.ui.on_left_click(0, 0)
+        self.assertIs(self.ui._zini_process, process)
+        old_token = self.ui._zini_job_token
+        paths = self.ui._zini_payload_path, self.ui._zini_result_path
+        self.ui.on_reset()
+        process.terminate.assert_called_once()
+        self.assert_cleared(*paths)
+        self.assert_invalidated()
+        new_process = Mock()
+        new_process.poll.return_value = None
+        with (patch("core_engine.random.sample", return_value=[(1, 1)]),
+              patch("ui_manager.subprocess.Popen", return_value=new_process)):
+            self.ui.on_right_click(0, 0)
+        self.assertGreater(self.ui._zini_job_token, old_token)
+        stale = {"token": old_token, "clicks": 999, "moves": self.result.moves, "error": None}
+        self.assertFalse(self.ui._zini_explorer.receive(stale, expected_token=old_token))
+        self.assertFalse(self.ui._zini_explorer.receive(stale, expected_token=self.ui._zini_job_token))
+        self.assertIsNone(self.ui._current_zini_clicks())
+        self.assertEqual(self.ui._stat_value_items["zini"].text(), "-")
+        self.assertFalse(self.ui.zini_explorer_button.isEnabled())
+
+    def test_next_action_does_not_restart_exited_worker_before_result_poll(self):
+        self.ui.on_reset()
+        process = Mock()
+        process.poll.return_value = None
+        with (patch("core_engine.random.sample", return_value=[(1, 1)]),
+              patch("ui_manager.subprocess.Popen", return_value=process) as popen):
+            self.ui.on_left_click(0, 0)
+            popen.assert_called_once()
+            payload_path, result_path = self.ui._zini_payload_path, self.ui._zini_result_path
+            write_result_atomic(result_path, {
+                "token": self.ui._zini_job_token, "clicks": self.result.clicks,
+                "moves": self.result.moves, "error": None,
+            })
+            process.poll.return_value = 0
+            self.ui.on_left_click(0, 1)
+            popen.assert_called_once()
+            self.assertEqual(self.ui._zini_result_path, result_path)
+            self.assertTrue(Path(result_path).is_file())
+            process.wait.assert_not_called()
+            self.ui._poll_zini_metric_job()
+            self.assertEqual(self.ui._current_zini_clicks(), self.result.clicks)
+            self.assert_cleared(payload_path, result_path)
+
     def test_frozen_launch_poll_and_cleanup(self):
         self.check_completed_launch(frozen=True)
 

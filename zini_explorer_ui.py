@@ -5,11 +5,11 @@ This window only reads the controller and delegates navigation to it. Closing
 the window leaves the cached trace and the controller's current index intact.
 """
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
-    QSpinBox, QStyle, QVBoxLayout, QWidget,
+    QSpinBox, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
 from zini_explorer import ZiniExplorerController
@@ -95,7 +95,8 @@ class ZiniExplorerWindow(QWidget):
         self.controller = controller
         self._session_token = controller.token
         self.setWindowTitle("ZiNi Explorer")
-        self.resize(780, 700)
+        self._initial_size_applied = False
+        self._details_auto_resize = None
 
         self.timer = QTimer(self)
         self.timer.setInterval(200)
@@ -103,17 +104,11 @@ class ZiniExplorerWindow(QWidget):
         layout = QVBoxLayout(self)
 
         counts = QHBoxLayout()
-        self.step_label = QLabel()
         self.clicks_label = QLabel()
-        for label in (self.step_label, self.clicks_label):
-            label.setFont(QFont("Arial", 12, QFont.Bold))
-            counts.addWidget(label)
-            counts.addSpacing(18)
+        self.clicks_label.setFont(QFont("Arial", 12, QFont.Bold))
+        counts.addWidget(self.clicks_label)
         counts.addStretch()
         layout.addLayout(counts)
-        explanation = QLabel("Step: 논리 결정 단계  ·  Clicks: 누적 물리 클릭 수")
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
 
         self.board_container = QWidget()
         grid = QGridLayout(self.board_container)
@@ -139,7 +134,7 @@ class ZiniExplorerWindow(QWidget):
         for text, style in (
             ("선택 좌표", "border: 2px solid #2463c5;"),
             ("새로 열린 칸", "background-color: #d8f0dd;"),
-            ("새로 놓은 깃발", "background-color: #ffe2a8;"),
+            ("새로 꽂은 깃발", "background-color: #ffe2a8;"),
         ):
             label = QLabel(text)
             label.setStyleSheet(f"QLabel {{ {style} padding: 3px; }}")
@@ -182,6 +177,18 @@ class ZiniExplorerWindow(QWidget):
         self.slider.sliderPressed.connect(self._stop_autoplay)
         layout.addWidget(self.slider)
 
+        self.details_button = QToolButton()
+        self.details_button.setText("상세 정보")
+        self.details_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.details_button.setArrowType(Qt.RightArrow)
+        self.details_button.setCheckable(True)
+        self.details_button.toggled.connect(self._toggle_details)
+        layout.addWidget(self.details_button)
+        self.details_panel = QWidget()
+        details_layout = QVBoxLayout(self.details_panel)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.details_panel)
+        self.details_panel.hide()
         self.diagnostic_labels = {}
         self.diagnostic_rows = {}
         for key, caption in (
@@ -191,7 +198,7 @@ class ZiniExplorerWindow(QWidget):
             ("best_premium", "적용 전 최대 Premium"),
             ("selection", "선택 관계 (적용 전 상태)"),
             ("newly_revealed", "새로 열린 칸"),
-            ("newly_flagged", "새로 놓은 깃발"),
+            ("newly_flagged", "새로 꽂은 깃발"),
             ("tie_count", "최대 Premium 숫자 칸 동률 수"),
         ):
             row = QWidget()
@@ -205,8 +212,66 @@ class ZiniExplorerWindow(QWidget):
             row_layout.addWidget(value_label, 1)
             self.diagnostic_labels[key] = value_label
             self.diagnostic_rows[key] = row
-            layout.addWidget(row)
+            details_layout.addWidget(row)
         self.refresh()
+
+    def _toggle_details(self, expanded: bool):
+        previous_size = self.size()
+        self.details_panel.setVisible(expanded)
+        self.details_button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        if self.isVisible():
+            self.layout().activate()
+        if not expanded:
+            sizes = self._details_auto_resize
+            self._details_auto_resize = None
+            if sizes is not None and previous_size == sizes[1]:
+                # Restore only our own growth; keep any user resize and position.
+                self.resize(sizes[0])
+            return
+
+        self._details_auto_resize = None
+        if expanded and self.isVisible():
+            scroll_frame = 2 * self.scroll_area.frameWidth()
+            required_height = self.board_container.height() + scroll_frame
+            # A board wider than the scroll area still needs its horizontal bar.
+            # Ignore a temporary vertical bar: growing may remove both bars.
+            if self.board_container.width() > self.scroll_area.width() - scroll_frame:
+                required_height += self.scroll_area.horizontalScrollBar().sizeHint().height()
+            extra_height = max(0, required_height - self.scroll_area.height())
+            self._resize_within_available_screen(QSize(self.width(), self.height() + extra_height))
+            if self.height() > previous_size.height():
+                self._details_auto_resize = (previous_size, self.size())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._initial_size_applied:
+            self._initial_size_applied = True
+            self._apply_initial_window_size()
+
+    def _apply_initial_window_size(self):
+        """Fit the board plus measured chrome, keeping scrolling for small screens."""
+        self.layout().activate()
+        margins = self.layout().contentsMargins()
+        hint = self.layout().sizeHint()
+        board = self.board_container.size()
+        scroll_frame = 2 * self.scroll_area.frameWidth()
+        chrome_height = hint.height() - self.scroll_area.sizeHint().height()
+        desired = QSize(
+            max(hint.width(), board.width() + scroll_frame + margins.left() + margins.right()),
+            board.height() + scroll_frame + chrome_height,
+        )
+        self._resize_within_available_screen(desired)
+
+    def _resize_within_available_screen(self, desired: QSize):
+        # On first show the native frame is available, unlike construction time.
+        available = self.screen().availableGeometry()
+        frame_size = self.frameGeometry().size() - self.size()
+        self.resize(desired.boundedTo(available.size() - frame_size))
+        frame = self.frameGeometry()
+        self.move(
+            max(available.left(), min(frame.left(), available.right() - frame.width() + 1)),
+            max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1)),
+        )
 
     def _session_ready(self) -> bool:
         return (
@@ -244,7 +309,6 @@ class ZiniExplorerWindow(QWidget):
         count = self.controller.step_count if ready else 0
         if not ready or index == count:
             self._stop_autoplay()
-        self.step_label.setText(f"Step {index} / {count}" if ready else "Step — / —")
         self.clicks_label.setText(
             f"Clicks {self.controller.cumulative_clicks} / {self.controller.clicks}"
             if ready else "Clicks — / —"

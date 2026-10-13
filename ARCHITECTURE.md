@@ -163,7 +163,7 @@ ZiNi trace의 `ZiniMove`는 `ReplayEvent`와 다른 모델이다. 예를 들어 
 ### Benchmark Statistics: Pre-Stage 3 / Stage 1 통계·시각화 확장
 
 ```text
-ui_manager.py                    진입 버튼과 보조 창 생명주기
+ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 생명주기
     └─▶ benchmark_statistics_ui.py
             ├─▶ benchmark_statistics_presentation.py   순수 표시·KO/EN·plot 좌표
             ├─▶ benchmark_statistics.py                실행 탐색·통계 의미
@@ -279,7 +279,7 @@ ReplayData
 
 ### 4.6 ZiNi worker
 
-종료된 Live 게임 또는 완료 Replay의 Counters를 표시할 때 확정 snapshot으로 worker를 시작한다.
+Live에서는 첫 OPEN/FLAG로 mine layout이 확정된 직후 불변 snapshot으로 worker를 시작한다. 배치 전에는 실행하지 않고, 같은 보드의 후속 행동은 실행 중이거나 결과 polling을 기다리는 작업을 재시작하지 않는다. 완료 결과는 controller에 저장하되 PLAYING 중에는 ZiNi와 Explorer를 공개하지 않는다. 종료 시 저장된 결과가 있으면 즉시 표시하며, 아직 계산 중이면 placeholder를 유지한다. Replay의 worker 시작과 표시 조건은 기존처럼 완료 기록에 한정된다.
 
 ```text
 UI: snapshot + config + job token → 임시 payload
@@ -300,7 +300,7 @@ Worker는 한 번의 탐색이 반환한 최종 moves를 전달한다. Controlle
 
 접근 조건은 Live WON/LOST 또는 완료 Replay이며, 완료 Replay에서는 현재 seek 위치와 무관하다. 진행 중 Live와 미완료 Replay에서는 접근할 수 없다. Board/mode 변경은 세션을 무효화하고 창을 닫는다. Explorer만 닫으면 Trace와 논리 index가 유지된다.
 
-Explorer는 처음·이전·다음·마지막, slider, 간격을 조절하는 Index 자동 재생과 선택 좌표·새 reveals/flags·누적 physical clicks·Premium/tie 관계를 표시한다. Index 0은 적용 전, N은 논리 move N개를 적용한 상태다. **Replay != ZiNi Trace**: 실제 행동 시간이나 ReplayEvent 모델을 공유하지 않으며, 적용 전 선택 관계는 탐색 phase·beam·RNG 이력을 뜻하지 않는다. Trace schema와 ZiNi semantics version은 각각 1이다.
+Explorer는 처음·이전·다음·마지막, slider와 간격을 조절하는 Index 자동 재생을 유지한다. 헤더는 누적 physical Clicks만 표시하며, 좌표·새 reveals/flags·Premium/tie 진단은 새 창마다 기본으로 접힌 상세 정보에 둔다. 접힌 동안에도 진단 값을 갱신하며 펼침/접힘은 재생 상태를 바꾸지 않는다. 초기 창은 보드 크기와 실제 layout chrome으로 계산하고 화면의 available geometry 이내로 제한한다. 큰 보드와 작은 화면을 위한 QScrollArea는 유지한다. Index 0은 적용 전, N은 논리 move N개를 적용한 상태다. **Replay != ZiNi Trace**: 실제 행동 시간이나 ReplayEvent 모델을 공유하지 않으며, 적용 전 선택 관계는 탐색 phase·beam·RNG 이력을 뜻하지 않는다. Trace schema와 ZiNi semantics version은 각각 1이다.
 
 ## 5. 중요한 설계 경계와 invariants
 

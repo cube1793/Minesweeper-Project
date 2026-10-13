@@ -49,6 +49,7 @@ class BenchmarkStatisticsWindow(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self.setModal(False)
         self.resize(1040, 780)
         self.language = presentation.DEFAULT_LANGUAGE

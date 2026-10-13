@@ -53,7 +53,7 @@ from PyQt5.QtWidgets import (
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
     QSpinBox, QDoubleSpinBox, QScrollArea, QSlider,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QCheckBox,
+    QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QCheckBox, QMenu, QToolButton,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QSize
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QIcon, QPainter, QPixmap, QPolygon
@@ -498,10 +498,6 @@ class MinesweeperUI(QWidget):
         self.stats_table = self._build_stats_table()
         layout.addWidget(self.stats_table)
 
-        self.benchmark_statistics_button = QPushButton("벤치마크 통계")
-        self.benchmark_statistics_button.clicked.connect(self.on_benchmark_statistics)
-        layout.addWidget(self.benchmark_statistics_button)
-
         self.zini_explorer_button = QPushButton("ZiNi Explorer")
         self.zini_explorer_button.setEnabled(False)
         self.zini_explorer_button.clicked.connect(self.on_open_zini_explorer)
@@ -611,6 +607,14 @@ class MinesweeperUI(QWidget):
         settings_bar.addWidget(self.cell_size_spin)
 
         settings_bar.addStretch()
+        self.tools_button = QToolButton()
+        self.tools_button.setText("도구")
+        self.tools_button.setPopupMode(QToolButton.InstantPopup)
+        tools_menu = QMenu(self.tools_button)
+        self.benchmark_statistics_action = tools_menu.addAction("벤치마크 통계")
+        self.benchmark_statistics_action.triggered.connect(self.on_benchmark_statistics)
+        self.tools_button.setMenu(tools_menu)
+        settings_bar.addWidget(self.tools_button)
         main_layout.addLayout(settings_bar)
 
         # --- 상단 정보 바: 지뢰 카운터 + 리셋 + 타이머 ---
@@ -1084,8 +1088,8 @@ class MinesweeperUI(QWidget):
     def _ensure_zini_metric_job(self):
         """Low-level job orchestration, also callable directly by existing tests.
 
-        Normal Counters callers check completion before starting a job. Direct
-        calls may prepare a metric while playing, but cannot grant Explorer access.
+        Live actions can precompute once the layout is fixed. Counters and
+        Explorer still require completion; Replay callers remain completion-gated.
         """
         self._sync_zini_explorer_eligibility()
         if (
@@ -1093,19 +1097,18 @@ class MinesweeperUI(QWidget):
             and self._zini_explorer.completed
         ):
             return
-        snapshot = self._engine_for_current_mode().get_board_snapshot()
-        if not snapshot.mines_placed:
-            return
         if self._zini_process is not None:
-            if (
-                self._zini_process_token == self._zini_job_token
-                and self._zini_process.poll() is None
-            ):
+            if self._zini_process_token == self._zini_job_token:
+                # Even an exited child belongs to this job until polling consumes
+                # its result/error. A live action must not discard it and restart.
                 if not self._zini_poll_timer.isActive():
                     self._zini_poll_timer.start()
                 return
             self._terminate_zini_metric_process()
 
+        snapshot = self._engine_for_current_mode().get_board_snapshot()
+        if not snapshot.mines_placed:
+            return
         token = self._zini_job_token
         # This exact immutable snapshot is both retained and serialized below.
         self._zini_explorer.begin(
@@ -2108,6 +2111,7 @@ class MinesweeperUI(QWidget):
         """One physical action, one event in the existing live recorder."""
         self._cancel_simple_auto_step()
         _, _, _, _, info = self.engine.step(x, y, action)
+        self._ensure_zini_metric_job()
         if action in (Action.OPEN, Action.FLAG):
             self._start_timer()
         self._record_replay_event(x, y, action)

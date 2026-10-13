@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PyQt5.QtCore import Qt
     from PyQt5.QtTest import QTest
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QDialog, QPushButton, QToolButton
     import pyqtgraph
 except ImportError:
     QApplication = None
@@ -60,6 +60,21 @@ class StatisticsUITests(StatisticsTestCase):
         self.assertIsNone(self.window.connection)
         self.assertIsNone(self.window.current_statistics)
         self.assertFalse(self.window.run_combo.isEnabled())
+
+    def test_context_help_is_removed_preserving_dialog_flags_and_close(self):
+        default_dialog = QDialog()
+        self.addCleanup(default_dialog.deleteLater)
+        flags = self.window.windowFlags()
+        self.assertFalse(flags & Qt.WindowContextHelpButtonHint)
+        self.assertEqual(flags, default_dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.assertTrue(flags & Qt.WindowCloseButtonHint)
+        self.assertEqual(self.window.windowType(), Qt.Dialog)
+        self.assertFalse(self.window.isModal())
+        self.window.show()
+        self.app.processEvents()
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window.close())
+        self.assertFalse(self.window.isVisible())
 
     def test_opens_readonly_lists_runs_and_selects_via_backend(self):
         diagnostic = self.mixed_run()
@@ -271,8 +286,18 @@ class StatisticsUITests(StatisticsTestCase):
                       main.simple_auto_checkbox.isChecked(), main._zini_job_token, main._zini_process,
                       main._timer.isActive(), main._timer_running, main.difficulty_combo.currentText())
             with patch.object(engine, "reset", wraps=engine.reset) as reset:
-                main.benchmark_statistics_button.click()
+                self.assertEqual(main.tools_button.text(), "도구")
+                self.assertEqual(main.tools_button.popupMode(), QToolButton.InstantPopup)
+                self.assertIn(main.benchmark_statistics_action, main.tools_button.menu().actions())
+                self.assertEqual(main.benchmark_statistics_action.text(), "벤치마크 통계")
+                self.assertFalse(main.stats_panel.isAncestorOf(main.tools_button))
+                self.assertNotIn("벤치마크 통계", [b.text() for b in main.stats_panel.findChildren(QPushButton)])
+                main.benchmark_statistics_action.trigger()
                 window = main._benchmark_statistics_window
+                with patch.object(window, "raise_") as raise_window:
+                    main.benchmark_statistics_action.trigger()
+                raise_window.assert_called_once()
+                self.assertIs(main._benchmark_statistics_window, window)
                 window.open_database(self.database)
                 window.run_combo.setCurrentIndex(1)
                 window.language_combo.setCurrentIndex(1)
@@ -289,7 +314,7 @@ class StatisticsUITests(StatisticsTestCase):
                      main.simple_auto_checkbox.isChecked(), main._zini_job_token, main._zini_process,
                      main._timer.isActive(), main._timer_running, main.difficulty_combo.currentText())
             self.assertEqual(before, after)
-            main.on_benchmark_statistics()
+            main.benchmark_statistics_action.trigger()
             self.assertIs(main._benchmark_statistics_window, window)
             window.open_database(self.database)
             reader = window.connection

@@ -48,7 +48,8 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **ZiNi:** 실제 mine layout을 사용하는 board metric입니다. 위 Simple Algorithm과 정보 경계 및 목적이 다릅니다.
 - deterministic G.ZiNi, maximum-Premium min-ties 탐색, neighborhood beam 및 seeded-chain 탐색을 제공합니다.
 - 화면의 ZiNi는 별도 subprocess에서 계산한 **bounded best-so-far**입니다. 전역 최적해나 정확한 최소 클릭 수를 보장하지 않습니다.
-- **ZiNi Explorer:** 종료된 Live 게임 또는 완료 Replay에서 ZiNi 결과가 준비되면 별도 창으로 최종 계산 경로를 확인합니다. 처음·이전·다음·마지막, slider와 Index 자동 재생을 지원하며 선택 좌표·새로 열린 칸·깃발·누적 클릭과 Premium 정보를 표시합니다. Trace는 요청 시 사후 구성하며, 실제 게임 행동을 기록한 Replay와 별도 모델입니다.
+- Live에서는 첫 OPEN 또는 FLAG로 지뢰 배치가 확정되면 백그라운드 계산을 시작합니다. 진행 중에는 결과를 숨기고, 종료 시 계산이 끝났다면 즉시 표시합니다. 아직 계산 중이면 `-`를 유지합니다. Replay의 계산 시작은 완료 기록에 한정됩니다.
+- **ZiNi Explorer:** 종료된 Live 게임 또는 완료 Replay에서 ZiNi 결과가 준비되면 별도 창으로 최종 계산 경로를 확인합니다. 처음·이전·다음·마지막, slider와 Index 자동 재생을 지원합니다. 헤더에는 누적 Clicks를 표시하고, 좌표·새로 열린 칸/깃발 수·Premium 진단은 기본으로 접힌 **상세 정보**에서 확인합니다. 초기 창 크기는 보드와 화면 공간에 맞추며 큰 사용자 지정 보드나 작은 화면에서는 스크롤을 유지합니다. Trace는 요청 시 사후 구성하며, 실제 게임 행동을 기록한 Replay와 별도 모델입니다.
 
 2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. 다음 활성 마일스톤은 Stage-3 Extended입니다.
 
@@ -56,7 +57,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 ## Benchmark Statistics / 벤치마크 통계
 
-Counters 패널 아래 **벤치마크 통계** 버튼으로 별도 창을 열고, **데이터베이스 열기**에서 기존 텔레메트리 SQLite 파일을 선택합니다. 데이터베이스는 읽기 전용으로 열며 생성·초기화·마이그레이션하지 않습니다. 게임, Live Auto, Replay 상태는 유지됩니다.
+상단 **도구 → 벤치마크 통계**에서 별도 창을 열고, **데이터베이스 열기**에서 기존 텔레메트리 SQLite 파일을 선택합니다. 데이터베이스는 읽기 전용으로 열며 생성·초기화·마이그레이션하지 않습니다. 게임, Live Auto, Replay 상태는 유지됩니다.
 
 - 실행 선택: 저장된 실행의 ID·솔버·보드·첫 클릭 정책, 요청/처리/저장 수와 정확한 접두 범위, Git dirty 및 공식 사용 가능 여부를 표시합니다. 부분/실패 실행에는 **진단용 실행** 표시가 붙습니다.
 - 실행 요약: 승패·승률·추측 비율/평균, 행동/추론 횟수, 계산 시간의 총합·평균·최대·P50/P90/P95/P99를 표시합니다.

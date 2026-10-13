@@ -20,9 +20,9 @@ from qt_bootstrap import configure_qt_plugin_path
 
 configure_qt_plugin_path()
 try:
-    from PyQt5.QtCore import Qt
+    from PyQt5.QtCore import Qt, QRect
     from PyQt5.QtTest import QTest
-    from PyQt5.QtWidgets import QApplication, QScrollArea
+    from PyQt5.QtWidgets import QApplication, QLabel, QScrollArea
 except ImportError:
     QApplication = None
 else:
@@ -163,7 +163,8 @@ class ExplorerWindowTests(unittest.TestCase):
     def test_initial_board_is_closed_without_flags_diagnostics_or_highlights(self):
         self.assertEqual(len(self.window.cells), 9)
         self.assertTrue(self.window.findChildren(QScrollArea))
-        self.assertEqual(self.window.step_label.text(), "Step 0 / 4")
+        self.assertEqual(self.controller.current_index, 0)
+        self.assertEqual(self.controller.step_count, 4)
         self.assertEqual(self.window.clicks_label.text(), "Clicks 0 / 5")
         for cell in self.window.cells.values():
             self.assertEqual(cell.state, "closed")
@@ -184,6 +185,247 @@ class ExplorerWindowTests(unittest.TestCase):
             self.assertEqual(self.window.cells[coord].text(), "1")
             self.assertIn(NUMBER_COLORS[1], self.window.cells[coord].styleSheet())
         self.assertTrue(self.window.cells[(1, 1)].text())
+
+    def test_header_contains_only_clicks_and_flag_wording_is_consistent(self):
+        labels = [label.text() for label in self.window.findChildren(QLabel)]
+        self.assertNotIn("새로 놓은 깃발", labels)
+        self.assertEqual(labels.count("새로 꽂은 깃발"), 2)
+        self.assertFalse(any(text.startswith("Step ") or "논리 결정 단계" in text
+                             or "누적 물리 클릭 수" in text for text in labels))
+        self.assertEqual(self.window.clicks_label.text(), "Clicks 0 / 5")
+
+    def test_details_default_collapsed_update_and_toggle_without_playback_changes(self):
+        window = self.window
+        self.assertFalse(window.details_button.isChecked())
+        self.assertEqual(window.details_button.text(), "상세 정보")
+        self.assertEqual(window.details_button.arrowType(), Qt.RightArrow)
+        self.assertTrue(window.details_panel.isHidden())
+        window.slider.setValue(2)
+        self.assertEqual(window.diagnostic_labels["action"].text(), "flag_chord")
+        self.assertEqual(window.diagnostic_labels["coordinate"].text(), "(1, 0)")
+        window.interval_spin.setValue(5000)
+        window.play_button.click()
+        before = (self.controller.current_index, self.controller.trace,
+                  self.controller.revealed, self.controller.flagged_mines)
+        for expanded in (True, False, True):
+            window.details_button.click()
+            self.assertEqual(window.details_panel.isHidden(), not expanded)
+            self.assertEqual(window.details_button.arrowType(), Qt.DownArrow if expanded else Qt.RightArrow)
+            self.assertEqual(window.diagnostic_labels["action"].text(), "flag_chord")
+            self.assertFalse(window.diagnostic_rows["tie_count"].isHidden())
+            self.assertTrue(window.timer.isActive())
+            self.assertEqual((self.controller.current_index, self.controller.trace,
+                              self.controller.revealed, self.controller.flagged_mines), before)
+        window.close()
+        reopened = self.create_window(self.controller)
+        self.assertFalse(reopened.details_button.isChecked())
+        self.assertTrue(reopened.details_panel.isHidden())
+        self.assertEqual(reopened.diagnostic_labels["action"].text(), "flag_chord")
+
+    def test_collapsed_fallback_details_keep_tie_row_hidden_when_expanded(self):
+        window = self.create_window(ready_controller(FALLBACK_SNAPSHOT, FALLBACK_RESULT))
+        window.next_button.click()
+        window.details_button.click()
+        self.assertFalse(window.details_panel.isHidden())
+        self.assertEqual(window.diagnostic_labels["action"].text(), "fallback_click")
+        self.assertTrue(window.diagnostic_rows["tie_count"].isHidden())
+
+    def show_on_screen(self, window, geometry):
+        screen = Mock()
+        screen.availableGeometry.return_value = geometry
+        screen_patch = patch.object(window, "screen", return_value=screen)
+        screen_patch.start()
+        self.addCleanup(screen_patch.stop)
+        window.show()
+        self.app.processEvents()
+        return window
+
+    def create_expert_window(self):
+        from tests.zini_fixtures import _expert_seed1003_snapshot
+        from tests.zini_v1_golden import GOLDEN
+        saved = GOLDEN["deterministic/expert1003"]["expected"]
+        controller = ready_controller(_expert_seed1003_snapshot(), ZiniResult(
+            saved["clicks"], tuple(ZiniMove(*move) for move in saved["moves"]),
+        ))
+        return self.create_window(controller)
+
+    def assert_expert_board_fits(self, window):
+        self.assertEqual((window.board_container.width(), window.board_container.height()), (840, 448))
+        self.assertGreaterEqual(window.scroll_area.viewport().width(), 840)
+        self.assertGreaterEqual(window.scroll_area.viewport().height(), 448)
+        self.assertEqual(window.scroll_area.horizontalScrollBar().maximum(), 0)
+        self.assertEqual(window.scroll_area.verticalScrollBar().maximum(), 0)
+
+    def test_expert_board_fits_initial_viewport_on_1920_by_1080_screen(self):
+        window = self.create_expert_window()
+        available = QRect(0, 0, 1920, 1080)
+        self.show_on_screen(window, available)
+        self.assertTrue(available.contains(window.frameGeometry()))
+        self.assert_expert_board_fits(window)
+        # Reopening an existing window must not undo a user's manual resize.
+        window.resize(window.width() + 30, window.height() + 20)
+        size = window.size()
+        window.hide()
+        window.show()
+        self.assertEqual(window.size(), size)
+
+    def test_expanding_expert_details_preserves_viewport_and_collapse_restores_size_only(self):
+        for index in (0, 2):
+            with self.subTest(index=index):
+                window = self.create_expert_window()
+                available = QRect(100, 50, 1920, 1080)
+                self.show_on_screen(window, available)
+                window.slider.setValue(index)
+                self.app.processEvents()
+                self.assert_expert_board_fits(window)
+                # At the bottom of the screen, expansion must also move upward.
+                window.move(available.left(), available.bottom() - window.frameGeometry().height() + 1)
+                collapsed_size = window.size()
+                collapsed_top = window.frameGeometry().top()
+                window.interval_spin.setValue(5000)
+                window.play_button.click()
+                controller = window.controller
+                trace = controller.trace
+                before = (controller.current_index, controller.revealed, controller.flagged_mines)
+                cells_before = {coord: (cell.state, cell.selected, cell.newly_revealed, cell.newly_flagged)
+                                for coord, cell in window.cells.items()}
+                with patch("zini_explorer.build_zini_trace", side_effect=AssertionError("rebuild")):
+                    window.details_button.click()
+                    self.app.processEvents()
+                    self.assertTrue(window.details_panel.isVisible())
+                    self.assertGreater(window.height(), collapsed_size.height())
+                    self.assertEqual(window.width(), collapsed_size.width())
+                    self.assertLess(window.frameGeometry().top(), collapsed_top)
+                    self.assertTrue(available.contains(window.frameGeometry()))
+                    self.assert_expert_board_fits(window)
+                    expanded_position = window.pos()
+                    window.details_button.click()
+                    self.app.processEvents()
+                    self.assertFalse(window.details_panel.isVisible())
+                    self.assertEqual(window.size(), collapsed_size)
+                    self.assertEqual(window.pos(), expanded_position)
+                    self.assertTrue(available.contains(window.frameGeometry()))
+                    self.assert_expert_board_fits(window)
+                self.assertIs(controller.trace, trace)
+                self.assertEqual((controller.current_index, controller.revealed, controller.flagged_mines), before)
+                self.assertEqual({coord: (cell.state, cell.selected, cell.newly_revealed, cell.newly_flagged)
+                                  for coord, cell in window.cells.items()}, cells_before)
+                self.assertTrue(window.timer.isActive())
+                self.assertEqual(window.timer.interval(), 5000)
+                window.timer.stop()
+
+    def test_collapse_after_auto_growth_preserves_manual_resize(self):
+        for width_delta, height_delta in ((30, 0), (0, 20), (0, -20)):
+            with self.subTest(width_delta=width_delta, height_delta=height_delta):
+                window = self.create_expert_window()
+                self.show_on_screen(window, QRect(0, 0, 1920, 1080))
+                window.slider.setValue(2)
+                window.interval_spin.setValue(5000)
+                window.play_button.click()
+                controller = window.controller
+                trace = controller.trace
+                before = (controller.current_index, controller.revealed, controller.flagged_mines)
+                collapsed_size = window.size()
+                window.details_button.click()
+                self.app.processEvents()
+                self.assertGreater(window.height(), collapsed_size.height())
+                self.assert_expert_board_fits(window)
+                window.resize(window.width() + width_delta, window.height() + height_delta)
+                self.app.processEvents()
+                manual_size, manual_position = window.size(), window.pos()
+                window.details_button.click()
+                self.app.processEvents()
+                self.assertEqual(window.size(), manual_size)
+                self.assertEqual(window.pos(), manual_position)
+                self.assert_expert_board_fits(window)
+                self.assertIs(controller.trace, trace)
+                self.assertEqual((controller.current_index, controller.revealed, controller.flagged_mines), before)
+                self.assertTrue(window.timer.isActive())
+                window.timer.stop()
+
+    def test_reexpansion_recalculates_from_current_size_and_screen(self):
+        window = self.create_expert_window()
+        available = QRect(0, 0, 1920, 1080)
+        self.show_on_screen(window, available)
+        initial_size = window.size()
+        window.details_button.click()
+        self.app.processEvents()
+        self.assert_expert_board_fits(window)
+        first_expanded_size = window.size()
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertEqual(window.size(), initial_size)
+
+        # A new cycle remembers this current size, not the first cycle's size.
+        window.resize(window.width() + 30, window.height() + 20)
+        second_collapsed_size = window.size()
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertGreater(window.height(), second_collapsed_size.height())
+        self.assertEqual(window.width(), second_collapsed_size.width())
+        self.assert_expert_board_fits(window)
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertEqual(window.size(), second_collapsed_size)
+        self.assert_expert_board_fits(window)
+
+        # Less available vertical space caps the next growth and allows scrolling.
+        smaller = QRect(0, 0, available.width(),
+                        (second_collapsed_size.height() + first_expanded_size.height()) // 2)
+        window.screen().availableGeometry.return_value = smaller
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertTrue(smaller.contains(window.frameGeometry()))
+        self.assertGreater(window.scroll_area.verticalScrollBar().maximum(), 0)
+        self.assertLess(window.scroll_area.viewport().height(), window.board_container.height())
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertEqual(window.size(), second_collapsed_size)
+        self.assert_expert_board_fits(window)
+
+    def test_details_toggle_and_hide_show_preserve_manual_size_when_board_already_fits(self):
+        window = self.create_expert_window()
+        available = QRect(0, 0, 1920, 1080)
+        self.show_on_screen(window, available)
+        frame_height = window.frameGeometry().height() - window.height()
+        window.resize(window.width() + 30, available.height() - frame_height)
+        manual_size = window.size()
+        for expanded in (True, False):
+            window.details_button.click()
+            self.app.processEvents()
+            self.assertEqual(window.details_panel.isVisible(), expanded)
+            self.assertEqual(window.size(), manual_size)
+            self.assert_expert_board_fits(window)
+            window.hide()
+            window.show()
+            self.app.processEvents()
+            self.assertEqual(window.size(), manual_size)
+            self.assert_expert_board_fits(window)
+
+    def test_oversized_board_uses_scroll_area_and_initial_size_stays_on_screen(self):
+        width, height = 40, 24
+        snapshot = BoardSnapshot(width, height, 0, True, frozenset(), ((0,) * width,) * height)
+        result = ZiniResult(1, (ZiniMove("fallback_click", 0, 0, None, 1),))
+        window = self.create_window(ready_controller(snapshot, result))
+        available = QRect(50, 30, 640, 480)
+        self.show_on_screen(window, available)
+        self.assertTrue(available.contains(window.frameGeometry()))
+        self.assertGreater(window.scroll_area.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(window.scroll_area.verticalScrollBar().maximum(), 0)
+        self.assertEqual(window.board_container.width(), width * zini_explorer_ui.CELL_SIZE)
+        initial_width = window.width()
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertTrue(window.details_panel.isVisible())
+        self.assertTrue(available.contains(window.frameGeometry()))
+        self.assertEqual(window.width(), initial_width)
+        self.assertGreater(window.scroll_area.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(window.scroll_area.verticalScrollBar().maximum(), 0)
+        self.assertLess(window.scroll_area.viewport().height(), window.board_container.height())
+        expanded_size = window.size()
+        window.details_button.click()
+        self.app.processEvents()
+        self.assertEqual(window.size(), expanded_size)
 
     def test_final_unflagged_mine_stays_closed_and_zero_cells_are_blank(self):
         snapshot = BoardSnapshot(3, 3, 1, True, {(0, 0)},
@@ -214,7 +456,7 @@ class ExplorerWindowTests(unittest.TestCase):
             action()
             self.assertEqual(self.controller.current_index, expected)
             self.assertEqual(window.slider.value(), expected)
-            self.assertEqual(window.step_label.text(), f"Step {expected} / 4")
+            self.assertEqual(window.clicks_label.text(), f"Clicks {self.controller.cumulative_clicks} / 5")
         window.last_button.click()
         self.assertTrue(window.first_button.isEnabled())
         self.assertTrue(window.previous_button.isEnabled())
@@ -225,7 +467,7 @@ class ExplorerWindowTests(unittest.TestCase):
 
     def test_flag_chord_diagnostics_distinguish_logical_steps_and_physical_clicks(self):
         self.window.slider.setValue(2)
-        self.assertEqual(self.window.step_label.text(), "Step 2 / 4")
+        self.assertEqual(self.controller.current_index, 2)
         self.assertEqual(self.window.clicks_label.text(), "Clicks 3 / 5")
         expected = {"action": "flag_chord", "coordinate": "(1, 0)", "premium": "2",
                     "best_premium": "2", "newly_revealed": "4", "newly_flagged": "1",
@@ -350,14 +592,14 @@ class ExplorerWindowTests(unittest.TestCase):
         self.assertEqual(self.controller.current_index, 2)
         with patch("zini_explorer.build_zini_trace", side_effect=AssertionError("rebuild")):
             reopened = self.create_window(self.controller)
-        self.assertEqual(reopened.step_label.text(), "Step 2 / 4")
+        self.assertEqual(reopened.slider.value(), 2)
         self.assertEqual(reopened.clicks_label.text(), "Clicks 3 / 5")
         self.assertFalse(reopened.timer.isActive())
 
     def test_empty_trace_has_no_enabled_navigation_or_hidden_mine_disclosure(self):
         controller = ready_controller(BoardSnapshot(1, 1, 1, True, {(0, 0)}, ((0,),)), ZiniResult(0))
         window = self.create_window(controller)
-        self.assertEqual(window.step_label.text(), "Step 0 / 0")
+        self.assertEqual((controller.current_index, controller.step_count), (0, 0))
         self.assertEqual(window.clicks_label.text(), "Clicks 0 / 0")
         for control in (window.first_button, window.previous_button, window.play_button,
                         window.next_button, window.last_button, window.slider):
@@ -491,7 +733,7 @@ class ExplorerMainUITests(unittest.TestCase):
             reopened = self.ui._zini_explorer_window
             self.assertIsNot(reopened, window)
             self.assertIs(self.ui._zini_explorer.trace, trace)
-            self.assertEqual(reopened.step_label.text(), "Step 2 / 4")
+            self.assertEqual(reopened.slider.value(), 2)
             self.assertEqual(reopened.clicks_label.text(), "Clicks 3 / 5")
             self.assertEqual(request.call_count, 3)
             build.assert_called_once()
