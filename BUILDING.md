@@ -19,14 +19,25 @@ $buildPython = Join-Path $buildEnv 'Scripts/python.exe'
 $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $buildEnv 'Lib/site-packages/PyQt5/Qt5/plugins/platforms'
 & $buildPython -m unittest discover -s tests -v
 $env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) 'results/pyinstaller-cache'
-& $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results main.py
+& $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results --add-data "calibration/stage3_physical_profile_v1.json;calibration" main.py
 ```
 
 The build uses the normal Python import graph; no hidden import or worker script
-data copy is required. `main.py` dispatches `--zini-metric-worker` before Qt setup
-and imports. Source execution still starts `python zini_metric_worker.py`, while
-the bundle starts `Minesweeper.exe --zini-metric-worker`. Both use the same payload,
-atomic result, polling and cancellation protocol. PyInstaller's
+data copy is required. The ZiNi worker requires no separate data file. The
+Stage-3 execution worker uses the frozen physical profile: the `--add-data`
+option above bundles the existing `calibration/stage3_physical_profile_v1.json`
+at the same relative path. Preserve its exact bytes and frozen SHA-256 contract;
+do not regenerate or edit the profile for packaging.
+
+`main.py` dispatches both `--zini-metric-worker` and `--stage3-execution-worker`
+before Qt setup and GUI imports. Source entry points are
+`python zini_metric_worker.py <payload.pkl> <result.pkl>` and
+`python stage3_execution_worker.py <payload.pkl> <result.pkl>`; the bundle uses
+`Minesweeper.exe --zini-metric-worker <payload.pkl> <result.pkl>` and
+`Minesweeper.exe --stage3-execution-worker <payload.pkl> <result.pkl>`. The existing
+ZiNi polling and cancellation protocol is unchanged. Stage-3 currently provides
+only the child execution boundary; parent lifecycle ownership belongs to the
+Visualizer slice. PyInstaller's
 [runtime documentation](https://pyinstaller.org/en/stable/runtime-information.html)
 describes `sys.frozen` and `sys.executable` in a bundle.
 
@@ -35,6 +46,9 @@ describes `sys.frozen` and `sys.executable` in a bundle.
 - Run the focused `test_zini_worker_dispatch.py` tests and the full suite with PyQt installed.
 - Run the built worker on a known board and confirm its token/result and exit code;
   check invalid arguments and a calculation error. Use a separate working directory.
+- Perform the packaged Stage-3 execution worker smoke at final Extended acceptance,
+  before closing the first Visualizer milestone. Verify the bundled frozen profile
+  loads and the complete execution unpickles from an unrelated working directory.
 - Launch the built GUI, play a game to completion and wait for a numeric ZiNi.
   Reset or close during a pending calculation; check that the child exits and its
   payload/result files are removed. Check Replay loading and analysis.

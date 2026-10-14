@@ -25,6 +25,11 @@ def main():
 
         return worker_main(sys.argv[1:])
 
+    if sys.argv[1:2] == ["--stage3-execution-worker"]:
+        from stage3_execution_worker import main as worker_main
+
+        return worker_main(sys.argv[1:])
+
     # Qt 설정과 import는 worker 분기 이후에만 실행한다.
     _configure_qt_plugin_path()
     from PyQt5.QtWidgets import QApplication
