@@ -60,8 +60,9 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 
 ## Stage 3 Extended — Active milestone
 
-현재는 **Stage-3 execution integration audit (read-only)** 단계다. 기존 `run_stage3 / Stage3ActionTrace`를 재사용하는 한 게임 실행 통합, 감사에서 결정할 재생 모델/컨트롤러 경계와 최소 Visualizer, OPEN / FLAG / CHORD 및 커서 위치·이동 시각화가 첫 목표다. Extended production 구현은 아직 수용되지 않았으며 V1은 frozen으로 유지한다.
+Execution integration audit와 Slices 1–4의 실행·재생·Visualizer·lifecycle 통합은 완료되어 main에 반영되었다. Slice 5 자동 검증과 2026-10-14 사용자의 packaged manual acceptance가 모두 통과했다. **Execution / Playback / Visualizer Foundation — CLOSED / ACCEPTANCE PASS / READY FOR REVIEW** 상태다. Stage-3 Extended 전체는 active이고 V1은 frozen이다.
 
+- [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 실제 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
 - [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.
 

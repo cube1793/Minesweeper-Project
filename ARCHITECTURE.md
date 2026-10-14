@@ -75,11 +75,11 @@ Solver가 `core_engine`에서 가져오는 것은 `Action`, `CellState` 같은 �
 
 | 모듈 | 책임 |
 | --- | --- |
-| `main.py` | Qt import 전 ZiNi worker 모드 분기, Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
+| `main.py` | Qt 설정·GUI import 전 ZiNi / Stage-3 worker 모드 분기, Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
 | `core_engine.py` | 지뢰 배치, OPEN/FLAG/CHORD, flood fill, 승패 판정, 타이머, active/wasted 클릭 및 진행량 집계 |
 | `board_snapshot.py` | 크기·지뢰 수·배치 여부·mine layout·adjacent를 담은 불변 `BoardSnapshot` |
 | `board_analyzer.py` | 확정 보드의 opening 그룹과 OPENING/BORDER/ISOLATED 분류, 정적 3BV/Ops |
-| `ui_manager.py` | PyQt5 화면·입력 정책·렌더링, Live Analysis/Auto 제어, Replay 이동·시간·파일 대화상자, 통계 표시, ZiNi worker 관리 |
+| `ui_manager.py` | PyQt5 화면·입력 정책·렌더링, Live Analysis/Auto 제어, Replay 이동·시간·파일 대화상자, 통계 표시, ZiNi worker 관리, Stage-3 launcher 창 소유 |
 
 `BoardSnapshot`은 `frozenset`과 중첩 tuple로 값을 복사한다. 아직 지뢰가 배치되지 않았으면 `mines_placed=False`, 지뢰 집합은 비어 있고 adjacent는 현재 0 배열이다. 이 상태를 조회할 수는 있지만 BoardAnalyzer와 ZiNi 계산은 확정 보드를 요구한다.
 
@@ -128,7 +128,60 @@ Certainty는 정수 world 수로 판정하며 표시용 반올림이나 float을
 
 공식 `EXPERT_GENERAL_V1` 100,000보드의 WW 37,702게임에서 동결 Model C의 modeled time-to-win 합계는 Stage 2보다 약 **30.089144% 감소**했다. 승패·기록된 guess 시퀀스 동등성은 이 corpus의 관찰 결과이며 보편적 회귀 불변식이 아니다. 이 수치는 CPU 계산시간·benchmark wall time·인간 플레이 시간의 30% 감소를 뜻하지 않는다. Model C의 OPEN·FLAG·CHORD 동일 비용 가정도 함께 적용한다.
 
-[최종 판정문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [동결 명세·감사 보존 위치](docs/stage3-v1/README.md)를 기준으로 읽는다. OPTIONAL 4건은 비차단 DEFER다. 현재 Live/Replay UI의 Simple Algorithm과 Stage-3 V1 실행 경계를 구분한다. ZiNi 개선은 별도 마일스톤으로 종료했으며, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정과 알고리즘 확장은 다음 Extended 범위다.
+[최종 판정문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [동결 명세·감사 보존 위치](docs/stage3-v1/README.md)를 기준으로 읽는다. OPTIONAL 4건은 비차단 DEFER다. 현재 Live/Replay UI의 Simple Algorithm과 Stage-3 V1 실행 경계를 구분한다. ZiNi 개선은 별도 마일스톤으로 종료했다. Stage-3 실행·재생·Visualizer 통합은 아래 Extended foundation에 구현되어 있고, 새 알고리즘·물리 모델 설정은 후속 범위다.
+
+### Stage-3 Extended: Execution / Playback / Visualizer Foundation
+
+Slices 1–4는 `b9af830495ce97552f2058ef91b59a4fd495222b` 기준 main에 통합되었다.
+Slice 5의 자동 검증과 2026-10-14 사용자의 대화형 packaged Visualizer 수용이
+모두 통과했다. 이 foundation은 **CLOSED / ACCEPTANCE PASS / READY FOR REVIEW**다.
+[수용 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)이
+자동 검증과 수동 확인 범위를 구분한다. Stage-3 Extended 전체는 계속 active다.
+
+| 모듈 | 책임 |
+| --- | --- |
+| `stage3_execution.py` | indexed `EXPERT_GENERAL_V1` 보드와 spec, 완료된 `Stage3RunResult`를 불변 `Stage3Execution`으로 유지 |
+| `stage3_execution_worker.py` | Qt 없이 한 index 실행, token/execution/error envelope를 trusted-local pickle로 atomic 게시 |
+| `stage3_execution_job.py` | 한 subprocess, token, polling/cancel, reap 후 job 디렉터리 전체 삭제 |
+| `stage3_visualizer_launcher.py` | job과 viewer 소유, index/Run/Cancel, 완료 시 자동 열기, 마지막 완료 결과 다시 열기 |
+| `stage3_trace_player.py` | fixed layout에 기록된 `trace.move`만 적용하는 순수 index 재구성; planner 호출 없음 |
+| `stage3_visualizer_ui.py` | execution만 입력받는 읽기 전용 보드·커서·action·정수 µs 및 presentation timer |
+
+```text
+main.py / MinesweeperUI
+  ↓ owns launcher only (no Stage-3 subprocess fields)
+Stage3VisualizerLauncherWindow
+  ├─ Stage3ExecutionJob (parent-side process owner)
+  │    ╰─ subprocess → stage3_execution_worker
+  │                      ↓ indexed EXPERT_GENERAL_V1 → frozen run_stage3()
+  │                    Stage3Execution
+  │                      ╰─ atomic result → job reaps + cleans → launcher
+  ╰─ Stage3VisualizerWindow(completed execution)
+       ╰─ Stage3TracePlayer → reconstructed observation / recorded action
+```
+
+Source job은 `sys.executable`과 `__file__` 기준 절대 worker script 경로를 쓴다.
+Frozen job은 `sys.executable --stage3-execution-worker`로 같은 EXE에 재진입한다.
+`main.py`의 두 worker dispatch는 Qt 설정과 GUI import보다 먼저 실행된다.
+동결 profile은 `stage3_physical.py`의 `__file__` 옆 `calibration/`에서 읽고,
+원본 bytes SHA-256과 table SHA-256을 각각 검증한다. Bundle의 `_internal/`
+아래 같은 상대 경로에 원본 파일을 포함해야 한다.
+
+Job의 정상 polling/cancel은 UI thread에서 블로킹 대기를 하지 않는다. 최종 shutdown만
+terminate 0.5초 + kill/reap 1초의 제한된 대기를 허용하며, reap/cleanup 실패 시
+소유권을 유지하고 close를 거부한다. Launcher close는 job과 viewer를 정리하고,
+main close는 launcher close 성공을 먼저 요구한다. 전체 private job 디렉터리를
+reap 후 삭제하므로 worker의 미완성 atomic 파일도 cleanup 범위에 포함된다.
+
+Benchmark 실행은 현재 Live/Replay 보드와 독립적이다. 보드 identity/layout은
+설정·재구성에만 쓰고 planner에는 공개 observation만 전달한다. Viewer는
+solver 결정 입력이 아니며 새 실행이나 계획을 만들지 않는다.
+
+**Replay != Stage-3 Trace Playback != ZiNi Trace.** Replay는 실제 게임 행동과
+elapsed time, Stage-3는 완료 실행의 action index와 정확한 modeled µs,
+ZiNi Trace는 answer-board 기반 계산 경로의 사후 설명이다. Presentation 간격은
+Model C 비용과 독립적이며 커서 선은 칸 중심 간 변위다. Arbitrary seek는 index 0부터
+재구성하는 기존 결정을 유지한다. Slice 5에서 checkpoint/seek 최적화는 하지 않았다.
 
 ### Replay
 
@@ -429,6 +482,8 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | ZiNi advanced | `test_zini_advanced.py` | 정책별 rollout, budget·종료 metadata, baseline 유지, 고정 seed/evaluation 재현성, trace 재적용 |
 | ZiNi golden / TYPE S | `test_zini_golden.py`, `test_zini_core.py` | 고정 10 workloads의 전체 moves·clicks·non-elapsed metadata, reference Premium 및 solved 판정 동등성 |
 | ZiNi Trace / Explorer | `test_zini_trace.py`, `test_zini_explorer.py`, `test_zini_explorer_ui.py` | 사후 Trace 검증, lazy 생성, 정보 gate, index/delta·Qt 표시 및 세션 수명 |
+| Stage-3 Extended | `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·순수 재생·worker transport·읽기 전용 UI·취소·종료·cleanup |
+| Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
 | ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
 정보 격리 테스트는 solver를 공개 enum만 있는 engine 대체 모듈로 로드하거나, hidden snapshot/layout 접근을 실패시키는 방식도 사용한다. Probability oracle은 answer board로 정답을 주입하지 않고 공개 조건을 직접 열거한다.
@@ -442,6 +497,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
+- **Stage-3 후속 범위:** 자동 검증과 사용자 packaged manual acceptance로 foundation을 종료했다. Version/settings identity 분리는 다음 후보이며 아직 selector를 구현하지 않았다. 더 명확한 Run/결과 열기 라벨, 명시적으로 synthetic/interpolated인 커서 이동 및 Modeled-Time Playback은 비차단 후속 관찰이며 미구현이다. Incremental-forward 재생 최적화는 modeled-time/smooth-animation 요구나 측정된 지연으로 정당화될 때까지 보류한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.

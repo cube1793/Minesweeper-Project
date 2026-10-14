@@ -2,75 +2,102 @@
 
 ## Status
 
-Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED** 상태이며, Extended의 immutable baseline으로 취급한다.
+Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen baseline이다.
+ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
+**Stage-3 Extended는 active**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
 
-2026-10-13 ZiNi improvement 종료 후 **다음 활성 마일스톤은 Stage-3 Extended**다. [ZiNi 최종 판정](../zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)은 V1 품질 유지·V2 미채택을 확정한다. ZiNi closeout은 Extended 구현을 시작하지 않는다.
+첫 milestone **Execution / Playback / Visualizer Foundation**은
+**ACCEPTANCE PASS / READY FOR REVIEW (2026-10-14)**이며 **CLOSED**다.
+자동 검증과 실제 Windows worker/profile/startup에 이어 사용자가 packaged
+interactive acceptance를 완료했다. [Slice 5 수용 기록](STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)에
+수동 tester/date, 네 terminal path의 PID·job-directory cleanup 및 controls PASS를 기록했다.
+종료 범위는 이 foundation뿐이며 Stage-3 Extended 전체는 계속 active다.
 
-- [V1 최종 판정](../stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
-- [Frozen V1 algorithm specification](../../STAGE3_ALGORITHM_SPEC_v1.md)
-- [Frozen V1 telemetry and benchmark specification](../../STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md)
-- [기존 extension backlog](../../STAGE3_EXTENSION_BACKLOG.md)
-- [Project documentation index](../README.md)
+## Closed / integrated
 
-## Extended boundary
+- Execution integration audit: 구현에 반영되어 완료.
+- Slice 1 — Execution Context + Pure Trace Playback (`cf7544b`).
+- Slice 2 — Subprocess Execution Worker (`d100a49`).
+- Slice 3 — Read-only Stage-3 Visualizer Window (`490a8cf`).
+- Slice 4 — Application Integration + Process Lifecycle (`b9af830`).
+- Slice 5 — Acceptance / Packaging / Documentation Closeout: **CLOSED / ACCEPTANCE PASS**; documentation uncommitted and ready for review.
 
-Extended는 accepted V1 위에 추가되는 별도 scope다. V1의 미완료 작업으로 취급하지 않으며, V1 수용을 다시 열기 위한 전제도 아니다.
+Full commit identities and the verified clean main baseline are in the acceptance record.
+Current components are `Stage3Execution`, worker, parent-owned `Stage3ExecutionJob`,
+launcher, pure `Stage3TracePlayer` and execution-only viewer. Indexed
+`EXPERT_GENERAL_V1` execution is independent of the current Live/Replay board.
 
-V1의 공식 100k 결과, frozen Model C, 기존 audit·evidence·qualification을 소급 변경하지 않는다. 새 물리 모델이나 새 알고리즘 버전은 V1과 구분되는 identity/version으로 기록하고 평가한다.
+## Current action — review Slice 5 documentation
 
-이 README는 backlog / planning의 출발점이다. 아래 후보의 최종 우선순위, 구현 사양 또는 구현 착수를 확정하지 않는다. 기존 backlog의 우선순위 표기도 당시 제안으로 보존하며, 실제 작업 순서와 검증 조건은 별도 계획에서 결정한다.
+Automated acceptance and user-performed packaged manual acceptance are complete.
+Normal success, Cancel, launcher-close and main-close during active jobs passed,
+with each owned worker gone and job directory removed. Parent PID 5352 also exited
+on main close. Playback, responsiveness and retained-result reopen passed.
+No algorithm, production Python, profile or playback-seek optimization changed.
+Source tests: **1628 passed, 0 failures/errors/skips** in the development environment.
+The closeout documentation remains uncommitted for review. Acceptance does not itself
+authorize a release, tag or next implementation milestone.
 
-## Current candidate workstreams
+## Next, after Slice 5 review
 
-다음 A/B/C는 후보를 구분하는 세 작업 축이며, 실행 우선순위를 뜻하지 않는다.
+**Version/settings identity separation** is justified by the concrete UI:
 
-### A. Existing-feature stabilization
+| Identity | Meaning |
+| --- | --- |
+| Application/release | App integration and distribution version |
+| Stage-3 algorithm | Frozen V1 decision/execution semantics; future versions separately specified |
+| Physical profile | Authenticated Model C/profile used for planning costs |
+| Playback/presentation | Index interval and display choices, independent of recorded costs |
 
-- ZiNi performance profiling / improvement: 별도 ZiNi improvement 마일스톤으로 **CLOSED**. 구현된 TYPE S 최적화와 Trace/Explorer를 수용했으며 V2 품질 연구는 미채택으로 종료했다. 이 과거 후보가 추가 ZiNi 연구를 지시하지 않는다.
+Slice 5 adds no selectors or new settings model. A changed app version does not
+change the algorithm/profile identity. A future profile must not be silently
+compared as the same frozen official Model C result.
 
-### B. Stage-3 application / visualization
+## Later candidates
 
-- Stage-3 execution integration into application.
-- Unified execution / replay / visualizer surface.
-- Cursor path 및 OPEN / FLAG / CHORD visualization.
-- Same-board comparison support.
-- Representative-board demonstration.
-- 필요에 따른 timeline / analytics expansion.
+- Same-board Human / Stage-2 / Stage-3 comparison.
+- Representative-board demonstrations and Timeline Analytics as needed.
+- First actual Extended algorithm research: likely nearest **exact-minimum-risk**
+  guess among equal-risk candidates, using physical cost. This is a candidate,
+  not an adopted policy or authorization to modify V1.
 
-녹화 기능은 앱 자체 기능으로 우선 구현하지 않는다. 발표·전시 영상은 외부 screen-recording tool 사용을 기본으로 한다.
+External screen-recording tools remain the default for demonstrations.
 
-### C. Stage-3 Extended algorithm / physical model
+## Deferred / evidence-triggered
 
-- Algorithm version selection: V1, 향후 별도로 정의할 V2/V3 등.
-- Physical-model configuration은 algorithm version과 분리한다.
-- Playback/presentation settings는 planning inputs와 분리한다.
-
-V1에서 deferred된 후보는 다음과 같다.
-
-- Nearest equal-risk guess: 동일한 최소 위험 후보 사이의 물리 비용 기반 선택.
-- Logical-known-mine / no-flag execution.
-- Action-specific timing.
+- Known-mine / no-flag execution.
+- Action-specific OPEN / FLAG / CHORD timing.
 - Anisotropy.
 - CPS / burst constraints.
-- Longer-horizon or richer planning: 별도 사양이 정의된 경우에만 검토한다.
+- Richer / longer planning.
 
-각 후보의 채택 여부, 순서, 모델 파라미터와 평가 계약은 후속 planning 문서에서 근거와 함께 결정한다.
+Revisit only with evidence and a separate specification/evaluation contract.
+Arbitrary Stage-3 seeks continue to rebuild from index 0. Incremental-forward
+optimization remains deferred until modeled-time/smooth-animation requirements
+or measured lag justify it; the manual report includes no quantitative lag result.
 
-## Versioning rule
+Manual UX follow-ups are nonblocking and unimplemented: clearer Run/new-execution
+versus 결과 열기/retained-result labels, smooth **synthetic/interpolated** cursor
+motion, and Modeled-Time Playback for inspecting Model-C action durations. A future
+cursor path must not be described as an actual OS mouse trajectory. Final WON
+with Step 0/current PLAYING is correct; the 20–5000 ms presentation interval is
+intentional and separate from Model C; manual seek stopping autoplay is accepted.
+See the acceptance record for the full deferred observations.
 
-| 구분 | 식별하는 대상 |
-| --- | --- |
-| Application version | 앱 기능·통합·배포 버전 |
-| Stage-3 algorithm version | V1 또는 향후 V2/V3의 의사결정·실행 semantics |
-| Physical model/profile version | 비용 모델, calibration/profile 및 planning에 사용되는 물리 입력 |
-| Playback/display settings | 재생 속도, 표시와 시각화 설정 |
+## Boundaries and references
 
-V1을 선택한 실행에서는 frozen V1 semantics와 사용한 Model C/profile identity를 각각 명시한다. Application version이 달라졌다는 이유로 algorithm이나 physical model의 version이 바뀐 것으로 취급하지 않는다.
+`Replay != Stage-3 Trace Playback != ZiNi Trace`. The viewer never supplies solver
+decision input. Playback interval is not Model C time, CPU speed or human speed.
+V1 official 100k results, algorithm, profile and qualification remain frozen.
+Extended is separate scope and does not reopen accepted V1 or closed ZiNi work.
 
-다른 물리 모델·profile을 적용한 결과는 기존 frozen Model C의 공식 V1 결과와 구분한다. Playback/display 설정 변경은 planning 입력이나 기록된 benchmark 지표를 바꾸지 않는다.
+- [V1 final adjudication](../stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
+- [Frozen algorithm](../../STAGE3_ALGORITHM_SPEC_v1.md)
+- [Frozen telemetry/benchmark specification](../../STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md)
+- [Historical extension backlog](../../STAGE3_EXTENSION_BACKLOG.md)
+- [ZiNi final adjudication](../zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)
+- [Documentation index](../README.md)
+- [Current handoff](../CURRENT_HANDOFF.md)
 
-## Documentation rule
-
-새 Extended 문서는 기본적으로 `docs/stage3-extended/` 또는 필요한 하위 디렉터리에 생성한다.
-
-기존 V1 문서는 Extended 작업 때문에 이동하거나 수정하지 않는다. Frozen spec과 audit·evidence·qualification 경로 및 공식 100k artifact root도 현재 위치와 identity를 유지한다. 새 설계·검증은 별도 문서로 작성하고 기존 기준선에 링크한다.
+New Extended records belong here. Existing frozen specs, audit/evidence paths,
+official 100k artifacts and historical decisions retain their identities and locations.

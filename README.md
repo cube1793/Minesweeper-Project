@@ -51,7 +51,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - Live에서는 첫 OPEN 또는 FLAG로 지뢰 배치가 확정되면 백그라운드 계산을 시작합니다. 진행 중에는 결과를 숨기고, 종료 시 계산이 끝났다면 즉시 표시합니다. 아직 계산 중이면 `-`를 유지합니다. Replay의 계산 시작은 완료 기록에 한정됩니다.
 - **ZiNi Explorer:** 종료된 Live 게임 또는 완료 Replay에서 ZiNi 결과가 준비되면 별도 창으로 최종 계산 경로를 확인합니다. 처음·이전·다음·마지막, slider와 Index 자동 재생을 지원합니다. 헤더에는 누적 Clicks를 표시하고, 좌표·새로 열린 칸/깃발 수·Premium 진단은 기본으로 접힌 **상세 정보**에서 확인합니다. 초기 창 크기는 보드와 화면 공간에 맞추며 큰 사용자 지정 보드나 작은 화면에서는 스크롤을 유지합니다. Trace는 요청 시 사후 구성하며, 실제 게임 행동을 기록한 Replay와 별도 모델입니다.
 
-2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. 다음 활성 마일스톤은 Stage-3 Extended입니다.
+2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. 현재 활성 마일스톤은 Stage-3 Extended입니다.
 
 계산 전략과 결과 해석은 [ZiNi 설계](ARCHITECTURE.md#zini-results)에 정리되어 있습니다.
 
@@ -74,7 +74,34 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 동결 Model C를 적용한 공식 `EXPERT_GENERAL_V1` 100,000보드 중 양쪽 모두 승리한 **WW 37,702게임에서 modeled time-to-win 합계가 Stage 2보다 약 30.089144% 감소**했습니다. 보드별 승패와 기록된 guess 시퀀스의 동등성은 이번 corpus의 관찰 결과입니다. CPU 계산시간·benchmark wall time·실제 인간 플레이 시간의 30% 감소나 모든 보드의 동등성을 뜻하지 않습니다.
 
-[최종 판정문 원문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [V1 기록·보존 위치 안내](docs/stage3-v1/README.md)를 참고하세요. 최종 감사 OPTIONAL 4건은 비차단 **DEFER**입니다. ZiNi 개선은 별도 마일스톤으로 종료했으며, Stage-3 `main.py` 통합, 시각 시뮬레이션, CPS/커서 속도 설정 및 알고리즘 확장은 **Extended** 범위입니다.
+[최종 판정문 원문](docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)과 [V1 기록·보존 위치 안내](docs/stage3-v1/README.md)를 참고하세요. 최종 감사 OPTIONAL 4건은 비차단 **DEFER**입니다. ZiNi 개선은 별도 마일스톤으로 종료했습니다. Stage-3 실행·재생·Visualizer는 현재 앱에 통합되어 있으며, 새 알고리즘이나 물리 모델 설정은 후속 **Extended** 범위입니다.
+
+## Stage-3 Visualizer
+
+메인 화면 왼쪽 **Counters** 패널의 **Stage-3 Visualizer** 버튼으로 별도 실행 창을 엽니다.
+현재 Live/Replay 보드와 독립된 `EXPERT_GENERAL_V1` 벤치마크의 **Game Index**
+(0 이상의 십진 정수)를 입력하고 **Run**을 누릅니다. 실행은 subprocess에서
+진행하며 **Cancel**로 취소할 수 있습니다. 완료하면 결과 Visualizer가 자동으로
+열리고, 결과 창만 닫은 뒤에는 실행 창의 **결과 열기**로 마지막 완료 결과를 다시
+엽니다. 새 Run, 취소/실패 또는 실행 창 종료 후에는 이전 결과를 유지하지 않습니다.
+
+- **First / Previous / Next / Last**, slider, **Play / Pause**로 행동 index를 이동합니다.
+  Index 0은 적용 전, index N은 기록된 action N개를 적용한 상태입니다. 최종 결과가
+  WON이어도 Step 0의 현재 재구성 상태는 PLAYING이며 정상입니다. 수동 seek는 자동 재생을 멈춥니다.
+- OPEN / FLAG / CHORD와 커서·대상을 표시합니다. 선은 **cursor-before → action-target**
+  칸 중심 사이의 modeled displacement이며 실제 OS 마우스 궤적이 아닙니다.
+- 행동별·누적·전체 modeled time은 정확한 정수 **µs**로 표시합니다.
+  **Presentation / index interval**(20–5000 ms, 기본 200 ms/step)은 화면 재생 간격이며
+  Model C 시간, CPU 성능 또는 실제 인간 속도를 뜻하지 않습니다.
+- 실행 창을 닫으면 소유한 job과 결과 창도 정리합니다. 메인 창 종료도 이 경계를 따릅니다.
+  Visualizer는 완료 실행을 읽기 전용으로 재생하며 solver에 판단 입력을 주지 않습니다.
+
+`Replay != Stage-3 Trace Playback != ZiNi Trace`입니다. Stage-3 V1 / Model C는
+변경되지 않았습니다. 2026-10-14 자동 검증과 사용자의 실제 Windows 패키지 수동
+검증을 모두 통과하여 **Execution / Playback / Visualizer Foundation은 CLOSED**,
+문서는 **ACCEPTANCE PASS / READY FOR REVIEW** 상태입니다.
+[수용 증거와 수동 검증 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)을
+참고하세요. Stage-3 Extended 전체는 계속 진행 중입니다.
 
 ## 실행 방법
 
@@ -109,6 +136,12 @@ Minesweeper-Project/
 ├─ simple_decision.py           # 순수 position 분석 및 decision 통합
 ├─ simple_runner.py             # UI 없이 동기 실행·중단·Replay 기록
 ├─ live_analysis.py             # 계산된 decision의 표시 모델과 Reduction
+├─ stage3_execution.py          # 고정 expert 보드 identity + 완료된 V1 실행
+├─ stage3_execution_worker.py   # Stage-3 trusted-local subprocess 진입점
+├─ stage3_execution_job.py      # 부모 process·token·임시 디렉터리 수명 관리
+├─ stage3_visualizer_launcher.py # 실행·취소·결과 다시 열기, job/viewer 소유
+├─ stage3_trace_player.py       # 기록 action index 기반 순수 재구성
+├─ stage3_visualizer_ui.py      # 읽기 전용 보드·커서·정수 modeled time 표시
 ├─ replay_model.py              # Replay 데이터 계약
 ├─ replay_recorder.py           # 실제 이벤트와 확정 보드 기록
 ├─ replay_json.py               # JSON 변환·파일 입출력
@@ -136,7 +169,7 @@ Repository 루트에서 실행합니다.
 python -m unittest discover -s tests -v
 ```
 
-Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi를 검증합니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
+Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
 
 Qt UI 테스트는 기본적으로 `offscreen` 플랫폼을 사용합니다. Windows에서 플랫폼 플러그인 탐색 오류가 발생하면 `QT_QPA_PLATFORM_PLUGIN_PATH`를 해당 Python의 실제 PyQt5 설치 경로 아래 `Qt5/plugins/platforms` 또는 `Qt/plugins/platforms`로 지정합니다.
 

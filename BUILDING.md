@@ -15,12 +15,35 @@ characters. Run these commands from the repository root:
 $buildEnv = Join-Path $env:TEMP 'minesweeper-release-build'
 python -m venv $buildEnv
 $buildPython = Join-Path $buildEnv 'Scripts/python.exe'
-& $buildPython -m pip install PyQt5==5.15.11 PyQt5-Qt5==5.15.2 PyQt5-sip==12.19.0 pyinstaller==6.22.3
+& $buildPython -m pip install PyQt5==5.15.11 PyQt5-Qt5==5.15.2 PyQt5-sip==12.19.0 pyinstaller==6.22.3 pyqtgraph==0.14.0 numpy==2.5.3 colorama==0.4.6
 $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $buildEnv 'Lib/site-packages/PyQt5/Qt5/plugins/platforms'
 & $buildPython -m unittest discover -s tests -v
 $env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) 'results/pyinstaller-cache'
-& $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results --add-data "calibration/stage3_physical_profile_v1.json;calibration" main.py
+$profile = (Resolve-Path 'calibration/stage3_physical_profile_v1.json').Path
+& $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results --add-data "${profile};calibration" main.py
 ```
+
+Inspect the chosen build environment and output directories before reuse. For
+acceptance, use a fresh ASCII-path environment and isolated paths under
+`results/stage3-visualizer-acceptance/<run-id>/` for the environment, dist, work,
+spec and cache. Do not overwrite previous release/evidence output or change the
+normal development environment. `results/` is ignored; generated artifacts are
+not source files to commit.
+
+The plotting dependencies above are required by the existing Benchmark Statistics
+UI and match the versions exercised on 2026-10-14. The original Qt/PyInstaller
+pins are unchanged. Record `pip freeze`, Python version and architecture per build.
+The normal development environment is the authority for full source regression:
+`C:\venvs\minesweeper\Scripts\python.exe -m unittest discover -s tests -v`.
+The clean app build environment can skip optional image/video replay-validation
+tests when their separate dependencies are absent; record those skips explicitly.
+Do not treat skipped tests as passed or omit required app/UI dependencies.
+
+Use an **absolute source profile path** with `--add-data`: when `--specpath` is
+under `results`, PyInstaller resolves relative data paths against that spec
+directory. Slice 5 reproduced a missing-profile build failure with the former
+relative command; `Resolve-Path` fixes the build configuration without changing
+profile bytes or production code.
 
 The build uses the normal Python import graph; no hidden import or worker script
 data copy is required. The ZiNi worker requires no separate data file. The
@@ -35,9 +58,11 @@ before Qt setup and GUI imports. Source entry points are
 `python stage3_execution_worker.py <payload.pkl> <result.pkl>`; the bundle uses
 `Minesweeper.exe --zini-metric-worker <payload.pkl> <result.pkl>` and
 `Minesweeper.exe --stage3-execution-worker <payload.pkl> <result.pkl>`. The existing
-ZiNi polling and cancellation protocol is unchanged. Stage-3 currently provides
-only the child execution boundary; parent lifecycle ownership belongs to the
-Visualizer slice. PyInstaller's
+ZiNi polling and cancellation protocol is unchanged. `Stage3ExecutionJob` now
+owns Stage-3 process/token/polling/cancel/reap and the whole private job directory.
+The launcher owns this job and the read-only viewer; the main UI owns the launcher.
+Source job commands use the absolute `__file__`-relative worker path; frozen jobs
+use `sys.executable` and the worker flag. Both dispatch before Qt setup. PyInstaller's
 [runtime documentation](https://pyinstaller.org/en/stable/runtime-information.html)
 describes `sys.frozen` and `sys.executable` in a bundle.
 
@@ -46,9 +71,23 @@ describes `sys.frozen` and `sys.executable` in a bundle.
 - Run the focused `test_zini_worker_dispatch.py` tests and the full suite with PyQt installed.
 - Run the built worker on a known board and confirm its token/result and exit code;
   check invalid arguments and a calculation error. Use a separate working directory.
-- Perform the packaged Stage-3 execution worker smoke at final Extended acceptance,
-  before closing the first Visualizer milestone. Verify the bundled frozen profile
-  loads and the complete execution unpickles from an unrelated working directory.
+- Verify the packaged Stage-3 worker with trusted-local `{"token": 503001,
+  "game_index": 0}` from an unrelated working directory and an explicit timeout.
+  Require exit 0, matching token, no error, a complete `Stage3Execution`, exact
+  benchmark/board identity, terminal WON/LOST, nonempty traces and integer modeled
+  costs. Compare deterministic fields to source, excluding `decision_compute_ns`.
+  Check wrong arity (exit 2), invalid index (failure envelope), owned PID reaping
+  and temporary-directory cleanup. Do not depend on console stderr from a windowed EXE.
+- Compare repository profile bytes to
+  `Minesweeper/_internal/calibration/stage3_physical_profile_v1.json`.
+  Both must have frozen SHA-256
+  `52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b`.
+  Inspect warnings and verify lazy Stage-3 modules, both workers and Qt plugins.
+- Launch the complete onedir GUI, verify native Qt startup/liveness, then exercise
+  launcher Run/Cancel, auto-open, retained-result reopen, playback, launcher-close
+  and main-close during active jobs. Track only owned child PIDs and directories.
+  If packaged interaction cannot be automated reliably, require recorded human
+  packaged acceptance; source/offscreen GUI results do not replace it.
 - Launch the built GUI, play a game to completion and wait for a numeric ZiNi.
   Reset or close during a pending calculation; check that the child exits and its
   payload/result files are removed. Check Replay loading and analysis.
@@ -56,5 +95,20 @@ describes `sys.frozen` and `sys.executable` in a bundle.
   notices/licenses. Provide the corresponding tagged source alongside the binary.
 - ZIP the folder, record its SHA-256, then publish it with the matching `v0.2.0` tag.
 
-Pre-Stage 3 telemetry SPEC v2 is frozen documentation; telemetry is not implemented
-by this release. ZiNi remains bounded best-so-far, not a proven minimum.
+The v0.2.0 release identity is unchanged by this documentation closeout. Current
+source includes the accepted telemetry/benchmark implementation and Stage-3 V1;
+historical release binaries should be identified by their own source tag.
+ZiNi remains bounded best-so-far, not a proven minimum.
+
+## Slice 5 acceptance evidence (2026-10-14)
+
+The real Windows x64 onedir/windowed build, profile identity, Stage-3 worker,
+source/package semantic equivalence, narrow ZiNi worker smoke and native GUI
+startup passed. The project user completed packaged manual acceptance on
+2026-10-14, including playback, retained-result reopen and all four success/cancel/
+active-close cleanup paths. Verdict: **ACCEPTANCE PASS / READY FOR REVIEW**.
+Only Execution / Playback / Visualizer Foundation is CLOSED; Stage-3 Extended
+remains active. See the [acceptance record and manual evidence](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md).
+Existing generated evidence remains the earlier automated snapshot and was not
+rewritten by this documentation-only manual signoff.
+No release version change, tag, publication or distribution ZIP was made.
