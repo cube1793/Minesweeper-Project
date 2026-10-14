@@ -187,6 +187,44 @@ ZiNi Trace는 answer-board 기반 계산 경로의 사후 설명이다. Presenta
 Model C 비용과 독립적이며 커서 선은 칸 중심 간 변위다. Arbitrary seek는 index 0부터
 재구성하는 기존 결정을 유지한다. Slice 5에서 checkpoint/seek 최적화는 하지 않았다.
 
+### Stage-3 Extended: Version / Settings Identity Separation
+
+`Application/release != algorithm identity != physical model/profile != playback/presentation`.
+
+| 소유자 / 소비자 | 책임과 경계 |
+| --- | --- |
+| Release/tag/build 문서 | 배포 identity. 현재 main을 historical `v0.2.0`으로 표시하지 않으며 runtime app-version 상수나 QApplication version은 없다. |
+| `stage3_identity.py` | Frozen `STAGE3_V1_IDENTITY`: algorithm spec version/hash와 solver stage/policy만 유지. Stage/policy 문자열은 기존 `telemetry_schema` public 상수를 참조하며 telemetry semantic version 자체는 별개다. |
+| `stage3_physical.py` | 불변 `MODEL_C_V1_IDENTITY`의 model ID, profile version/hash, table hash, unit과 실제 profile/table 인증·cost를 소유. `MODEL_C_DISPLAY_NAME`은 인증에 참여하지 않는 별도 표시 alias다. |
+| Benchmark producer / modeled evaluator | 위 authoritative 값을 소비한다. 기존 public 상수는 compatibility alias이며 canonical snapshot의 9개 key·값·type·serialization·거부 규칙을 보존한다. |
+| Launcher / viewer | Identity를 읽기 전용으로 표시한다. Launcher corpus ID는 `EXPERT_GENERAL_V1`, viewer의 run 정보는 기존 execution에서 읽는다. |
+| `stage3_visualizer_ui.py` | Index presentation interval의 local 상수·widget/session 상태를 소유한다. 범위 20..5000 ms, 기본 200 ms, `Playback: Index · N ms/step (presentation)`으로 표시한다. |
+
+Dependency는 benchmark/UI → identity owner 방향이다. Identity owner는 UI나
+presentation settings를 참조하지 않는다. UI가 profile을 다시 열거나 해석하지 않는다.
+`stage3_identity` import는 Qt, solver 실행, profile I/O, subprocess, settings를 요구하지 않는다.
+
+Snapshot은 `initial_open`, `initial_cursor`, `algorithm_spec_version`,
+`algorithm_spec_sha256`, `physical_model_id`, `physical_profile_version`,
+`physical_profile_sha256`, `timing_table_sha256`, `timing_unit`이다.
+Initial OPEN/cursor는 execution configuration이며 algorithm identity 객체의 필드가 아니다.
+Profile descriptor 비교가 실제 profile bytes/table authentication을 대체하지 않는다.
+Semantic model ID, concrete profile identity, exact timing-table artifact identity도 구분한다.
+
+`Stage3Execution(spec, board, result)`와 trusted-local pickle envelope는 그대로다.
+DB migration, Replay schema 변경, ZiNi 변경, algorithm/profile 선택기 또는 registry는 없다.
+Game-index text, autoplay, playback index와 interval은 비영속 local state이며
+viewer를 다시 열면 interval은 기본값으로 돌아간다. Stage-3 QSettings와
+presentation semantic version은 도입하지 않았다.
+
+- `Replay != Stage-3 Trace Playback != ZiNi Trace`.
+- `Presentation interval != Model C time`; interval 편집은 timer와 label만 바꾼다.
+- `decision_compute_ns != modeled physical time`; Replay elapsed time도 별도다.
+- `rendered UI cell size != calibration physical identity`.
+- Playback/display settings는 planner 입력이 아니며 recorded action/cost와 total을 바꾸지 않는다.
+- Frozen V1 official 100k 결과는 원래 algorithm/profile identity에 계속 귀속된다.
+  향후 algorithm/profile 변경은 별도의 명세·identity·평가를 요구한다.
+
 ### Replay
 
 | 모듈 | 책임 |
@@ -486,7 +524,7 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | ZiNi advanced | `test_zini_advanced.py` | 정책별 rollout, budget·종료 metadata, baseline 유지, 고정 seed/evaluation 재현성, trace 재적용 |
 | ZiNi golden / TYPE S | `test_zini_golden.py`, `test_zini_core.py` | 고정 10 workloads의 전체 moves·clicks·non-elapsed metadata, reference Premium 및 solved 판정 동등성 |
 | ZiNi Trace / Explorer | `test_zini_trace.py`, `test_zini_explorer.py`, `test_zini_explorer_ui.py` | 사후 Trace 검증, lazy 생성, 정보 gate, index/delta·Qt 표시 및 세션 수명 |
-| Stage-3 Extended | `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·순수 재생·worker transport·읽기 전용 UI·취소·종료·cleanup |
+| Stage-3 Extended | `test_stage3_identity.py`, `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·순수 재생·worker transport·읽기 전용 UI·취소·종료·cleanup |
 | Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
 | ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
@@ -501,7 +539,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** 자동 검증과 사용자 packaged manual acceptance로 foundation을 종료했다. Version/settings identity 분리는 다음 후보이며 아직 selector를 구현하지 않았다. 더 명확한 Run/결과 열기 라벨, 명시적으로 synthetic/interpolated인 커서 이동 및 Modeled-Time Playback은 비차단 후속 관찰이며 미구현이다. Incremental-forward 재생 최적화는 modeled-time/smooth-animation 요구나 측정된 지연으로 정당화될 때까지 보류한다.
+- **Stage-3 후속 범위:** 자동 검증과 사용자 packaged manual acceptance로 foundation을 종료했다. Version / Settings Identity Separation도 최종 수용으로 종료했으며 selector는 도입하지 않았다. 다음 활성 마일스톤은 Modeled-Time Playback / Synthetic Smooth Cursor Presentation이다. 더 명확한 Run/결과 열기 라벨, 명시적으로 synthetic/interpolated인 커서 이동 및 Modeled-Time Playback은 비차단 후속 관찰이며 미구현이다. Incremental-forward 재생 최적화는 modeled-time/smooth-animation 요구나 측정된 지연으로 정당화될 때까지 보류한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.

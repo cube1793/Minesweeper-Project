@@ -60,8 +60,16 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 
 ## Stage 3 Extended — Active milestone
 
-Execution integration audit와 Slices 1–5는 main에 통합되었으며 Slice 5 문서 closeout 및 독립 감사 기준점은 `18964add02c508d67429ef29cb59ce879c01017d`다. 자동·packaged manual 수용, 독립 Claude 감사와 ChatGPT 최종 판정을 통과하여 **Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED**다. Stage-3 Extended 전체는 **ACTIVE**이고 V1은 frozen이다. 다음 마일스톤은 **Version / Settings Identity Separation**이다.
+**Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED**
+(2026-10-14), **Version / Settings Identity Separation — FINAL ACCEPTANCE PASS / CLOSED**
+(2026-10-15). Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
+Identity Separation은 고정 algorithm/physical identity, read-only UI labels와
+비영속 presentation state를 분리했다. 다음 활성 마일스톤은
+**Modeled-Time Playback / Synthetic Smooth Cursor Presentation**이며 아직 구현하지 않았다.
+그 뒤에는 Same-board Human / Stage-2 / Stage-3, representative demonstrations /
+Timeline Analytics, 첫 실제 Extended algorithm research가 남는다.
 
+- [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md): 실제 구현 commit, 최종 tests, fresh package/worker, 사용자 native GUI 수용 및 보존 경계.
 - [Foundation 최종 판정](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md): 독립 감사 수치, F-1 문서 정리, F-2 OPTIONAL / DEFER와 후속 범위.
 - [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 초안 당시와 통합 이후의 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)

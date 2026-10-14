@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Recover the current project state safely when a chat is restarted or reaches its maximum length.  
-> Updated: 2026-10-14 (Asia/Seoul)
+> Updated: 2026-10-15 (Asia/Seoul)
 
 ---
 
@@ -32,29 +32,25 @@ Approved development interpreter:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Live Git verified on 2026-10-14 before final-adjudication documentation edits:
+Live Git verified on 2026-10-15 before Identity Separation closeout preparation:
 
 - branch: `main`
 - working tree: clean
-- HEAD = local `origin/main`: `18964add02c508d67429ef29cb59ce879c01017d`
-- commit: `docs: close stage3 visualizer foundation`
+- HEAD = local `origin/main`: `e04d4e8292338f53b0a3a0f88e999992b9ac80ec`
+- commit: `feat: separate stage3 visualizer identity labels`
 
-Slice 5 documentation was already committed, merged and pushed at this commit.
-It is also the independent Claude audit baseline and the verified starting point
-for this documentation-only closeout. It is not a permanent latest-HEAD claim:
-recheck branch, HEAD, `origin/main` and working-tree status in each later chat.
-No remote fetch was performed for this closeout.
-The final-adjudication documentation branch was created from this clean baseline:
-`docs/stage3-visualizer-foundation-final-closeout`.
+This is a dated preparation baseline, not a permanent latest-HEAD claim.
+No fetch was performed. Closeout branch:
+`docs/stage3-identity-separation-closeout`.
+Documentation is awaiting user review; this preparation session has not committed,
+merged or pushed it. Determine later integration state from live Git.
 
-Integrated Slice identities:
-
-- Slice 1: `cf7544b6dbc059594750f0798eca8878ddf2ea66`
-- Slice 2: `d100a493445c7118b5347fdbe2ec0f7243719f17`
-- Slice 3: `490a8cf3df1939ae9930e0735665e77120912995`
-- Slice 4 / pre-Slice-5 baseline: `b9af830495ce97552f2058ef91b59a4fd495222b`
-- Slice 5 documentation closeout / independent-audit baseline:
-  `18964add02c508d67429ef29cb59ce879c01017d`
+Integrated Identity Separation implementation:
+Slice 1 `858dc1aa3bdac69cff85bb6bbb6ac352bac5f37b` (public fixed identities);
+Slice 2 `e04d4e8292338f53b0a3a0f88e999992b9ac80ec` (identity-backed labels).
+Foundation final documentation is integrated at
+`16ba355701744ec9827a73291546a656bed67980`; its historical Slice 1–5 identities
+remain in the [Foundation record](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md).
 
 Important Stage-3 V1 identities, verified in live Git:
 
@@ -133,8 +129,8 @@ merge/push to `main`.
 ### Recent maintenance / usability — CLOSED (2026-10-13)
 
 These are concise accepted closeouts. Test counts and desktop smoke results below
-come from historical completion records. Slice 5's new source/package results
-are recorded separately below and do not relabel historical smoke as newly run.
+come from historical completion records. Current Identity Separation acceptance
+is recorded separately below and does not relabel historical smoke as newly run.
 Commit identities were read from live Git.
 
 - **ASCII path migration:** moved to the current ASCII root; **1414/1414 PASS**,
@@ -164,63 +160,55 @@ Commit identities were read from live Git.
 ## 4. Current milestone
 
 **Stage-3 Extended remains ACTIVE. Next active milestone:
-Version / Settings Identity Separation.** Stage-3 V1 remains **CLOSED / FROZEN**;
-ZiNi Improvement and the listed maintenance milestones remain **CLOSED**.
+Modeled-Time Playback / Synthetic Smooth Cursor Presentation.**
+Both features remain unimplemented. Stage-3 V1 / Model C remain CLOSED / FROZEN;
+ZiNi Improvement and the maintenance milestones remain CLOSED.
 
-**Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED.**
-Execution integration audit and Slices 1–5 are closed/integrated. The project user
-completed packaged manual acceptance on **2026-10-14 (Asia/Seoul)** after the
-automated checks. Independent Claude audit and ChatGPT final adjudication both
-passed. Closure covers this foundation; Stage-3 Extended as a whole remains ACTIVE.
+**Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED**
+(2026-10-14). Historical source/package/manual evidence and independent adjudication
+are preserved in the [acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
+and [final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md).
+Its process ownership/lifecycle acceptance is not reopened.
 
-Implemented components: indexed `Stage3Execution`, Qt-independent subprocess
-worker, parent-owned `Stage3ExecutionJob`, `Stage3VisualizerLauncherWindow`,
-pure `Stage3TracePlayer`, and read-only `Stage3VisualizerWindow`. Main UI owns
-only the launcher; launcher owns job/viewer. This is independent of Live/Replay.
+**Version / Settings Identity Separation — FINAL ACCEPTANCE PASS / CLOSED**
+(2026-10-15). Slice 1 provides `stage3_identity.STAGE3_V1_IDENTITY` and
+`stage3_physical.MODEL_C_V1_IDENTITY`, with benchmark consumers preserving the exact
+nine-field snapshot. Slice 2 derives separate Algorithm/Physical labels from those
+owners and the physical display-only alias, with a dynamic Playback interval label.
 
-Recorded Slice 5 executable evidence on 2026-10-14:
+Four distinct concepts:
 
-- Development full suite: **1628 passed, 0 failures/errors/skips**, 103.709 s.
-- Explicit Extended: **122 passed**; frozen Stage-3 protection: **92 passed**.
-- Fresh Windows x64 Python 3.12.10 / PyInstaller 6.22.3 onedir/windowed build: PASS.
-- Frozen profile byte/SHA identity, packaged Stage-3 game 0 and deterministic
-  source equivalence: PASS; **WON / 227 traces / 39,987,084 modeled µs**.
-- Packaged ZiNi known-board regression and native GUI startup/liveness/clean close: PASS.
-- Source-parent/real-frozen-worker success, cancel, launcher-close, main-close:
-  owned children reaped and job directories removed. This is supplemental,
-  not an automated packaged interactive GUI result.
-- Fresh app build environment: 1628 discovered, **1603 passed / 25 optional
-  image/video replay-validation skips**, 0 failures/errors, 90.505 s. Normal
-  development verification above ran all 1628 without skips.
+- Application/release stays release/tag/build-documentation identity; no runtime
+  app-version constant, and current main is not historical `v0.2.0`.
+- Algorithm identity is fixed V1; telemetry semantic version and initial OPEN/cursor
+  execution configuration remain separate.
+- Physical model/profile/table identity stays authenticated by `stage3_physical`;
+  the `Model C` display alias is not authentication.
+- Playback/presentation is local Index state: 20..5000 ms, default 200 ms,
+  explicit `(presentation)` text, no persistence or presentation semantic version.
 
-User-performed packaged manual acceptance on 2026-10-14: **PASS**. Main PID
-5352; normal-success worker 8940, Cancel worker 6300, launcher-close worker 5124,
-main-close worker 19188. Each reported WorkerGone=True and JobDirGone=True; main
-5352 also had MainGone=True on main close. Startup, launcher, Run, responsiveness,
-auto-open, First/Next/Last, slider click/drag and seek stopping autoplay, Play/Pause,
-interval editing and retained-result reopen all passed. Exact job paths and
-manual tester/provenance are recorded separately from automated evidence below.
+Final acceptance, using development Python 3.12.10 / 64-bit:
 
-Independent Claude read-only audit at `18964add02c508d67429ef29cb59ce879c01017d`:
-**INDEPENDENT AUDIT PASS**. Focused **122 passed, 0 failures/errors/skips**;
-frozen runner/planner/physical/telemetry **92 passed**; Stage-2 / ZiNi / Replay /
-Stage-3 benchmark boundary **86 passed**; full suite **1628 passed,
-0 failures/errors/skips**. Independent source-derived game 0 and packaged-worker
-re-check passed; exact identities and timing values are in the final adjudication.
+- Focused: **376 passed**, **22.160 s**, **0 failures / 0 errors / 0 skips**.
+- Full discovery: **1639 passed**, **79.857 s**, **0 failures / 0 errors / 0 skips**.
+- Fresh Windows x64 onedir/windowed PyInstaller 6.22.3 package: **exit 0**,
+  **51.0505613 s**, same accepted absolute profile bundling method.
+- Source/bundled profile bytes identical; frozen SHA-256 unchanged.
+- Packaged worker from unrelated cwd: **WON / 227 traces / 39,987,084 modeled µs**,
+  complete deterministic source equivalence excluding decision CPU timing.
+- **Native packaged GUI PASS, reported by project user on 2026-10-15**:
+  startup, separate launcher/viewer identities, game-0 Run, 200→20→5000 presentation
+  label updates with unchanged modeled total, and clean close.
 
-ChatGPT: **FINAL ADJUDICATION PASS — IMPLEMENTATION CLOSED**;
-**BLOCKER 0 / REQUIRED production 0**. F-1 is **REQUIRED documentation-only**
-historical/current-state correction, addressed by this closeout. F-2 is
-**OPTIONAL / DEFER**, future worker/release transport hardening, not fixed.
-The audit had categorized stale docs as OPTIONAL; only that item's documentation
-disposition was promoted, without creating a product/implementation blocker.
+New ignored evidence/package root:
+`results/stage3-identity-separation-acceptance/20261015-012718/`.
+Exact commands, hashes, full implementation commits and automated/manual provenance:
+[Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md).
 
-[Foundation acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
-preserves the automated/manual evidence;
-[final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
-records the independent audit, final dispositions and KEEP/DEFER observations.
-This closeout changes documentation only; tests/package checks were not rerun,
-and frozen production semantics, profile bytes and generated evidence are preserved.
+`Stage3Execution` remains exactly `spec / board / result`. No schema/Replay migration,
+ZiNi change, worker-envelope change, V1 algorithm/profile timing change, planner-input
+change or generic registry. The closeout changes documentation only; tests/package
+were freshly verified, while historical evidence and frozen artifacts were preserved.
 
 ---
 
@@ -245,32 +233,24 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-**After this documentation closeout is integrated, the next active engineering
-milestone is Version / Settings Identity Separation** — distinguish
-application/release, Stage-3 algorithm, physical model/profile and
-playback/presentation identities. No implementation of that milestone was part of
-this documentation-only closeout. This closeout was prepared from the dated
-2026-10-14 `18964ad` Slice 5 documentation / independent-audit baseline.
-Live Git must determine whether and where this final closeout was later integrated.
+Review/integrate this documentation closeout, then design **Modeled-Time Playback /
+Synthetic Smooth Cursor Presentation** against recorded actions and modeled
+durations. Neither feature is implemented or authorized as part of this closeout.
+Use live Git/source/tests to determine whether later work has already begun.
 
-F-2 remains future worker/release hardening: a packaged windowed transport exception
+Keep presentation separate from planner inputs, physical profile identity and
+recorded modeled costs. Keep Step 0/current PLAYING with known final WON, manual
+seek stopping autoplay, and the existing endpoint/straight-line presentation.
+Synthetic/interpolated movement is never an actual OS trajectory measurement.
+
+Foundation F-2 remains **OPTIONAL / DEFER**: packaged windowed transport exceptions
 may show PyInstaller's uncaught-exception dialog rather than exit immediately.
-There is no false success; Cancel/launcher close/main close retain ownership and
-reap the worker. Production was not changed, preserving accepted package/source
-identity and the completed packaging acceptance.
+There is no false success; existing Cancel/close ownership/reaping remains.
+No new evidence promotes F-2 to required work.
 
-KEEP: Step 0 PLAYING with final WON, 20–5000 ms presentation interval, manual seek
-stopping autoplay, and endpoint/straight-line cursor presentation.
-DEFER: clearer Run / 결과 열기 labels, synthetic smooth cursor, Modeled-Time
-Playback, and incremental-forward TracePlayer optimization until requirements or
-measured lag justify it. Synthetic/interpolated motion must never be described as
-an actual OS mouse trajectory, and modeled time is not human play time.
-
-Preserve existing generated build/evidence outputs. At preparation/review time,
-this final documentation closeout had not yet been committed, merged or pushed.
-Later integration state must be read from live Git. No release/tag/ZIP or
-next-milestone implementation was part of this documentation closeout. Do not
-reopen ZiNi work or consume its reserved final quality holdout.
+Preserve historical and new acceptance artifacts. No release/tag/ZIP or commit/
+push was performed in this preparation session. Do not reopen ZiNi work or consume
+its unopened final quality holdout.
 
 ---
 
@@ -280,19 +260,13 @@ Stage-3 Extended is the **active milestone**, separate from frozen V1.
 
 Natural dependency roadmap — not a rigid chronological schedule:
 
-1. **Closed:** execution integration audit and Slices 1–4 implementation.
-2. **FINAL ADJUDICATION PASS / CLOSED:** Slice 5 automated/packaged manual
-   acceptance, independent Claude audit and ChatGPT final adjudication. Closure
-   covers Execution / Playback / Visualizer Foundation only.
-3. **Next active milestone — Version / Settings Identity Separation:**
-   application version, Stage-3 algorithm version, physical model/profile
-   version, and playback/display settings.
-4. **Modeled-Time Playback / synthetic smooth cursor presentation.**
-5. **Same-board Human / Stage-2 / Stage-3 comparison.**
-6. **Representative-board demonstrations and Timeline Analytics where useful.**
-7. **First real Stage-3 Extended algorithm research.** The current likely first
-   candidate is nearest exact-minimum-risk guess selection using physical movement cost
-   among exactly equal minimum-risk candidates; it is not yet an accepted algorithm change.
+1. **CLOSED:** Execution / Playback / Visualizer Foundation.
+2. **CLOSED:** Version / Settings Identity Separation.
+3. **Next active:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
+4. **Later:** Same-board Human / Stage-2 / Stage-3 comparison.
+5. **Later:** Representative-board demonstrations and Timeline Analytics.
+6. **Later:** First real Extended algorithm research; nearest equal-minimum-risk
+   guess selection using movement cost is a candidate, not an adopted policy.
 
 This is a dependency roadmap, NOT a rigid chronological schedule. If
 implementation evidence makes an adjacent task more natural earlier, the order
@@ -300,6 +274,10 @@ may change without changing milestone boundaries.
 
 The following remain **DEFERRED / evidence-triggered** candidates, not mandatory work:
 
+- runtime application/release display or version constant
+- selectable algorithms/profiles and durable cross-version Stage3Execution transport
+- persistent Stage-3 presentation settings
+- presentation settings dataclass until an external consumer exists
 - logical-known-mine / no-flag execution
 - action-specific OPEN / FLAG / CHORD timing
 - anisotropic movement
@@ -324,7 +302,7 @@ Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the finally adjudicated closed foundation,
 the next active milestone and later planning. Arbitrary Stage-3 seeks still rebuild from
-index 0; Slice 5 does not optimize playback.
+index 0; incremental-forward optimization remains deferred until justified.
 
 ---
 
@@ -336,6 +314,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)
 - [Foundation final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
 - [Foundation acceptance evidence](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
 - `STAGE3_ALGORITHM_SPEC_v1.md`
@@ -398,7 +377,8 @@ For disputed findings, return to source/tests rather than choosing an AI by repu
 
 ## 11. New-chat recovery prompt
 
-Use this dated starting point, then reconcile it with live Git and source.
+Reconcile recorded milestone status with live Git/source/tests; do not force Git
+to match dated prose.
 
 ```text
 이 채팅은 Minesweeper 졸업프로젝트 작업을 이어가는 새 채팅입니다.
@@ -407,40 +387,26 @@ Python: C:\venvs\minesweeper\Scripts\python.exe
 
 먼저 live Git의 branch / HEAD / origin/main / working tree를 확인하고
 docs/CURRENT_HANDOFF.md, docs/README.md 및 최신 source/tests를 읽으세요.
-기억보다 source → tests → 실행 검증 → frozen specs/final adjudication
-→ current docs → 이전 AI summaries를 우선하세요. Git을 오래된 prose에 맞춰 되돌리지 마세요.
+source → tests → 실행 검증 → frozen specs/final adjudication → current docs
+→ 이전 AI summaries 순서로 판단하세요. 날짜가 찍힌 SHA나 prose를 latest로
+가정하지 말고 live evidence를 우선하세요.
 
-2026-10-14 Slice 5 문서 closeout 및 독립 감사 기준점:
-18964add02c508d67429ef29cb59ce879c01017d.
-최종 문서 정리 시작 시 main, clean, HEAD == origin/main == 위 commit을 확인했습니다.
-Slice 5 문서는 이 commit에 이미 committed/merged/pushed되었습니다.
-이 값은 이후에도 latest HEAD라고 가정할 고정값이 아닙니다.
-Stage-3 V1 CLOSED/FROZEN, ZiNi Improvement CLOSED/V1 RETAINED.
-Stage-3 Extended ACTIVE; integration audit와 Slices 1–5는 CLOSED/integrated.
-Execution / Playback / Visualizer Foundation은 FINAL ADJUDICATION PASS / CLOSED.
-Packaged manual acceptance, 독립 Claude 감사와 ChatGPT 최종 판정 모두 PASS입니다.
-Stage-3 Extended 전체를 CLOSED로 기록하지 마세요.
+마지막 기록 상태: Stage-3 V1 / Model C CLOSED/FROZEN, ZiNi Improvement CLOSED.
+Execution / Playback / Visualizer Foundation CLOSED.
+Version / Settings Identity Separation FINAL ACCEPTANCE PASS / CLOSED.
+Stage-3 Extended 전체는 ACTIVE이며 다음은
+Modeled-Time Playback / Synthetic Smooth Cursor Presentation입니다.
+후속 기능이 이미 구현됐다고 가정하지 말고 현재 source/tests로 확인하세요.
+Identity closeout: docs/stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md.
 
-독립 감사: focused 122 PASS, frozen 92 PASS, boundary 86 PASS,
-full suite 1628 PASS (failures/errors/skips 0).
-Game 0: WON, 227 traces, 39,987,084 modeled µs; packaged-worker re-check PASS.
-ChatGPT: BLOCKER 0 / REQUIRED production 0.
-F-1은 required documentation-only closeout이며 구현 blocker가 아닙니다.
-F-2 packaged transport hardening은 OPTIONAL / DEFER이고 수정되지 않았습니다.
-최종 판정: docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md.
-수용 증거: docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md.
-Generated evidence는 그대로 보존합니다.
-다음 active milestone은 Version / Settings Identity Separation입니다.
-Modeled-Time Playback / synthetic smooth cursor 및 나머지 UX는 KEEP/DEFER입니다.
-
-Main UI → launcher → parent-owned job/subprocess → Stage3Execution → player/viewer.
-현재 Live/Replay 보드와 독립적이며 viewer는 solver 입력이 아닙니다.
+Application/release != algorithm != physical model/profile != presentation.
 Replay != Stage-3 Trace Playback != ZiNi Trace.
-Presentation interval != Model C time; arbitrary seek는 index 0부터 재구성합니다.
-Frozen source/profile과 Stage-2/Replay/ZiNi semantics를 유지하고 새 알고리즘은 구현하지 마세요.
-사용자 review 전 commit/merge/push하지 마세요. 미개봉 ZiNi holdout도 유지하세요.
-
-최신 Git/source가 더 진행됐다면 날짜가 찍힌 이 문서보다 live evidence를 우선하세요.
+Presentation interval, Replay elapsed time, CPU decision time, modeled physical
+time은 별개입니다. Stage3Execution은 spec / board / result이며 viewer는 solver 입력이 아닙니다.
+Stage-3 설정 persistence와 registry는 없습니다.
+Frozen specs/profile, official evidence와 미개봉 ZiNi holdout을 보존하세요.
+F-2 packaged transport hardening은 OPTIONAL / DEFER입니다.
+사용자 review 전 commit/merge/push하지 마세요.
 현재 상태·남은 gate·다음 한 단계를 짧게 정리하고 이미 확인 가능한 내용은 다시 묻지 마세요.
 ```
 

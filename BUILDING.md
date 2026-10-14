@@ -1,6 +1,9 @@
 # Windows release build
 
-v0.2.0 uses a Windows x64 PyInstaller **onedir / windowed** bundle. Extract the
+The historical v0.2.0 release uses a Windows x64 PyInstaller **onedir / windowed**
+bundle. Current main uses the same build method but is not labeled v0.2.0; its
+source identity is the actual Git commit. No runtime app-version constant,
+QApplication version or version resource has been added. Extract the
 entire release ZIP and run `Minesweeper/Minesweeper.exe`; keep `_internal` beside
 the executable. Python does not need to be installed on the target machine.
 
@@ -23,11 +26,12 @@ $profile = (Resolve-Path 'calibration/stage3_physical_profile_v1.json').Path
 & $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results --add-data "${profile};calibration" main.py
 ```
 
-Inspect the chosen build environment and output directories before reuse. For
-acceptance, use a fresh ASCII-path environment and isolated paths under
-`results/stage3-visualizer-acceptance/<run-id>/` for the environment, dist, work,
-spec and cache. Do not overwrite previous release/evidence output or change the
-normal development environment. `results/` is ignored; generated artifacts are
+Inspect the chosen build environment and output directories before reuse.
+Acceptance requires a fresh ASCII-path environment and isolated environment,
+dist/work/spec/cache paths. Foundation used
+`results/stage3-visualizer-acceptance/<run-id>/`; Identity Separation uses
+`results/stage3-identity-separation-acceptance/<run-id>/`. Do not overwrite previous
+release/evidence output or change the normal development environment. `results/` is ignored; generated artifacts are
 not source files to commit.
 
 The plotting dependencies above are required by the existing Benchmark Statistics
@@ -93,7 +97,9 @@ describes `sys.frozen` and `sys.executable` in a bundle.
   payload/result files are removed. Check Replay loading and analysis.
 - Ship the complete onedir folder with `LICENSE`, user documentation, and dependency
   notices/licenses. Provide the corresponding tagged source alongside the binary.
-- ZIP the folder, record its SHA-256, then publish it with the matching `v0.2.0` tag.
+- For a separately authorized release, ZIP the folder, record its SHA-256 and
+  publish it with its matching source tag. The historical `v0.2.0` tag does
+  not identify current main or the acceptance package below.
 
 The v0.2.0 release identity is unchanged by this documentation closeout. Current
 source includes the accepted telemetry/benchmark implementation and Stage-3 V1;
@@ -125,3 +131,24 @@ invalidate accepted package/source identity and reopen packaging acceptance.
 Existing generated evidence remains the earlier automated snapshot and was not
 rewritten by either documentation-only signoff. The accepted package was not
 rebuilt; no release version change, tag, publication or distribution ZIP was made.
+
+## Identity Separation package verification (2026-10-15)
+
+A fresh Windows x64 onedir/windowed package was built from
+`e04d4e8292338f53b0a3a0f88e999992b9ac80ec` using the same accepted build command,
+documented dependency pins and absolute `--add-data` profile source. The isolated
+environment, dist/work/spec/cache and new evidence are under
+`results/stage3-identity-separation-acceptance/20261015-012718/`; historical
+Foundation output was not reused or overwritten.
+
+`stage3_identity.py` is a normal import: no new hidden-import or data rule is
+needed. Exact frozen profile bundling remains required. Build exit 0, bundled
+profile byte/SHA equality and packaged game-0 deterministic source equivalence
+passed. The project user also passed the concise native packaged GUI smoke:
+separate identity labels, game-0 viewer, dynamic presentation interval label,
+unchanged modeled total and clean close. See the
+[Identity Separation closeout](docs/stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)
+for commands, counts, environment and automated/manual evidence.
+No release version, runtime application-version claim, version resource, tag or
+distribution ZIP was added. This fresh verification is distinct from the
+historical Foundation evidence above.

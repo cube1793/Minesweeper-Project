@@ -91,8 +91,9 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - OPEN / FLAG / CHORD와 커서·대상을 표시합니다. 선은 **cursor-before → action-target**
   칸 중심 사이의 modeled displacement이며 실제 OS 마우스 궤적이 아닙니다.
 - 행동별·누적·전체 modeled time은 정확한 정수 **µs**로 표시합니다.
-  **Presentation / index interval**(20–5000 ms, 기본 200 ms/step)은 화면 재생 간격이며
-  Model C 시간, CPU 성능 또는 실제 인간 속도를 뜻하지 않습니다.
+  **Playback: Index · N ms/step (presentation)**은 현재 화면 재생 간격을 표시합니다.
+  범위는 20–5000 ms, 기본 200 ms이며 Model C 시간, CPU 성능 또는 실제 인간 속도를
+  뜻하지 않습니다. 간격은 저장하지 않으며 결과 창을 다시 열면 기본값으로 돌아갑니다.
 - 실행 창을 닫으면 소유한 job과 결과 창도 정리합니다. 메인 창 종료도 이 경계를 따릅니다.
   Visualizer는 완료 실행을 읽기 전용으로 재생하며 solver에 판단 입력을 주지 않습니다.
 
@@ -102,8 +103,29 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 Visualizer Foundation은 FINAL ADJUDICATION PASS / CLOSED**입니다.
 [최종 판정과 후속 범위](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md) 및
 [수용 증거와 수동 검증 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)을
-참고하세요. Stage-3 Extended 전체는 **ACTIVE**이며 다음 마일스톤은
-**Version / Settings Identity Separation**입니다.
+참고하세요.
+
+**Version / Settings Identity Separation — FINAL ACCEPTANCE PASS / CLOSED
+(2026-10-15)**: 고정 identity와 표시 경계를 분리하고 최종 source tests,
+fresh package/worker 및 사용자 native packaged GUI 수용을 완료했습니다.
+[Identity Separation closeout](docs/stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)에
+검증 수치와 범위를 기록했습니다.
+
+| Identity | 현재 의미 |
+| --- | --- |
+| Application / release | Release/tag/build 문서의 배포 identity. Runtime app-version 상수는 의도적으로 도입하지 않았으며 현재 main은 historical v0.2.0이 아닙니다. |
+| Stage-3 algorithm | `stage3_identity.STAGE3_V1_IDENTITY`의 동결 V1 알고리즘 identity |
+| Physical model / profile | `stage3_physical.MODEL_C_V1_IDENTITY`의 인증된 Model C/profile/table identity; `Model C` 표시는 별도 alias |
+| Playback / presentation | Index·현재 간격 등 비영속 viewer 상태; planner 입력이나 물리 시간 identity가 아닙니다. |
+
+실행 창은 `Benchmark: EXPERT_GENERAL_V1`, `Algorithm: Stage-3 V1`,
+`Physical: Model C · profile v1`을 각각 표시합니다. Viewer도 Algorithm과
+Physical을 분리하며 recorded modeled time은 간격을 바꿔도 그대로입니다.
+V1 알고리즘/profile semantics와 공식 100k 결과의 identity는 변경되지 않았습니다.
+
+Stage-3 Extended 전체는 **ACTIVE**입니다. 다음 활성 마일스톤은
+**Modeled-Time Playback / Synthetic Smooth Cursor Presentation**이며,
+modeled-time 재생과 synthetic/interpolated cursor는 아직 구현하지 않았습니다.
 
 ## 실행 방법
 
@@ -138,6 +160,8 @@ Minesweeper-Project/
 ├─ simple_decision.py           # 순수 position 분석 및 decision 통합
 ├─ simple_runner.py             # UI 없이 동기 실행·중단·Replay 기록
 ├─ live_analysis.py             # 계산된 decision의 표시 모델과 Reduction
+├─ stage3_identity.py           # 동결 Stage-3 알고리즘 identity
+├─ stage3_physical.py           # Model C/profile/table identity·인증·비용
 ├─ stage3_execution.py          # 고정 expert 보드 identity + 완료된 V1 실행
 ├─ stage3_execution_worker.py   # Stage-3 trusted-local subprocess 진입점
 ├─ stage3_execution_job.py      # 부모 process·token·임시 디렉터리 수명 관리
