@@ -17,6 +17,7 @@ from benchmark_board import (
 from board_analyzer import analyze_board
 from benchmark_modeled_time import authenticate_model_c, reconstruct_game
 from core_engine import Action, GameStatus, MinesweeperEngine
+from stage3_identity import STAGE3_V1_IDENTITY
 import stage3_physical as physical
 from stage3_physical import load_timing_table
 from stage3_runner import Stage3ActionTrace, run_stage3
@@ -26,11 +27,12 @@ from telemetry_model import ActionEvent, GameRecord, InferenceCategory
 import telemetry_schema as schema
 
 
-ALGORITHM_SPEC_VERSION = 1
-ALGORITHM_SPEC_SHA256 = "6e4ff95b74d274f4938e22f0a04be33879bdfab6156280e48a25429d0c811c33"
-PHYSICAL_MODEL_ID = "overlap_floor_log2_distance_v1"
-PHYSICAL_PROFILE_VERSION = 1
-TIMING_UNIT = "us"
+# Preserve the existing public names as aliases of their identity owners.
+ALGORITHM_SPEC_VERSION = STAGE3_V1_IDENTITY.algorithm_spec_version
+ALGORITHM_SPEC_SHA256 = STAGE3_V1_IDENTITY.algorithm_spec_sha256
+PHYSICAL_MODEL_ID = physical.MODEL_C_V1_IDENTITY.physical_model_id
+PHYSICAL_PROFILE_VERSION = physical.MODEL_C_V1_IDENTITY.physical_profile_version
+TIMING_UNIT = physical.MODEL_C_V1_IDENTITY.timing_unit
 
 
 def _validate_spec(spec: BenchmarkSetSpec) -> None:
@@ -52,8 +54,8 @@ def _benchmark_identity(spec: BenchmarkSetSpec) -> dict:
     load_timing_table()
     return {
         "telemetry_schema_version": schema.TELEMETRY_SCHEMA_VERSION_STAGE_3,
-        "solver_stage": schema.SOLVER_STAGE_STAGE_3,
-        "solver_policy": schema.SOLVER_POLICY_E_FIRST_FIRST_REVEAL_V1,
+        "solver_stage": STAGE3_V1_IDENTITY.solver_stage,
+        "solver_policy": STAGE3_V1_IDENTITY.solver_policy,
         "solver_config_snapshot": {
             "initial_open": [0, 0],
             "initial_cursor": [0, 0],

@@ -13,6 +13,7 @@ from contextlib import closing
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
+from stage3_identity import STAGE3_V1_IDENTITY
 import stage3_physical as physical
 import telemetry_schema as schema
 
@@ -33,11 +34,11 @@ class ModelCEvaluation:
     profile_path: InitVar[str | Path | None] = None
     table: physical.TimingTable = field(init=False, repr=False)
     initial_cursor: tuple[int, int] = field(default=(0, 0), init=False)
-    physical_model_id: str = field(default="overlap_floor_log2_distance_v1", init=False)
-    physical_profile_version: int = field(default=1, init=False)
+    physical_model_id: str = field(default=physical.MODEL_C_V1_IDENTITY.physical_model_id, init=False)
+    physical_profile_version: int = field(default=physical.MODEL_C_V1_IDENTITY.physical_profile_version, init=False)
     physical_profile_sha256: str = field(default=physical.PROFILE_SHA256, init=False)
     timing_table_sha256: str = field(default=physical.TABLE_SHA256, init=False)
-    timing_unit: str = field(default="us", init=False)
+    timing_unit: str = field(default=physical.MODEL_C_V1_IDENTITY.timing_unit, init=False)
 
     def __post_init__(self, profile_path: str | Path | None) -> None:
         try:
@@ -83,8 +84,8 @@ def _integer(name: str, value: int, minimum: int = 0) -> None:
 def _stage3_config(evaluation: ModelCEvaluation) -> dict:
     return {
         "initial_open": [0, 0], "initial_cursor": list(evaluation.initial_cursor),
-        "algorithm_spec_version": 1,
-        "algorithm_spec_sha256": "6e4ff95b74d274f4938e22f0a04be33879bdfab6156280e48a25429d0c811c33",
+        "algorithm_spec_version": STAGE3_V1_IDENTITY.algorithm_spec_version,
+        "algorithm_spec_sha256": STAGE3_V1_IDENTITY.algorithm_spec_sha256,
         "physical_model_id": evaluation.physical_model_id,
         "physical_profile_version": evaluation.physical_profile_version,
         "physical_profile_sha256": evaluation.physical_profile_sha256,
@@ -109,9 +110,9 @@ def validate_run_identity(
         semantic_version = schema.TELEMETRY_SCHEMA_VERSION
         policy = schema.SOLVER_POLICY_SIMPLE_MINIMUM_RISK
         config = {"accept_guesses": True, "initial_open": [0, 0]}
-    elif solver_stage == schema.SOLVER_STAGE_STAGE_3:
+    elif solver_stage == STAGE3_V1_IDENTITY.solver_stage:
         semantic_version = schema.TELEMETRY_SCHEMA_VERSION_STAGE_3
-        policy = schema.SOLVER_POLICY_E_FIRST_FIRST_REVEAL_V1
+        policy = STAGE3_V1_IDENTITY.solver_policy
         config = _stage3_config(evaluation)
     else:
         raise ModeledTimeValidationError("Unsupported modeled-time solver role.")

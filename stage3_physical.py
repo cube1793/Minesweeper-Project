@@ -8,6 +8,7 @@ or formula evaluation. Table indices are [absolute dx][absolute dy].
 import hashlib
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from simple_algorithm import Coordinate
@@ -17,6 +18,26 @@ PROFILE_PATH = Path(__file__).resolve().parent / "calibration" / "stage3_physica
 PROFILE_SHA256 = "52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b"
 TABLE_SHA256 = "7c284c66f7ddbd5f0c7de96f5f4e6a26b12d31fddb4ebb931674866d1041123b"
 TimingTable = tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class PhysicalProfileIdentity:
+    """Expected frozen identity; this descriptor does not authenticate a file."""
+
+    physical_model_id: str
+    physical_profile_version: int
+    physical_profile_sha256: str
+    timing_table_sha256: str
+    timing_unit: str
+
+
+MODEL_C_V1_IDENTITY = PhysicalProfileIdentity(
+    physical_model_id="overlap_floor_log2_distance_v1",
+    physical_profile_version=1,
+    physical_profile_sha256=PROFILE_SHA256,
+    timing_table_sha256=TABLE_SHA256,
+    timing_unit="us",
+)
 
 
 def validate_timing_table(table: Sequence[Sequence[int]]) -> TimingTable:
@@ -41,9 +62,9 @@ def load_timing_table(path: str | Path = PROFILE_PATH) -> TimingTable:
         raise ValueError("Frozen physical profile SHA-256 mismatch.")
     profile = json.loads(raw)
     required = {
-        "model_id": "overlap_floor_log2_distance_v1",
+        "model_id": MODEL_C_V1_IDENTITY.physical_model_id,
         "timing_tick_unit": "1_us",
-        "timing_unit": "us",
+        "timing_unit": MODEL_C_V1_IDENTITY.timing_unit,
         "distance_unit": "cell_width",
         "grid_width": 30,
         "grid_height": 16,
