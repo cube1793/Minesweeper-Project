@@ -1,9 +1,14 @@
 """Offscreen launcher ownership tests using recorded traces and a fake job."""
 
 from contextlib import ExitStack
+from dataclasses import replace
 import os
 import unittest
 from unittest.mock import patch
+
+import benchmark_board
+import stage3_identity
+import stage3_physical
 
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -14,7 +19,7 @@ try:
     from PyQt5.QtCore import QEvent, QObject, Qt, pyqtSignal
     from PyQt5.QtGui import QCloseEvent
     from PyQt5.QtTest import QSignalSpy
-    from PyQt5.QtWidgets import QApplication, QWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QWidget
 except ImportError:
     QApplication = None
 else:
@@ -95,7 +100,8 @@ class Stage3LauncherTests(unittest.TestCase):
             "stage3_execution.run_expert_stage3_execution", "stage3_execution.run_stage3",
             "stage3_execution.generate_board", "stage3_runner.run_stage3",
             "stage3_runner.plan_position", "stage3_planner.plan_position",
-            "benchmark_board.generate_board",
+            "benchmark_board.generate_board", "stage3_physical.load_timing_table",
+            "benchmark_modeled_time.authenticate_model_c", "PyQt5.QtCore.QSettings",
         ):
             self.stack.enter_context(patch(producer, side_effect=AssertionError(producer)))
         self.execution = execution_fixture()
@@ -132,12 +138,34 @@ class Stage3LauncherTests(unittest.TestCase):
         self.assertEqual(window.windowType(), Qt.Window)
         self.assertTrue(window.testAttribute(Qt.WA_DeleteOnClose))
         self.assertEqual(window.benchmark_label.text(), "Benchmark: EXPERT_GENERAL_V1")
-        self.assertEqual(window.algorithm_label.text(), "Algorithm: Stage-3 V1 / Model C")
+        self.assertEqual(window.algorithm_label.text(), "Algorithm: Stage-3 V1")
+        self.assertEqual(window.physical_label.text(), "Physical: Model C · profile v1")
+        self.assertNotIn("Stage-3 V1 / Model C",
+                         " ".join(label.text() for label in window.findChildren(QLabel)))
+        window.show()
+        self.app.processEvents()
+        for label in (window.benchmark_label, window.algorithm_label, window.physical_label):
+            self.assertTrue(label.isVisible())
         self.assertEqual(window.game_index_edit.text(), "0")
         self.assertIs(self.job.parent(), window)
         self.assert_idle_controls()
         self.assertFalse(window.open_result_button.isEnabled())
         self.assertEqual(self.job.started, [])
+
+    def test_labels_read_shared_authorities_at_construction(self):
+        with patch.object(benchmark_board, "EXPERT_GENERAL_V1", replace(
+            benchmark_board.EXPERT_GENERAL_V1, benchmark_set_id="LABEL_TEST_CORPUS",
+        )), patch.object(stage3_identity, "STAGE3_V1_IDENTITY", replace(
+            stage3_identity.STAGE3_V1_IDENTITY, algorithm_spec_version=7,
+        )), patch.object(stage3_physical, "MODEL_C_V1_IDENTITY", replace(
+            stage3_physical.MODEL_C_V1_IDENTITY, physical_profile_version=9,
+        )), patch.object(stage3_physical, "MODEL_C_DISPLAY_NAME", "Test model"):
+            window = launcher.Stage3VisualizerLauncherWindow()
+            self.addCleanup(window.close)
+            self.assertEqual(window.benchmark_label.text(), "Benchmark: LABEL_TEST_CORPUS")
+            self.assertEqual(window.algorithm_label.text(), "Algorithm: Stage-3 V7")
+            self.assertEqual(window.physical_label.text(), "Physical: Test model · profile v9")
+            self.assertEqual(window.job.started, [])
 
     def test_invalid_input_never_starts_a_job(self):
         for text in ("", " ", "-1", "1.0", "1e3", "True", "+1", "0x10", "1_000", "１２"):
@@ -216,6 +244,7 @@ class Stage3LauncherTests(unittest.TestCase):
 
     def test_close_viewer_reopens_retained_result_without_rerun(self):
         viewer = self.complete_request()
+        viewer.interval_spin.setValue(5000)
         self.assertTrue(viewer.close())
         self.assertIsNone(self.window._visualizer_window)
         self.assertIs(self.window._completed_execution, self.execution)
@@ -224,6 +253,11 @@ class Stage3LauncherTests(unittest.TestCase):
         reopened = self.window._visualizer_window
         self.assertIsNot(reopened, viewer)
         self.assertIs(reopened.player.execution, self.execution)
+        self.assertEqual(reopened.interval_spin.value(), 200)
+        self.assertEqual(reopened.playback_label.text(),
+                         "Playback: Index · 200 ms/step (presentation)")
+        self.assertFalse(reopened.timer.isActive())
+        self.assertEqual(reopened.player.current_index, 0)
         self.assertEqual(self.viewer_factory.call_count, 2)
         self.assertEqual(self.job.started, [(1, 0)])
 

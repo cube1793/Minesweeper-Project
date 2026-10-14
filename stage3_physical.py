@@ -18,6 +18,8 @@ PROFILE_PATH = Path(__file__).resolve().parent / "calibration" / "stage3_physica
 PROFILE_SHA256 = "52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b"
 TABLE_SHA256 = "7c284c66f7ddbd5f0c7de96f5f4e6a26b12d31fddb4ebb931674866d1041123b"
 TimingTable = tuple[tuple[int, ...], ...]
+# Presentation alias only; excluded from authentication and exact identity.
+MODEL_C_DISPLAY_NAME = "Model C"
 
 
 @dataclass(frozen=True)

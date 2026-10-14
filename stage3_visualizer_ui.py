@@ -13,10 +13,15 @@ from PyQt5.QtWidgets import (
 
 from core_engine import CellState
 from stage3_execution import Stage3Execution
+import stage3_identity
+import stage3_physical
 from stage3_trace_player import Stage3TracePlayer
 
 
 CELL_SIZE = 28
+STAGE3_PRESENTATION_INTERVAL_MIN_MS = 20
+STAGE3_PRESENTATION_INTERVAL_MAX_MS = 5000
+STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS = 200
 NUMBER_COLORS = {
     1: "#0000ff", 2: "#008000", 3: "#ff0000", 4: "#000080",
     5: "#800000", 6: "#008080", 7: "#000000", 8: "#808080",
@@ -154,13 +159,25 @@ class Stage3VisualizerWindow(QWidget):
         self.player = Stage3TracePlayer(execution)
         self._closed = False
         self.timer = QTimer(self)
-        self.timer.setInterval(200)
+        self.timer.setInterval(STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS)
         self.timer.timeout.connect(self._advance_autoplay)
         layout = QVBoxLayout(self)
 
-        self.title_label = QLabel("Stage-3 Visualizer — Stage-3 V1 / Model C")
+        self.title_label = QLabel("Stage-3 Visualizer")
         self.title_label.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(self.title_label)
+        identities = QHBoxLayout()
+        self.algorithm_label = QLabel(
+            f"Algorithm: Stage-3 V{stage3_identity.STAGE3_V1_IDENTITY.algorithm_spec_version}"
+        )
+        self.physical_label = QLabel(
+            f"Physical: {stage3_physical.MODEL_C_DISPLAY_NAME} · "
+            f"profile v{stage3_physical.MODEL_C_V1_IDENTITY.physical_profile_version}"
+        )
+        identities.addWidget(self.algorithm_label)
+        identities.addWidget(self.physical_label)
+        identities.addStretch()
+        layout.addLayout(identities)
         self.identity_label = QLabel(
             f"Benchmark: {execution.spec.benchmark_set_id} • "
             f"Game index: {execution.board.game_index} • "
@@ -230,13 +247,18 @@ class Stage3VisualizerWindow(QWidget):
         layout.addLayout(position)
 
         interval = QHBoxLayout()
-        interval.addWidget(QLabel("Presentation / index interval:"))
+        self.playback_label = QLabel()
+        interval.addWidget(self.playback_label)
         self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(20, 5000)
-        self.interval_spin.setValue(200)
+        self.interval_spin.setRange(
+            STAGE3_PRESENTATION_INTERVAL_MIN_MS, STAGE3_PRESENTATION_INTERVAL_MAX_MS,
+        )
+        self.interval_spin.setValue(STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS)
         self.interval_spin.setSuffix(" ms/step")
-        self.interval_spin.setToolTip("Presentation / index interval, not Model C physical time.")
+        self.interval_spin.setToolTip("Presentation interval only; recorded modeled time is unchanged.")
         self.interval_spin.valueChanged.connect(self.timer.setInterval)
+        self.interval_spin.valueChanged.connect(self._update_playback_label)
+        self._update_playback_label()
         interval.addWidget(self.interval_spin)
         interval.addStretch()
         layout.addLayout(interval)
@@ -264,6 +286,11 @@ class Stage3VisualizerWindow(QWidget):
         available = self.screen().availableGeometry()
         self.resize(min(max(820, self.board_container.width() + 48), available.width()),
                     min(self.board_container.height() + 410, available.height()))
+
+    def _update_playback_label(self):
+        self.playback_label.setText(
+            f"Playback: Index · {self.interval_spin.value()} ms/step (presentation)"
+        )
 
     def refresh(self):
         player = self.player

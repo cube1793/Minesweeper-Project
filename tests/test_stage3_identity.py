@@ -8,6 +8,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest.mock import patch
 
 from benchmark_board import EXPERT_GENERAL_V1
 import benchmark_modeled_time as modeled
@@ -68,6 +69,17 @@ class Stage3IdentityTests(unittest.TestCase):
     def test_physical_identity_has_only_the_exact_frozen_physical_fields(self):
         self.assert_exact_values_and_types(asdict(physical.MODEL_C_V1_IDENTITY),
                                           EXPECTED_PHYSICAL)
+
+    def test_physical_display_alias_is_separate_from_authenticated_identity(self):
+        self.assertEqual(physical.MODEL_C_DISPLAY_NAME, "Model C")
+        with patch.object(physical, "MODEL_C_DISPLAY_NAME", "Display-only test alias"):
+            evaluation = modeled.authenticate_model_c()
+            self.assert_exact_values_and_types(asdict(physical.MODEL_C_V1_IDENTITY),
+                                              EXPECTED_PHYSICAL)
+            for config in (benchmark._benchmark_identity(EXPERT_GENERAL_V1)["solver_config_snapshot"],
+                           modeled._stage3_config(evaluation)):
+                self.assertEqual(json.dumps(config, sort_keys=True, separators=(",", ":")),
+                                 EXPECTED_CONFIG_JSON)
 
     def test_public_identity_values_are_immutable(self):
         for identity in (STAGE3_V1_IDENTITY, physical.MODEL_C_V1_IDENTITY):

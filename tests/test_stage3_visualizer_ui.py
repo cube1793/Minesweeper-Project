@@ -31,6 +31,8 @@ from benchmark_board import BenchmarkBoard, BenchmarkSetSpec, calculate_board_fi
 from core_engine import Action, CellState, GameStatus
 from simple_algorithm import SimpleMove
 from stage3_execution import Stage3Execution
+import stage3_identity
+import stage3_physical
 from stage3_runner import Stage3ActionTrace, Stage3RunResult
 from stage3_trace_player import Stage3TracePlayer
 
@@ -125,7 +127,16 @@ class Stage3VisualizerTests(unittest.TestCase):
         self.assertIsInstance(window.player, Stage3TracePlayer)
         self.assertIs(window.player.execution, self.execution)
         self.assertEqual(window.windowTitle(), "Stage-3 Visualizer")
-        self.assertIn("Stage-3 V1 / Model C", window.title_label.text())
+        self.assertEqual(window.title_label.text(), "Stage-3 Visualizer")
+        self.assertEqual(window.algorithm_label.text(), "Algorithm: Stage-3 V1")
+        self.assertEqual(window.physical_label.text(), "Physical: Model C · profile v1")
+        self.assertEqual(window.playback_label.text(), "Playback: Index · 200 ms/step (presentation)")
+        self.assertNotIn("Stage-3 V1 / Model C",
+                         " ".join(label.text() for label in window.findChildren(QLabel)))
+        window.show()
+        self.app.processEvents()
+        for label in (window.algorithm_label, window.physical_label, window.playback_label):
+            self.assertTrue(label.isVisible())
         self.assertIn(self.execution.spec.benchmark_set_id, window.identity_label.text())
         self.assertIn("Game index: 17", window.identity_label.text())
         self.assertIn("Final result: WON", window.identity_label.text())
@@ -141,6 +152,18 @@ class Stage3VisualizerTests(unittest.TestCase):
         loss = self.create_window(execution_fixture("loss"))
         self.assertIn("Final result: LOST", loss.identity_label.text())
         self.assertIn("PLAYING", loss.status_label.text())
+
+    def test_labels_read_shared_authorities_at_construction(self):
+        with patch.object(stage3_identity, "STAGE3_V1_IDENTITY", replace(
+            stage3_identity.STAGE3_V1_IDENTITY, algorithm_spec_version=7,
+        )), patch.object(stage3_physical, "MODEL_C_V1_IDENTITY", replace(
+            stage3_physical.MODEL_C_V1_IDENTITY, physical_profile_version=9,
+        )), patch.object(stage3_physical, "MODEL_C_DISPLAY_NAME", "Test model"):
+            window = self.create_window(self.execution)
+            self.assertEqual(window.algorithm_label.text(), "Algorithm: Stage-3 V7")
+            self.assertEqual(window.physical_label.text(), "Physical: Test model · profile v9")
+            self.assertEqual(window.playback_label.text(),
+                             "Playback: Index · 200 ms/step (presentation)")
 
     def test_initial_board_cursor_time_and_placeholders(self):
         window = self.window
@@ -336,9 +359,13 @@ class Stage3VisualizerTests(unittest.TestCase):
         self.assertEqual(window.interval_spin.value(), 200)
         self.assertEqual(window.timer.interval(), 200)
         self.assertEqual(window.interval_spin.suffix(), " ms/step")
-        self.assertIn("not Model C physical time", window.interval_spin.toolTip())
+        self.assertIn("recorded modeled time is unchanged", window.interval_spin.toolTip())
         window.slider.setValue(2)
-        original = self.execution.result
+        original = replace(self.execution)
+        result = self.execution.result
+        traces = result.traces
+        total = result.total_modeled_us
+        cumulative = window.player.cumulative_modeled_us
         labels = {key: label.text() for key, label in window.detail_labels.items()}
         window.play_button.click()
         for interval in (20, 5000, 387):
@@ -347,7 +374,16 @@ class Stage3VisualizerTests(unittest.TestCase):
             self.assertEqual(window.timer.interval(), interval)
             self.assert_index(window, 2)
             self.assertEqual({key: label.text() for key, label in window.detail_labels.items()}, labels)
-            self.assertEqual(self.execution.result, original)
+            self.assertEqual(window.playback_label.text(),
+                             f"Playback: Index · {interval} ms/step (presentation)")
+            self.assertIs(window.player.execution, self.execution)
+            self.assertIs(self.execution.result, result)
+            self.assertIs(self.execution.result.traces, traces)
+            self.assertEqual(self.execution, original)
+            self.assertEqual(self.execution.result.total_modeled_us, total)
+            self.assertEqual(window.player.cumulative_modeled_us, cumulative)
+        window.timer.timeout.emit()
+        self.assert_index(window, 3)
 
     def test_programmatic_slider_refresh_does_not_seek_or_stop_timer(self):
         window = self.window
@@ -453,7 +489,8 @@ class Stage3VisualizerTests(unittest.TestCase):
     def test_module_dependencies_are_only_presentation_and_no_hidden_truth(self):
         source = Path(stage3_visualizer_ui.__file__).read_text(encoding="utf-8")
         module = ast.parse(source)
-        allowed = {"PyQt5", "core_engine", "stage3_execution", "stage3_trace_player"}
+        allowed = {"PyQt5", "core_engine", "stage3_execution", "stage3_trace_player",
+                   "stage3_identity", "stage3_physical"}
         for node in ast.walk(module):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
@@ -464,7 +501,8 @@ class Stage3VisualizerTests(unittest.TestCase):
             for name in names:
                 self.assertIn(name.split(".")[0], allowed)
         for forbidden in ("mine_positions", "decision_compute_ns", "run_stage3", "run_expert_stage3_execution",
-                          "plan_position", "subprocess", "ReplayData", "ReplayPlayer", "QSettings"):
+                          "plan_position", "subprocess", "ReplayData", "ReplayPlayer", "QSettings",
+                          "load_timing_table", "authenticate_model_c", "action_cost"):
             self.assertNotIn(forbidden, source)
 
     def test_construction_navigation_and_autoplay_never_call_producers(self):
@@ -476,6 +514,8 @@ class Stage3VisualizerTests(unittest.TestCase):
             "simple_probability.choose_probability_move", "simple_decision.choose_probability_move",
             "stage3_execution.generate_board", "benchmark_board.generate_board",
             "stage3_physical.action_cost", "stage3_physical.load_timing_table",
+            "benchmark_modeled_time.authenticate_model_c", "PyQt5.QtCore.QSettings",
+            "pathlib.Path.read_bytes", "pathlib.Path.read_text",
         )
         forbidden_imports = {"stage3_execution_worker", "subprocess", "ui_manager", "zini_explorer_ui",
                              "zini_explorer", "replay_player", "replay_model"}
@@ -504,6 +544,10 @@ class Stage3VisualizerTests(unittest.TestCase):
             window.on_last()
             window.on_first()
             window.on_play_pause()
+            for interval in (20, 5000):
+                window.interval_spin.setValue(interval)
+                self.assertEqual(window.playback_label.text(),
+                                 f"Playback: Index · {interval} ms/step (presentation)")
             for _ in self.execution.result.traces:
                 window.timer.timeout.emit()
             self.assertEqual(window.player.current_index, 5)

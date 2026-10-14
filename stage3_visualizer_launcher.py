@@ -3,7 +3,10 @@
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
+import benchmark_board
 from stage3_execution_job import Stage3ExecutionJob
+import stage3_identity
+import stage3_physical
 from stage3_visualizer_ui import Stage3VisualizerWindow
 
 
@@ -28,10 +31,19 @@ class Stage3VisualizerLauncherWindow(QWidget):
         self.job.cancelled.connect(self._on_cancelled)
 
         layout = QVBoxLayout(self)
-        self.benchmark_label = QLabel("Benchmark: EXPERT_GENERAL_V1")
-        self.algorithm_label = QLabel("Algorithm: Stage-3 V1 / Model C")
+        self.benchmark_label = QLabel(
+            f"Benchmark: {benchmark_board.EXPERT_GENERAL_V1.benchmark_set_id}"
+        )
+        self.algorithm_label = QLabel(
+            f"Algorithm: Stage-3 V{stage3_identity.STAGE3_V1_IDENTITY.algorithm_spec_version}"
+        )
+        self.physical_label = QLabel(
+            f"Physical: {stage3_physical.MODEL_C_DISPLAY_NAME} · "
+            f"profile v{stage3_physical.MODEL_C_V1_IDENTITY.physical_profile_version}"
+        )
         layout.addWidget(self.benchmark_label)
         layout.addWidget(self.algorithm_label)
+        layout.addWidget(self.physical_label)
         index_row = QHBoxLayout()
         index_label = QLabel("Game Index:")
         self.game_index_edit = QLineEdit("0")
