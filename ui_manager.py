@@ -359,6 +359,7 @@ class MinesweeperUI(QWidget):
         super().__init__()
         self.engine = engine
         self._benchmark_statistics_window = None
+        self._stage3_visualizer_launcher = None
         self._game_over = False
         self._buttons = {}
         self._mouse_buttons = Qt.NoButton
@@ -433,7 +434,11 @@ class MinesweeperUI(QWidget):
         self._update_statistics_panel(self.engine.get_stats())
 
     def closeEvent(self, event):
-        """Close auxiliary statistics and stop the worker when the UI closes."""
+        """Close auxiliary windows and their workers before accepting shutdown."""
+        if self._stage3_visualizer_launcher is not None:
+            if not self._stage3_visualizer_launcher.close():
+                event.ignore()
+                return
         self._invalidate_mouse_input()
         if self._benchmark_statistics_window is not None:
             self._benchmark_statistics_window.close()
@@ -454,6 +459,21 @@ class MinesweeperUI(QWidget):
         self._benchmark_statistics_window.show()
         self._benchmark_statistics_window.raise_()
         self._benchmark_statistics_window.activateWindow()
+
+    def on_stage3_visualizer(self):
+        """Open one independent benchmark launcher without touching gameplay."""
+        if self._stage3_visualizer_launcher is None:
+            from stage3_visualizer_launcher import Stage3VisualizerLauncherWindow
+
+            self._stage3_visualizer_launcher = Stage3VisualizerLauncherWindow(self)
+            self._stage3_visualizer_launcher.closed.connect(self._on_stage3_visualizer_closed)
+        self._stage3_visualizer_launcher.show()
+        self._stage3_visualizer_launcher.raise_()
+        self._stage3_visualizer_launcher.activateWindow()
+
+    def _on_stage3_visualizer_closed(self):
+        if self.sender() is self._stage3_visualizer_launcher:
+            self._stage3_visualizer_launcher = None
 
     def _engine_for_current_mode(self) -> MinesweeperEngine:
         """Return the current Replay engine without replacing the live engine."""
@@ -520,6 +540,10 @@ class MinesweeperUI(QWidget):
         self.zini_explorer_button.setEnabled(False)
         self.zini_explorer_button.clicked.connect(self.on_open_zini_explorer)
         layout.addWidget(self.zini_explorer_button)
+
+        self.stage3_visualizer_button = QPushButton("Stage-3 Visualizer")
+        self.stage3_visualizer_button.clicked.connect(self.on_stage3_visualizer)
+        layout.addWidget(self.stage3_visualizer_button)
 
         return panel
 
