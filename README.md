@@ -97,11 +97,13 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
   Visualizer는 완료 실행을 읽기 전용으로 재생하며 solver에 판단 입력을 주지 않습니다.
 
 `Replay != Stage-3 Trace Playback != ZiNi Trace`입니다. Stage-3 V1 / Model C는
-변경되지 않았습니다. 2026-10-14 자동 검증과 사용자의 실제 Windows 패키지 수동
-검증을 모두 통과하여 **Execution / Playback / Visualizer Foundation은 CLOSED**,
-문서는 **ACCEPTANCE PASS / READY FOR REVIEW** 상태입니다.
+변경되지 않았습니다. 2026-10-14 자동 검증과 실제 Windows 패키지 수동 수용,
+독립 Claude 감사 및 ChatGPT 최종 판정을 통과하여 **Execution / Playback /
+Visualizer Foundation은 FINAL ADJUDICATION PASS / CLOSED**입니다.
+[최종 판정과 후속 범위](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md) 및
 [수용 증거와 수동 검증 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)을
-참고하세요. Stage-3 Extended 전체는 계속 진행 중입니다.
+참고하세요. Stage-3 Extended 전체는 **ACTIVE**이며 다음 마일스톤은
+**Version / Settings Identity Separation**입니다.
 
 ## 실행 방법
 

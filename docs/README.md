@@ -60,9 +60,10 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 
 ## Stage 3 Extended — Active milestone
 
-Execution integration audit와 Slices 1–4의 실행·재생·Visualizer·lifecycle 통합은 완료되어 main에 반영되었다. Slice 5 자동 검증과 2026-10-14 사용자의 packaged manual acceptance가 모두 통과했다. **Execution / Playback / Visualizer Foundation — CLOSED / ACCEPTANCE PASS / READY FOR REVIEW** 상태다. Stage-3 Extended 전체는 active이고 V1은 frozen이다.
+Execution integration audit와 Slices 1–5는 main에 통합되었으며 Slice 5 문서 closeout 및 독립 감사 기준점은 `18964add02c508d67429ef29cb59ce879c01017d`다. 자동·packaged manual 수용, 독립 Claude 감사와 ChatGPT 최종 판정을 통과하여 **Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED**다. Stage-3 Extended 전체는 **ACTIVE**이고 V1은 frozen이다. 다음 마일스톤은 **Version / Settings Identity Separation**이다.
 
-- [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 실제 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
+- [Foundation 최종 판정](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md): 독립 감사 수치, F-1 문서 정리, F-2 OPTIONAL / DEFER와 후속 범위.
+- [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 초안 당시와 통합 이후의 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
 - [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.
 

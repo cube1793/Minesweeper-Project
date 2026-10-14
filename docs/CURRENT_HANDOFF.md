@@ -32,28 +32,29 @@ Approved development interpreter:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Live Git verified on 2026-10-14, before this documentation refresh:
+Live Git verified on 2026-10-14 before final-adjudication documentation edits:
 
 - branch: `main`
-- HEAD = local `origin/main`: `b9af830495ce97552f2058ef91b59a4fd495222b`
-- latest commit: `feat: integrate stage3 visualizer execution lifecycle`
-- inside work tree: true; bare: false; Slices 1–3 verified ancestors of main
-- acceptance work branch: `feature/stage3-visualizer-acceptance` (created after checks)
-- working tree: clean before the documentation edits
+- working tree: clean
+- HEAD = local `origin/main`: `18964add02c508d67429ef29cb59ce879c01017d`
+- commit: `docs: close stage3 visualizer foundation`
 
-This is a dated snapshot of live Git, not a permanent HEAD pin. Recheck branch,
-HEAD, `origin/main` and working-tree status when recovering a later chat.
-The integrated Slice 4 commit is the latest local `main` / `origin/main` baseline;
-Slices 1–4 are accepted, merged and pushed per the supplied closeout state and
-verified local refs. No remote fetch was performed. Slice 5 documentation changes
-remain uncommitted for review; no commit, merge or push was performed.
+Slice 5 documentation was already committed, merged and pushed at this commit.
+It is also the independent Claude audit baseline and the verified starting point
+for this documentation-only closeout. It is not a permanent latest-HEAD claim:
+recheck branch, HEAD, `origin/main` and working-tree status in each later chat.
+No remote fetch was performed for this closeout.
+The final-adjudication documentation branch was created from this clean baseline:
+`docs/stage3-visualizer-foundation-final-closeout`.
 
-Live Slice identities:
+Integrated Slice identities:
 
 - Slice 1: `cf7544b6dbc059594750f0798eca8878ddf2ea66`
 - Slice 2: `d100a493445c7118b5347fdbe2ec0f7243719f17`
 - Slice 3: `490a8cf3df1939ae9930e0735665e77120912995`
-- Slice 4: `b9af830495ce97552f2058ef91b59a4fd495222b`
+- Slice 4 / pre-Slice-5 baseline: `b9af830495ce97552f2058ef91b59a4fd495222b`
+- Slice 5 documentation closeout / independent-audit baseline:
+  `18964add02c508d67429ef29cb59ce879c01017d`
 
 Important Stage-3 V1 identities, verified in live Git:
 
@@ -162,21 +163,22 @@ Commit identities were read from live Git.
 
 ## 4. Current milestone
 
-**Active milestone: Stage-3 Extended.** Stage-3 V1 remains **CLOSED / FROZEN**;
+**Stage-3 Extended remains ACTIVE. Next active milestone:
+Version / Settings Identity Separation.** Stage-3 V1 remains **CLOSED / FROZEN**;
 ZiNi Improvement and the listed maintenance milestones remain **CLOSED**.
 
-**Execution / Playback / Visualizer Foundation — ACCEPTANCE PASS / READY FOR REVIEW.**
-Execution integration audit and Slices 1–4 are closed/integrated. The project user
+**Execution / Playback / Visualizer Foundation — FINAL ADJUDICATION PASS / CLOSED.**
+Execution integration audit and Slices 1–5 are closed/integrated. The project user
 completed packaged manual acceptance on **2026-10-14 (Asia/Seoul)** after the
-automated checks. **This foundation and Slice 5 acceptance are CLOSED**;
-documentation remains uncommitted for review. Stage-3 Extended as a whole remains active.
+automated checks. Independent Claude audit and ChatGPT final adjudication both
+passed. Closure covers this foundation; Stage-3 Extended as a whole remains ACTIVE.
 
 Implemented components: indexed `Stage3Execution`, Qt-independent subprocess
 worker, parent-owned `Stage3ExecutionJob`, `Stage3VisualizerLauncherWindow`,
 pure `Stage3TracePlayer`, and read-only `Stage3VisualizerWindow`. Main UI owns
 only the launcher; launcher owns job/viewer. This is independent of Live/Replay.
 
-New executable evidence on 2026-10-14:
+Recorded Slice 5 executable evidence on 2026-10-14:
 
 - Development full suite: **1628 passed, 0 failures/errors/skips**, 103.709 s.
 - Explicit Extended: **122 passed**; frozen Stage-3 protection: **92 passed**.
@@ -199,9 +201,26 @@ auto-open, First/Next/Last, slider click/drag and seek stopping autoplay, Play/P
 interval editing and retained-result reopen all passed. Exact job paths and
 manual tester/provenance are recorded separately from automated evidence below.
 
-Acceptance evidence and deferred UX observations:
-[Foundation acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md).
-Only documentation changed; frozen production semantics and profile bytes did not.
+Independent Claude read-only audit at `18964add02c508d67429ef29cb59ce879c01017d`:
+**INDEPENDENT AUDIT PASS**. Focused **122 passed, 0 failures/errors/skips**;
+frozen runner/planner/physical/telemetry **92 passed**; Stage-2 / ZiNi / Replay /
+Stage-3 benchmark boundary **86 passed**; full suite **1628 passed,
+0 failures/errors/skips**. Independent source-derived game 0 and packaged-worker
+re-check passed; exact identities and timing values are in the final adjudication.
+
+ChatGPT: **FINAL ADJUDICATION PASS — IMPLEMENTATION CLOSED**;
+**BLOCKER 0 / REQUIRED production 0**. F-1 is **REQUIRED documentation-only**
+historical/current-state correction, addressed by this closeout. F-2 is
+**OPTIONAL / DEFER**, future worker/release transport hardening, not fixed.
+The audit had categorized stale docs as OPTIONAL; only that item's documentation
+disposition was promoted, without creating a product/implementation blocker.
+
+[Foundation acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
+preserves the automated/manual evidence;
+[final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
+records the independent audit, final dispositions and KEEP/DEFER observations.
+This closeout changes documentation only; tests/package checks were not rerun,
+and frozen production semantics, profile bytes and generated evidence are preserved.
 
 ---
 
@@ -226,23 +245,32 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-Review the seven documentation-only Slice 5 changes. Automated and user-reported
-packaged manual acceptance are complete; no manual gate remains. Preserve the
-existing generated build/evidence outputs as the earlier automated snapshot.
+**After this documentation closeout is integrated, the next active engineering
+milestone is Version / Settings Identity Separation** — distinguish
+application/release, Stage-3 algorithm, physical model/profile and
+playback/presentation identities. No implementation of that milestone was part of
+this documentation-only closeout. This closeout was prepared from the dated
+2026-10-14 `18964ad` Slice 5 documentation / independent-audit baseline.
+Live Git must determine whether and where this final closeout was later integrated.
 
-The foundation is CLOSED and ready for review. **Version/settings identity
-separation** remains the recommended next milestone; no next implementation is
-authorized here. Deferred, nonblocking UX observations include clearer Run/new
-execution versus 결과 열기/retained-result labels, smooth synthetic cursor motion,
-and Modeled-Time Playback. A future cursor path must remain explicitly synthetic/
-interpolated, never an actual OS mouse trajectory. Final WON with Step 0/current
-PLAYING, the intentional 20–5000 ms presentation range, and manual seek stopping
-autoplay are accepted behavior. Incremental-forward player optimization waits for
-modeled-time/smooth-animation requirements or measured lag; it is not implemented.
+F-2 remains future worker/release hardening: a packaged windowed transport exception
+may show PyInstaller's uncaught-exception dialog rather than exit immediately.
+There is no false success; Cancel/launcher close/main close retain ownership and
+reap the worker. Production was not changed, preserving accepted package/source
+identity and the completed packaging acceptance.
 
-No selector, new algorithm or next milestone implementation belongs in Slice 5.
-No commit/merge/push is authorized by this closeout. Do not reopen ZiNi work or
-consume its reserved final quality holdout.
+KEEP: Step 0 PLAYING with final WON, 20–5000 ms presentation interval, manual seek
+stopping autoplay, and endpoint/straight-line cursor presentation.
+DEFER: clearer Run / 결과 열기 labels, synthetic smooth cursor, Modeled-Time
+Playback, and incremental-forward TracePlayer optimization until requirements or
+measured lag justify it. Synthetic/interpolated motion must never be described as
+an actual OS mouse trajectory, and modeled time is not human play time.
+
+Preserve existing generated build/evidence outputs. At preparation/review time,
+this final documentation closeout had not yet been committed, merged or pushed.
+Later integration state must be read from live Git. No release/tag/ZIP or
+next-milestone implementation was part of this documentation closeout. Do not
+reopen ZiNi work or consume its reserved final quality holdout.
 
 ---
 
@@ -253,15 +281,16 @@ Stage-3 Extended is the **active milestone**, separate from frozen V1.
 Natural dependency roadmap — not a rigid chronological schedule:
 
 1. **Closed:** execution integration audit and Slices 1–4 implementation.
-2. **Closed / ready for review:** Slice 5 automated and packaged manual acceptance;
-   only the Execution / Playback / Visualizer Foundation is closed. Current action
-   is review of the uncommitted documentation.
-3. **Next after review — version/settings identity separation:**
+2. **FINAL ADJUDICATION PASS / CLOSED:** Slice 5 automated/packaged manual
+   acceptance, independent Claude audit and ChatGPT final adjudication. Closure
+   covers Execution / Playback / Visualizer Foundation only.
+3. **Next active milestone — Version / Settings Identity Separation:**
    application version, Stage-3 algorithm version, physical model/profile
    version, and playback/display settings.
-4. **Same-board Human / Stage2 / Stage3 comparison.**
-5. **Representative-board demonstrations and Timeline Analytics where useful.**
-6. **First Stage-3 Extended algorithm extension.** The current likely first
+4. **Modeled-Time Playback / synthetic smooth cursor presentation.**
+5. **Same-board Human / Stage-2 / Stage-3 comparison.**
+6. **Representative-board demonstrations and Timeline Analytics where useful.**
+7. **First real Stage-3 Extended algorithm research.** The current likely first
    candidate is nearest exact-minimum-risk guess selection using physical movement cost
    among exactly equal minimum-risk candidates; it is not yet an accepted algorithm change.
 
@@ -293,8 +322,8 @@ Boundaries:
 
 Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
-the Extended README distinguishes the closed foundation, review-ready
-documentation and later planning. Arbitrary Stage-3 seeks still rebuild from
+the Extended README distinguishes the finally adjudicated closed foundation,
+the next active milestone and later planning. Arbitrary Stage-3 seeks still rebuild from
 index 0; Slice 5 does not optimize playback.
 
 ---
@@ -307,6 +336,8 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- [Foundation final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
+- [Foundation acceptance evidence](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
 - `STAGE3_ALGORITHM_SPEC_v1.md`
 - `STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md`
 - `STAGE3_EXTENSION_BACKLOG.md`
@@ -379,23 +410,28 @@ docs/CURRENT_HANDOFF.md, docs/README.md 및 최신 source/tests를 읽으세요.
 기억보다 source → tests → 실행 검증 → frozen specs/final adjudication
 → current docs → 이전 AI summaries를 우선하세요. Git을 오래된 prose에 맞춰 되돌리지 마세요.
 
-2026-10-14 Slice 5 기준 main = origin/main =
-b9af830495ce97552f2058ef91b59a4fd495222b (Slice 4 통합).
-feature/stage3-visualizer-acceptance에는 review 대기 중인 미커밋 문서 변경이 있습니다.
+2026-10-14 Slice 5 문서 closeout 및 독립 감사 기준점:
+18964add02c508d67429ef29cb59ce879c01017d.
+최종 문서 정리 시작 시 main, clean, HEAD == origin/main == 위 commit을 확인했습니다.
+Slice 5 문서는 이 commit에 이미 committed/merged/pushed되었습니다.
+이 값은 이후에도 latest HEAD라고 가정할 고정값이 아닙니다.
 Stage-3 V1 CLOSED/FROZEN, ZiNi Improvement CLOSED/V1 RETAINED.
-Stage-3 Extended active; integration audit와 Slices 1–4는 CLOSED/integrated.
-Execution / Playback / Visualizer Foundation은 CLOSED / ACCEPTANCE PASS / READY FOR REVIEW.
-2026-10-14 사용자가 packaged manual acceptance를 완료했으며 문서 review만 남았습니다.
+Stage-3 Extended ACTIVE; integration audit와 Slices 1–5는 CLOSED/integrated.
+Execution / Playback / Visualizer Foundation은 FINAL ADJUDICATION PASS / CLOSED.
+Packaged manual acceptance, 독립 Claude 감사와 ChatGPT 최종 판정 모두 PASS입니다.
 Stage-3 Extended 전체를 CLOSED로 기록하지 마세요.
 
-Development full suite: 1628 PASS, failures/errors/skips 0.
-Actual package: profile SHA, game 0 worker (WON, 227 traces, 39,987,084 µs),
-source equivalence, ZiNi worker, native GUI startup/clean close PASS.
-사용자의 packaged manual interaction/cleanup도 PASS입니다 (main PID 5352;
-workers 8940/6300/5124/19188; 모든 WorkerGone/JobDirGone 및 main-close MainGone=True).
-다음은 docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md를 포함한
-문서 review입니다. 기존 generated evidence는 갱신하지 않았습니다.
-이후 version/settings identity 분리가 next 후보이며 UX 관찰은 비차단 후속 작업으로 보류합니다.
+독립 감사: focused 122 PASS, frozen 92 PASS, boundary 86 PASS,
+full suite 1628 PASS (failures/errors/skips 0).
+Game 0: WON, 227 traces, 39,987,084 modeled µs; packaged-worker re-check PASS.
+ChatGPT: BLOCKER 0 / REQUIRED production 0.
+F-1은 required documentation-only closeout이며 구현 blocker가 아닙니다.
+F-2 packaged transport hardening은 OPTIONAL / DEFER이고 수정되지 않았습니다.
+최종 판정: docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md.
+수용 증거: docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md.
+Generated evidence는 그대로 보존합니다.
+다음 active milestone은 Version / Settings Identity Separation입니다.
+Modeled-Time Playback / synthetic smooth cursor 및 나머지 UX는 KEEP/DEFER입니다.
 
 Main UI → launcher → parent-owned job/subprocess → Stage3Execution → player/viewer.
 현재 Live/Replay 보드와 독립적이며 viewer는 solver 입력이 아닙니다.

@@ -132,11 +132,15 @@ Certainty는 정수 world 수로 판정하며 표시용 반올림이나 float을
 
 ### Stage-3 Extended: Execution / Playback / Visualizer Foundation
 
-Slices 1–4는 `b9af830495ce97552f2058ef91b59a4fd495222b` 기준 main에 통합되었다.
-Slice 5의 자동 검증과 2026-10-14 사용자의 대화형 packaged Visualizer 수용이
-모두 통과했다. 이 foundation은 **CLOSED / ACCEPTANCE PASS / READY FOR REVIEW**다.
-[수용 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)이
-자동 검증과 수동 확인 범위를 구분한다. Stage-3 Extended 전체는 계속 active다.
+Slices 1–4는 pre-Slice-5 기준점 `b9af830495ce97552f2058ef91b59a4fd495222b`까지
+main에 통합되었다. Slice 5 문서 closeout 및 독립 감사 기준점은
+`18964add02c508d67429ef29cb59ce879c01017d`이며 이후 HEAD를 고정하는 값이 아니다.
+자동·packaged manual 수용, 독립 Claude 감사와 ChatGPT 최종 판정을 거쳐 이
+foundation은 **FINAL ADJUDICATION PASS / CLOSED**다.
+[수용 기록](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)은 자동·수동
+증거를 구분하고, [최종 판정](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)은
+F-1 문서 정리와 F-2 worker transport hardening 보류를 기록한다.
+Stage-3 Extended 전체는 **ACTIVE**이며 Stage-3 V1 / Model C는 frozen이다.
 
 | 모듈 | 책임 |
 | --- | --- |

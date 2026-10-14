@@ -2,7 +2,7 @@
 
 ## Verdict and scope
 
-**STAGE-3 EXTENDED VISUALIZER FOUNDATION — ACCEPTANCE PASS / READY FOR REVIEW**
+**STAGE-3 EXTENDED VISUALIZER FOUNDATION — FINAL ADJUDICATION PASS / CLOSED**
 
 Milestone: **Stage-3 Extended — Execution / Playback / Visualizer Foundation**.
 Automated and packaged manual acceptance date: **2026-10-14 (Asia/Seoul)**.
@@ -12,35 +12,51 @@ they are separate from the earlier automated checks. Slice 5 is packaging,
 regression and documentation closeout; no production Python, tests, algorithm
 or profile was changed.
 
-Slices 1–4 and the execution integration audit are closed/integrated. Automated
-and packaged manual acceptance now pass. **Execution / Playback / Visualizer
-Foundation and Slice 5 acceptance are CLOSED; documentation is READY FOR REVIEW.**
-Stage-3 Extended as a whole remains active. This does not change frozen Stage-3 V1
-or start the next milestone; the Slice 5 documentation remains uncommitted.
-There was no commit, merge, push, tag, release-version change or publication.
+Slices 1–5 and the execution integration audit are closed/integrated. Automated
+and packaged manual acceptance passed, followed by the independent Claude audit
+and ChatGPT final adjudication. **Execution / Playback / Visualizer Foundation
+is CLOSED**; Stage-3 Extended as a whole remains **ACTIVE**, and Stage-3 V1 remains
+frozen. See the [final adjudication](STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
+for the audit evidence and final F-1 / F-2 dispositions.
 
-## Live Git baseline
+At the time this acceptance record was drafted, its documentation status was
+**ACCEPTANCE PASS / READY FOR REVIEW**: the changes were uncommitted, this new
+record was untracked, and no commit/merge/push had occurred in that drafting
+session. Those are historical facts, not the current post-merge state.
+Slice 5 documentation was subsequently committed, merged and pushed at
+`18964add02c508d67429ef29cb59ce879c01017d`. Neither that signoff nor this final
+documentation closeout changes the release version or publishes a tag/release/ZIP.
+
+## Git chronology
 
 Repository: `C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project`.
 Development Python: `C:\venvs\minesweeper\Scripts\python.exe`.
 
-Before branch creation: inside work tree `true`, bare `false`, branch `main`,
-clean `git status --short`, and HEAD = local `origin/main` =
-`b9af830495ce97552f2058ef91b59a4fd495222b`. No remote fetch was performed.
-`git log -12 --oneline` identified Slice 4 as the latest integrated main commit;
-`merge-base --is-ancestor` returned 0 for Slices 1–3. The stale desktop cwd in the
-chat environment was not used; sandbox work-tree permission errors were resolved
-by verifying the real repository with approved access, without changing Git config.
+At the time this acceptance record was drafted, the **pre-Slice-5 baseline** was
+branch `main`, clean working tree, HEAD = local `origin/main` =
+`b9af830495ce97552f2058ef91b59a4fd495222b`. Inside work tree was `true`, bare was
+`false`, and no remote fetch was performed. The original `git log -12 --oneline`
+identified Slice 4 as the latest integrated commit at that time;
+`merge-base --is-ancestor` returned 0 for Slices 1–3. The stale desktop cwd was
+not used; approved access to the real repository resolved sandbox work-tree
+permission errors without changing Git config.
 
-| Slice | Live commit | Accepted component |
+| Slice | Integrated commit | Accepted component |
 | --- | --- | --- |
 | 1 | `cf7544b6dbc059594750f0798eca8878ddf2ea66` | Execution context + pure trace playback |
 | 2 | `d100a493445c7118b5347fdbe2ec0f7243719f17` | Subprocess execution worker |
 | 3 | `490a8cf3df1939ae9930e0735665e77120912995` | Read-only Visualizer |
-| 4 | `b9af830495ce97552f2058ef91b59a4fd495222b` | Application integration + process lifecycle |
+| 4 | `b9af830495ce97552f2058ef91b59a4fd495222b` | Application integration + process lifecycle; pre-Slice-5 baseline |
+| 5 | `18964add02c508d67429ef29cb59ce879c01017d` | Acceptance / packaging / documentation closeout |
 
-Review branch: `feature/stage3-visualizer-acceptance`, created from that baseline.
-Live source/tests/execution took precedence over stale handoff/build prose.
+The original acceptance branch, `feature/stage3-visualizer-acceptance`, was later
+deleted after integration; it is historical provenance, not a recovery target.
+The **post-merge / independent-audit baseline** was clean `main`, HEAD =
+`origin/main` = `18964add02c508d67429ef29cb59ce879c01017d`. This was also verified
+before creating `docs/stage3-visualizer-foundation-final-closeout` for the final
+documentation correction. It does not claim that `18964ad` remains the latest
+HEAD after later documentation commits. Live source/tests/execution take
+precedence over stale handoff/build prose.
 
 ## Source audit and architecture
 
@@ -252,8 +268,10 @@ Additional packaged manual checks, all **PASS**:
 | Retained result | Closing viewer, then **결과 열기**, reopens the retained completed execution |
 | Active-job lifecycle | Cancel; launcher-close; main-close, with the PID/directory evidence above |
 
-The required packaged manual gate is complete. Review of the uncommitted
-documentation remains; no commit, merge, push or release is implied.
+The required packaged manual gate is complete. At the time this acceptance
+record was drafted, documentation review remained; the record was subsequently
+integrated at `18964add02c508d67429ef29cb59ce879c01017d`. The independent audit and
+final adjudication now also pass. No release publication is implied.
 
 ## Manual UX observations — accepted behavior and deferred follow-up
 
@@ -266,6 +284,8 @@ do not reopen foundation acceptance:
   **PLAYING** is correct trace semantics: no recorded actions have been applied yet.
 - **Interval:** the current **20–5000 ms** range is intentional presentation timing,
   independent of Model C action durations.
+- **Cursor endpoints / straight line:** the current cell-center displacement
+  presentation is accepted modeled geometry, not an actual OS mouse trajectory.
 - **Smooth cursor:** synthetic/interpolated cursor motion is desirable for later
   presentation work. It must remain explicitly labeled synthetic/interpolated and
   must never be claimed as an actual OS mouse trajectory.
@@ -288,28 +308,37 @@ Contains `source-full.log`, `source-extended-focused.log`, `source-frozen-focuse
 These are local evidence, not tracked release artifacts. Keep the complete dist
 folder as accepted package evidence; no release ZIP/tag/publication is implied.
 
-Documentation changes: root README, ARCHITECTURE, BUILDING, docs index,
-CURRENT_HANDOFF, Extended README, and this acceptance record. Final checks:
+At the time this acceptance record was drafted, its seven documentation changes
+were root README, ARCHITECTURE, BUILDING, docs index, CURRENT_HANDOFF, Extended
+README and this new record. The drafting-session checks were
 **`git diff --check` PASS; 71 local documentation paths/anchors PASS**.
-Profile bytes match HEAD and the bundle; production/tests are unchanged;
-nothing is staged and no generated acceptance binary/cache/spec/pickle is tracked.
+Profile bytes matched HEAD and the bundle; production/tests were unchanged.
+Nothing was staged, and this record was then untracked pending review.
+Those historical checks are not claimed as validation of later documentation edits.
+
 The two pre-existing tracked historical files under `results/stage3_replay_validation/`
-are preserved. `final-hygiene.json`, `final-git-status.txt` and
+remain preserved. `final-hygiene.json`, `final-git-status.txt` and
 `final-git-diff.patch` preserve the earlier automated closeout snapshot, including
 its then-pending manual status. Generated evidence and build outputs were not
-rewritten for this documentation-only manual signoff. The seven intended Markdown
-files are the only changes; this new acceptance document remains untracked and
-nothing is staged pending review.
+rewritten for the manual signoff or this final-adjudication documentation closeout.
+The seven Slice 5 documents were subsequently committed/merged/pushed at
+`18964add02c508d67429ef29cb59ce879c01017d`.
 
-Remaining action: review the documentation. Automated and user-reported packaged
-manual acceptance are complete, with no Slice-5 blocker. Optional image/video
-tooling is absent only from the isolated build environment. No quantitative
-packaged seek latency result is claimed; reconstruction from index 0 remains
-the accepted implementation.
+Automated and user-reported packaged manual acceptance are complete. Independent
+Claude audit and ChatGPT final adjudication also pass; see the
+[final adjudication](STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md) for the exact
+independent evidence and F-1 documentation-only closeout. F-2 packaged windowed
+transport-failure hardening remains **OPTIONAL / DEFER** and was not implemented.
+There is no implementation blocker or required production change.
 
-Recommended next milestone **after this review**: version/settings identity
-separation (application, algorithm, physical profile, presentation). Later:
-same-board Human / Stage-2 / Stage-3, representative boards, Timeline Analytics,
-and first Extended algorithm research, likely nearest exact-minimum-risk guess.
+Optional image/video tooling was absent only from the isolated build environment.
+No quantitative packaged seek latency result is claimed; reconstruction from
+index 0 remains the accepted implementation.
+
+Next active milestone: **Version / Settings Identity Separation** (application,
+algorithm, physical profile, presentation). Later: Modeled-Time Playback /
+synthetic smooth cursor, same-board Human / Stage-2 / Stage-3, representative
+boards / Timeline Analytics, and first real Extended algorithm research, likely
+nearest exact-minimum-risk guess.
 Known-mine/no-flag, action-specific timing, anisotropy, CPS/burst and richer/longer
 planning remain evidence-triggered. This is a dependency roadmap, not a fixed schedule.

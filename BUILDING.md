@@ -106,9 +106,22 @@ The real Windows x64 onedir/windowed build, profile identity, Stage-3 worker,
 source/package semantic equivalence, narrow ZiNi worker smoke and native GUI
 startup passed. The project user completed packaged manual acceptance on
 2026-10-14, including playback, retained-result reopen and all four success/cancel/
-active-close cleanup paths. Verdict: **ACCEPTANCE PASS / READY FOR REVIEW**.
-Only Execution / Playback / Visualizer Foundation is CLOSED; Stage-3 Extended
-remains active. See the [acceptance record and manual evidence](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md).
+active-close cleanup paths. Slice 5 documentation was committed, merged and
+pushed at `18964add02c508d67429ef29cb59ce879c01017d`, also the independent-audit
+baseline; this is a dated identity, not a permanent latest-HEAD claim.
+Independent Claude audit: **PASS**. ChatGPT final adjudication:
+**FINAL ADJUDICATION PASS / CLOSED** for Execution / Playback / Visualizer
+Foundation. Stage-3 Extended remains **ACTIVE**. See the
+[acceptance record and manual evidence](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
+and [final adjudication](docs/stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md).
+
+**F-2 — OPTIONAL / DEFER:** packaged windowed worker transport exceptions may
+surface through PyInstaller's uncaught-exception dialog instead of immediately
+exiting. There is no false success; Cancel, launcher close and main close retain
+ownership and reap the worker. This environmental transport-failure case remains
+future worker/release hardening. It was not fixed here: changing production would
+invalidate accepted package/source identity and reopen packaging acceptance.
+
 Existing generated evidence remains the earlier automated snapshot and was not
-rewritten by this documentation-only manual signoff.
-No release version change, tag, publication or distribution ZIP was made.
+rewritten by either documentation-only signoff. The accepted package was not
+rebuilt; no release version change, tag, publication or distribution ZIP was made.
