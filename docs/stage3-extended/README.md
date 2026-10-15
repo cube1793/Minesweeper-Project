@@ -27,7 +27,7 @@ Full commit identities and the dated Git baselines are in the acceptance and fin
 adjudication records. `18964add02c508d67429ef29cb59ce879c01017d` is the Slice 5
 documentation closeout / independent-audit baseline, not a permanent latest HEAD.
 Current components are `Stage3Execution`, worker, parent-owned `Stage3ExecutionJob`,
-launcher, pure `Stage3TracePlayer` and execution-only viewer. Indexed
+launcher, pure `Stage3TracePlayer` / `Stage3ModeledPlayback` and execution-only viewer. Indexed
 `EXPERT_GENERAL_V1` execution is independent of the current Live/Replay board.
 
 ## Foundation final adjudication — CLOSED
@@ -64,52 +64,87 @@ fresh Windows package/profile/worker equivalence and user-performed native GUI P
 | Application/release | Release/tag/build documentation; no runtime version constant, and current main is not historical v0.2.0 |
 | Stage-3 algorithm | `stage3_identity.STAGE3_V1_IDENTITY`; distinct from telemetry semantic version and execution configuration |
 | Physical model/profile/table | `stage3_physical.MODEL_C_V1_IDENTITY` and substantive authentication; `Model C` alias is separate |
-| Playback/presentation | Viewer-local Index/interval state, 20..5000 ms, default 200 ms; no QSettings or presentation version |
+| Playback/presentation | Viewer-local Index/Modeled-Time; Index 20..5000 ms, default 200 ms; modeled default 1×; no QSettings or presentation version |
 
 `Stage3Execution(spec, board, result)`, worker transport and all frozen semantics
-remain unchanged. No migration, selectors, registry or new runtime app version.
+remain unchanged. No migration, algorithm/profile selectors, registry or new runtime app version.
 
-## Next active milestone — Modeled-Time Playback / Synthetic Smooth Cursor Presentation
+## Modeled-Time Playback / Synthetic Smooth Cursor Presentation — CLOSED
 
-Both features remain unimplemented. Future animation is presentation data only;
-it must not alter recorded `modeled_action_us`, planner inputs or Model C identity,
-and synthetic movement must not be described as an actual OS trajectory.
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-15)**.
+[Closeout evidence](STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md) records Slice 1–3 commits,
+254 focused / 1699 full tests with zero failures/errors/skips, a fresh package,
+frozen profile equality, packaged worker equivalence and the project user's
+native packaged GUI report **"A–K passed"**.
 
-## Later candidates
+- TracePlayer uses failure-atomic incremental `next()`; arbitrary seek and previous
+  retain reconstruction from index 0.
+- The Qt-independent controller owns exact partial modeled time, monotonic anchoring,
+  pause/resume, speed and multi-action catch-up using recorded durations.
+- Index remains default, 20..5000 ms/step, default 200. Modeled-Time uses
+  0.25× / 0.5× / 1× / 2× / 4× / 8×, default 1×, without persistence.
+- The UI requests frames every 16 ms; the controller clock is authoritative.
+  Partial frames update only the overlay; catch-up refreshes the board once.
+- Straight smoothstep `q = u²(3 - 2u)` uses rendered cell centers. Same-cell actions
+  stay stationary; no separate dwell model. Actions commit at modeled boundaries.
+  Pause preserves partial progress; manual navigation and mode changes cancel it.
 
-- Same-board Human / Stage-2 / Stage-3 comparison.
-- Representative-board demonstrations and Timeline Analytics as needed.
-- First actual Extended algorithm research: likely nearest **exact-minimum-risk**
-  guess among equal-risk candidates, using physical cost. This is a candidate,
-  not an adopted policy or authorization to modify V1.
+The synthetic cursor is presentation, not an actual OS trajectory or physical
+acceleration model. Rates/easing never alter recorded costs, Model C or planner input.
 
-External screen-recording tools remain the default for demonstrations.
+## Roadmap
+
+1. **CLOSED** — Execution / Playback / Visualizer Foundation.
+2. **CLOSED** — Version / Settings Identity Separation.
+3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
+4. **NEXT** — Human Mouse Trace / Path Visualization (not implemented).
+5. **NEXT AFTER THAT** — Same-board Human / Stage-2 / Stage-3 Comparison.
+6. **LATER** — Representative demonstrations / Timeline Analytics.
+7. **LATER** — First actual Extended algorithm research.
+
+For the last item, nearest exact-minimum-risk guess selection among equal-risk
+candidates using movement cost remains a candidate, not an adopted policy or
+authorization to modify V1. External screen-recording tools remain the default.
+
+## Next planned milestone — Human Mouse Trace / Path Visualization
+
+**Not implemented.** This small milestone was inserted after Modeled-Time closeout
+preparation; it precedes Same-board Human / Stage-2 / Stage-3 Comparison.
+This closeout changes planning/documentation only and creates no implementation/spec document.
+
+Initial scope:
+
+- Record actual mouse movement only while the cursor is over the Live game board.
+- Store sampled pixel-space cursor points/timestamps separately from Replay.
+- Retain actual action/click markers.
+- After game completion, visualize the recorded cursor path over the board.
+- No OS-global mouse hook and no Stage-3 synthetic cursor reuse.
+- No physical-model calibration/refit or advanced path analytics yet.
+
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
+Human Mouse Trace is actual sampled Live-board cursor movement presentation data,
+not Stage-3 synthetic movement and not Model-C calibration evidence.
 
 ## Deferred / evidence-triggered
 
+- Arbitrary-seek checkpoint/cache optimization.
+- Modeled-time slider / sub-action scrubbing.
+- 120-fps UI target, easing selector and click pulse.
+- Persistent Stage-3 presentation settings; settings dataclass until an external consumer exists.
 - Runtime application/release display or version constant.
 - Selectable algorithms/profiles and durable cross-version Stage3Execution transport.
-- Persistent Stage-3 presentation settings; presentation settings dataclass until an external consumer exists.
-- Known-mine / no-flag execution.
-- Action-specific OPEN / FLAG / CHORD timing.
-- Anisotropy.
-- CPS / burst constraints.
-- Richer / longer planning.
+- Richer physical model / Model C successor or refit.
+- Action-specific OPEN / FLAG / CHORD timing and physical CHORD variants.
+- CPS / burst / minimum inter-action constraints, anisotropy and human cognitive timing.
+- Built-in screen recording unless later justified.
+- Known-mine / no-flag execution and richer / longer planning.
 
 Revisit only with evidence and a separate specification/evaluation contract.
-Arbitrary Stage-3 seeks continue to rebuild from index 0. Incremental-forward
-optimization remains deferred until modeled-time/smooth-animation requirements
-or measured lag justify it; the manual report includes no quantitative lag result.
-
-Manual UX follow-ups are nonblocking and unimplemented: clearer Run/new-execution
-versus 결과 열기/retained-result labels, smooth **synthetic/interpolated** cursor
-motion, and Modeled-Time Playback for inspecting Model-C action durations. A future
-cursor path must not be described as an actual OS mouse trajectory. Final WON
-with Step 0/current PLAYING is correct; the 20–5000 ms presentation interval is
-intentional and separate from Model C; manual seek stopping autoplay is accepted.
-Endpoint/straight-line cursor presentation remains accepted modeled displacement,
-not an actual OS trajectory. See the acceptance and final adjudication records
-for the full KEEP/DEFER observations and the unfixed F-2 transport case.
+Incremental forward is implemented; arbitrary seeks still rebuild from index 0.
+Clearer Run/new-execution versus 결과 열기/retained-result labels remain a nonblocking
+UX follow-up. Final WON with Step 0/current PLAYING and manual seek stopping autoplay
+remain correct. Foundation F-2 stays **OPTIONAL / DEFER**; this closeout supplies no
+new evidence to promote that transport-hardening item.
 
 ## Boundaries and references
 

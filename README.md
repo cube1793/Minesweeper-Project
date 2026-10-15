@@ -91,9 +91,19 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - OPEN / FLAG / CHORD와 커서·대상을 표시합니다. 선은 **cursor-before → action-target**
   칸 중심 사이의 modeled displacement이며 실제 OS 마우스 궤적이 아닙니다.
 - 행동별·누적·전체 modeled time은 정확한 정수 **µs**로 표시합니다.
-  **Playback: Index · N ms/step (presentation)**은 현재 화면 재생 간격을 표시합니다.
-  범위는 20–5000 ms, 기본 200 ms이며 Model C 시간, CPU 성능 또는 실제 인간 속도를
-  뜻하지 않습니다. 간격은 저장하지 않으며 결과 창을 다시 열면 기본값으로 돌아갑니다.
+- **Index**는 기본 모드입니다. **Playback: Index · N ms/step (presentation)**은
+  화면 재생 간격을 표시하며 범위 20–5000 ms, 기본 200 ms를 유지합니다.
+- **Modeled-Time**은 기록된 Model C의 `modeled_action_us`를 따라 재생합니다.
+  **Playback: Modeled-Time · 1× (presentation)**처럼 현재 배속을 표시하며,
+  0.25× / 0.5× / 1× / 2× / 4× / 8× 중 선택합니다. 기본은 1×입니다.
+  배속은 presentation만 바꾸며 기록된 시간·total·planner·물리 모델은 바꾸지 않습니다.
+- Synthetic cursor는 현재 pending action의 칸 중심 사이를 직선 smoothstep
+  (`q = u²(3 − 2u)`)으로 표시합니다. 부분 구간에는 적용 전 보드를 유지하고
+  modeled 경계에서 action을 적용합니다. 같은 칸 action은 이동하지 않습니다.
+  별도 dwell 모델은 없으며 실제 OS 마우스 궤적이나 물리적 가속도 모델이 아닙니다.
+- Pause/Resume은 부분 진행을 보존합니다. 수동 navigation과 모드 전환은 부분 진행을
+  취소하고 정수 index 상태로 돌아가며, 모드 전환은 자동 시작하지 않습니다.
+  설정은 저장하지 않으며 다시 열면 Index / 200 ms / modeled 1×로 돌아갑니다.
 - 실행 창을 닫으면 소유한 job과 결과 창도 정리합니다. 메인 창 종료도 이 경계를 따릅니다.
   Visualizer는 완료 실행을 읽기 전용으로 재생하며 solver에 판단 입력을 주지 않습니다.
 
@@ -116,16 +126,32 @@ fresh package/worker 및 사용자 native packaged GUI 수용을 완료했습니
 | Application / release | Release/tag/build 문서의 배포 identity. Runtime app-version 상수는 의도적으로 도입하지 않았으며 현재 main은 historical v0.2.0이 아닙니다. |
 | Stage-3 algorithm | `stage3_identity.STAGE3_V1_IDENTITY`의 동결 V1 알고리즘 identity |
 | Physical model / profile | `stage3_physical.MODEL_C_V1_IDENTITY`의 인증된 Model C/profile/table identity; `Model C` 표시는 별도 alias |
-| Playback / presentation | Index·현재 간격 등 비영속 viewer 상태; planner 입력이나 물리 시간 identity가 아닙니다. |
+| Playback / presentation | Index/Modeled-Time·간격·배속 등 비영속 viewer 상태; planner 입력이나 물리 시간 identity가 아닙니다. |
 
 실행 창은 `Benchmark: EXPERT_GENERAL_V1`, `Algorithm: Stage-3 V1`,
 `Physical: Model C · profile v1`을 각각 표시합니다. Viewer도 Algorithm과
 Physical을 분리하며 recorded modeled time은 간격을 바꿔도 그대로입니다.
 V1 알고리즘/profile semantics와 공식 100k 결과의 identity는 변경되지 않았습니다.
 
-Stage-3 Extended 전체는 **ACTIVE**입니다. 다음 활성 마일스톤은
-**Modeled-Time Playback / Synthetic Smooth Cursor Presentation**이며,
-modeled-time 재생과 synthetic/interpolated cursor는 아직 구현하지 않았습니다.
+**Modeled-Time Playback / Synthetic Smooth Cursor Presentation —
+FINAL ACCEPTANCE PASS / CLOSED (2026-10-15)**: 최종 source regression,
+fresh package/profile/worker 검증과 사용자의 native packaged GUI A–K 수용을
+완료했습니다. [Closeout 기록](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)을
+참고하세요. 동결 Stage-3 알고리즘과 물리 모델 semantics는 변경하지 않았습니다.
+
+Stage-3 Extended 전체는 **ACTIVE**입니다. 다음 작은 활성 마일스톤은
+**Human Mouse Trace / Path Visualization (not implemented)**이며, 그다음은
+**Same-board Human / Stage-2 / Stage-3 Comparison**입니다. 이후 representative
+demonstrations / Timeline Analytics, 첫 실제 Extended algorithm research 순서입니다.
+
+Human Mouse Trace의 초기 계획은 커서가 Live 게임 보드 위에 있을 때만 실제 이동을
+sampled pixel-space points/timestamps로 기록하고, 실제 action/click markers와 함께
+Replay와 별도로 보관하여 게임 종료 후 보드 위에 경로를 표시하는 것입니다.
+OS-global mouse hook, Stage-3 synthetic cursor 재사용, 물리 모델 calibration/refit과
+advanced path analytics는 초기 범위에서 제외합니다. 이 closeout에서는 구현하지 않습니다.
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`입니다.
+계획된 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며
+Stage-3 synthetic movement나 Model-C calibration evidence가 아닙니다.
 
 ## 실행 방법
 
@@ -166,8 +192,9 @@ Minesweeper-Project/
 ├─ stage3_execution_worker.py   # Stage-3 trusted-local subprocess 진입점
 ├─ stage3_execution_job.py      # 부모 process·token·임시 디렉터리 수명 관리
 ├─ stage3_visualizer_launcher.py # 실행·취소·결과 다시 열기, job/viewer 소유
-├─ stage3_trace_player.py       # 기록 action index 기반 순수 재구성
-├─ stage3_visualizer_ui.py      # 읽기 전용 보드·커서·정수 modeled time 표시
+├─ stage3_trace_player.py       # 정수 index 재구성·incremental next()
+├─ stage3_modeled_playback.py   # 순수 modeled timeline·정확한 부분 시간·배속
+├─ stage3_visualizer_ui.py      # 모드 controls·Qt frame 요청·synthetic cursor 표시
 ├─ replay_model.py              # Replay 데이터 계약
 ├─ replay_recorder.py           # 실제 이벤트와 확정 보드 기록
 ├─ replay_json.py               # JSON 변환·파일 입출력

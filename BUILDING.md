@@ -29,8 +29,9 @@ $profile = (Resolve-Path 'calibration/stage3_physical_profile_v1.json').Path
 Inspect the chosen build environment and output directories before reuse.
 Acceptance requires a fresh ASCII-path environment and isolated environment,
 dist/work/spec/cache paths. Foundation used
-`results/stage3-visualizer-acceptance/<run-id>/`; Identity Separation uses
-`results/stage3-identity-separation-acceptance/<run-id>/`. Do not overwrite previous
+`results/stage3-visualizer-acceptance/<run-id>/`; Identity Separation used
+`results/stage3-identity-separation-acceptance/<run-id>/`; Modeled-Time Playback uses
+`results/stage3-modeled-playback-acceptance/<run-id>/`. Do not overwrite previous
 release/evidence output or change the normal development environment. `results/` is ignored; generated artifacts are
 not source files to commit.
 
@@ -152,3 +153,30 @@ for commands, counts, environment and automated/manual evidence.
 No release version, runtime application-version claim, version resource, tag or
 distribution ZIP was added. This fresh verification is distinct from the
 historical Foundation evidence above.
+
+## Modeled-Time Playback package verification (2026-10-15)
+
+A fresh Windows x64 onedir/windowed package was built from
+`82c61d5447bf7cffc3c1d4fbcd392ef2945efa04` using the accepted method above:
+Python 3.12.10 / 64-bit, documented dependency pins and the absolute profile
+`--add-data` path. Its new environment, dist/work/spec/cache and evidence are under
+`results/stage3-modeled-playback-acceptance/20261015-113435/`.
+Foundation, Identity Separation and historical release output were preserved.
+
+Build **exit 0**, **83.6817627 s**. Archive inspection confirms
+`stage3_modeled_playback`, `stage3_visualizer_ui` and `stage3_trace_player` are bundled;
+they use normal Python imports with no additional hidden-import/data rule.
+Warnings contain no missing playback module; the optional unused
+`pyqtgraph.opengl` / `OpenGL` warning remains. Frozen profile bundling is still required.
+
+Source regression: **254 focused / 1699 full passed**, zero failures/errors/skips.
+Source/bundled profile bytes and required SHA-256 match. The packaged game-0 worker
+passed from an unrelated cwd with deterministic source equivalence. The project
+user reported **"A–K passed"** for the fresh native package: Index regression,
+modeled controls, stationary first action, synthetic movement, pause/resume,
+navigation, mode/rate changes, terminal total and close/reopen defaults.
+
+See the [Modeled-Time closeout](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)
+for exact commands and evidence. No application/release version, build configuration,
+profile bytes or worker transport changed. No tag, release or ZIP was published;
+current main is not relabeled historical v0.2.0.

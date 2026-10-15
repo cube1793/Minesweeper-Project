@@ -148,8 +148,9 @@ Stage-3 Extended 전체는 **ACTIVE**이며 Stage-3 V1 / Model C는 frozen이다
 | `stage3_execution_worker.py` | Qt 없이 한 index 실행, token/execution/error envelope를 trusted-local pickle로 atomic 게시 |
 | `stage3_execution_job.py` | 한 subprocess, token, polling/cancel, reap 후 job 디렉터리 전체 삭제 |
 | `stage3_visualizer_launcher.py` | job과 viewer 소유, index/Run/Cancel, 완료 시 자동 열기, 마지막 완료 결과 다시 열기 |
-| `stage3_trace_player.py` | fixed layout에 기록된 `trace.move`만 적용하는 순수 index 재구성; planner 호출 없음 |
-| `stage3_visualizer_ui.py` | execution만 입력받는 읽기 전용 보드·커서·action·정수 µs 및 presentation timer |
+| `stage3_trace_player.py` | fixed layout의 정수 index 재구성; incremental `next()`, arbitrary seek는 index 0부터 재구성; planner 호출 없음 |
+| `stage3_modeled_playback.py` | Qt 독립 modeled timeline; monotonic clock, 정확한 부분 시간, 배속·pause·boundary catch-up |
+| `stage3_visualizer_ui.py` | execution만 입력받는 읽기 전용 보드·controls·Qt frame 요청·smoothstep synthetic cursor |
 
 ```text
 main.py / MinesweeperUI
@@ -161,7 +162,8 @@ Stage3VisualizerLauncherWindow
   │                    Stage3Execution
   │                      ╰─ atomic result → job reaps + cleans → launcher
   ╰─ Stage3VisualizerWindow(completed execution)
-       ╰─ Stage3TracePlayer → reconstructed observation / recorded action
+       ├─ Stage3TracePlayer → committed observation / recorded action
+       ╰─ Stage3ModeledPlayback(player) → exact timeline / boundary consumption
 ```
 
 Source job은 `sys.executable`과 `__file__` 기준 절대 worker script 경로를 쓴다.
@@ -198,7 +200,7 @@ Model C 비용과 독립적이며 커서 선은 칸 중심 간 변위다. Arbitr
 | `stage3_physical.py` | 불변 `MODEL_C_V1_IDENTITY`의 model ID, profile version/hash, table hash, unit과 실제 profile/table 인증·cost를 소유. `MODEL_C_DISPLAY_NAME`은 인증에 참여하지 않는 별도 표시 alias다. |
 | Benchmark producer / modeled evaluator | 위 authoritative 값을 소비한다. 기존 public 상수는 compatibility alias이며 canonical snapshot의 9개 key·값·type·serialization·거부 규칙을 보존한다. |
 | Launcher / viewer | Identity를 읽기 전용으로 표시한다. Launcher corpus ID는 `EXPERT_GENERAL_V1`, viewer의 run 정보는 기존 execution에서 읽는다. |
-| `stage3_visualizer_ui.py` | Index presentation interval의 local 상수·widget/session 상태를 소유한다. 범위 20..5000 ms, 기본 200 ms, `Playback: Index · N ms/step (presentation)`으로 표시한다. |
+| `stage3_visualizer_ui.py` | Index/Modeled-Time controls와 비영속 presentation을 소유한다. Index는 20..5000 ms, 기본 200 ms; modeled speed는 기본 1×다. 두 label에 `(presentation)`을 표시한다. |
 
 Dependency는 benchmark/UI → identity owner 방향이다. Identity owner는 UI나
 presentation settings를 참조하지 않는다. UI가 profile을 다시 열거나 해석하지 않는다.
@@ -213,8 +215,8 @@ Semantic model ID, concrete profile identity, exact timing-table artifact identi
 
 `Stage3Execution(spec, board, result)`와 trusted-local pickle envelope는 그대로다.
 DB migration, Replay schema 변경, ZiNi 변경, algorithm/profile 선택기 또는 registry는 없다.
-Game-index text, autoplay, playback index와 interval은 비영속 local state이며
-viewer를 다시 열면 interval은 기본값으로 돌아간다. Stage-3 QSettings와
+Game-index text, autoplay, playback index·mode·interval·배속은 비영속 local state이며
+viewer를 다시 열면 Index / 200 ms / modeled 1×로 돌아간다. Stage-3 QSettings와
 presentation semantic version은 도입하지 않았다.
 
 - `Replay != Stage-3 Trace Playback != ZiNi Trace`.
@@ -224,6 +226,47 @@ presentation semantic version은 도입하지 않았다.
 - Playback/display settings는 planner 입력이 아니며 recorded action/cost와 total을 바꾸지 않는다.
 - Frozen V1 official 100k 결과는 원래 algorithm/profile identity에 계속 귀속된다.
   향후 algorithm/profile 변경은 별도의 명세·identity·평가를 요구한다.
+
+### Stage-3 Extended: Modeled-Time Playback / Synthetic Smooth Cursor Presentation
+
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-15)**.
+[Closeout](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)에 최종 tests,
+fresh package/worker/profile 및 사용자 native GUI A–K 수용을 기록했다.
+
+- **Stage3TracePlayer:** index k는 traces[:k]를 적용한 정수 상태다. `next()`는 현재
+  engine의 격리된 복사본에 pending action 하나만 적용·검증한 뒤 게시한다.
+  실패 시 공개 상태는 유지된다. `go_to()`는 여전히 index 0부터 재구성하고
+  `previous()`는 이를 사용한다. 커서·current trace·누적 정수 µs를 소유한다.
+- **Stage3ModeledPlayback:** recorded `modeled_action_us`를 분해하거나 재계산하지 않는다.
+  monotonic nanoseconds를 정확한 Fraction µs로 반영하며 running/partial/speed,
+  pause/resume, 여러 boundary catch-up, zero-duration 및 `cancel_partial()`을 소유한다.
+  Qt·geometry·profile I/O·planner를 소유하지 않는다.
+- **Stage3VisualizerWindow:** Index 기본값과 20..5000 ms/step(기본 200)을 유지한다.
+  Modeled-Time의 16 ms PreciseTimer는 frame 요청이며 elapsed time은 controller가
+  계산한다. 정수 index가 같으면 overlay만 갱신하고, catch-up으로 여러 action을
+  적용해도 마지막 committed board를 한 번만 refresh한다.
+
+Pending action의 raw progress u 동안 보드는 pre-action 상태를 유지하고 경계에서
+action을 한 번 적용한다. UI에서만 Fraction을 float로 바꾸고
+`q = u² * (3 - 2u)`, `P = A + q * (B - A)`를 렌더된 칸 중심에 적용한다.
+A/B는 pending trace의 cursor-before/target이다. 같은 칸은 정지하며 별도 dwell,
+curve, overshoot, jitter는 없다. Detail panel은 last-applied trace를 유지한다.
+
+Pause는 요청 시각까지 반영하고 부분 위치를 동결한다. Resume은 새 clock anchor로
+이어 간다. 0.25× / 0.5× / 1× / 2× / 4× / 8×(기본 1×) 변경 전에는 old speed로
+경계를 처리한다. 수동 버튼·slider press/seek는 timer 정지 → `cancel_partial()` →
+기존 정수 navigation 순서다. 같은 index slider interaction도 취소하지만 programmatic
+slider 동기화는 취소하지 않는다. Mode 전환은 committed index를 유지하고 paused가 된다.
+오류·close는 재생을 멈추며 final index에서 wrap/restart하지 않는다.
+
+다음 경계를 유지한다:
+
+- QTimer frame request != modeled-time authority; 16 ms는 실측 FPS 보장이 아니다.
+- Presentation speed != Model C parameter; 1×는 recorded modeled time의 표시 배율이다.
+- Smoothstep easing != physical acceleration model.
+- Synthetic cursor != actual OS trajectory; rendered geometry는 calibration pixel size와 별개다.
+- Replay elapsed time != Stage-3 modeled time.
+- `decision_compute_ns != modeled physical time`.
 
 ### Replay
 
@@ -524,7 +567,7 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | ZiNi advanced | `test_zini_advanced.py` | 정책별 rollout, budget·종료 metadata, baseline 유지, 고정 seed/evaluation 재현성, trace 재적용 |
 | ZiNi golden / TYPE S | `test_zini_golden.py`, `test_zini_core.py` | 고정 10 workloads의 전체 moves·clicks·non-elapsed metadata, reference Premium 및 solved 판정 동등성 |
 | ZiNi Trace / Explorer | `test_zini_trace.py`, `test_zini_explorer.py`, `test_zini_explorer_ui.py` | 사후 Trace 검증, lazy 생성, 정보 gate, index/delta·Qt 표시 및 세션 수명 |
-| Stage-3 Extended | `test_stage3_identity.py`, `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·순수 재생·worker transport·읽기 전용 UI·취소·종료·cleanup |
+| Stage-3 Extended | `test_stage3_identity.py`, `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_modeled_playback.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·incremental 재생·fake-clock exact timeline·synthetic cursor·worker transport·취소·종료·cleanup |
 | Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
 | ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
@@ -539,7 +582,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** 자동 검증과 사용자 packaged manual acceptance로 foundation을 종료했다. Version / Settings Identity Separation도 최종 수용으로 종료했으며 selector는 도입하지 않았다. 다음 활성 마일스톤은 Modeled-Time Playback / Synthetic Smooth Cursor Presentation이다. 더 명확한 Run/결과 열기 라벨, 명시적으로 synthetic/interpolated인 커서 이동 및 Modeled-Time Playback은 비차단 후속 관찰이며 미구현이다. Incremental-forward 재생 최적화는 modeled-time/smooth-animation 요구나 측정된 지연으로 정당화될 때까지 보류한다.
+- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation은 최종 수용으로 CLOSED다. Stage-3 Extended는 ACTIVE이며 다음은 미구현 Human Mouse Trace / Path Visualization이다. 그다음 Same-board Human / Stage-2 / Stage-3 Comparison, 이후 representative demonstrations / Timeline Analytics와 첫 실제 Extended algorithm research가 이어진다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -548,6 +591,16 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 ## 8. 향후 확장 방향
 
 현재 기능에 포함되지 않은 개선 후보다.
+
+다음 작은 마일스톤은 **Human Mouse Trace / Path Visualization (not implemented)**이다.
+초기 계획은 Live 게임 보드 위의 실제 마우스 이동만 pixel-space points/timestamps로
+sample하고, 실제 action/click markers를 유지하면서 Replay와 별도로 저장하여 게임 종료 후
+보드 위에 경로를 시각화하는 것이다. OS-global hook, Stage-3 synthetic cursor 재사용,
+physical-model calibration/refit 및 advanced path analytics는 초기 범위에 포함하지 않는다.
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
+계획된 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며,
+Stage-3 synthetic movement나 Model-C calibration evidence가 아니다.
+이 closeout은 roadmap만 갱신하며 새 recorder나 데이터 모델을 구현하지 않는다.
 
 - Live 파생 통계 계산기, Replay controller와 ZiNi worker 관리 서비스를 분리한다.
 - UI 표시 formatter와 계산 모델의 경계를 정리하고, exact analysis의 비동기 실행·취소 방식을 검토한다.
