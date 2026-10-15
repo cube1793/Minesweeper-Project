@@ -16,7 +16,7 @@ _ACTION_COLORS = {
 
 
 class MouseTraceOverlay(QWidget):
-    """Draw only; the owner decides when finished-Live data may be displayed."""
+    """Draw only; the owner decides when Live or Replay data may be displayed."""
 
     def __init__(self, parent):
         super().__init__(parent)

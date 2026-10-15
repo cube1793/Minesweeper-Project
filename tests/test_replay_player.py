@@ -1,6 +1,8 @@
 import unittest
+from dataclasses import replace
 
 from core_engine import CellState
+from mouse_trace import MouseTraceData, MouseTracePoint, MouseTraceSegment
 from replay_model import (
     ACTION_CHORD,
     ACTION_FLAG,
@@ -10,9 +12,27 @@ from replay_model import (
     ReplayEvent,
 )
 from replay_player import ReplayPlayer
+from replay_statistics import ReplayStatisticsAnalyzer
 
 
 class ReplayPlayerTests(unittest.TestCase):
+    def test_v2_attachment_does_not_change_playback_or_statistics(self):
+        plain = self._sample_replay()
+        trace = MouseTraceData(3, 3, (MouseTraceSegment(28, (
+            MouseTracePoint(0, 3.5, 7, 0), MouseTracePoint(9_000_000, 45, 39, 1),
+        )),))
+        attached = replace(plain, schema_version=2, mouse_trace=trace)
+        players = ReplayPlayer(plain), ReplayPlayer(attached)
+        for index in (0, 1, 3, 2, 0):
+            for player in players:
+                player.go_to(index)
+            self.assertEqual(players[0].get_observation(), players[1].get_observation())
+            self.assertEqual(players[0].engine.get_counter_snapshot(), players[1].engine.get_counter_snapshot())
+            self.assertEqual(players[0].current_time, players[1].current_time)
+            self.assertEqual(players[0].current_event, players[1].current_event)
+        self.assertEqual(ReplayStatisticsAnalyzer.analyze(plain), ReplayStatisticsAnalyzer.analyze(attached))
+        self.assertIs(players[1].replay_data.mouse_trace, trace)
+
     def _sample_replay(self):
         return ReplayData(
             board=ReplayBoard(

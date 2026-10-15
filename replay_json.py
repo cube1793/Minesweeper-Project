@@ -9,12 +9,13 @@ Replay validation remains centralized in replay_model dataclasses.
 import json
 from pathlib import Path
 
+from mouse_trace import MouseTraceData, MouseTracePoint, MouseTraceSegment
 from replay_model import ReplayBoard, ReplayData, ReplayEvent
 
 
 def replay_data_to_dict(replay_data: ReplayData) -> dict:
     """Convert ReplayData to a JSON-serializable dictionary."""
-    return {
+    data = {
         "schema_version": replay_data.schema_version,
         "source_type": replay_data.source_type,
         "board": {
@@ -35,6 +36,24 @@ def replay_data_to_dict(replay_data: ReplayData) -> dict:
             for event in replay_data.events
         ],
     }
+    if replay_data.mouse_trace is not None:
+        trace = replay_data.mouse_trace
+        data["mouse_trace"] = {
+            "width": trace.width,
+            "height": trace.height,
+            "segments": [
+                {
+                    "cell_size": segment.cell_size,
+                    "points": [
+                        {"elapsed_us": point.elapsed_us, "x": point.x, "y": point.y,
+                         "replay_event_index": point.replay_event_index}
+                        for point in segment.points
+                    ],
+                }
+                for segment in trace.segments
+            ],
+        }
+    return data
 
 
 def replay_data_from_dict(data: dict) -> ReplayData:
@@ -55,13 +74,41 @@ def replay_data_from_dict(data: dict) -> ReplayData:
 
     board = _board_from_dict(board_data)
     events = tuple(_event_from_dict(event) for event in event_data)
+    schema_version = data.get("schema_version", 1)
+    if schema_version == 1 and "mouse_trace" in data:
+        raise ValueError("Replay schema v1 cannot contain mouse_trace.")
+    trace = _mouse_trace_from_dict(data["mouse_trace"]) if "mouse_trace" in data else None
 
     return ReplayData(
         board=board,
         events=events,
         source_type=data.get("source_type", "human"),
-        schema_version=data.get("schema_version", 1),
+        schema_version=schema_version,
+        mouse_trace=trace,
     )
+
+
+def _mouse_trace_from_dict(data) -> MouseTraceData:
+    """Check JSON containers; pure trace models own value/order validation."""
+    if not isinstance(data, dict):
+        raise ValueError("Replay JSON mouse_trace must be an object.")
+    try:
+        if not isinstance(data["segments"], list):
+            raise ValueError("Mouse Trace segments must be a list.")
+        segments = []
+        for segment in data["segments"]:
+            if not isinstance(segment, dict) or not isinstance(segment.get("points"), list):
+                raise ValueError("Mouse Trace segment must be an object with a points list.")
+            points = []
+            for point in segment["points"]:
+                if not isinstance(point, dict):
+                    raise ValueError("Mouse Trace point must be an object.")
+                points.append(MouseTracePoint(point["elapsed_us"], point["x"], point["y"],
+                                              point["replay_event_index"]))
+            segments.append(MouseTraceSegment(segment["cell_size"], tuple(points)))
+        return MouseTraceData(data["width"], data["height"], tuple(segments))
+    except KeyError as exc:
+        raise ValueError("Replay JSON mouse_trace is missing a required field.") from exc
 
 
 def save_replay_json(replay_data: ReplayData, path) -> None:

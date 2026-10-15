@@ -45,6 +45,7 @@ import sys
 import tempfile
 import time
 from bisect import bisect_right
+from dataclasses import replace
 from datetime import datetime
 from enum import IntEnum
 
@@ -864,7 +865,7 @@ class MinesweeperUI(QWidget):
         self.mouse_trace_record_checkbox.toggled.connect(self._on_mouse_trace_recording_toggled)
         self.mouse_trace_display_checkbox = QCheckBox("마우스 경로 표시")
         self.mouse_trace_display_checkbox.setEnabled(False)
-        self.mouse_trace_display_checkbox.setToolTip("게임 종료 후 기록된 경로 표시 · 파랑 OPEN / 초록 FLAG / 보라 CHORD")
+        self.mouse_trace_display_checkbox.setToolTip("종료된 게임 / Replay에 기록된 전체 경로 표시 · 파랑 OPEN / 초록 FLAG / 보라 CHORD")
         self.mouse_trace_display_checkbox.toggled.connect(self._update_mouse_trace_controls)
         mouse_trace_bar.addWidget(self.mouse_trace_record_checkbox)
         mouse_trace_bar.addWidget(self.mouse_trace_display_checkbox)
@@ -1531,7 +1532,12 @@ class MinesweeperUI(QWidget):
 
         self._capture_replay_board_if_ready()
         try:
-            return self._replay_recorder.to_replay_data()
+            replay_data = self._replay_recorder.to_replay_data()
+            trace = self._mouse_trace_recorder.snapshot()
+            # Save takes a detached prefix without freezing ongoing Live capture.
+            if trace is not None:
+                replay_data = replace(replay_data, schema_version=2, mouse_trace=trace)
+            return replay_data
         except ValueError as exc:
             QMessageBox.information(
                 self,
@@ -1915,6 +1921,7 @@ class MinesweeperUI(QWidget):
         self._replay_mode = True
         self._replay_player = replay_player
         self._replay_data = replay_player.replay_data
+        self.mouse_trace_overlay.set_trace(self._replay_data.mouse_trace, self._replay_data.events)
         self._clear_replay_display_time_override()
         self._prepare_replay_counter_state(replay_player.replay_data)
         self._game_over = False
@@ -2230,7 +2237,11 @@ class MinesweeperUI(QWidget):
             self._mouse_trace_display_data = self._mouse_trace_recorder.snapshot()
             self.mouse_trace_overlay.set_trace(self._mouse_trace_display_data,
                                               self._replay_recorder.events)
-        available = terminal_live and self._mouse_trace_display_data is not None
+        if self._replay_mode:
+            # ReplayData owns the entire attachment, independent of seek/time.
+            available = self._replay_data is not None and self._replay_data.mouse_trace is not None
+        else:
+            available = terminal_live and self._mouse_trace_display_data is not None
         self.mouse_trace_display_checkbox.setEnabled(available)
         if not available:
             self._clear_mouse_trace_display()

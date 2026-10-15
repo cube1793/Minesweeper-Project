@@ -1,6 +1,8 @@
 import unittest
 from math import inf, nan
+from dataclasses import replace
 
+from mouse_trace import MouseTraceData, MouseTracePoint, MouseTraceSegment
 from board_analyzer import analyze_board
 from core_engine import MinesweeperEngine
 from replay_model import (
@@ -250,6 +252,54 @@ class ReplayModelTests(unittest.TestCase):
                 num_mines=2,
                 mine_positions={(1, 1)},
             )
+
+
+class ReplayMouseTraceModelTests(unittest.TestCase):
+    def setUp(self):
+        self.board = ReplayBoard(3, 3, 1, {(1, 1)})
+        self.events = (ReplayEvent(0, 0, 0, "CHORD"), ReplayEvent(7.5, 0, 0, "OPEN"))
+        self.trace = MouseTraceData(3, 3, (
+            MouseTraceSegment(28, (MouseTracePoint(0, 4.25, 7, 1),
+                                   MouseTracePoint(99_000_000, 8, 9.5))),
+        ))
+
+    def test_default_and_old_four_position_constructor_remain_v1(self):
+        for replay in (ReplayData(self.board, self.events),
+                       ReplayData(self.board, self.events, "human", 1),
+                       ReplayData(self.board, self.events, "algorithm", 1)):
+            self.assertEqual(replay.schema_version, 1)
+            self.assertIsNone(replay.mouse_trace)
+        self.assertEqual(ReplayData(self.board, self.events, "algorithm", 1).source_type, "algorithm")
+
+    def test_v2_accepts_later_first_reference_and_independent_trace_clock(self):
+        replay = ReplayData(self.board, self.events, "human", 2, self.trace)
+        self.assertIs(replay.mouse_trace, self.trace)
+        self.assertEqual(replay.events, self.events)
+        self.assertEqual(replay.mouse_trace.segments[0].points[0].replay_event_index, 1)
+        self.assertEqual(replay.mouse_trace.segments[0].points[-1].elapsed_us, 99_000_000)
+
+    def test_version_and_attachment_combinations_are_strict(self):
+        for version, trace in ((1, self.trace), (2, None), (2, {}),
+                               (0, None), (3, self.trace), (-1, None),
+                               (True, None), (False, None), (1.0, None),
+                               (2.0, self.trace), ("2", self.trace), (None, None)):
+            with self.subTest(version=version, trace=trace), self.assertRaises(ValueError):
+                ReplayData(self.board, self.events, "human", version, trace)
+        with self.assertRaises(ValueError):
+            ReplayData(self.board, self.events, schema_version=2)
+
+    def test_trace_requires_human_source(self):
+        for source in ("algorithm", "ai"):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                ReplayData(self.board, self.events, source, 2, self.trace)
+
+    def test_trace_dimensions_and_event_range_must_match(self):
+        for trace in (replace(self.trace, width=4), replace(self.trace, height=4)):
+            with self.subTest(trace=trace), self.assertRaises(ValueError):
+                ReplayData(self.board, self.events, "human", 2, trace)
+        for events in ((), self.events[:1]):
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                ReplayData(self.board, events, "human", 2, self.trace)
 
 
 if __name__ == "__main__":

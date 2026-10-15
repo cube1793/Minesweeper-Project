@@ -9,6 +9,8 @@ the UI, or execute game actions.
 from dataclasses import dataclass
 from math import isfinite
 
+from mouse_trace import MouseTraceData
+
 
 Coordinate = tuple[int, int]
 MinePositions = frozenset[Coordinate]
@@ -115,14 +117,31 @@ class ReplayData:
     events: tuple[ReplayEvent, ...]
     source_type: str = SOURCE_HUMAN
     schema_version: int = 1
+    mouse_trace: MouseTraceData | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "events", tuple(self.events))
 
         if self.source_type not in VALID_SOURCE_TYPES:
             raise ValueError("Replay source_type is not supported.")
-        if self.schema_version != 1:
+        if (isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int)
+                or self.schema_version not in (1, 2)):
             raise ValueError("Unsupported replay schema_version.")
+
+        if self.schema_version == 1:
+            if self.mouse_trace is not None:
+                raise ValueError("Replay schema v1 cannot contain Mouse Trace.")
+        else:
+            if not isinstance(self.mouse_trace, MouseTraceData):
+                raise ValueError("Replay schema v2 requires MouseTraceData.")
+            if self.source_type != SOURCE_HUMAN:
+                raise ValueError("Mouse Trace requires a human replay.")
+            if (self.mouse_trace.width, self.mouse_trace.height) != (self.board.width, self.board.height):
+                raise ValueError("Mouse Trace dimensions must match the replay board.")
+            for segment in self.mouse_trace.segments:
+                for point in segment.points:
+                    if point.replay_event_index is not None and point.replay_event_index >= len(self.events):
+                        raise ValueError("Mouse Trace event reference is outside the replay event stream.")
 
         previous_elapsed_time = None
         for event in self.events:
