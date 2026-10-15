@@ -71,6 +71,7 @@ from replay_analysis import ReplayStepAnalysis, analyze_replay_step
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
 from mouse_trace import MouseTraceRecorder
+from mouse_trace_ui import MouseTraceOverlay
 from zini_calculator import ZiniNeighborhoodBeamConfig
 from zini_explorer import ZiniExplorerController
 
@@ -373,6 +374,9 @@ class MinesweeperUI(QWidget):
         self._mouse_preview = set()
         self._mouse_trace_recorder = MouseTraceRecorder(engine.width, engine.height)
         self._mouse_trace_release = None
+        self._mouse_trace_recording_enabled = True
+        self._mouse_trace_recording_locked = False
+        self._mouse_trace_display_data = None
         self._analysis_result: LiveAnalysis | None = None
         self._replay_analysis_result: ReplayStepAnalysis | None = None
         self._replay_view_index = None
@@ -853,11 +857,26 @@ class MinesweeperUI(QWidget):
         )
         main_layout.addWidget(self.analysis_status_label)
 
+        mouse_trace_bar = QHBoxLayout()
+        self.mouse_trace_record_checkbox = QCheckBox("마우스 경로 기록")
+        self.mouse_trace_record_checkbox.setChecked(self._mouse_trace_recording_enabled)
+        self.mouse_trace_record_checkbox.setToolTip("첫 OPEN/FLAG 전에 선택 · 게임 종료 후 경로 확인")
+        self.mouse_trace_record_checkbox.toggled.connect(self._on_mouse_trace_recording_toggled)
+        self.mouse_trace_display_checkbox = QCheckBox("마우스 경로 표시")
+        self.mouse_trace_display_checkbox.setEnabled(False)
+        self.mouse_trace_display_checkbox.setToolTip("게임 종료 후 기록된 경로 표시 · 파랑 OPEN / 초록 FLAG / 보라 CHORD")
+        self.mouse_trace_display_checkbox.toggled.connect(self._update_mouse_trace_controls)
+        mouse_trace_bar.addWidget(self.mouse_trace_record_checkbox)
+        mouse_trace_bar.addWidget(self.mouse_trace_display_checkbox)
+        mouse_trace_bar.addStretch()
+        main_layout.addLayout(mouse_trace_bar)
+
         # --- 보드: 컨테이너 위젯 + 그리드, QScrollArea로 감싸기 ---
         self.board_container = QWidget()
         self.grid = QGridLayout(self.board_container)
         self.grid.setSpacing(0)
         self.grid.setContentsMargins(0, 0, 0, 0)
+        self.mouse_trace_overlay = MouseTraceOverlay(self.board_container)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidget(self.board_container)
@@ -931,16 +950,19 @@ class MinesweeperUI(QWidget):
         w = engine.width * self._cell_size
         h = engine.height * self._cell_size
         self.board_container.setFixedSize(w, h)
+        self.mouse_trace_overlay.setGeometry(0, 0, w, h)
+        self.mouse_trace_overlay.set_cell_size(self._cell_size)
+        self.mouse_trace_overlay.raise_()
 
     def _apply_initial_window_size(self):
         """초기 창 크기를 보드 비율에 맞춰 설정(화면 초과 시 적당히 제한)."""
         engine = self._engine_for_current_mode()
         board_w = engine.width * self._cell_size
         board_h = engine.height * self._cell_size
-        # Reserve space for settings, game controls, analysis controls/status,
+        # Reserve space for settings, game controls, analysis/trace controls,
         # and scroll-area frames so the default expert board fits on first show.
         w = min(board_w + STATS_PANEL_WIDTH + 80, 1500)
-        h = min(board_h + 220, 900)
+        h = min(board_h + 250, 900)
         self.resize(w, h)
 
     def _init_shortcuts(self):
@@ -1443,6 +1465,9 @@ class MinesweeperUI(QWidget):
         # was interrupted by a reset/rebuild callback.
         self._mouse_trace_recorder = MouseTraceRecorder(self.engine.width, self.engine.height)
         self._mouse_trace_release = None
+        self._mouse_trace_recording_locked = False
+        self._clear_mouse_trace_display()
+        self._update_mouse_trace_controls()
 
     def _record_replay_event(self, x: int, y: int, action: Action):
         """engine.step()으로 실제 처리된 클릭 이벤트를 recorder에 반영한다."""
@@ -1876,6 +1901,8 @@ class MinesweeperUI(QWidget):
         self._invalidate_mouse_input()
         self._mouse_trace_recorder.invalidate()
         self._mouse_trace_release = None
+        self._clear_mouse_trace_display()
+        self.mouse_trace_record_checkbox.setEnabled(False)
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._replay_view_index = None
@@ -2171,6 +2198,44 @@ class MinesweeperUI(QWidget):
     def _break_mouse_trace_segment(self, _value=None):
         self._mouse_trace_recorder.break_segment()
 
+    def _on_mouse_trace_recording_toggled(self, checked):
+        if (self._mouse_trace_recording_locked or self._replay_mode
+                or self.engine.status != GameStatus.PLAYING):
+            blocked = self.mouse_trace_record_checkbox.blockSignals(True)
+            self.mouse_trace_record_checkbox.setChecked(self._mouse_trace_recording_enabled)
+            self.mouse_trace_record_checkbox.blockSignals(blocked)
+        else:
+            self._mouse_trace_recording_enabled = checked
+
+    def _lock_mouse_trace_recording(self):
+        self._mouse_trace_recording_locked = True
+        self.mouse_trace_record_checkbox.setEnabled(False)
+
+    def _clear_mouse_trace_display(self):
+        self._mouse_trace_display_data = None
+        self.mouse_trace_overlay.set_trace(None, ())
+        self.mouse_trace_overlay.hide()
+        blocked = self.mouse_trace_display_checkbox.blockSignals(True)
+        self.mouse_trace_display_checkbox.setChecked(False)
+        self.mouse_trace_display_checkbox.blockSignals(blocked)
+        self.mouse_trace_display_checkbox.setEnabled(False)
+
+    def _update_mouse_trace_controls(self, _checked=None):
+        terminal_live = (not self._replay_mode
+                         and self.engine.status in (GameStatus.WON, GameStatus.LOST))
+        self.mouse_trace_record_checkbox.setEnabled(
+            not self._replay_mode and not terminal_live and not self._mouse_trace_recording_locked)
+        if (terminal_live and self._mouse_trace_recorder.frozen
+                and self._mouse_trace_display_data is None):
+            self._mouse_trace_display_data = self._mouse_trace_recorder.snapshot()
+            self.mouse_trace_overlay.set_trace(self._mouse_trace_display_data,
+                                              self._replay_recorder.events)
+        available = terminal_live and self._mouse_trace_display_data is not None
+        self.mouse_trace_display_checkbox.setEnabled(available)
+        if not available:
+            self._clear_mouse_trace_display()
+        self.mouse_trace_overlay.setVisible(available and self.mouse_trace_display_checkbox.isChecked())
+
     def _mouse_trace_position(self, event):
         recorder = self._mouse_trace_recorder
         if (self._replay_mode or self.engine.status != GameStatus.PLAYING
@@ -2432,15 +2497,26 @@ class MinesweeperUI(QWidget):
                      > before["active_clicks"] + before["wasted_clicks"])
         if committed and auto_observation is not None:
             self._mouse_trace_recorder.invalidate()
+            self._lock_mouse_trace_recording()
+        elif (committed and release is not None and release[0] is self._mouse_trace_recorder
+              and action in (Action.OPEN, Action.FLAG) and not self._mouse_trace_recording_locked):
+            self._lock_mouse_trace_recording()
+            if not self._mouse_trace_recording_enabled:
+                self._mouse_trace_recorder.invalidate()
         self._ensure_zini_metric_job()
         if action in (Action.OPEN, Action.FLAG):
             self._start_timer()
         event_index = self._record_replay_event(x, y, action)
         if committed and auto_observation is None and release is not None:
             recorder, position, cell_size, observed_ns = release
-            if (recorder is self._mouse_trace_recorder and event_index is not None
+            if (recorder is self._mouse_trace_recorder
                     and (recorder.started or action in (Action.OPEN, Action.FLAG))):
-                recorder.record_action(*position, cell_size, event_index, observed_ns=observed_ns)
+                if event_index is None:
+                    # A committed action missing from the authoritative Replay
+                    # stream makes the entire human trace unusable this game.
+                    recorder.invalidate()
+                else:
+                    recorder.record_action(*position, cell_size, event_index, observed_ns=observed_ns)
         if self.engine.status != GameStatus.PLAYING:
             self._mouse_trace_recorder.freeze()
         self._refresh_live_board(info, auto_observation=auto_observation)
@@ -2722,6 +2798,7 @@ class MinesweeperUI(QWidget):
         remaining = engine.num_mines - engine.count_flags()
         self.mine_label.setText(f"💣 {remaining:03d}")
         self._update_mouse_preview()
+        self._update_mouse_trace_controls()
 
     def _current_font_size(self) -> int:
         """셀 크기에 비례한 폰트 크기."""

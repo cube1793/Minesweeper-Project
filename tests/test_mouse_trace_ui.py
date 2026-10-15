@@ -1,6 +1,8 @@
 """Real Qt board capture with unchanged engine/Replay/gesture authorities."""
 
 import os
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -8,6 +10,7 @@ from core_engine import Action, GameStatus, MinesweeperEngine
 from mouse_trace import MouseTraceRecorder
 from replay_model import ReplayBoard, ReplayData
 from replay_player import ReplayPlayer
+from replay_json import load_replay_json
 from tests.ui_settings import isolate_ui_settings
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -244,9 +247,17 @@ class MouseTraceUITests(unittest.TestCase):
                             patch("builtins.print"):
                         self.release((2, 0))
                     self.clock.assert_called_once_with()
-                    self.assertEqual(self.markers(), before)
-                    self.assertEqual(self.recorder.started, started)
-                    if not started:
+                    if failure == "replay":
+                        self.assertFalse(self.recorder.eligible)
+                        self.assertIsNone(self.recorder.snapshot())
+                        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                        self.click((4, 0))
+                        self.assertIsNone(self.recorder.snapshot())
+                    else:
+                        self.assertEqual(self.markers(), before)
+                        self.assertEqual(self.recorder.started, started)
+                        self.assertTrue(self.recorder.eligible)
+                    if not started and failure == "action":
                         self.assertIsNone(self.recorder.snapshot())
                         # A discarded candidate must not set the next origin.
                         self.click((4, 0))
@@ -254,9 +265,6 @@ class MouseTraceUITests(unittest.TestCase):
                         self.clock.return_value += 7_000
                         self.hover((3, 0))
                         self.assertEqual(self.points()[-1].elapsed_us, 7)
-                    elif failure == "replay":
-                        self.assertEqual(self.points()[-1].elapsed_us, 12)
-                        self.assertIsNone(self.points()[-1].replay_event_index)
 
     def test_held_motion_preview_and_release_target_are_preserved(self):
         self.click()
@@ -502,6 +510,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.ui.simple_auto_checkbox.setChecked(True)
         self.assertTrue(self.ui._simple_auto_pending)
         self.assertTrue(self.recorder.eligible)
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
         self.ui.simple_auto_checkbox.setChecked(False)
         self.assertTrue(self.recorder.eligible)
         self.assertIsNone(self.recorder.snapshot())
@@ -515,6 +524,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.ui._simple_auto_timer.timeout.emit()
         self.assertFalse(self.recorder.eligible)
         self.assertIsNone(self.recorder.snapshot())
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
         self.assertEqual(self.ui._replay_recorder.source_type, "human")
         self.ui.simple_auto_checkbox.setChecked(False)
         self.hover((4, 0))
@@ -534,12 +544,147 @@ class MouseTraceUITests(unittest.TestCase):
         self.assertTrue(self.recorder.eligible)
         self.assertIsNotNone(self.recorder.snapshot())
 
-    def test_failed_replay_append_does_not_start_or_invent_action_reference(self):
-        with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")), \
+    def test_first_open_or_flag_replay_append_failure_prevents_later_trace_start(self):
+        for button in (Qt.LeftButton, Qt.RightButton):
+            with self.subTest(button=button):
+                self.ui.on_reset()
+                self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                self.install_recorder()
+                with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")), \
+                        patch("builtins.print"):
+                    self.click((0, 0), button)
+                counters = self.engine.get_counter_snapshot()
+                self.assertEqual(counters["active_clicks"] + counters["wasted_clicks"], 1)
+                self.assertEqual(self.ui._replay_recorder.events, ())
+                self.assertFalse(self.recorder.eligible)
+                self.assertIsNone(self.recorder.snapshot())
+                self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                self.click((2, 0))
+                self.assertEqual(len(self.ui._replay_recorder.events), 1)
+                self.assertIsNone(self.recorder.snapshot())
+                self.click((3, 3))
+                self.assertEqual(self.engine.status, GameStatus.LOST)
+                self.assertEqual(len(self.ui._replay_recorder.events), 2)
+                self.assertIsNone(self.recorder.snapshot())
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+
+    def test_started_trace_is_discarded_on_open_flag_or_chord_replay_append_failure(self):
+        cases = ((Action.OPEN, (2, 0), Qt.LeftButton),
+                 (Action.FLAG, (1, 1), Qt.RightButton),
+                 (Action.CHORD, (0, 0), Qt.LeftButton))
+        for action, target, button in cases:
+            with self.subTest(action=action):
+                self.ui.on_reset()
+                self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                self.install_recorder()
+                self.click()
+                self.assertIsNotNone(self.recorder.snapshot())
+                events = self.ui._replay_recorder.events
+                with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")) as append, \
+                        patch("builtins.print"):
+                    self.click(target, button)
+                self.assertEqual(append.call_args.kwargs["action"], action)
+                counters = self.engine.get_counter_snapshot()
+                self.assertEqual(counters["active_clicks"] + counters["wasted_clicks"], 2)
+                self.assertEqual(self.ui._replay_recorder.events, events)
+                self.assertFalse(self.recorder.eligible)
+                self.assertIsNone(self.recorder.snapshot())
+                self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                self.click((4, 0))
+                self.assertIsNone(self.recorder.snapshot())
+                self.click((3, 3))
+                self.assertEqual(self.engine.status, GameStatus.LOST)
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+                self.assertIsNone(self.ui.mouse_trace_overlay._trace)
+
+    def test_terminal_replay_append_failure_never_exposes_finished_path(self):
+        for started in (False, True):
+            for won in (False, True):
+                with self.subTest(started=started, won=won):
+                    width = 4 if started else 2
+                    self.ui._rebuild_game(width, 1, 1)
+                    self.engine.reset_with_mines(width, 1, 1, {(width - 1, 0)})
+                    self.install_recorder()
+                    self.app.processEvents()
+                    if started:
+                        self.click((2, 0))
+                        self.assertEqual(self.engine.status, GameStatus.PLAYING)
+                        self.assertIsNotNone(self.recorder.snapshot())
+                    with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")), \
+                            patch("builtins.print"):
+                        self.click((0, 0) if won else (width - 1, 0))
+                    self.assertEqual(self.engine.status, GameStatus.WON if won else GameStatus.LOST)
+                    self.assertFalse(self.recorder.eligible)
+                    self.assertTrue(self.recorder.frozen)
+                    self.assertIsNone(self.recorder.snapshot())
+                    self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+                    self.ui.mouse_trace_display_checkbox.setChecked(True)
+                    self.assertFalse(self.ui.mouse_trace_display_checkbox.isChecked())
+                    self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
+                    self.assertIsNone(self.ui.mouse_trace_overlay._trace)
+
+    def test_noncommitted_action_with_missing_replay_preserves_recording_policy(self):
+        for started, enabled in ((False, True), (False, False), (True, True)):
+            with self.subTest(started=started, enabled=enabled):
+                self.ui.on_reset()
+                self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                self.install_recorder()
+                self.ui.mouse_trace_record_checkbox.setChecked(enabled)
+                if started:
+                    self.click()
+
+                def policy():
+                    return (self.recorder.eligible, self.recorder.started, self.recorder.frozen,
+                            self.ui.mouse_trace_record_checkbox.isChecked(),
+                            self.ui.mouse_trace_record_checkbox.isEnabled(),
+                            self.ui._mouse_trace_recording_locked, self.markers())
+
+                before = policy()
+                counters = self.engine.get_counter_snapshot()
+                events = self.ui._replay_recorder.events
+                with patch.object(self.engine, "step", return_value=(None, None, None, None, {})), \
+                        patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")), \
+                        patch("builtins.print"):
+                    self.click((2, 0))
+                self.assertEqual(policy(), before)
+                self.assertEqual(self.engine.get_counter_snapshot(), counters)
+                self.assertEqual(self.ui._replay_recorder.events, events)
+                if not started:
+                    self.assertIsNone(self.recorder.snapshot())
+                    self.ui.mouse_trace_record_checkbox.setChecked(True)
+                self.click((2, 0))
+                self.assertTrue(self.recorder.eligible)
+                self.assertEqual(len(self.markers()), len(events) + 1)
+
+    def test_pre_start_untimed_chord_append_failure_preserves_future_trace(self):
+        self.ui.mouse_trace_record_checkbox.setChecked(False)
+        self.press((0, 0))
+        self.press((0, 0), Qt.RightButton)
+        with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("not appended")) as append, \
+                patch("builtins.print"):
+            self.release((0, 0), Qt.RightButton)
+            self.release((0, 0))
+        append.assert_called_once()
+        self.assertEqual(append.call_args.kwargs["action"], Action.CHORD)
+        self.assertTrue(self.recorder.eligible)
+        self.assertIsNone(self.recorder.snapshot())
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertFalse(self.ui._mouse_trace_recording_locked)
+        self.ui.mouse_trace_record_checkbox.click()
+        self.clock.return_value += 1_000_000
+        self.click()
+        self.assertEqual((self.markers()[0].elapsed_us, self.markers()[0].replay_event_index), (0, 0))
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+
+    def test_board_capture_failure_after_successful_event_append_keeps_trace_eligible(self):
+        with patch.object(self.ui, "_capture_replay_board_if_ready", side_effect=ValueError("board capture failed")), \
                 patch("builtins.print"):
             self.click()
-        self.assertIsNone(self.recorder.snapshot())
-        self.assertEqual(self.ui._replay_recorder.events, ())
+        self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        self.assertTrue(self.recorder.eligible)
+        self.assertEqual(self.markers()[0].replay_event_index, 0)
+        self.click((2, 0))
+        self.assertEqual([p.replay_event_index for p in self.markers()], [0, 1])
 
     def test_direct_action_slot_cannot_reuse_previous_release_position(self):
         self.ui.on_left_click(0, 0)
@@ -573,6 +718,320 @@ class MouseTraceUITests(unittest.TestCase):
         self.app.sendEvent(button, event)
         self.held = Qt.NoButton
         self.assertEqual((self.points()[0].x, self.points()[0].y), (4.25, 7.75))
+
+    def finish_small_game(self, *, won=True, recording=True):
+        self.ui._rebuild_game(2, 1, 1)
+        self.engine.reset_with_mines(2, 1, 1, {(1, 0)})
+        self.install_recorder()
+        self.ui.mouse_trace_record_checkbox.setChecked(recording)
+        self.app.processEvents()
+        self.click((0, 0) if won else (1, 0))
+
+    def paint_overlay(self):
+        with patch("mouse_trace_ui.QPainter") as painter_class:
+            self.ui.mouse_trace_overlay.paintEvent(None)
+        return painter_class.return_value
+
+    def test_recording_default_and_pre_action_choice_are_session_local(self):
+        record = self.ui.mouse_trace_record_checkbox
+        display = self.ui.mouse_trace_display_checkbox
+        before = self.settings.allKeys()
+        self.assertEqual(record.text(), "마우스 경로 기록")
+        self.assertEqual(display.text(), "마우스 경로 표시")
+        self.assertTrue(record.isChecked())
+        self.assertTrue(record.isEnabled())
+        record.click()
+        self.assertFalse(record.isChecked())
+        self.assertTrue(self.recorder.eligible)
+        record.click()
+        self.assertTrue(record.isChecked())
+        self.assertIsNone(self.recorder.snapshot())
+        self.assertEqual(self.settings.allKeys(), before)
+        record.click()
+        another = MinesweeperUI(MinesweeperEngine(2, 1, 1))
+        try:
+            self.assertTrue(another.mouse_trace_record_checkbox.isChecked())
+        finally:
+            another.close()
+            another.deleteLater()
+
+    def test_untimed_chord_keeps_recording_choice_editable(self):
+        self.ui.mouse_trace_record_checkbox.setChecked(False)
+        self.press((0, 0))
+        self.press((0, 0), Qt.RightButton)
+        self.release((0, 0), Qt.RightButton)
+        self.release((0, 0))
+        self.assertEqual(self.ui._replay_recorder.events[0].action, "CHORD")
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertTrue(self.recorder.eligible)
+        self.ui.mouse_trace_record_checkbox.click()
+        self.click()
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertEqual(self.markers()[0].replay_event_index, 1)
+
+    def test_first_physical_open_or_flag_locks_choice_with_on_or_off_policy(self):
+        for enabled in (True, False):
+            for button in (Qt.LeftButton, Qt.RightButton):
+                with self.subTest(enabled=enabled, button=button):
+                    self.ui.on_reset()
+                    self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                    self.install_recorder()
+                    record = self.ui.mouse_trace_record_checkbox
+                    record.setChecked(enabled)
+                    self.click((0, 0), button)
+                    self.assertFalse(record.isEnabled())
+                    self.assertEqual(self.recorder.eligible, enabled)
+                    self.assertEqual(self.recorder.started, enabled)
+                    record.click()  # Disabled mouse/keyboard activation is inert.
+                    self.assertEqual(record.isChecked(), enabled)
+                    record.setChecked(not enabled)  # A late programmatic toggle cannot change policy.
+                    self.assertEqual(record.isChecked(), enabled)
+                    self.click((2, 0))
+                    if enabled:
+                        self.assertEqual([p.replay_event_index for p in self.markers()], [0, 1])
+                    else:
+                        self.assertIsNone(self.recorder.snapshot())
+
+    def test_recording_lock_depends_on_gameplay_commit_not_replay_append(self):
+        with patch.object(self.engine, "step", return_value=(None, None, None, None, {})):
+            self.click()
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+        with patch.object(self.ui._replay_recorder, "record_event", side_effect=ValueError("failed")), \
+                patch("builtins.print"):
+            self.click()
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertIsNone(self.recorder.snapshot())
+
+    def test_fresh_game_transitions_preserve_recording_choice_and_unlock(self):
+        transitions = (
+            self.ui.on_reset,
+            lambda: self.ui._rebuild_game(7, 4, 3),
+            lambda: self.ui.on_difficulty_changed("초급 (9x9, 10)"),
+            lambda: self.ui.on_difficulty_changed("커스텀"),
+        )
+        for enabled in (True, False):
+            for transition in transitions:
+                with self.subTest(enabled=enabled, transition=transition):
+                    self.ui.on_reset()
+                    self.ui.mouse_trace_record_checkbox.setChecked(enabled)
+                    self.click((0, 0), Qt.RightButton)
+                    self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                    with patch.object(self.ui, "_ask_custom_dimensions", return_value=(8, 6, 4)):
+                        transition()
+                    self.app.processEvents()
+                    self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+                    self.assertEqual(self.ui.mouse_trace_record_checkbox.isChecked(), enabled)
+                    self.assertIsNone(self.ui._mouse_trace_recorder.snapshot())
+                    self.assertTrue(self.ui._mouse_trace_recorder.eligible)
+
+    def test_auto_before_any_human_action_locks_only_when_executed(self):
+        self.ui.on_reset()
+        self.install_recorder()
+        self.ui.mouse_trace_record_checkbox.setChecked(False)
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.assertTrue(self.ui._simple_auto_pending)
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertTrue(self.recorder.eligible)
+        self.ui._simple_auto_timer.timeout.emit()
+        self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertFalse(self.recorder.eligible)
+
+    def test_display_is_unavailable_throughout_playing(self):
+        display = self.ui.mouse_trace_display_checkbox
+        for started in (False, True):
+            with self.subTest(started=started):
+                if started:
+                    self.click()
+                self.assertFalse(display.isEnabled())
+                self.assertFalse(display.isChecked())
+                display.setChecked(True)
+                self.assertFalse(display.isChecked())
+                self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
+                self.assertIsNone(self.ui.mouse_trace_overlay._trace)
+
+    def test_won_and_lost_trace_available_off_until_explicitly_shown(self):
+        for won in (True, False):
+            with self.subTest(won=won):
+                self.finish_small_game(won=won)
+                display = self.ui.mouse_trace_display_checkbox
+                overlay = self.ui.mouse_trace_overlay
+                self.assertEqual(self.engine.status, GameStatus.WON if won else GameStatus.LOST)
+                self.assertTrue(self.recorder.frozen)
+                self.assertTrue(display.isEnabled())
+                self.assertFalse(display.isChecked())
+                self.assertFalse(overlay.isVisible())
+                self.assertEqual(overlay._trace, self.recorder.snapshot())
+                display.click()
+                self.assertTrue(overlay.isVisible())
+                self.assertEqual(self.paint_overlay().drawEllipse.call_count, 1)
+                display.click()
+                self.assertFalse(overlay.isVisible())
+
+    def test_terminal_without_trace_cannot_enable_display(self):
+        for cause in ("disabled", "auto", "no observed release"):
+            with self.subTest(cause=cause):
+                self.ui._rebuild_game(2, 1, 1)
+                self.engine.reset_with_mines(2, 1, 1, {(1, 0)})
+                self.install_recorder()
+                self.app.processEvents()
+                if cause == "disabled":
+                    self.ui.mouse_trace_record_checkbox.setChecked(False)
+                    self.click()
+                elif cause == "auto":
+                    self.ui.simple_auto_checkbox.setChecked(True)
+                    self.ui.allow_guess_checkbox.setChecked(True)
+                    self.assertTrue(self.ui._simple_auto_pending)
+                    self.ui._simple_auto_timer.timeout.emit()
+                else:
+                    self.ui.on_left_click(0, 0)
+                self.assertIn(self.engine.status, (GameStatus.WON, GameStatus.LOST))
+                self.assertIsNone(self.recorder.snapshot())
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+                self.ui.mouse_trace_display_checkbox.setChecked(True)
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isChecked())
+                self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
+
+    def test_new_game_hides_and_clears_finished_overlay(self):
+        for transition in (self.ui.on_reset, lambda: self.ui._rebuild_game(5, 5, 3)):
+            with self.subTest(transition=transition):
+                self.finish_small_game()
+                self.ui.mouse_trace_display_checkbox.click()
+                transition()
+                self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
+                self.assertIsNone(self.ui.mouse_trace_overlay._trace)
+                self.assertIsNone(self.ui._mouse_trace_display_data)
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isChecked())
+                self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+
+    def test_display_toggle_changes_only_presentation(self):
+        self.finish_small_game()
+        self.ui._analysis_result = object()
+        cell = self.ui._buttons[(0, 0)]
+        cell.setToolTip("unchanged tooltip")
+
+        def state():
+            return (self.engine.get_board_snapshot(), self.engine.get_observation(),
+                    self.engine.get_counter_snapshot(), self.engine.get_stats(),
+                    self.ui._replay_recorder.events, self.recorder.snapshot(),
+                    self.ui._analysis_result, self.ui._analysis_observation,
+                    cell.toolTip(), cell.analysis_overlay, cell.isDown(), self.ui._mouse_preview.copy())
+
+        before = state()
+        with patch.object(self.engine, "step", wraps=self.engine.step) as step, \
+                patch.object(self.ui, "_clear_live_analysis", wraps=self.ui._clear_live_analysis) as clear:
+            self.ui.mouse_trace_display_checkbox.click()
+            self.ui.mouse_trace_display_checkbox.click()
+        step.assert_not_called()
+        clear.assert_not_called()
+        self.assertEqual(state(), before)
+
+    def test_visible_overlay_preserves_board_target_and_physical_event_delivery(self):
+        self.finish_small_game()
+        self.ui.mouse_trace_display_checkbox.click()
+        overlay = self.ui.mouse_trace_overlay
+        self.assertTrue(overlay.testAttribute(Qt.WA_TransparentForMouseEvents))
+        before = self.ui._replay_recorder.events
+        target = self.ui._buttons[(1, 0)]
+        global_pos = self.point((1, 0))
+        self.assertIs(self.ui.board_container.childAt(self.ui.board_container.mapFromGlobal(global_pos)), target)
+        self.assertIs(self.ui._cell_at_mouse_position(global_pos), target)
+        delivered = QSignalSpy(target.mouse_input)
+        QTest.mouseClick(self.ui.windowHandle(), Qt.LeftButton, pos=self.ui.mapFromGlobal(global_pos))
+        self.assertGreaterEqual(len(delivered), 2)
+        self.assertEqual(self.ui._replay_recorder.events, before)  # Terminal routing remains inert.
+
+    def test_recorded_exit_gap_stays_separate_in_finished_overlay(self):
+        self.click()
+        self.hover((1, 0))
+        self.hover(self.outside())
+        self.hover((2, 0))
+        self.click((3, 3))
+        self.assertEqual(self.engine.status, GameStatus.LOST)
+        data = self.recorder.snapshot()
+        self.assertEqual(len(data.segments), 2)
+        self.ui.mouse_trace_display_checkbox.click()
+        painter = self.paint_overlay()
+        polygons = [[(p.x(), p.y()) for p in call.args[0]]
+                    for call in painter.drawPolyline.call_args_list]
+        self.assertEqual(polygons, [[(p.x, p.y) for p in s.points] for s in data.segments])
+
+    def test_mixed_live_sizes_and_terminal_resize_preserve_trace_geometry(self):
+        self.click()
+        self.ui.on_cell_size_changed(56)
+        self.app.processEvents()
+        self.click((3, 3))
+        data = self.recorder.snapshot()
+        self.assertEqual([s.cell_size for s in data.segments], [28, 56])
+        self.ui.mouse_trace_display_checkbox.click()
+        self.ui.on_cell_size_changed(14)
+        self.app.processEvents()
+        overlay = self.ui.mouse_trace_overlay
+        self.assertEqual((overlay.width(), overlay.height()), (70, 70))
+        self.assertTrue(overlay.isVisible())
+        self.assertEqual(self.recorder.snapshot(), data)
+        painter = self.paint_overlay()
+        positions = [(call.args[0].x(), call.args[0].y()) for call in painter.drawEllipse.call_args_list]
+        self.assertEqual(positions, [(p.x * 14 / s.cell_size, p.y * 14 / s.cell_size)
+                                     for s in data.segments for p in s.points if p.replay_event_index is not None])
+
+    def test_large_board_overlay_scrolls_and_clips_with_existing_viewport(self):
+        self.ui._rebuild_game(50, 50, 10)
+        self.engine.reset_with_mines(50, 50, 10, {(x, 1) for x in range(10)})
+        self.install_recorder()
+        self.ui.resize(1000, 650)
+        self.app.processEvents()
+        self.click()
+        self.click((0, 1))
+        self.ui.mouse_trace_display_checkbox.click()
+        overlay = self.ui.mouse_trace_overlay
+        before = self.recorder.snapshot()
+        self.ui.scroll_area.horizontalScrollBar().setValue(280)
+        self.ui.scroll_area.verticalScrollBar().setValue(280)
+        self.app.processEvents()
+        self.assertIs(overlay.parentWidget(), self.ui.board_container)
+        self.assertEqual(overlay.geometry(), self.ui.board_container.rect())
+        self.assertFalse(overlay.visibleRegion().contains(QPoint(0, 0)))
+        self.assertTrue(overlay.visibleRegion().contains(QPoint(300, 300)))
+        self.assertEqual(self.recorder.snapshot(), before)
+        self.assertIs(self.ui._cell_at_mouse_position(self.point((12, 11))), self.ui._buttons[(12, 11)])
+
+    def test_current_replay_and_save_load_remain_v1_without_trace_presentation(self):
+        self.finish_small_game()
+        self.ui.mouse_trace_display_checkbox.click()
+        data = self.ui._replay_recorder.to_replay_data()
+        self.ui.on_view_current_replay()
+        self.assertTrue(self.ui._replay_mode)
+        self.assertEqual(self.ui._replay_data, data)
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+        self.assertFalse(self.ui.mouse_trace_display_checkbox.isChecked())
+        self.assertIsNone(self.ui.mouse_trace_overlay._trace)
+        self.ui.on_replay_last()
+        self.ui.mouse_trace_display_checkbox.setChecked(True)
+        self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
+        root = Path(self.settings.fileName()).parent
+        named = root / "named.json"
+        with patch.object(self.ui, "_select_auto_replay_directory", return_value=str(root)), \
+                patch("ui_manager.QFileDialog.getSaveFileName", return_value=(str(named), "")), \
+                patch("ui_manager.QMessageBox.information"):
+            self.ui.on_save_replay()
+            self.ui.on_save_replay_as()
+        files = list(root.glob("*.json"))
+        self.assertEqual(len(files), 2)
+        for path in files:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(document["schema_version"], 1)
+            self.assertNotIn("mouse_trace", document)
+            self.assertEqual(load_replay_json(str(path)), data)
+        self.ui.on_exit_replay()
+        self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
+        with patch("ui_manager.QFileDialog.getOpenFileName", return_value=(str(named), "")):
+            self.ui.on_load_replay()
+        self.assertTrue(self.ui._replay_mode)
+        self.assertEqual(self.ui._replay_data, data)
+        self.assertFalse(self.ui.mouse_trace_display_checkbox.isEnabled())
+        self.assertFalse(self.ui.mouse_trace_overlay.isVisible())
 
 
 if __name__ == "__main__":

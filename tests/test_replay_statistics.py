@@ -482,6 +482,10 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
             ui = MinesweeperUI(live_engine)
         # This fixture bypasses _init_ui; supply the new presentation controls.
         ui.zini_explorer_button = Mock()
+        ui.mouse_trace_record_checkbox = Mock()
+        ui.mouse_trace_display_checkbox = Mock()
+        ui.mouse_trace_display_checkbox.isChecked.return_value = False
+        ui.mouse_trace_overlay = Mock()
         ui.analysis_status_label = _WidgetProbe()
         ui.analysis_checkbox = Mock()
         ui.analysis_checkbox.isChecked.return_value = False
@@ -728,7 +732,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         self.assertEqual(ui.board_container.fixed_size, (20, 20))
         ui.resize.assert_called_once_with(
             20 + ui_manager.STATS_PANEL_WIDTH + 80,
-            20 + 220,
+            20 + 250,
         )
         self.assertEqual(ui._render_cell.call_count, 4)
         self.assertEqual(
