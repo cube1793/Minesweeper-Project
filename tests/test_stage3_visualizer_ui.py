@@ -3,6 +3,8 @@
 import ast
 import builtins
 from contextlib import ExitStack
+from copy import deepcopy
+from fractions import Fraction
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -28,7 +30,7 @@ else:
     from stage3_visualizer_ui import CELL_SIZE, Stage3VisualizerWindow
 
 from benchmark_board import BenchmarkBoard, BenchmarkSetSpec, calculate_board_fingerprint
-from core_engine import Action, CellState, GameStatus
+from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 from simple_algorithm import SimpleMove
 from stage3_execution import Stage3Execution
 import stage3_identity
@@ -81,6 +83,17 @@ def execution_fixture(kind="win"):
     return Stage3Execution(spec, board, Stage3RunResult(actions[-1][3], tuple(traces)))
 
 
+class FakeClock:
+    def __init__(self):
+        self.now_ns = 0
+
+    def __call__(self):
+        return self.now_ns
+
+    def advance(self, nanoseconds):
+        self.now_ns += nanoseconds
+
+
 @unittest.skipIf(QApplication is None, "PyQt5 unavailable")
 class Stage3VisualizerTests(unittest.TestCase):
     @classmethod
@@ -93,8 +106,8 @@ class Stage3VisualizerTests(unittest.TestCase):
         self.execution = execution_fixture()
         self.window = self.create_window(self.execution)
 
-    def create_window(self, execution, parent=None):
-        window = Stage3VisualizerWindow(execution, parent)
+    def create_window(self, execution, parent=None, **kwargs):
+        window = Stage3VisualizerWindow(execution, parent, **kwargs)
         self.windows.append(window)
         return window
 
@@ -486,11 +499,450 @@ class Stage3VisualizerTests(unittest.TestCase):
             self.assert_index(window, index)
         self.assertEqual(self.execution, original)
 
+    def create_modeled_window(self, index=0, execution=None):
+        clock = FakeClock()
+        window = self.create_window(execution or self.execution, clock=clock)
+        window.slider.setValue(index)
+        window.mode_combo.setCurrentText("Modeled-Time")
+        return window, clock
+
+    def test_playback_modes_and_rates_default_without_persistence(self):
+        window = self.window
+        self.assertEqual([window.mode_combo.itemText(i) for i in range(2)], ["Index", "Modeled-Time"])
+        self.assertEqual(window.mode_combo.currentText(), "Index")
+        self.assertTrue(window.interval_spin.isEnabled())
+        self.assertFalse(window.speed_combo.isEnabled())
+        self.assertEqual(window.speed_combo.currentText(), "1×")
+        self.assertEqual(window.modeled_playback.speed, 1)
+        window.interval_spin.setValue(387)
+        window.mode_combo.setCurrentText("Modeled-Time")
+        window.speed_combo.setCurrentText("8×")
+        reopened = self.create_window(self.execution)
+        self.assertEqual(reopened.mode_combo.currentText(), "Index")
+        self.assertEqual(reopened.interval_spin.value(), 200)
+        self.assertEqual(reopened.speed_combo.currentText(), "1×")
+        self.assertEqual(reopened.modeled_playback.speed, 1)
+        self.assertFalse(reopened.modeled_playback.running)
+        self.assertFalse(reopened.timer.isActive())
+
+    def test_mode_switch_stops_discards_partial_and_retains_committed_index(self):
+        window, clock = self.create_modeled_window(2)
+        self.assertFalse(window.interval_spin.isEnabled())
+        self.assertTrue(window.speed_combo.isEnabled())
+        self.assertFalse(window.timer.isActive())
+        self.assertIsNone(window.overlay.presentation_position)
+        window.on_play_pause()
+        clock.advance(123456)
+        window.timer.timeout.emit()
+        self.assertGreater(window.modeled_playback.partial_modeled_us, 0)
+        clock.advance(10**12)  # Switching must discard unsampled time, too.
+        window.mode_combo.setCurrentText("Index")
+        self.assert_index(window, 2)
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.modeled_playback.running)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+        self.assertIsNone(window.overlay.presentation_position)
+        self.assertEqual(window.overlay.action_target, (1, 0))
+        self.assertTrue(window.interval_spin.isEnabled())
+        self.assertFalse(window.speed_combo.isEnabled())
+        self.assertEqual(window.timer.interval(), 200)
+        window.on_play_pause()
+        window.timer.timeout.emit()
+        self.assert_index(window, 3)
+        window.mode_combo.setCurrentText("Modeled-Time")
+        self.assert_index(window, 3)
+        self.assertFalse(window.timer.isActive())
+        self.assertEqual(window.play_button.text(), "Play")
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+        self.assertIsNone(window.overlay.presentation_position)
+        self.assertEqual(window.playback_label.text(), "Playback: Modeled-Time · 1× (presentation)")
+
+    def test_modeled_timer_requests_frames_without_advancing_by_tick_count(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        self.assertTrue(window.modeled_playback.running)
+        self.assertTrue(window.timer.isActive())
+        self.assertEqual(window.timer.interval(), 16)
+        self.assertEqual(window.timer.timerType(), Qt.PreciseTimer)
+        self.assertEqual(window.play_button.text(), "Pause")
+        for _ in range(10):
+            window.timer.timeout.emit()
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+        self.assert_index(window, 1)
+        clock.advance(self.execution.result.traces[1].modeled_action_us * 250)
+        window.timer.timeout.emit()
+        self.assertEqual(window.modeled_playback.progress, Fraction(1, 4))
+        self.assertEqual(window.overlay.cursor_center, QPointF(14 + 28 * 5 / 32, 14))
+        self.assertEqual(window.overlay.current_cursor, (0, 0))
+        self.assertEqual(window.overlay.action_target, (1, 0))
+
+    def test_same_cell_first_action_waits_for_boundary_then_refreshes_once(self):
+        window, clock = self.create_modeled_window()
+        trace = self.execution.result.traces[0]
+        self.assertEqual(trace.modeled_action_us, 126005)
+        before = window.player.get_observation()
+        window.on_play_pause()
+        self.assertEqual(window.overlay.cursor_center, QPointF(14, 14))
+        self.assertEqual(window.overlay.action_target, (0, 0))
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+            clock.advance(63002500)
+            window.timer.timeout.emit()
+            self.assertEqual(window.modeled_playback.progress, Fraction(1, 2))
+            self.assertEqual(window.overlay.cursor_center, QPointF(14, 14))
+            self.assertIsNone(window.overlay.movement_line)
+            self.assertEqual(window.player.get_observation(), before)
+            self.assertEqual(window.detail_labels["action"].text(), "—")
+            refresh.assert_not_called()
+            clock.advance(63002500)
+            window.timer.timeout.emit()
+            refresh.assert_called_once_with()
+            self.assert_index(window, 1)
+            self.assertEqual(window.cells[(0, 0)].logical_state, 1)
+            self.assertEqual(window.overlay.cursor_center, QPointF(14, 14))
+            self.assertEqual(window.overlay.action_target, (1, 0))
+            self.assertEqual(window.detail_labels["action"].text(), "OPEN")
+            window.timer.timeout.emit()
+            refresh.assert_called_once_with()
+
+    def test_smoothstep_endpoints_quarter_midpoint_and_straight_paths(self):
+        overlay = self.window.overlay
+        for start, target in (((0, 0), (2, 1)), ((2, 1), (0, 0)), ((1, 0), (1, 1)), ((0, 0), (0, 0))):
+            trace = replace(self.execution.result.traces[0], cursor_before=start,
+                            move=SimpleMove(Action.OPEN, *target))
+            for u, q in ((Fraction(0), 0), (Fraction(1, 4), Fraction(5, 32)),
+                         (Fraction(1, 2), Fraction(1, 2)), (Fraction(1), 1)):
+                with self.subTest(start=start, target=target, u=u):
+                    overlay.set_pending(trace, start, u)
+                    a, b = overlay.cell_center(start), overlay.cell_center(target)
+                    self.assertEqual(overlay.cursor_center, a + (b - a) * float(q))
+                    self.assertEqual(overlay.current_cursor, start)
+                    expected_line = None if start == target else (start, target)
+                    self.assertEqual(overlay.movement_line, expected_line)
+        self.assertEqual(self.window.player.current_index, 0)
+
+    def test_modeled_pause_samples_time_and_resume_preserves_frozen_cursor(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        clock.advance(self.execution.result.traces[1].modeled_action_us * 250)
+        window.on_play_pause()  # Pause samples time even without an intervening frame.
+        position = QPointF(window.overlay.cursor_center)
+        partial = window.modeled_playback.partial_modeled_us
+        self.assertEqual(window.modeled_playback.progress, Fraction(1, 4))
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.modeled_playback.running)
+        self.assertEqual(window.play_button.text(), "Play")
+        clock.advance(10**12)
+        window.timer.timeout.emit()
+        self.assertEqual(window.overlay.cursor_center, position)
+        window.on_play_pause()
+        self.assertEqual(window.overlay.cursor_center, position)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, partial)
+        window.timer.timeout.emit()
+        self.assertEqual(window.overlay.cursor_center, position)
+        clock.advance(1000)
+        window.timer.timeout.emit()
+        self.assertEqual(window.modeled_playback.partial_modeled_us, partial + 1)
+        self.assertGreater(window.overlay.cursor_center.x(), position.x())
+
+    def test_pause_can_cross_boundaries_and_refresh_committed_board_once(self):
+        window, clock = self.create_modeled_window()
+        window.on_play_pause()
+        clock.advance(sum(t.modeled_action_us for t in self.execution.result.traces[:2]) * 1000 + 7000)
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+            window.on_play_pause()
+            refresh.assert_called_once_with()
+        self.assert_index(window, 2)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 7)
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.modeled_playback.running)
+
+    def test_late_frame_commits_every_action_but_refreshes_board_once(self):
+        window, clock = self.create_modeled_window()
+        traces = self.execution.result.traces
+        applied = []
+        real_step = MinesweeperEngine.step
+
+        def step(engine, x, y, action):
+            applied.append(SimpleMove(action, x, y))
+            return real_step(engine, x, y, action)
+
+        window.on_play_pause()
+        clock.advance(sum(t.modeled_action_us for t in traces[:3]) * 1000 + traces[3].modeled_action_us * 250)
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh, patch.object(
+            window.player, "go_to", side_effect=AssertionError("Frame sought"),
+        ), patch.object(MinesweeperEngine, "step", new=step), patch.object(
+            window.cells[(0, 0)], "render_state", wraps=window.cells[(0, 0)].render_state,
+        ) as cell_render:
+            window.timer.timeout.emit()
+            refresh.assert_called_once_with()
+            cell_render.assert_called_once()
+        self.assertEqual(tuple(applied), self.execution.result.moves[:3])
+        self.assert_index(window, 3)
+        self.assertEqual(window.modeled_playback.progress, Fraction(1, 4))
+        self.assertEqual(window.overlay.cursor_center, QPointF(14 + 56 * 5 / 32, 14))
+        self.assertEqual(window.detail_labels["action"].text(), "CHORD")
+        self.assertEqual(window.detail_labels["target"].text(), "(0, 0)")
+        self.assertEqual(window.overlay.action_target, (2, 0))
+
+    def test_partial_frame_only_updates_overlay_and_keeps_applied_details(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        details = {key: label.text() for key, label in window.detail_labels.items()}
+        with patch.object(window, "refresh", side_effect=AssertionError("Full refresh")), patch.object(
+            stage3_visualizer_ui.Stage3VisualizerCell, "render_state", side_effect=AssertionError("Cell restyle"),
+        ), patch.object(window.player, "go_to", side_effect=AssertionError("Seek")), patch.object(
+            window.player, "get_observation", side_effect=AssertionError("Board read"),
+        ):
+            for _ in range(2):
+                clock.advance(self.execution.result.traces[1].modeled_action_us * 250)
+                window.timer.timeout.emit()
+        self.assertEqual(window.modeled_playback.progress, Fraction(1, 2))
+        self.assertEqual(window.overlay.cursor_center, QPointF(28, 14))
+        self.assertEqual({key: label.text() for key, label in window.detail_labels.items()}, details)
+        self.assert_index(window, 1)
+
+    def test_programmatic_refresh_keeps_modeled_partial_progress_and_timer(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        clock.advance(123456)
+        window.timer.timeout.emit()
+        position = QPointF(window.overlay.cursor_center)
+        partial = window.modeled_playback.partial_modeled_us
+        with patch.object(window.modeled_playback, "cancel_partial", side_effect=AssertionError("Cancelled")), patch.object(
+            window.player, "go_to", side_effect=AssertionError("Sought"),
+        ):
+            window.refresh()
+        self.assertEqual(window.overlay.cursor_center, position)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, partial)
+        self.assertTrue(window.modeled_playback.running)
+        self.assertTrue(window.timer.isActive())
+        self.assertFalse(window.slider.signalsBlocked())
+
+    def test_modeled_speed_selector_has_exact_six_rates_and_labels(self):
+        window, clock = self.create_modeled_window()
+        labels = ("0.25×", "0.5×", "1×", "2×", "4×", "8×")
+        self.assertEqual([window.speed_combo.itemText(i) for i in range(6)], list(labels))
+        for index, rate in enumerate((Fraction(1, 4), Fraction(1, 2), 1, 2, 4, 8)):
+            with self.subTest(rate=rate):
+                window.on_first()
+                window.speed_combo.setCurrentIndex(index)
+                self.assertEqual(window.modeled_playback.speed, rate)
+                self.assertEqual(window.playback_label.text(), f"Playback: Modeled-Time · {labels[index]} (presentation)")
+                window.on_play_pause()
+                clock.advance(1000)
+                window.timer.timeout.emit()
+                self.assertEqual(window.modeled_playback.partial_modeled_us, rate)
+                self.assertEqual(window.timer.interval(), 16)
+
+    def test_speed_change_catches_up_at_old_rate_and_preserves_remainder(self):
+        window, clock = self.create_modeled_window()
+        window.on_play_pause()
+        clock.advance(self.execution.result.traces[0].modeled_action_us * 1000 + 3500)
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+            window.speed_combo.setCurrentText("8×")
+            refresh.assert_called_once_with()
+        self.assert_index(window, 1)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, Fraction(7, 2))
+        self.assertEqual(window.modeled_playback.speed, 8)
+        self.assertTrue(window.timer.isActive())
+        clock.advance(3000)
+        window.timer.timeout.emit()
+        self.assertEqual(window.modeled_playback.partial_modeled_us, Fraction(55, 2))
+
+    def test_paused_speed_change_and_inactive_interval_do_not_move_cursor(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        clock.advance(7000)
+        window.on_play_pause()
+        position = QPointF(window.overlay.cursor_center)
+        clock.advance(10**12)
+        window.speed_combo.setCurrentText("0.25×")
+        window.interval_spin.setValue(4999)  # Programmatic changes cannot alter frame cadence.
+        self.assertEqual(window.overlay.cursor_center, position)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 7)
+        self.assertFalse(window.timer.isActive())
+        self.assertEqual(window.timer.interval(), 16)
+        self.assertEqual(window.playback_label.text(), "Playback: Modeled-Time · 0.25× (presentation)")
+        window.mode_combo.setCurrentText("Index")
+        self.assertEqual(window.timer.interval(), 4999)
+        self.assertEqual(window.playback_label.text(), "Playback: Index · 4999 ms/step (presentation)")
+
+    def test_terminal_speed_change_stops_timer_without_wrap_or_restart(self):
+        window, clock = self.create_modeled_window()
+        window.on_play_pause()
+        clock.advance(self.execution.result.total_modeled_us * 1000)
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+            window.speed_combo.setCurrentText("4×")
+            refresh.assert_called_once_with()
+        self.assert_index(window, 5)
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.modeled_playback.running)
+        self.assertFalse(window.play_button.isEnabled())
+        self.assertEqual(window.play_button.text(), "Play")
+        self.assertIsNone(window.overlay.presentation_position)
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+        window.on_play_pause()
+        window.timer.timeout.emit()
+        self.assert_index(window, 5)
+
+    def test_every_modeled_manual_navigation_cancels_before_integer_operation(self):
+        operations = (("on_first", None, 0), ("on_previous", None, 1), ("on_next", None, 3),
+                      ("on_last", None, 5), ("on_slider_changed", 4, 4), ("on_slider_changed", 2, 2))
+        for method, argument, expected in operations:
+            with self.subTest(method=method, argument=argument):
+                window, clock = self.create_modeled_window(2)
+                window.on_play_pause()
+                clock.advance(100000)
+                window.timer.timeout.emit()
+                clock.advance(10**12)
+                real_methods = {name: getattr(window.player, name) for name in ("next", "previous", "go_to")}
+
+                def checked(name, *args):
+                    self.assertFalse(window.timer.isActive())
+                    self.assertFalse(window.modeled_playback.running)
+                    self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+                    return real_methods[name](*args)
+
+                with ExitStack() as stack:
+                    for name in real_methods:
+                        stack.enter_context(patch.object(window.player, name, side_effect=lambda *args, name=name: checked(name, *args)))
+                    if argument is None:
+                        getattr(window, method)()
+                    else:
+                        getattr(window, method)(argument)
+                self.assert_index(window, expected)
+                self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+                self.assertIsNone(window.overlay.presentation_position)
+                self.assertFalse(window.timer.isActive())
+                window.timer.timeout.emit()
+                self.assert_index(window, expected)
+
+    def test_slider_value_and_same_index_mouse_presses_cancel_partial(self):
+        for interaction in ("value", "handle", "track"):
+            with self.subTest(interaction=interaction):
+                window, clock = self.create_modeled_window()
+                window.show()
+                self.app.processEvents()
+                slider = window.slider
+                option = QStyleOptionSlider()
+                slider.initStyleOption(option)
+                handle = slider.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, slider)
+                window.on_play_pause()
+                clock.advance(63002500)
+                window.timer.timeout.emit()
+                clock.advance(10**12)
+                if interaction == "value":
+                    slider.setValue(3)
+                else:
+                    point = handle.center() if interaction == "handle" else QPoint(handle.right() + 1, slider.height() // 2)
+                    QTest.mouseClick(slider, Qt.LeftButton, pos=point)
+                self.assert_index(window, 3 if interaction == "value" else 0)
+                self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+                self.assertFalse(window.modeled_playback.running)
+                self.assertFalse(window.timer.isActive())
+                self.assertIsNone(window.overlay.presentation_position)
+
+    def test_zero_duration_play_commits_immediately_with_one_refresh(self):
+        for costs, expected in (((0, 0, 10, 20, 30), 2), ((0, 0, 0, 0, 0), 5)):
+            with self.subTest(costs=costs):
+                result = replace(self.execution.result, traces=tuple(
+                    replace(trace, modeled_action_us=cost) for trace, cost in zip(self.execution.result.traces, costs)
+                ))
+                window, _ = self.create_modeled_window(execution=replace(self.execution, result=result))
+                with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+                    window.on_play_pause()
+                    refresh.assert_called_once_with()
+                self.assert_index(window, expected)
+                self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+                self.assertEqual(window.timer.isActive(), expected < 5)
+                self.assertEqual(window.modeled_playback.running, expected < 5)
+
+    def test_boundary_failure_keeps_safe_commits_visible_and_never_auto_retries(self):
+        traces = list(self.execution.result.traces)
+        traces[1] = replace(traces[1], status_after=L)
+        execution = replace(self.execution, result=replace(self.execution.result, traces=traces))
+        window, clock = self.create_modeled_window(execution=execution)
+        window.on_play_pause()
+        clock.advance(10**12)
+        with patch.object(window, "refresh", wraps=window.refresh) as refresh:
+            window.timer.timeout.emit()
+            refresh.assert_called_once_with()
+        self.assert_index(window, 1)
+        self.assertFalse(window.modeled_playback.running)
+        self.assertFalse(window.timer.isActive())
+        self.assertEqual(window.play_button.text(), "Play")
+        self.assertEqual(window.modeled_playback.progress, 1)
+        self.assertEqual(window.overlay.cursor_center, window.overlay.cell_center((1, 0)))
+        self.assertFalse(window.error_label.isHidden())
+        self.assertIn("Trace 2 status_after", window.error_label.text())
+        self.assertEqual(window.error_label.textFormat(), Qt.PlainText)
+        with patch.object(window.player, "next", side_effect=AssertionError("Automatic retry")):
+            window.timer.timeout.emit()
+        self.assert_index(window, 1)
+        window.on_first()
+        self.assertTrue(window.error_label.isHidden())
+
+    def test_clock_failure_on_frame_pause_or_speed_preserves_cursor_and_stops(self):
+        for operation in ("frame", "pause", "speed"):
+            with self.subTest(operation=operation):
+                window, clock = self.create_modeled_window(1)
+                window.on_play_pause()
+                clock.advance(7000)
+                window.timer.timeout.emit()
+                position = QPointF(window.overlay.cursor_center)
+                clock.now_ns = 6999
+                if operation == "frame":
+                    window.timer.timeout.emit()
+                elif operation == "pause":
+                    window.on_play_pause()
+                else:
+                    window.speed_combo.setCurrentText("8×")
+                self.assertFalse(window.timer.isActive())
+                self.assertFalse(window.modeled_playback.running)
+                self.assertEqual(window.overlay.cursor_center, position)
+                self.assertEqual(window.modeled_playback.partial_modeled_us, 7)
+                self.assertIn("backwards", window.error_label.text())
+                self.assertEqual(window.speed_combo.currentText(), "1×")
+                self.assertEqual(window.playback_label.text(), "Playback: Modeled-Time · 1× (presentation)")
+                self.assert_index(window, 1)
+
+    def test_accepted_modeled_close_cancels_and_late_callback_is_inert(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        clock.advance(7000)
+        window.timer.timeout.emit()
+        observed = []
+        window.closed.connect(lambda: observed.append((window.timer.isActive(), window.modeled_playback.running)))
+        self.assertTrue(window.close())
+        self.assertEqual(observed, [(False, False)])
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 0)
+        with patch.object(window.player, "next", side_effect=AssertionError("Closed advance")), patch.object(
+            window, "refresh", side_effect=AssertionError("Closed refresh"),
+        ):
+            clock.advance(10**12)
+            window.timer.timeout.emit()
+            window.on_play_pause()
+        self.assertEqual(window.player.current_index, 1)
+        self.assertFalse(window.timer.isActive())
+
+    def test_ignored_close_keeps_modeled_playback_running(self):
+        window, clock = self.create_modeled_window(1)
+        window.on_play_pause()
+        clock.advance(7000)
+        window.timer.timeout.emit()
+        event = QCloseEvent()
+        with patch.object(QWidget, "closeEvent", side_effect=lambda event: event.ignore()):
+            window.closeEvent(event)
+        self.assertFalse(event.isAccepted())
+        self.assertTrue(window.modeled_playback.running)
+        self.assertTrue(window.timer.isActive())
+        self.assertEqual(window.modeled_playback.partial_modeled_us, 7)
+
     def test_module_dependencies_are_only_presentation_and_no_hidden_truth(self):
         source = Path(stage3_visualizer_ui.__file__).read_text(encoding="utf-8")
         module = ast.parse(source)
         allowed = {"PyQt5", "core_engine", "stage3_execution", "stage3_trace_player",
-                   "stage3_identity", "stage3_physical"}
+                   "stage3_identity", "stage3_physical", "stage3_modeled_playback"}
         for node in ast.walk(module):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
@@ -551,6 +1003,21 @@ class Stage3VisualizerTests(unittest.TestCase):
             for _ in self.execution.result.traces:
                 window.timer.timeout.emit()
             self.assertEqual(window.player.current_index, 5)
+            original = deepcopy(self.execution)
+            modeled, clock = self.create_modeled_window()
+            modeled.on_play_pause()
+            clock.advance(63002500)
+            modeled.timer.timeout.emit()
+            modeled.on_play_pause()
+            modeled.speed_combo.setCurrentText("8×")
+            modeled.on_play_pause()
+            clock.advance(self.execution.result.total_modeled_us * 1000)
+            modeled.timer.timeout.emit()
+            self.assertEqual(modeled.player.current_index, 5)
+            self.assertEqual(modeled.player.cumulative_modeled_us, self.execution.result.total_modeled_us)
+            self.assertEqual(self.execution, original)
+            modeled.on_first()
+            modeled.mode_combo.setCurrentText("Index")
             for mock in mocks:
                 mock.assert_not_called()
 

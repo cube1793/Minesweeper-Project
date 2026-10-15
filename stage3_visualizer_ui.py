@@ -1,13 +1,14 @@
 """Read-only Qt presentation of one already-computed Stage-3 V1 execution.
 
 Only the trace player reconstructs game state. This window owns presentation
-widgets and an index timer; recorded modeled microseconds are never scheduled.
+widgets, frame requests and synthetic cursor geometry. Recorded modeled time
+is advanced only by the pure modeled playback controller.
 """
 
 from PyQt5.QtCore import QPointF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen
 from PyQt5.QtWidgets import (
-    QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
+    QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
     QSpinBox, QStyle, QStyleOptionSlider, QVBoxLayout, QWidget,
 )
 
@@ -16,12 +17,14 @@ from stage3_execution import Stage3Execution
 import stage3_identity
 import stage3_physical
 from stage3_trace_player import Stage3TracePlayer
+from stage3_modeled_playback import SUPPORTED_SPEEDS, Stage3ModeledPlayback
 
 
 CELL_SIZE = 28
 STAGE3_PRESENTATION_INTERVAL_MIN_MS = 20
 STAGE3_PRESENTATION_INTERVAL_MAX_MS = 5000
 STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS = 200
+STAGE3_MODELED_FRAME_INTERVAL_MS = 16
 NUMBER_COLORS = {
     1: "#0000ff", 2: "#008000", 3: "#ff0000", 4: "#000080",
     5: "#800000", 6: "#008080", 7: "#000000", 8: "#808080",
@@ -29,6 +32,11 @@ NUMBER_COLORS = {
 MOVEMENT_LEGEND = (
     "Blue ring: cursor • Orange outline: action target • Line: modeled "
     "cell-to-cell displacement, not a continuous OS mouse trajectory."
+)
+
+MODELED_MOVEMENT_LEGEND = (
+    "Blue ring: synthetic cursor • Orange outline: pending action target • "
+    "Straight path with presentation easing, not a continuous OS mouse trajectory."
 )
 
 
@@ -77,7 +85,7 @@ class Stage3VisualizerCell(QLabel):
 
 
 class _MovementOverlay(QWidget):
-    """Presentation coordinates only; no interpolation or engine ownership."""
+    """Static trace coordinates plus an optional synthetic presentation position."""
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -85,6 +93,7 @@ class _MovementOverlay(QWidget):
         self.current_cursor = (0, 0)
         self.movement_start = None
         self.action_target = None
+        self.presentation_position = None
 
     @property
     def movement_line(self):
@@ -96,7 +105,31 @@ class _MovementOverlay(QWidget):
         self.current_cursor = cursor
         self.movement_start = None if trace is None else trace.cursor_before
         self.action_target = None if trace is None else (trace.move.x, trace.move.y)
+        self.presentation_position = None
         self.update()
+
+    def set_pending(self, trace, cursor, progress):
+        self.current_cursor = cursor
+        self.movement_start = trace.cursor_before
+        self.action_target = (trace.move.x, trace.move.y)
+        self.presentation_position = self.interpolated_center(
+            self.movement_start, self.action_target, progress,
+        )
+        self.update()
+
+    @classmethod
+    def interpolated_center(cls, start, target, progress):
+        # Fraction -> float only at the rendering edge; never fed back to timing.
+        u = float(progress)
+        q = u * u * (3 - 2 * u)
+        a, b = cls.cell_center(start), cls.cell_center(target)
+        return a + (b - a) * q
+
+    @property
+    def cursor_center(self):
+        if self.presentation_position is not None:
+            return self.presentation_position
+        return self.cell_center(self.current_cursor)
 
     @staticmethod
     def cell_center(coordinate):
@@ -120,7 +153,7 @@ class _MovementOverlay(QWidget):
             painter.drawRect(x * CELL_SIZE + 2, y * CELL_SIZE + 2,
                              CELL_SIZE - 4, CELL_SIZE - 4)
         painter.setPen(QPen(QColor("#2463c5"), 2))
-        painter.drawEllipse(self.cell_center(self.current_cursor), 9, 9)
+        painter.drawEllipse(self.cursor_center, 9, 9)
 
 
 class _IndexSlider(QSlider):
@@ -152,11 +185,15 @@ class Stage3VisualizerWindow(QWidget):
 
     closed = pyqtSignal()
 
-    def __init__(self, execution: Stage3Execution, parent=None):
+    def __init__(self, execution: Stage3Execution, parent=None, *, clock=None):
         super().__init__(parent, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle("Stage-3 Visualizer")
         self.player = Stage3TracePlayer(execution)
+        self.modeled_playback = (
+            Stage3ModeledPlayback(self.player) if clock is None
+            else Stage3ModeledPlayback(self.player, clock=clock)
+        )
         self._closed = False
         self.timer = QTimer(self)
         self.timer.setInterval(STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS)
@@ -193,6 +230,12 @@ class Stage3VisualizerWindow(QWidget):
         layout.addWidget(self.fingerprint_label)
         self.status_label = QLabel()
         layout.addWidget(self.status_label)
+        self.error_label = QLabel()
+        self.error_label.setTextFormat(Qt.PlainText)
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet("color: #c00000;")
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
 
         self.board_container = QWidget()
         grid = QGridLayout(self.board_container)
@@ -239,16 +282,20 @@ class Stage3VisualizerWindow(QWidget):
         self.slider = _IndexSlider(Qt.Horizontal)
         self.slider.setAccessibleName("Stage-3 trace index")
         self.slider.valueChanged.connect(self.on_slider_changed)
-        self.slider.sliderPressed.connect(self._stop_autoplay)
-        self.slider.trackPressed.connect(self._stop_autoplay)
+        self.slider.sliderPressed.connect(self._cancel_partial)
+        self.slider.trackPressed.connect(self._cancel_partial)
         position.addWidget(self.slider, 1)
         self.step_label = QLabel()
         position.addWidget(self.step_label)
         layout.addLayout(position)
 
         interval = QHBoxLayout()
-        self.playback_label = QLabel()
-        interval.addWidget(self.playback_label)
+        interval.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(("Index", "Modeled-Time"))
+        self.mode_combo.setAccessibleName("Playback mode")
+        interval.addWidget(self.mode_combo)
+        interval.addWidget(QLabel("Index interval:"))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(
             STAGE3_PRESENTATION_INTERVAL_MIN_MS, STAGE3_PRESENTATION_INTERVAL_MAX_MS,
@@ -256,13 +303,26 @@ class Stage3VisualizerWindow(QWidget):
         self.interval_spin.setValue(STAGE3_PRESENTATION_INTERVAL_DEFAULT_MS)
         self.interval_spin.setSuffix(" ms/step")
         self.interval_spin.setToolTip("Presentation interval only; recorded modeled time is unchanged.")
-        self.interval_spin.valueChanged.connect(self.timer.setInterval)
-        self.interval_spin.valueChanged.connect(self._update_playback_label)
-        self._update_playback_label()
+        self.interval_spin.valueChanged.connect(self._on_interval_changed)
         interval.addWidget(self.interval_spin)
+        interval.addWidget(QLabel("Modeled speed:"))
+        self.speed_combo = QComboBox()
+        self.speed_combo.setAccessibleName("Modeled-Time presentation speed")
+        for text, speed in zip(("0.25×", "0.5×", "1×", "2×", "4×", "8×"), SUPPORTED_SPEEDS):
+            self.speed_combo.addItem(text, speed)
+        self.speed_combo.setCurrentIndex(2)
+        self.speed_combo.setEnabled(False)
+        self.speed_combo.setToolTip("Presentation speed only; recorded modeled time is unchanged.")
+        self.speed_combo.currentIndexChanged.connect(self._on_speed_changed)
+        interval.addWidget(self.speed_combo)
         interval.addStretch()
         layout.addLayout(interval)
+        self.playback_label = QLabel()
+        layout.addWidget(self.playback_label)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self._update_playback_label()
 
+        layout.addWidget(QLabel("Last applied action (committed trace)"))
         details = QGridLayout()
         self.detail_labels = {}
         for index, (key, caption) in enumerate((
@@ -285,12 +345,88 @@ class Stage3VisualizerWindow(QWidget):
         # Leave scrolling available on smaller screens, with fixed-size cells.
         available = self.screen().availableGeometry()
         self.resize(min(max(820, self.board_container.width() + 48), available.width()),
-                    min(self.board_container.height() + 410, available.height()))
+                    min(self.board_container.height() + 450, available.height()))
+
+    def _is_modeled_mode(self):
+        return self.mode_combo.currentText() == "Modeled-Time"
 
     def _update_playback_label(self):
-        self.playback_label.setText(
-            f"Playback: Index · {self.interval_spin.value()} ms/step (presentation)"
+        rate = (f"Modeled-Time · {self.speed_combo.currentText()}" if self._is_modeled_mode()
+                else f"Index · {self.interval_spin.value()} ms/step")
+        self.playback_label.setText(f"Playback: {rate} (presentation)")
+
+    def _on_interval_changed(self):
+        if not self._is_modeled_mode():
+            self.timer.setInterval(self.interval_spin.value())
+        self._update_playback_label()
+
+    def _on_mode_changed(self):
+        if self._closed:
+            return
+        self._cancel_partial()
+        modeled = self._is_modeled_mode()
+        self.interval_spin.setEnabled(not modeled)
+        self.speed_combo.setEnabled(modeled)
+        self.timer.setTimerType(Qt.PreciseTimer if modeled else Qt.CoarseTimer)
+        self.timer.setInterval(
+            STAGE3_MODELED_FRAME_INTERVAL_MS if modeled else self.interval_spin.value(),
         )
+        self._update_playback_label()
+
+    def _on_speed_changed(self):
+        if self._closed:
+            return
+        speed = self.speed_combo.currentData()
+        if self._is_modeled_mode():
+            self._run_modeled_operation(lambda: self.modeled_playback.set_speed(speed))
+        else:
+            self.modeled_playback.set_speed(speed)
+        # A failed clock/action can prevent the requested rate from taking effect.
+        blocked = self.speed_combo.blockSignals(True)
+        try:
+            self.speed_combo.setCurrentIndex(SUPPORTED_SPEEDS.index(self.modeled_playback.speed))
+        finally:
+            self.speed_combo.blockSignals(blocked)
+        self._update_playback_label()
+
+    def _update_presentation(self):
+        playback = self.modeled_playback
+        if (self._is_modeled_mode() and playback.pending_trace is not None
+                and (playback.running or playback.partial_modeled_us > 0)):
+            self.overlay.set_pending(playback.pending_trace, self.player.current_cursor, playback.progress)
+            legend = MODELED_MOVEMENT_LEGEND
+        else:
+            self.overlay.set_trace(self.player.current_trace, self.player.current_cursor)
+            legend = MOVEMENT_LEGEND
+        if self.legend_label.text() != legend:
+            self.legend_label.setText(legend)
+
+    def _run_modeled_operation(self, operation):
+        """Sample the controller once; render once after any boundary catch-up."""
+        if self._closed:
+            return
+        before = self.player.current_index
+        error = None
+        try:
+            operation()
+        except Exception as exc:
+            error = exc
+        if self.player.current_index != before:
+            self.refresh()
+        else:
+            self._update_presentation()
+        if error is not None:
+            self._stop_autoplay()
+            self.error_label.setText(f"Playback stopped: {error}")
+            self.error_label.show()
+        else:
+            self.error_label.hide()
+            if self.modeled_playback.running:
+                if not self.timer.isActive():
+                    self.timer.start()
+                self._set_play_button(True)
+            else:
+                self._stop_autoplay()
 
     def refresh(self):
         player = self.player
@@ -298,7 +434,6 @@ class Stage3VisualizerWindow(QWidget):
             for x, value in enumerate(row):
                 self.cells[(x, y)].render_state(value)
         trace = player.current_trace
-        self.overlay.set_trace(trace, player.current_cursor)
         index, count = player.current_index, player.step_count
         self.step_label.setText(f"Step {index} / {count}")
         self.status_label.setText(f"Current reconstructed status: {player.status.name}")
@@ -333,55 +468,76 @@ class Stage3VisualizerWindow(QWidget):
         self.play_button.setEnabled(index < count)
         if index == count:
             self._stop_autoplay()
+        self._update_presentation()
+
+    def _cancel_partial(self):
+        self._stop_autoplay()
+        self.modeled_playback.cancel_partial()
+        self.error_label.hide()
+        self._update_presentation()
+
+    def _set_play_button(self, running):
+        text = "Pause" if running else "Play"
+        if self.play_button.text() != text:
+            self.play_button.setText(text)
+            icon = QStyle.SP_MediaPause if running else QStyle.SP_MediaPlay
+            self.play_button.setIcon(self.style().standardIcon(icon))
 
     def _stop_autoplay(self):
         self.timer.stop()
-        self.play_button.setText("Play")
-        self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self._set_play_button(False)
 
     def on_first(self):
-        self._stop_autoplay()
+        self._cancel_partial()
         self.player.go_to(0)
         self.refresh()
 
     def on_previous(self):
-        self._stop_autoplay()
+        self._cancel_partial()
         self.player.previous()
         self.refresh()
 
     def on_next(self):
-        self._stop_autoplay()
+        self._cancel_partial()
         self.player.next()
         self.refresh()
 
     def on_last(self):
-        self._stop_autoplay()
+        self._cancel_partial()
         self.player.go_to(self.player.step_count)
         self.refresh()
 
     def on_slider_changed(self, index: int):
-        self._stop_autoplay()
+        self._cancel_partial()
         self.player.go_to(index)
         self.refresh()
 
     def on_play_pause(self):
-        if self.timer.isActive():
+        if self._closed:
+            return
+        if self._is_modeled_mode():
+            playback = self.modeled_playback
+            self._run_modeled_operation(playback.pause if playback.running else playback.play)
+        elif self.timer.isActive():
             self._stop_autoplay()
         elif not self._closed and self.player.current_index < self.player.step_count:
             self.timer.start()
-            self.play_button.setText("Pause")
-            self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self._set_play_button(True)
 
     def _advance_autoplay(self):
-        if not self.timer.isActive():
+        if self._closed or not self.timer.isActive():
             return
-        self.player.next()
-        self.refresh()
+        if self._is_modeled_mode():
+            self._run_modeled_operation(self.modeled_playback.update)
+        else:
+            self.player.next()
+            self.refresh()
 
     def closeEvent(self, event):
         super().closeEvent(event)
         if event.isAccepted():
             self._stop_autoplay()
+            self.modeled_playback.cancel_partial()
             if not self._closed:
                 self._closed = True
                 self.closed.emit()
