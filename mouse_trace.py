@@ -144,7 +144,7 @@ class MouseTraceRecorder:
     def observation_time_ns(self) -> int:
         """Timestamp a candidate without starting or changing the trace.
 
-        A caller may retain this with a release position across synchronous
+        A caller may retain this with a press/release position across synchronous
         gameplay processing, then link it only after a successful commit.
         """
         now = self._clock_ns()
@@ -164,7 +164,7 @@ class MouseTraceRecorder:
 
     def record_action(self, x, y, cell_size: int, replay_event_index: int,
                       *, observed_ns=None) -> MouseTracePoint | None:
-        """Link a committed event using the release's earlier observation time.
+        """Link a committed event using the physical action's earlier observation time.
 
         Omit observed_ns only when observation and linking happen together.
         """

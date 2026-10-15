@@ -125,7 +125,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.assert_last_position((3, 0))
         self.assertEqual((self.points()[0].elapsed_us, self.points()[0].replay_event_index), (0, 0))
 
-    def test_first_open_and_first_flag_start_from_observed_release(self):
+    def test_first_open_release_and_flag_press_start_at_zero(self):
         for button, action, target in ((Qt.LeftButton, "OPEN", (0, 0)),
                                        (Qt.RightButton, "FLAG", (1, 1))):
             with self.subTest(action=action):
@@ -138,27 +138,33 @@ class MouseTraceUITests(unittest.TestCase):
                 self.assertEqual(self.points()[0].elapsed_us, 0)
                 self.assert_last_position(target)
 
-    def test_prestart_gating_skips_geometry_but_keeps_first_release_policy(self):
+    def test_prestart_gating_allows_only_first_flag_candidate_press(self):
         for checked in (True, False):
             with self.subTest(checked=checked):
                 self.ui.on_reset()
                 self.install_recorder()
                 self.ui.mouse_trace_record_checkbox.setChecked(checked)
+                self.clock.reset_mock()
                 with patch.object(self.ui, "_mouse_trace_position", wraps=self.ui._mouse_trace_position) as position:
                     self.hover((1, 0))
-                    self.press((2, 0), Qt.RightButton)
+                    self.press((2, 0))
                     self.send(QEvent.MouseMove, (3, 0))
                     position.assert_not_called()
                     self.clock.assert_not_called()
-                    self.release((3, 0), Qt.RightButton)
+                    self.press((3, 0), Qt.RightButton)
                     position.assert_called_once()
-                self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
-                self.assertEqual(self.recorder.started, checked)
-                self.assertEqual(self.recorder.eligible, checked)
-                if checked:
-                    self.assertEqual(self.markers()[0].elapsed_us, 0)
-                    self.assert_last_position((3, 0))
-                self.clock.reset_mock()
+                    self.clock.assert_called_once_with()
+                    self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                    self.assertEqual(self.recorder.started, checked)
+                    self.assertEqual(self.recorder.eligible, checked)
+                    marker = self.markers()
+                    if checked:
+                        self.assertEqual(marker[0].elapsed_us, 0)
+                        self.assert_last_position((3, 0))
+                    self.clock.return_value += 1_000_000_000
+                    self.release((4, 0), Qt.RightButton)
+                    self.release((3, 0))
+                    self.assertEqual(self.markers(), marker)
 
     def test_invalidated_and_frozen_movement_skip_trace_geometry(self):
         self.click()
@@ -245,7 +251,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.assertEqual(self.ui._mouse_preview, set())
         self.assertEqual(len(self.recorder.snapshot().segments), 1)
 
-    def test_first_release_origin_precedes_engine_zini_and_replay_processing(self):
+    def test_first_action_observation_precedes_engine_zini_and_replay_processing(self):
         for button, target in ((Qt.LeftButton, (0, 0)), (Qt.RightButton, (1, 1))):
             with self.subTest(button=button):
                 self.ui.on_reset()
@@ -269,12 +275,16 @@ class MouseTraceUITests(unittest.TestCase):
                     advance_before_commit()
                     return record_event(*args, **kwargs)
 
-                self.press(target, button)
+                if button == Qt.LeftButton:
+                    self.press(target, button)
                 self.clock.reset_mock()
                 with patch.object(self.engine, "step", side_effect=delayed_step), \
                         patch.object(self.ui, "_ensure_zini_metric_job", side_effect=advance_before_commit), \
                         patch.object(self.ui._replay_recorder, "record_event", side_effect=delayed_replay_append):
-                    self.release(target, button)
+                    if button == Qt.LeftButton:
+                        self.release(target, button)
+                    else:
+                        self.press(target, button)
                 self.clock.assert_called_once_with()
                 self.assertEqual((self.markers()[0].elapsed_us, self.markers()[0].replay_event_index), (0, 0))
                 self.clock.return_value += 17_000
@@ -282,6 +292,8 @@ class MouseTraceUITests(unittest.TestCase):
                 # Includes all three seconds of processing, not just 17 us
                 # since completion of the first action.
                 self.assertEqual(self.points()[-1].elapsed_us, 3_000_017)
+                if button == Qt.RightButton:
+                    self.release(target, button)
 
     def test_later_release_marker_uses_observation_time_before_slow_action(self):
         self.click()
@@ -400,6 +412,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.assertEqual([p.replay_event_index for p in self.markers()], list(range(before + 1)))
 
     def test_untimed_first_chord_does_not_start_trace(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
         self.press((0, 0))
         self.press((0, 0), Qt.RightButton)
         self.release((0, 0), Qt.RightButton)
@@ -431,6 +444,114 @@ class MouseTraceUITests(unittest.TestCase):
         self.release((4, 0))
         self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["OPEN", "FLAG", "OPEN"])
         self.assertEqual([p.replay_event_index for p in self.markers()], [0, 1, 2])
+
+    def test_flag_press_subpixels_time_and_release_delay_are_exact(self):
+        self.clock.return_value = 2_000_000_000
+        receiver = self.ui._buttons[(0, 0)]
+        origin = QPointF(self.ui.board_container.mapToGlobal(QPoint(0, 0)))
+        local = QPointF(4.25, 7.75)
+        event = QMouseEvent(QEvent.MouseButtonPress, local, origin + local,
+                            Qt.RightButton, Qt.RightButton, Qt.NoModifier)
+        self.app.sendEvent(receiver, event)
+        self.held, self.receiver = Qt.RightButton, receiver
+        first = self.markers()[0]
+        self.assertEqual((first.x, first.y, first.elapsed_us, first.replay_event_index), (4.25, 7.75, 0, 0))
+        self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+        self.clock.return_value += 9_000_000_000
+        self.release((4, 0), Qt.RightButton)
+        self.assertEqual(self.markers(), (first,))
+        self.assert_last_position((4, 0))
+        self.assertEqual(self.points()[-1].elapsed_us, 9_000_000)
+        self.clock.return_value += 123_000
+        step = self.engine.step
+        def slow_step(*args, **kwargs):
+            self.clock.return_value += 4_000_000_000
+            return step(*args, **kwargs)
+        with patch.object(self.engine, "step", side_effect=slow_step):
+            self.press((1, 1), Qt.RightButton)
+        marker = self.markers()[-1]
+        self.assertEqual((marker.elapsed_us, marker.replay_event_index), (9_000_123, 1))
+        self.assert_last_position((1, 1))
+        self.release((2, 0), Qt.RightButton)
+        self.assertEqual(self.markers()[-1], marker)
+        data = self.ui._build_current_replay_data("test")
+        self.assertEqual(replay_data_to_dict(data)["schema_version"], 2)
+        path = Path(self.settings.fileName()).parent / "press-trace.json"
+        save_replay_json(data, str(path))
+        self.assertEqual(load_replay_json(str(path)), data)
+
+    def test_chord_markers_use_the_committing_release_in_each_mode_and_order(self):
+        for mode in (ChordMode.LEFT_CLICK, ChordMode.BOTH_CLICK):
+            for first_press in (Qt.LeftButton, Qt.RightButton):
+                for first_release in (Qt.LeftButton, Qt.RightButton):
+                    with self.subTest(mode=mode, first_press=first_press, first_release=first_release):
+                        self.ui.on_reset()
+                        self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                        self.install_recorder()
+                        self.click()
+                        self.click((1, 1), Qt.RightButton)
+                        self.ui.on_chord_mode_changed(mode)
+                        other_press = Qt.RightButton if first_press == Qt.LeftButton else Qt.LeftButton
+                        other_release = Qt.RightButton if first_release == Qt.LeftButton else Qt.LeftButton
+                        self.press((0, 0), first_press)
+                        self.press((0, 0), other_press)
+                        before = len(self.markers())
+                        self.clock.return_value += 101_000
+                        self.release((0, 0), first_release)
+                        commits_first = mode == ChordMode.BOTH_CLICK or first_release == Qt.LeftButton
+                        self.assertEqual(len(self.markers()), before + int(commits_first))
+                        self.clock.return_value += 203_000
+                        self.release((0, 0), other_release)
+                        self.assertEqual(len(self.markers()), before + 1)
+                        marker = self.markers()[-1]
+                        self.assertEqual(marker.elapsed_us, 101 if commits_first else 304)
+                        self.assertEqual(self.ui._replay_recorder.events[marker.replay_event_index].action, "CHORD")
+
+    def test_suppressed_mode_b_press_is_gated_before_start_and_sampled_after_start(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+        with patch.object(self.ui, "_mouse_trace_position", wraps=self.ui._mouse_trace_position) as position:
+            self.press((0, 0))
+            self.send(QEvent.MouseMove, (2, 0))
+            self.press((2, 0), Qt.RightButton)
+            position.assert_not_called()
+            self.clock.assert_not_called()
+        self.assertIsNone(self.recorder.snapshot())
+        self.assertEqual(self.ui._replay_recorder.events, ())
+        self.release((2, 0), Qt.RightButton)
+        self.release((2, 0))
+        self.assertIsNone(self.recorder.snapshot())
+        self.click((0, 0))
+        before = len(self.points())
+        for kind, target, button in ((QEvent.MouseButtonPress, (2, 0), Qt.LeftButton),
+                                     (QEvent.MouseButtonPress, (3, 0), Qt.RightButton),
+                                     (QEvent.MouseMove, (4, 0), Qt.NoButton),
+                                     (QEvent.MouseButtonRelease, (2, 0), Qt.RightButton),
+                                     (QEvent.MouseButtonRelease, (3, 0), Qt.LeftButton)):
+            self.clock.return_value += 7_000
+            self.send(kind, target, button)
+            self.assert_last_position(target)
+        points = self.points()[before:]
+        self.assertEqual([p.elapsed_us for p in points], [7, 14, 21, 28, 35])
+        self.assertEqual([p.replay_event_index for p in points], [None, None, None, 2, None])
+
+    def test_flag_press_callback_cannot_reuse_context_after_reset_or_resize(self):
+        for change in (self.ui.on_reset, lambda: self.ui.on_cell_size_changed(60)):
+            with self.subTest(change=change):
+                self.ui.on_reset()
+                self.install_recorder()
+                old_recorder = self.recorder
+                target = self.ui._buttons[(0, 0)]
+                def callback(_x, _y):
+                    change()
+                target.right_clicked.connect(callback)
+                self.press((0, 0), Qt.RightButton)
+                target.right_clicked.disconnect(callback)
+                self.assertIsNone(self.ui._mouse_trace_observation)
+                self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
+                events = self.ui._replay_recorder.events
+                self.release((2, 0), Qt.RightButton)
+                self.assertEqual(self.ui._replay_recorder.events, events)
+                self.assertEqual(len(tuple(p for seg in old_recorder.snapshot().segments for p in seg.points)), 1)
 
     def test_hover_exit_reentry_and_blank_viewport_create_gaps(self):
         self.click()
@@ -753,6 +874,7 @@ class MouseTraceUITests(unittest.TestCase):
                 self.assertEqual(len(self.markers()), len(events) + 1)
 
     def test_pre_start_untimed_chord_append_failure_preserves_future_trace(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
         self.ui.mouse_trace_record_checkbox.setChecked(False)
         self.press((0, 0))
         self.press((0, 0), Qt.RightButton)
@@ -852,6 +974,7 @@ class MouseTraceUITests(unittest.TestCase):
             another.deleteLater()
 
     def test_untimed_chord_keeps_recording_choice_editable(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
         self.ui.mouse_trace_record_checkbox.setChecked(False)
         self.press((0, 0))
         self.press((0, 0), Qt.RightButton)

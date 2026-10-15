@@ -1,4 +1,4 @@
-"""Real Qt release gestures, grab routing, preview purity and session invalidation."""
+"""Real Qt physical gestures, grab routing, preview purity and session invalidation."""
 
 from copy import deepcopy
 import os
@@ -151,10 +151,9 @@ class MouseInputTests(unittest.TestCase):
 
     def assert_mouse_cleared(self):
         self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
-        self.assertEqual(self.ui._mouse_origins, {})
         self.assertEqual(self.ui._mouse_left_suppressed, set())
         self.assertFalse(self.ui._mouse_both)
-        self.assertFalse(self.ui._mouse_consumed)
+        self.assertFalse(self.ui._mouse_left_consumed)
         self.assertIsNone(self.ui._mouse_position)
         self.assertEqual(self.down(), set())
 
@@ -191,32 +190,45 @@ class MouseInputTests(unittest.TestCase):
         self.step.assert_called_once_with(1, 0, Action.OPEN)
         self.assertTrue(self.engine.get_board_snapshot().mines_placed)
 
-    def test_right_drag_commits_only_at_release_target(self):
-        before = self.snapshot()
-        self.press((0, 0), Qt.RightButton)
-        self.move((1, 1))
-        self.assertEqual(self.down(), set())
-        self.assert_pure(before)
-        self.release((1, 1), Qt.RightButton)
-        self.step.assert_called_once_with(1, 1, Action.FLAG)
-        self.assertEqual(len(self.ui._replay_recorder.events), 1)
-        self.assert_last_event("FLAG", (1, 1))
-        self.assertEqual(self.engine.get_observation()[0][0], CellState.HIDDEN)
-        self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
-        self.assertTrue(self.ui._timer_running)
-        self.assertTrue(self.engine._timer_started)
+    def test_right_press_commits_at_press_target_in_every_mode(self):
+        for mode in ChordMode:
+            with self.subTest(mode=mode):
+                self.ui.on_reset()
+                self.ui.on_chord_mode_changed(mode)
+                self.step.reset_mock()
+                self.press((0, 0), Qt.RightButton)
+                self.step.assert_called_once_with(0, 0, Action.FLAG)
+                self.assert_last_event("FLAG", (0, 0))
+                self.assertEqual(len(self.ui._replay_recorder.events), 1)
+                self.assertEqual(self.engine.get_observation()[0][0], CellState.FLAGGED)
+                self.assertTrue(self.engine._timer_started)
+                self.move((1, 1))
+                self.assertEqual(self.down(), set())
+                after = self.snapshot()
+                self.release((1, 1), Qt.RightButton)
+                self.assertEqual(self.snapshot(), after)
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.HIDDEN)
+                self.press((0, 0), Qt.RightButton)
+                self.assertEqual(self.engine.get_observation()[0][0], CellState.HIDDEN)
+                self.assertEqual(self.step.call_count, 2)
+                after = self.snapshot()
+                self.release((1, 1), Qt.RightButton)
+                self.assertEqual(self.snapshot(), after)
+                self.assert_mouse_cleared()
 
-    def test_right_toggle_preserves_existing_policy(self):
+    def test_right_toggle_occurs_before_qtest_release(self):
         cell = self.ui._buttons[(1, 1)]
-        QTest.mouseClick(cell, Qt.RightButton)
-        before = self.snapshot()
         QTest.mousePress(cell, Qt.RightButton)
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+        before = self.snapshot()
         QTest.mouseRelease(cell, Qt.RightButton)
+        self.assertEqual(self.snapshot(), before)
+        QTest.mousePress(cell, Qt.RightButton)
         self.assertEqual(self.engine.get_observation()[1][1], CellState.HIDDEN)
-        self.assertEqual(self.step.call_count, 2)
-        self.assertEqual([e.action for e in self.ui._replay_recorder.events],
-                         ["FLAG", "FLAG"])
+        before = self.snapshot()
+        QTest.mouseRelease(cell, Qt.RightButton)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG", "FLAG"])
 
     def test_hidden_drag_transfers_preview_and_opens_only_destination(self):
         before = self.snapshot()
@@ -306,13 +318,13 @@ class MouseInputTests(unittest.TestCase):
     def test_single_release_outside_does_nothing(self):
         for button in (Qt.LeftButton, Qt.RightButton):
             with self.subTest(button=button):
-                before = self.snapshot()
                 self.press((0, 0), button)
+                before = self.snapshot()
                 self.move(self.outside())
                 self.assertEqual(self.down(), set())
                 self.release(self.outside(), button)
-                self.assert_pure(before)
-                self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
+                self.assertEqual(self.snapshot(), before)
+                self.assert_mouse_cleared()
 
     def test_flag_never_depresses_but_left_wasted_accounting_is_preserved(self):
         self.prepare_numbers()
@@ -420,27 +432,32 @@ class MouseInputTests(unittest.TestCase):
     def check_both_order(self, first_press, first_release):
         self.prepare_numbers()
         self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
-        before = self.snapshot()
         count = len(self.ui._replay_recorder.events)
         other_press = Qt.RightButton if first_press == Qt.LeftButton else Qt.LeftButton
         other_release = Qt.RightButton if first_release == Qt.LeftButton else Qt.LeftButton
         self.press((0, 0), first_press)
+        expected = [call(0, 0, Action.FLAG)] if first_press == Qt.RightButton else []
+        self.assertEqual(self.step.call_args_list, expected)
         self.press((0, 0), other_press)
+        self.assertTrue(self.ui._mouse_both)
         self.assertEqual(self.down(), self.neighbors((0, 0)))
-        self.assert_pure(before)
+        self.assertEqual(self.step.call_args_list, expected)
         self.release((0, 0), first_release)
-        self.step.assert_called_once_with(0, 0, Action.CHORD)
-        self.assertEqual(self.signals, [("both", 0, 0)])
-        self.assertEqual(len(self.ui._replay_recorder.events), count + 1)
+        expected.append(call(0, 0, Action.CHORD))
+        self.assertEqual(self.step.call_args_list, expected)
+        self.assertEqual(len(self.ui._replay_recorder.events), count + len(expected))
+        self.assertEqual([e.action for e in self.ui._replay_recorder.events[count:]],
+                         ["FLAG", "CHORD"] if first_press == Qt.RightButton else ["CHORD"])
         self.assert_last_event("CHORD", (0, 0))
-        self.assertEqual(self.down(), set())
+        self.assertFalse(self.ui._mouse_both)
         after = self.snapshot()
         self.move((4, 0))
-        self.assertEqual(self.down(), set())
+        self.assertEqual(self.down(), {(4, 0)} if other_release == Qt.LeftButton else set())
         self.release((4, 0), other_release)
         self.assertEqual(self.snapshot(), after)
-        self.assertEqual(self.step.call_count, 1)
-        self.assertEqual(self.signals, [("both", 0, 0)])
+        self.assertEqual(self.step.call_args_list, expected)
+        self.assertEqual([name for name, _, _ in self.signals].count("both"), 1)
+        self.assert_mouse_cleared()
 
     def test_both_left_right_release_left_right(self):
         self.check_both_order(Qt.LeftButton, Qt.LeftButton)
@@ -454,38 +471,41 @@ class MouseInputTests(unittest.TestCase):
     def test_both_right_left_release_right_left(self):
         self.check_both_order(Qt.RightButton, Qt.RightButton)
 
-    def test_both_is_allowed_in_left_click_mode(self):
+    def test_left_mode_chords_on_left_release_while_right_is_held(self):
         self.prepare_numbers()
         self.press((0, 0))
         self.press((0, 0), Qt.RightButton)
+        self.assertFalse(self.ui._mouse_both)
+        self.step.assert_called_once_with(0, 0, Action.FLAG)
         self.assertEqual(self.down(), self.neighbors((0, 0)))
         self.release((0, 0))
+        self.assertEqual(self.step.call_args_list, [call(0, 0, Action.FLAG), call(0, 0, Action.CHORD)])
+        before = self.snapshot()
         self.release((0, 0), Qt.RightButton)
-        self.step.assert_called_once_with(0, 0, Action.CHORD)
-        self.assertEqual(self.signals, [("both", 0, 0)])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.signals, [("right", 0, 0), ("left", 0, 0)])
 
-    def test_disabled_both_never_previews_or_commits(self):
+    def test_disabled_overlap_never_chords_but_flags_immediately(self):
         self.prepare_numbers()
         self.ui.on_chord_mode_changed(ChordMode.DISABLED)
-        for target in ((0, 0), (4, 0), (1, 1)):
-            for first in (Qt.LeftButton, Qt.RightButton):
-                with self.subTest(target=target, first=first):
-                    second = (Qt.RightButton if first == Qt.LeftButton
-                              else Qt.LeftButton)
-                    before = self.snapshot()
-                    self.press(target)
-                    self.press(target, Qt.RightButton)
-                    self.assertEqual(self.down(), set())
-                    self.move((0, 0))
-                    self.assertEqual(self.down(), set())
-                    self.release(target, first)
-                    self.assert_pure(before)
-                    self.assertEqual(self.down(), set())
-                    self.release((4, 0), second)
-                    self.assert_pure(before)
+        for first in (Qt.LeftButton, Qt.RightButton):
+            with self.subTest(first=first):
+                second = Qt.RightButton if first == Qt.LeftButton else Qt.LeftButton
+                self.step.reset_mock()
+                self.press((4, 0), first)
+                self.press((4, 0), second)
+                self.assertFalse(self.ui._mouse_both)
+                self.step.assert_called_once_with(4, 0, Action.FLAG)
+                self.move((0, 0))
+                self.assertEqual(self.down(), set())
+                self.release((0, 0), first)
+                self.release((0, 0), second)
+                self.step.assert_called_once_with(4, 0, Action.FLAG)
+                self.assertNotIn("CHORD", [e.action for e in self.ui._replay_recorder.events])
 
     def test_both_first_release_outside_consumes_both_orders(self):
         self.prepare_numbers()
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
         for first in (Qt.LeftButton, Qt.RightButton):
             with self.subTest(first=first):
                 second = Qt.RightButton if first == Qt.LeftButton else Qt.LeftButton
@@ -498,86 +518,82 @@ class MouseInputTests(unittest.TestCase):
                 self.release((4, 0), second)
                 self.assert_pure(before)
 
-    def test_both_preview_tracks_numbers_and_clears_on_invalid_targets(self):
+    def test_both_preview_tracks_hidden_numbers_and_current_release_target(self):
         self.prepare_numbers()
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+        self.press((0, 0), Qt.RightButton)
+        self.press((0, 0))
         before = self.snapshot()
-        self.press((4, 0), Qt.RightButton)
-        self.press((4, 0))
-        self.assertEqual(self.down(), set())
-        for target in ((0, 0), (2, 0)):
+        for target in ((0, 0), (2, 0), (4, 0), (1, 1)):
             self.move(target)
             self.assertEqual(self.down(), self.neighbors(target))
-            self.assert_pure(before)
-        for target in ((4, 0), (1, 1), self.outside()):
-            self.move(target)
-            self.assertEqual(self.down(), set())
-            self.assert_pure(before)
+            self.assertEqual(self.snapshot(), before)
+        self.move(self.outside())
+        self.assertEqual(self.down(), set())
         self.move((0, 0))
-        self.assertEqual(self.down(), self.neighbors((0, 0)))
-        self.release((2, 0), Qt.RightButton)
-        self.step.assert_called_once_with(2, 0, Action.CHORD)
-        self.release((0, 0))
-        self.assertEqual(self.step.call_count, 1)
+        self.release((2, 0))
+        self.assert_last_event("CHORD", (2, 0))
+        self.assertEqual(self.step.call_args_list, [call(0, 0, Action.FLAG), call(2, 0, Action.CHORD)])
+        self.assertFalse(self.ui._mouse_both)
+        self.assertEqual(self.down(), set())
+        after = self.snapshot()
+        self.release((0, 0), Qt.RightButton)
+        self.assertEqual(self.snapshot(), after)
 
     def check_wasted_both(self, mode, target):
         self.ui.on_chord_mode_changed(mode)
-        # Exercise both a stationary BOTH and a BOTH dragged from a number,
-        # in all four press/release orders.
-        for origin in ((0, 0), target):
-            for first_press in (Qt.LeftButton, Qt.RightButton):
-                for first_release in (Qt.LeftButton, Qt.RightButton):
-                    with self.subTest(origin=origin, first_press=first_press,
-                                      first_release=first_release):
-                        other_press = (Qt.RightButton
-                                       if first_press == Qt.LeftButton
-                                       else Qt.LeftButton)
-                        other_release = (Qt.RightButton
-                                         if first_release == Qt.LeftButton
-                                         else Qt.LeftButton)
-                        self.step.reset_mock()
-                        self.worker.reset_mock()
-                        self.signals.clear()
-                        before = self.snapshot()
-                        obs = self.engine.get_observation()
-                        board = self.engine.get_board_snapshot()
-                        wasted = self.engine._wasted_clicks.copy()
-                        active = self.engine._active_clicks.copy()
-                        count = len(self.ui._replay_recorder.events)
-                        self.press(origin, first_press)
-                        self.press(origin, other_press)
-                        self.move(target)
-                        if obs[target[1]][target[0]] in (
-                                CellState.HIDDEN, CellState.FLAGGED):
-                            self.assertEqual(self.down(), set())
-                        self.assert_pure(before)
-                        self.release(target, first_release)
-                        self.step.assert_called_once_with(*target, Action.CHORD)
-                        self.assertEqual(self.engine.get_observation(), obs)
-                        self.assertEqual(self.engine.get_board_snapshot(), board)
-                        wasted["chord"] += 1
-                        wasted["total"] += 1
-                        self.assertEqual(self.engine._wasted_clicks, wasted)
-                        self.assertEqual(self.engine._active_clicks, active)
-                        self.assertEqual(len(self.ui._replay_recorder.events),
-                                         count + 1)
-                        self.assert_last_event("CHORD", target)
-                        self.assertEqual(self.signals, [("both", *target)])
-                        self.assertEqual(self.down(), set())
-                        after = self.snapshot()
-                        self.move((4, 0))
-                        self.assertEqual(self.down(), set())
-                        self.release((4, 0), other_release)
-                        self.assertEqual(self.snapshot(), after)
-                        self.step.assert_called_once_with(*target, Action.CHORD)
-                        self.assertEqual(self.signals, [("both", *target)])
+        for first_release in (Qt.LeftButton, Qt.RightButton):
+            with self.subTest(first_release=first_release):
+                other_release = Qt.RightButton if first_release == Qt.LeftButton else Qt.LeftButton
+                self.step.reset_mock()
+                self.signals.clear()
+                before = self.engine.get_observation()
+                wasted = self.engine._wasted_clicks["chord"]
+                count = len(self.ui._replay_recorder.events)
+                self.press((0, 0))
+                self.press(target, Qt.RightButton)
+                self.assertTrue(self.ui._mouse_both)
+                self.assertEqual(self.down(), self.neighbors(target))
+                self.step.assert_not_called()
+                self.release(target, first_release)
+                self.step.assert_called_once_with(*target, Action.CHORD)
+                self.assertEqual(self.engine.get_observation(), before)
+                self.assertEqual(self.engine._wasted_clicks["chord"], wasted + 1)
+                self.assertEqual(len(self.ui._replay_recorder.events), count + 1)
+                self.assert_last_event("CHORD", target)
+                self.release((4, 0), other_release)
+                self.step.assert_called_once_with(*target, Action.CHORD)
 
-    def test_left_mode_both_hidden_records_one_wasted_chord(self):
-        self.prepare_numbers()
-        self.check_wasted_both(ChordMode.LEFT_CLICK, (4, 0))
+    def test_left_mode_same_hidden_overlap_flags_without_chord(self):
+        for mode in (ChordMode.LEFT_CLICK, ChordMode.DISABLED):
+            for first in (Qt.LeftButton, Qt.RightButton):
+                with self.subTest(mode=mode, first=first):
+                    self.ui.on_reset()
+                    self.ui.on_chord_mode_changed(mode)
+                    self.step.reset_mock()
+                    second = Qt.RightButton if first == Qt.LeftButton else Qt.LeftButton
+                    self.press((4, 0), first)
+                    if first == Qt.LeftButton:
+                        self.assertEqual(self.down(), {(4, 0)})
+                    self.press((4, 0), second)
+                    self.assertEqual(self.engine.get_observation()[0][4], CellState.FLAGGED)
+                    self.assertEqual(self.down(), set())
+                    self.release((4, 0), Qt.LeftButton)
+                    self.release((4, 0), Qt.RightButton)
+                    self.assertEqual(self.engine.get_observation()[0][4], CellState.FLAGGED)
+                    self.assertNotIn(Action.CHORD, [c.args[2] for c in self.step.call_args_list])
+                    self.assertEqual(self.step.call_count, 1 if first == Qt.LeftButton else 2)
 
-    def test_left_mode_both_flagged_records_one_wasted_chord(self):
-        self.prepare_numbers()
-        self.check_wasted_both(ChordMode.LEFT_CLICK, (1, 1))
+    def test_left_mode_overlap_unflags_then_opens(self):
+        self.ui.on_right_click(4, 0)
+        self.step.reset_mock()
+        self.press((4, 0))
+        self.press((4, 0), Qt.RightButton)
+        self.assertEqual(self.engine.get_observation()[0][4], CellState.HIDDEN)
+        self.assertEqual(self.down(), {(4, 0)})
+        self.release((4, 0))
+        self.release((4, 0), Qt.RightButton)
+        self.assertEqual(self.step.call_args_list, [call(4, 0, Action.FLAG), call(4, 0, Action.OPEN)])
 
     def test_both_mode_both_hidden_records_one_wasted_chord(self):
         self.prepare_numbers()
@@ -591,7 +607,7 @@ class MouseInputTests(unittest.TestCase):
         self.prepare_numbers(flag=False)
         self.ui.on_left_click(0, 4)
         self.assertEqual(self.engine.get_observation()[4][0], 0)
-        for mode in (ChordMode.LEFT_CLICK, ChordMode.BOTH_CLICK):
+        for mode in (ChordMode.BOTH_CLICK,):
             for target in ((0, 0), (0, 4)):
                 with self.subTest(mode=mode, target=target):
                     self.check_wasted_both(mode, target)
@@ -673,8 +689,8 @@ class MouseInputTests(unittest.TestCase):
                              pos=self.window_point((1, 1)))
             try:
                 self.assertFalse(self.ui._mouse_both)
-                self.assertEqual(self.down(), {(1, 1)})
-                self.step.assert_not_called()
+                self.assertEqual(self.down(), set())
+                self.step.assert_called_once_with(1, 1, Action.FLAG)
             finally:
                 QTest.mouseRelease(window, Qt.RightButton,
                                    pos=self.window_point((1, 1)))
@@ -684,7 +700,7 @@ class MouseInputTests(unittest.TestCase):
             self.assertEqual(self.engine.get_observation()[1][1],
                              CellState.FLAGGED)
             self.assertEqual(self.ui._mouse_buttons, Qt.LeftButton)
-            self.assertFalse(self.ui._mouse_consumed)
+            self.assertFalse(self.ui._mouse_left_consumed)
             self.assertEqual(self.down(), set())
             QTest.mouseMove(window, self.window_point((2, 0)))
             self.assertEqual(self.down(), {(2, 0)})
@@ -708,15 +724,14 @@ class MouseInputTests(unittest.TestCase):
         self.assertEqual(self.down(), set())
         self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
 
-    def test_new_flag_suppresses_held_left_release_in_every_chord_mode(self):
+    def test_new_flag_suppresses_held_left_release_in_modes_a_c(self):
         window = self.ui.windowHandle()
         origin = self.ui._buttons[(0, 0)]
         events = []
         origin.mouse_input.connect(
             lambda cell, e: events.append((cell, e.type(), e.button())))
-        for mode in ChordMode:
-            # A different RIGHT origin proves it is the release target that
-            # matters. Both cases still route through LEFT's original grab.
+        for mode in (ChordMode.LEFT_CLICK, ChordMode.DISABLED):
+            # RIGHT press position wins even while Qt routes through LEFT's grab.
             for right_origin in ((1, 1), (2, 0)):
                 with self.subTest(mode=mode, right_origin=right_origin):
                     self.ui.on_reset()
@@ -736,31 +751,31 @@ class MouseInputTests(unittest.TestCase):
                                          pos=self.window_point(right_origin))
                         try:
                             self.assertFalse(self.ui._mouse_both)
-                            self.step.assert_not_called()
+                            self.step.assert_called_once_with(*right_origin, Action.FLAG)
                             QTest.mouseMove(window, self.window_point((1, 1)))
                         finally:
                             QTest.mouseRelease(window, Qt.RightButton,
                                                pos=self.window_point((1, 1)))
-                        self.step.assert_called_once_with(1, 1, Action.FLAG)
+                        self.step.assert_called_once_with(*right_origin, Action.FLAG)
                         self.assert_click_totals(1, 0, 1, 0)
                         self.assertEqual(self.ui._mouse_buttons, Qt.LeftButton)
-                        self.assertEqual(self.ui._mouse_left_suppressed, {(1, 1)})
-                        self.assertEqual(self.down(), set())
-                        self.assertEqual(self.engine.get_observation()[1][1],
+                        self.assertEqual(self.ui._mouse_left_suppressed, {right_origin})
+                        self.assertEqual(self.down(), set() if right_origin == (1, 1) else {(1, 1)})
+                        self.assertEqual(self.engine.get_observation()[right_origin[1]][right_origin[0]],
                                          CellState.FLAGGED)
                         after_flag = self.snapshot()
                     finally:
                         QTest.mouseRelease(window, Qt.LeftButton,
-                                           pos=self.window_point((1, 1)))
+                                           pos=self.window_point(right_origin))
                     self.assertEqual(self.snapshot(), after_flag)
-                    self.step.assert_called_once_with(1, 1, Action.FLAG)
-                    self.assertEqual(self.signals, [("right", 1, 1)])
+                    self.step.assert_called_once_with(*right_origin, Action.FLAG)
+                    self.assertEqual(self.signals, [("right", *right_origin)])
                     self.assert_click_totals(1, 0, 1, 0)
                     self.assertEqual(self.engine._wasted_clicks["left"], 0)
                     self.assertEqual(
                         [(e.action, e.x, e.y)
                          for e in self.ui._replay_recorder.events],
-                        [("FLAG", 1, 1)])
+                        [("FLAG", *right_origin)])
                     for kind in (QEvent.MouseButtonPress,
                                  QEvent.MouseButtonRelease):
                         self.assertIn((origin, kind, Qt.RightButton), events)
@@ -839,38 +854,76 @@ class MouseInputTests(unittest.TestCase):
         self.assert_click_totals(3, 1, 2, 0)
         self.assert_mouse_cleared()
 
-    def test_remembered_flag_does_not_change_same_origin_both(self):
-        for mode in ChordMode:
-            with self.subTest(mode=mode):
+    def test_repeated_mode_b_overlaps_rearm_with_either_button_held(self):
+        for held in (Qt.LeftButton, Qt.RightButton):
+            with self.subTest(held=held):
                 self.ui.on_reset()
-                self.engine.reset_with_mines(
-                    5, 5, 3, {(1, 1), (3, 1), (3, 3)})
-                self.ui.render_board()
-                self.ui.on_chord_mode_changed(mode)
+                self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                self.prepare_numbers()
+                self.ui.on_left_click(4, 0)
+                self.ui.on_right_click(3, 1)
                 self.step.reset_mock()
-                self.worker.reset_mock()
-                self.signals.clear()
-                self.flag_during_left_hold()
-                self.move((0, 0))
-                self.press((0, 0), Qt.RightButton)
-                self.assertTrue(self.ui._mouse_both)
-                self.release((1, 1))
-                if mode == ChordMode.DISABLED:
-                    self.step.assert_called_once_with(1, 1, Action.FLAG)
-                    self.assert_click_totals(1, 0, 1, 0)
-                    actions = ["FLAG"]
-                else:
-                    self.assertEqual(self.step.call_args_list,
-                                     [call(1, 1, Action.FLAG),
-                                      call(1, 1, Action.CHORD)])
-                    self.assertEqual(self.engine._wasted_clicks["chord"], 1)
-                    self.assert_click_totals(2, 0, 1, 1)
-                    actions = ["FLAG", "CHORD"]
-                after_first = self.snapshot()
-                self.release((1, 1), Qt.RightButton)
-                self.assertEqual(self.snapshot(), after_first)
-                self.assertEqual([e.action for e in self.ui._replay_recorder.events],
-                                 actions)
+                self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+                cycle = Qt.RightButton if held == Qt.LeftButton else Qt.LeftButton
+                self.press((0, 0), held)
+                expected = [call(0, 0, Action.FLAG)] if held == Qt.RightButton else []
+                count = len(self.ui._replay_recorder.events)
+                for target in ((0, 0), (2, 0), (4, 0)):
+                    self.press(target, cycle)
+                    self.assertTrue(self.ui._mouse_both)
+                    self.assertEqual(self.step.call_args_list, expected)
+                    self.release(target, cycle)
+                    expected.append(call(*target, Action.CHORD))
+                    self.assertEqual(self.step.call_args_list, expected)
+                    self.assertFalse(self.ui._mouse_both)
+                    self.assertEqual(self.ui._mouse_buttons, held)
+                self.assertEqual(self.engine._active_clicks["chord"], 3)
+                self.assertEqual([e.action for e in self.ui._replay_recorder.events[count:]], ["CHORD"] * 3)
+                self.release((4, 0), held)
+                self.assertEqual(self.step.call_args_list, expected)
+                self.assert_mouse_cleared()
+
+    def test_hidden_both_preview_falls_back_to_single_left_after_first_release(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+        self.ui.mouse_trace_overlay.show()
+        self.press((0, 0))
+        self.assertEqual(self.down(), {(0, 0)})
+        self.move((2, 0))
+        self.press((2, 0), Qt.RightButton)
+        self.assertEqual(self.down(), self.neighbors((2, 0)))
+        self.assertIn((2, 0), self.down())
+        self.step.assert_not_called()
+        self.move((3, 0))
+        self.assertEqual(self.down(), self.neighbors((3, 0)))
+        self.release((3, 0), Qt.RightButton)
+        self.assertFalse(self.ui._mouse_both)
+        self.assertTrue(self.ui._mouse_left_consumed)
+        self.assertEqual(self.down(), {(3, 0)})
+        self.step.assert_called_once_with(3, 0, Action.CHORD)
+        self.release((4, 0))
+        self.step.assert_called_once_with(3, 0, Action.CHORD)
+        self.assert_mouse_cleared()
+
+    def test_flag_press_callback_reset_does_not_restore_left_suppression(self):
+        for rebuild in (False, True):
+            with self.subTest(rebuild=rebuild):
+                self.ui.on_reset()
+                self.ui.on_chord_mode_changed(ChordMode.LEFT_CLICK)
+                target = self.ui._buttons[(1, 0)]
+                def change_board(_x, _y):
+                    if rebuild:
+                        self.ui._rebuild_game(5, 5, 3)
+                    else:
+                        self.ui.on_reset()
+                target.right_clicked.connect(change_board)
+                self.press((0, 0))
+                self.press((1, 0), Qt.RightButton)
+                target.right_clicked.disconnect(change_board)
+                self.assert_mouse_cleared()
+                self.step.reset_mock()
+                self.release((1, 0), Qt.RightButton)
+                self.release((1, 0))
+                self.step.assert_not_called()
                 self.assert_mouse_cleared()
 
     def check_flag_suppression_invalidation(self, invalidate):
@@ -903,88 +956,53 @@ class MouseInputTests(unittest.TestCase):
         self.ui._exit_replay_mode()
         self.assert_mouse_cleared()
 
-    def test_independent_left_opens_under_right_grab_then_right_flags(self):
+    def test_independent_left_opens_under_right_grab_after_right_flags(self):
         window = self.ui.windowHandle()
-        origin = self.ui._buttons[(0, 0)]
-        events = []
-        origin.mouse_input.connect(
-            lambda cell, e: events.append((cell, e.type(), e.button())))
         QTest.mousePress(window, Qt.RightButton, pos=self.window_point((0, 0)))
-        try:
-            QTest.mouseMove(window, self.window_point((1, 0)))
-            QTest.mousePress(window, Qt.LeftButton,
-                             pos=self.window_point((1, 0)))
-            try:
-                self.assertFalse(self.ui._mouse_both)
-                self.assertEqual(self.down(), {(1, 0)})
-                self.step.assert_not_called()
-            finally:
-                QTest.mouseRelease(window, Qt.LeftButton,
-                                   pos=self.window_point((1, 0)))
-            self.step.assert_called_once_with(1, 0, Action.OPEN)
-            self.assertEqual(self.signals, [("left", 1, 0)])
-            self.assertEqual(self.ui._mouse_buttons, Qt.RightButton)
-            self.assertFalse(self.ui._mouse_consumed)
-            self.assertEqual(self.down(), set())
-            QTest.mouseMove(window, self.window_point((1, 1)))
-        finally:
-            QTest.mouseRelease(window, Qt.RightButton,
-                               pos=self.window_point((1, 1)))
-        self.assertEqual(self.step.call_args_list,
-                         [call(1, 0, Action.OPEN), call(1, 1, Action.FLAG)])
-        self.assertEqual(self.signals, [("left", 1, 0), ("right", 1, 1)])
-        self.assertEqual([(e.action, e.x, e.y)
-                          for e in self.ui._replay_recorder.events],
-                         [("OPEN", 1, 0), ("FLAG", 1, 1)])
-        self.assertEqual(self.engine.get_observation()[0][0], CellState.HIDDEN)
-        self.assertEqual(self.engine.get_observation()[0][1], 1)
-        self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
-        for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
-            self.assertIn((origin, kind, Qt.LeftButton), events)
-        self.assertEqual(self.down(), set())
-        self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
+        self.step.assert_called_once_with(0, 0, Action.FLAG)
+        QTest.mouseMove(window, self.window_point((1, 0)))
+        QTest.mousePress(window, Qt.LeftButton, pos=self.window_point((1, 0)))
+        self.assertFalse(self.ui._mouse_both)
+        self.assertEqual(self.down(), {(1, 0)})
+        QTest.mouseRelease(window, Qt.LeftButton, pos=self.window_point((1, 0)))
+        self.assertEqual(self.step.call_args_list, [call(0, 0, Action.FLAG), call(1, 0, Action.OPEN)])
+        before = self.snapshot()
+        QTest.mouseRelease(window, Qt.RightButton, pos=self.window_point((1, 1)))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual([(e.action, e.x, e.y) for e in self.ui._replay_recorder.events],
+                         [("FLAG", 0, 0), ("OPEN", 1, 0)])
+        self.assert_mouse_cleared()
 
-    def test_different_origins_remain_independent_in_every_chord_mode(self):
-        # Release the first-pressed button first as well; each remaining
-        # gesture must stay live, regardless of the configured chord mode.
+    def test_different_origins_arm_only_in_mode_b(self):
         for mode in ChordMode:
             for first in (Qt.LeftButton, Qt.RightButton):
                 with self.subTest(mode=mode, first=first):
                     self.ui.on_reset()
-                    self.engine.reset_with_mines(
-                        5, 5, 3, {(1, 1), (3, 1), (3, 3)})
+                    self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
                     self.ui.render_board()
                     self.ui.on_chord_mode_changed(mode)
                     self.step.reset_mock()
-                    self.worker.reset_mock()
-                    self.signals.clear()
-                    second = (Qt.RightButton if first == Qt.LeftButton
-                              else Qt.LeftButton)
+                    second = Qt.RightButton if first == Qt.LeftButton else Qt.LeftButton
                     self.press((0, 0), first)
                     self.move((1, 0))
                     self.press((1, 0), second)
-                    self.assertFalse(self.ui._mouse_both)
-                    first_target = (2, 0) if first == Qt.LeftButton else (1, 1)
-                    self.release(first_target, first)
-                    self.assertEqual(self.ui._mouse_buttons, second)
-                    self.assertFalse(self.ui._mouse_consumed)
-                    self.move((3, 0))
-                    self.assertEqual(self.down(),
-                                     {(3, 0)} if second == Qt.LeftButton
-                                     else set())
+                    self.assertEqual(self.ui._mouse_both, mode == ChordMode.BOTH_CLICK)
+                    right_target = (0, 0) if first == Qt.RightButton else (1, 0)
+                    expected = [] if mode == ChordMode.BOTH_CLICK and first == Qt.LeftButton else [call(*right_target, Action.FLAG)]
+                    self.assertEqual(self.step.call_args_list, expected)
+                    if mode == ChordMode.BOTH_CLICK:
+                        self.assertEqual(self.down(), self.neighbors((1, 0)))
+                        self.assertEqual(self.engine.get_observation()[0][1], CellState.HIDDEN)
+                    self.release((2, 0), first)
+                    if mode == ChordMode.BOTH_CLICK:
+                        expected.append(call(2, 0, Action.CHORD))
+                    elif first == Qt.LeftButton:
+                        expected.append(call(2, 0, Action.OPEN))
                     self.release((3, 0), second)
-                    first_action = (Action.OPEN if first == Qt.LeftButton
-                                    else Action.FLAG)
-                    second_action = (Action.OPEN if second == Qt.LeftButton
-                                     else Action.FLAG)
-                    self.assertEqual(self.step.call_args_list,
-                                     [call(*first_target, first_action),
-                                      call(3, 0, second_action)])
-                    self.assertNotIn("both", [s[0] for s in self.signals])
-                    self.assertEqual(
-                        [e.action for e in self.ui._replay_recorder.events],
-                        ["OPEN", "FLAG"] if first == Qt.LeftButton
-                        else ["FLAG", "OPEN"])
+                    if mode != ChordMode.BOTH_CLICK and second == Qt.LeftButton:
+                        expected.append(call(3, 0, Action.OPEN))
+                    self.assertEqual(self.step.call_args_list, expected)
+                    self.assert_mouse_cleared()
 
     def test_keyboard_reset_invalidates_old_release_and_allows_fresh_gesture(self):
         self.press((0, 0))
@@ -1050,6 +1068,116 @@ class MouseInputTests(unittest.TestCase):
         self.release((0, 0))
         self.assert_pure(before)
 
+    def test_armed_and_consumed_overlaps_are_invalidated_across_lifecycle(self):
+        transitions = ("reset", "rebuild", "difficulty", "hide", "deactivate",
+                       "board_hide", "replay", "resize", "mode")
+        for transition in transitions:
+            for consumed in (False, True):
+                with self.subTest(transition=transition, consumed=consumed):
+                    self.ui.on_reset()
+                    self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+                    self.press((0, 0))
+                    self.press((1, 0), Qt.RightButton)
+                    self.assertTrue(self.ui._mouse_both)
+                    if consumed:
+                        self.release(self.outside(), Qt.RightButton)
+                        self.assertTrue(self.ui._mouse_left_consumed)
+                    old = self.receiver
+                    if transition == "reset":
+                        self.ui.on_reset()
+                    elif transition == "rebuild":
+                        self.ui._rebuild_game(5, 5, 3)
+                    elif transition == "difficulty":
+                        self.ui.on_difficulty_changed("초급 (9x9, 10)")
+                    elif transition == "hide":
+                        self.ui.hide()
+                        self.ui.show()
+                    elif transition == "deactivate":
+                        self.app.sendEvent(self.ui, QEvent(QEvent.WindowDeactivate))
+                    elif transition == "board_hide":
+                        self.ui.board_container.hide()
+                        self.ui.board_container.show()
+                    elif transition == "replay":
+                        self.ui._enter_replay_mode(ReplayPlayer(ReplayData(ReplayBoard(
+                            5, 5, 3, {(1, 1), (3, 1), (3, 3)}), ())))
+                        self.ui._exit_replay_mode()
+                    elif transition == "resize":
+                        self.ui.on_cell_size_changed(28 if self.ui._cell_size == 30 else 30)
+                    else:
+                        self.ui.on_chord_mode_changed(ChordMode.LEFT_CLICK)
+                    self.assert_mouse_cleared()
+                    self.step.reset_mock()
+                    # Missing-button press after reset must not revive a stale
+                    # held LEFT, even if delivered to a current board widget.
+                    if consumed:
+                        self.send(QEvent.MouseButtonPress, (1, 0), Qt.RightButton,
+                                  receiver=self.ui._buttons[(1, 0)])
+                    self.release((1, 0), Qt.RightButton, receiver=old)
+                    self.release((1, 0), receiver=old)
+                    self.release((1, 0), receiver=self.ui._buttons[(1, 0)])
+                    self.step.assert_not_called()
+                    self.assert_mouse_cleared()
+                    self.app.processEvents()  # Lay out any rebuilt grid before a fresh press.
+                    self.press((0, 0), Qt.RightButton)
+                    self.step.assert_called_once_with(0, 0, Action.FLAG)
+                    self.release((0, 0), Qt.RightButton)
+                    self.assert_mouse_cleared()
+
+    def test_old_widget_press_and_mismatched_button_state_cannot_act(self):
+        old = self.ui._buttons[(0, 0)]
+        self.ui._rebuild_game(5, 5, 3)
+        self.send(QEvent.MouseButtonPress, (0, 0), Qt.RightButton, receiver=old)
+        self.release((0, 0), Qt.RightButton, receiver=old)
+        self.step.assert_not_called()
+        self.assert_mouse_cleared()
+        self.press((0, 0))
+        # A missing LEFT in a newly delivered RIGHT press is not a coherent
+        # transition. Discard the tracked hold instead of acting on it.
+        self.held = Qt.NoButton
+        self.press((1, 0), Qt.RightButton)
+        self.release((1, 0), Qt.RightButton)
+        self.step.assert_not_called()
+        self.assert_mouse_cleared()
+
+    def test_mode_b_right_flag_is_not_undone_when_left_joins_same_hidden_cell(self):
+        self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+        for first_release in (Qt.LeftButton, Qt.RightButton):
+            with self.subTest(first_release=first_release):
+                self.ui.on_reset()
+                self.step.reset_mock()
+                target = (1, 1)
+                center = self.ui._buttons[target]
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.HIDDEN)
+                self.press(target, Qt.RightButton)
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+                self.step.assert_called_once_with(1, 1, Action.FLAG)
+                self.assert_last_event("FLAG", target)
+                self.assertEqual(len(self.ui._replay_recorder.events), 1)
+                flag_text = center.text()
+                self.assertTrue(flag_text)
+                self.press(target)
+                self.assertTrue(self.ui._mouse_both)
+                self.step.assert_called_once_with(1, 1, Action.FLAG)
+                self.assertEqual(self.down(), self.neighbors(target))
+                self.assertEqual(len(self.down()), 8)
+                self.assertNotIn(target, self.down())
+                self.assertFalse(center.isDown())
+                self.assertEqual(center.text(), flag_text)
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+                self.release(target, first_release)
+                expected = [call(1, 1, Action.FLAG), call(1, 1, Action.CHORD)]
+                self.assertEqual(self.step.call_args_list, expected)
+                self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG", "CHORD"])
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+                after_first_release = self.snapshot()
+                trailing = Qt.RightButton if first_release == Qt.LeftButton else Qt.LeftButton
+                self.release(target, trailing)
+                self.assertEqual(self.snapshot(), after_first_release)
+                self.assertEqual(self.step.call_args_list, expected)
+                self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+                self.assertEqual(center.text(), flag_text)
+                self.assertFalse(center.isDown())
+
     def test_qtest_double_click_is_a_second_release_committed_click(self):
         cell = self.ui._buttons[(0, 0)]
         QTest.mouseClick(cell, Qt.LeftButton)
@@ -1065,12 +1193,12 @@ class MouseInputTests(unittest.TestCase):
                          ["OPEN", "CHORD"])
         self.assertEqual(self.down(), set())
 
-    def test_rapid_right_double_click_toggles_once_per_release(self):
+    def test_rapid_right_double_click_toggles_once_per_press(self):
         cell = self.ui._buttons[(1, 1)]
         QTest.mouseClick(cell, Qt.RightButton)
         QTest.mouseDClick(cell, Qt.RightButton)
-        self.assertEqual(self.step.call_count, 1)
-        self.assertEqual(self.engine.get_observation()[1][1], CellState.FLAGGED)
+        self.assertEqual(self.step.call_count, 2)
+        self.assertEqual(self.engine.get_observation()[1][1], CellState.HIDDEN)
         QTest.mouseRelease(cell, Qt.RightButton)
         self.assertEqual(self.step.call_count, 2)
         self.assertEqual(self.engine.get_observation()[1][1], CellState.HIDDEN)

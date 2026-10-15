@@ -234,7 +234,7 @@ def border_width_for(cell_size: int) -> int:
 class CellButton(QPushButton):
     """
     Forward physical mouse events to the board gesture coordinator.
-    Semantic click signals are emitted only for the resolved release target.
+    Semantic click signals use the physical action's resolved press/release target.
     """
     mouse_input = pyqtSignal(object, object)
     left_clicked = pyqtSignal(int, int)
@@ -367,14 +367,13 @@ class MinesweeperUI(QWidget):
         self._game_over = False
         self._buttons = {}
         self._mouse_buttons = Qt.NoButton
-        self._mouse_origins = {}
         self._mouse_left_suppressed = set()
-        self._mouse_both = False
-        self._mouse_consumed = False
+        self._mouse_both = False  # Current Mode-B overlap awaits its first release.
+        self._mouse_left_consumed = False  # Trailing LEFT release must be inert.
         self._mouse_position = None
         self._mouse_preview = set()
         self._mouse_trace_recorder = MouseTraceRecorder(engine.width, engine.height)
-        self._mouse_trace_release = None
+        self._mouse_trace_observation = None
         self._mouse_trace_recording_enabled = True
         self._mouse_trace_recording_locked = False
         self._mouse_trace_display_data = None
@@ -465,6 +464,8 @@ class MinesweeperUI(QWidget):
     def eventFilter(self, watched, event):
         # These filters observe only the window/board/viewport, never consume
         # input, and do not split segments at ordinary cell-to-cell crossings.
+        if event.type() in (QEvent.Hide, QEvent.WindowDeactivate, QEvent.WindowBlocked):
+            self._invalidate_mouse_input()
         if event.type() in (QEvent.Leave, QEvent.Hide, QEvent.Move, QEvent.Resize,
                             QEvent.WindowDeactivate, QEvent.WindowBlocked):
             self._mouse_trace_recorder.break_segment()
@@ -1462,10 +1463,10 @@ class MinesweeperUI(QWidget):
             height=self.engine.height,
             num_mines=self.engine.num_mines,
         )
-        # Replacing the capture session also rejects a release dispatch that
+        # Replacing the capture session also rejects a physical dispatch that
         # was interrupted by a reset/rebuild callback.
         self._mouse_trace_recorder = MouseTraceRecorder(self.engine.width, self.engine.height)
-        self._mouse_trace_release = None
+        self._mouse_trace_observation = None
         self._mouse_trace_recording_locked = False
         self._clear_mouse_trace_display()
         self._update_mouse_trace_controls()
@@ -1906,7 +1907,7 @@ class MinesweeperUI(QWidget):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
         self._invalidate_mouse_input()
         self._mouse_trace_recorder.invalidate()
-        self._mouse_trace_release = None
+        self._mouse_trace_observation = None
         self._clear_mouse_trace_display()
         self.mouse_trace_record_checkbox.setEnabled(False)
         self._stop_simple_auto()
@@ -2126,6 +2127,7 @@ class MinesweeperUI(QWidget):
     # 설정 핸들러
     # ------------------------------------------------------------------
     def on_chord_mode_changed(self, index: int):
+        self._invalidate_mouse_input()
         self._chord_mode = ChordMode(index)
         self._update_mouse_preview()
 
@@ -2288,17 +2290,17 @@ class MinesweeperUI(QWidget):
             return None
         return x, y
 
-    def _emit_mouse_release(self, target, signal_name, position, observed_ns):
+    def _emit_mouse_action(self, target, signal_name, position, observed_ns):
         # This context exists only during the existing synchronous semantic
-        # dispatch. Direct/Auto calls cannot borrow a previous release position.
-        self._mouse_trace_release = (
+        # dispatch. Direct/Auto calls cannot borrow a previous observation.
+        self._mouse_trace_observation = (
             (self._mouse_trace_recorder, position, self._cell_size, observed_ns)
             if position is not None else None
         )
         try:
             getattr(target, signal_name).emit(target.x, target.y)
         finally:
-            self._mouse_trace_release = None
+            self._mouse_trace_observation = None
 
     def _set_mouse_preview(self, cells):
         for cell in self._mouse_preview - cells:
@@ -2311,10 +2313,9 @@ class MinesweeperUI(QWidget):
         """Old releases cannot act on a reset, rebuilt, hidden or replay board."""
         self._set_mouse_preview(set())
         self._mouse_buttons = Qt.NoButton
-        self._mouse_origins = {}
         self._mouse_left_suppressed = set()
         self._mouse_both = False
-        self._mouse_consumed = False
+        self._mouse_left_consumed = False
         self._mouse_position = None
 
     def _cell_at_mouse_position(self, global_position):
@@ -2332,7 +2333,7 @@ class MinesweeperUI(QWidget):
 
     def _update_mouse_preview(self):
         cells = set()
-        if (self._mouse_buttons & Qt.LeftButton and not self._mouse_consumed
+        if (self._mouse_buttons & Qt.LeftButton
                 and not self._replay_mode and not self._game_over
                 and self.engine.status == GameStatus.PLAYING
                 and self._mouse_position is not None):
@@ -2343,10 +2344,8 @@ class MinesweeperUI(QWidget):
                 value = obs[y][x]
                 if value == CellState.HIDDEN and not self._mouse_both:
                     cells.add((x, y))
-                elif (0 <= value <= 8
-                      and (self._chord_mode == ChordMode.LEFT_CLICK
-                           or (self._mouse_both
-                               and self._chord_mode == ChordMode.BOTH_CLICK))):
+                elif ((self._mouse_both and (value in (CellState.HIDDEN, CellState.FLAGGED) or 0 <= value <= 8))
+                      or (0 <= value <= 8 and self._chord_mode == ChordMode.LEFT_CLICK)):
                     # No flag-count validation: this previews an attempt only.
                     cells = {
                         (nx, ny)
@@ -2361,118 +2360,115 @@ class MinesweeperUI(QWidget):
                 or self._replay_mode or self._game_over or not self.isVisible()):
             return
         kind = event.type()
-        trace_recorder = self._mouse_trace_recorder
-        # Pre-start hover/press has no trace observation to contribute. Releases
-        # still carry physical-human provenance, geometry and observation time,
-        # even when the unchecked recording choice must lock on the first action.
-        trace_position = None
-        if (trace_recorder.eligible and not trace_recorder.frozen
-                and (trace_recorder.started or kind == QEvent.MouseButtonRelease)):
-            trace_position = self._mouse_trace_position(event)
-        trace_observed_ns = None
-        if trace_position is not None:
-            if kind == QEvent.MouseButtonRelease:
-                # Observe before dispatch. Reading this clock does not start
-                # capture; a successful gameplay/Replay commit is still needed.
-                trace_observed_ns = trace_recorder.observation_time_ns()
-            else:
-                trace_recorder.record_position(*trace_position, self._cell_size)
         button = event.button()
         buttons = event.buttons() & (Qt.LeftButton | Qt.RightButton)
-        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
+        press = kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick)
+        if press:
             if button not in (Qt.LeftButton, Qt.RightButton):
                 return
-            if not self._mouse_buttons:
-                # A second press after invalidation cannot revive an old hold.
-                if buttons != button:
-                    return
-                self._mouse_both = False
-                self._mouse_consumed = False
-            if button == Qt.LeftButton:
-                self._mouse_left_suppressed = set()
-            self._mouse_buttons = buttons
-            target = self._cell_at_mouse_position(event.globalPos())
-            origin = (target.x, target.y) if target is not None else None
-            self._mouse_origins[button] = origin
-            # A mouse grab routes both presses through the first widget, but
-            # only presses that began on the same cell form one BOTH gesture.
-            self._mouse_both |= (
-                buttons == (Qt.LeftButton | Qt.RightButton)
-                and origin is not None
-                and self._mouse_origins.get(Qt.LeftButton)
-                == self._mouse_origins.get(Qt.RightButton)
-            )
-        elif kind == QEvent.MouseMove:
-            if not self._mouse_buttons:
-                return
-            if buttons != self._mouse_buttons:
+            # Only a fresh transition can join the tracked hold. In particular,
+            # a second press after invalidation cannot revive an old hold.
+            if self._mouse_buttons & button or buttons != self._mouse_buttons | button:
                 self._invalidate_mouse_input()
                 return
         elif kind == QEvent.MouseButtonRelease:
             if not self._mouse_buttons & button:
                 return
+            if buttons != self._mouse_buttons & ~button:
+                self._invalidate_mouse_input()
+                return
+        elif kind != QEvent.MouseMove:
+            return
+
+        right_action = (press and button == Qt.RightButton
+                        and not (self._chord_mode == ChordMode.BOTH_CLICK
+                                 and self._mouse_buttons & Qt.LeftButton))
+        action_observation = right_action or kind == QEvent.MouseButtonRelease
+        trace_recorder = self._mouse_trace_recorder
+        # Pre-start movement and ordinary presses stay gated. Only a candidate
+        # action needs geometry/time before synchronous engine/Replay processing.
+        trace_position = None
+        if (trace_recorder.eligible and not trace_recorder.frozen
+                and (trace_recorder.started or action_observation)):
+            trace_position = self._mouse_trace_position(event)
+        trace_observed_ns = None
+        if trace_position is not None:
+            if action_observation:
+                trace_observed_ns = trace_recorder.observation_time_ns()
+            else:
+                trace_recorder.record_position(*trace_position, self._cell_size)
+        if action_observation:
             trace_event_count = len(self._replay_recorder.events)
             trace_cell_size = self._cell_size
-            both, consumed = self._mouse_both, self._mouse_consumed
-            self._mouse_buttons = buttons
-            self._mouse_origins.pop(button, None)
-            self._mouse_consumed |= both
-            self._mouse_position = event.globalPos()
-            self._set_mouse_preview(set())
-            target = self._cell_at_mouse_position(self._mouse_position)
-            suppress_left = (
-                not both and button == Qt.LeftButton and target is not None
-                and (target.x, target.y) in self._mouse_left_suppressed
-                and self.engine.get_observation()[target.y][target.x]
-                == CellState.FLAGGED
-            )
-            if button == Qt.LeftButton:
-                self._mouse_left_suppressed = set()
-            if not buttons:
+
+        if kind == QEvent.MouseMove:
+            if not self._mouse_buttons:
+                return
+            if buttons != self._mouse_buttons:
                 self._invalidate_mouse_input()
-            # Consume BOTH before dispatch; independent releases leave the
-            # other button active. Rendering may update its preview or reset.
-            if not consumed and not suppress_left and target is not None:
-                if both:
-                    if self._chord_mode != ChordMode.DISABLED:
-                        self._emit_mouse_release(target, "both_clicked", trace_position, trace_observed_ns)
-                elif button == Qt.LeftButton:
-                    self._emit_mouse_release(target, "left_clicked", trace_position, trace_observed_ns)
-                elif button == Qt.RightButton:
-                    # Remember only flags placed during this live LEFT hold,
-                    # at the actual RIGHT release target, never its origin.
+                return
+            self._mouse_position = event.globalPos()
+        else:
+            self._mouse_position = event.globalPos()
+            target = self._cell_at_mouse_position(self._mouse_position)
+            if press:
+                self._mouse_buttons = buttons
+                if button == Qt.LeftButton:
+                    self._mouse_left_suppressed = set()
+                    self._mouse_left_consumed = False
+                # One overlap, independent of origins and any prior overlap.
+                self._mouse_both = (self._chord_mode == ChordMode.BOTH_CLICK
+                                    and buttons == (Qt.LeftButton | Qt.RightButton))
+                if right_action and target is not None:
                     suppressed = self._mouse_left_suppressed
-                    was_flagged = (
-                        self.engine.get_observation()[target.y][target.x]
-                        == CellState.FLAGGED
-                    )
-                    self._emit_mouse_release(target, "right_clicked", trace_position, trace_observed_ns)
+                    was_flagged = (self.engine.get_observation()[target.y][target.x]
+                                   == CellState.FLAGGED)
+                    self._emit_mouse_action(target, "right_clicked", trace_position, trace_observed_ns)
                     if (self._mouse_buttons & Qt.LeftButton
                             and self._mouse_left_suppressed is suppressed):
-                        # Dispatch can invalidate the gesture via a callback.
-                        is_flagged = (
-                            self.engine.get_observation()[target.y][target.x]
-                            == CellState.FLAGGED
-                        )
+                        # A synchronous callback can reset/rebuild the board.
+                        is_flagged = (self.engine.get_observation()[target.y][target.x]
+                                      == CellState.FLAGGED)
                         if is_flagged and not was_flagged:
                             suppressed.add((target.x, target.y))
                         elif not is_flagged:
                             suppressed.discard((target.x, target.y))
-            if (trace_position is not None and trace_recorder is self._mouse_trace_recorder
-                    and len(self._replay_recorder.events) == trace_event_count
-                    and self._buttons.get((source.x, source.y)) is source
-                    and self._cell_size == trace_cell_size
-                    and self._mouse_trace_position(event) == trace_position):
-                # Committed actions already supplied this observation. An
-                # ignored release is still a sample unless dispatch changed
-                # the session, visibility, or geometry beneath it.
-                trace_recorder.record_position(*trace_position, trace_cell_size,
-                                               observed_ns=trace_observed_ns)
-            self._update_mouse_preview()
-            return
-        else:
-            return
-        self._mouse_position = event.globalPos()
+            else:
+                both = self._mouse_both
+                suppress_left = (self._mouse_left_consumed
+                                 or (target is not None
+                                     and (target.x, target.y) in self._mouse_left_suppressed
+                                     and self.engine.get_observation()[target.y][target.x]
+                                     == CellState.FLAGGED))
+                self._mouse_buttons = buttons
+                # Consume even an outside release before dispatch. A remaining
+                # LEFT release is inert, but a new RIGHT press can re-arm BOTH.
+                self._mouse_both = False
+                if both:
+                    self._mouse_left_consumed = bool(buttons & Qt.LeftButton)
+                if button == Qt.LeftButton:
+                    self._mouse_left_suppressed = set()
+                    self._mouse_left_consumed = False
+                self._set_mouse_preview(set())
+                if not buttons:
+                    self._invalidate_mouse_input()
+                if target is not None:
+                    if both:
+                        self._emit_mouse_action(target, "both_clicked", trace_position, trace_observed_ns)
+                    elif button == Qt.LeftButton and not suppress_left:
+                        self._emit_mouse_action(target, "left_clicked", trace_position, trace_observed_ns)
+                # RIGHT release never dispatches a standalone FLAG.
+
+        if (action_observation and trace_position is not None
+                and trace_recorder is self._mouse_trace_recorder
+                and len(self._replay_recorder.events) == trace_event_count
+                and self._buttons.get((source.x, source.y)) is source
+                and self._cell_size == trace_cell_size
+                and self._mouse_trace_position(event) == trace_position):
+            # Committed actions already supplied this observation. An ignored
+            # press/release remains a sample unless dispatch changed its context.
+            trace_recorder.record_position(*trace_position, trace_cell_size,
+                                           observed_ns=trace_observed_ns)
         self._update_mouse_preview()
 
     def _is_revealed_number(self, x: int, y: int) -> bool:
@@ -2520,8 +2516,8 @@ class MinesweeperUI(QWidget):
     def _apply_live_action(self, x, y, action, *, auto_observation=None):
         """One physical action, one event in the existing live recorder."""
         self._cancel_simple_auto_step()
-        release = self._mouse_trace_release
-        self._mouse_trace_release = None
+        observation = self._mouse_trace_observation
+        self._mouse_trace_observation = None
         before = self.engine.get_counter_snapshot()
         _, _, _, _, info = self.engine.step(x, y, action)
         after = self.engine.get_counter_snapshot()
@@ -2530,7 +2526,7 @@ class MinesweeperUI(QWidget):
         if committed and auto_observation is not None:
             self._mouse_trace_recorder.invalidate()
             self._lock_mouse_trace_recording()
-        elif (committed and release is not None and release[0] is self._mouse_trace_recorder
+        elif (committed and observation is not None and observation[0] is self._mouse_trace_recorder
               and action in (Action.OPEN, Action.FLAG) and not self._mouse_trace_recording_locked):
             self._lock_mouse_trace_recording()
             if not self._mouse_trace_recording_enabled:
@@ -2539,8 +2535,8 @@ class MinesweeperUI(QWidget):
         if action in (Action.OPEN, Action.FLAG):
             self._start_timer()
         event_index = self._record_replay_event(x, y, action)
-        if committed and auto_observation is None and release is not None:
-            recorder, position, cell_size, observed_ns = release
+        if committed and auto_observation is None and observation is not None:
+            recorder, position, cell_size, observed_ns = observation
             if (recorder is self._mouse_trace_recorder
                     and (recorder.started or action in (Action.OPEN, Action.FLAG))):
                 if event_index is None:
