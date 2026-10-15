@@ -92,38 +92,61 @@ native packaged GUI report **"A–K passed"**.
 The synthetic cursor is presentation, not an actual OS trajectory or physical
 acceleration model. Rates/easing never alter recorded costs, Model C or planner input.
 
+## Human Mouse Trace / Path Visualization — CLOSED
+
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-16)**.
+[Closeout evidence](STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md) records qualified
+implementation/package SHA `e32145fa5c114e1ce500ad2e837ef6000cc49cca`,
+**627 focused / 1825 full source PASS**, fresh-environment **1800 PASS / 25 optional
+skips**, packaged workers/native GUI/Replay v2 verification and final user native PASS.
+
+- Actual Live-board event samples use board-local Qt logical pixels, exact subpixel
+  positions and an independent monotonic trace clock. No timer sampling,
+  min-distance filtering or semantic point dropping; continuity breaks form segments.
+- Recording defaults ON per application/session and locks at the first committed
+  timed human OPEN/FLAG. OPEN observes L release; FLAG observes R press.
+  Untimed pre-start CHORD does not start trace. Recording OFF at the lock point,
+  an actual Auto action or Replay append failure after a committed human action
+  invalidates the Human trace.
+- Action markers reference actual ReplayEvent indices. Replay v2 carries the
+  separate trace attachment; v1 remains readable and trace-free. Display is optional.
+- Physical gesture fidelity includes independent Mode-A/C R-press FLAG and
+  origin-independent Mode-B BOTH, first-release CHORD at the current target,
+  repeated overlaps and FLAGGED-center neighborhood preview.
+- Primitive recorder storage, pre-start gating, transformed-geometry caching and
+  a **16 MiB** bounded raster cache/fallback preserve exact samples. User testing
+  accepted trace ON after hardening and found no noticeable final-package regression;
+  this is not a zero-overhead claim.
+
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
+Human trace is pointer presentation data, not OS-global tracking, synthetic Stage-3
+motion, Model C calibration evidence or solver input. Frozen V1 and official 100k
+results retain their original identity and meaning.
+
 ## Roadmap
 
 1. **CLOSED** — Execution / Playback / Visualizer Foundation.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
-4. **NEXT** — Human Mouse Trace / Path Visualization (not implemented).
-5. **NEXT AFTER THAT** — Same-board Human / Stage-2 / Stage-3 Comparison.
-6. **LATER** — Representative demonstrations / Timeline Analytics.
+4. **CLOSED** — Human Mouse Trace / Path Visualization.
+5. **NEXT** — Same-board Human / Stage-2 / Stage-3 Comparison.
+6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
 For the last item, nearest exact-minimum-risk guess selection among equal-risk
 candidates using movement cost remains a candidate, not an adopted policy or
 authorization to modify V1. External screen-recording tools remain the default.
 
-## Next planned milestone — Human Mouse Trace / Path Visualization
+## Next planned milestone — Same-board Human / Stage-2 / Stage-3 Comparison
 
-**Not implemented.** This small milestone was inserted after Modeled-Time closeout
-preparation; it precedes Same-board Human / Stage-2 / Stage-3 Comparison.
-This closeout changes planning/documentation only and creates no implementation/spec document.
+**Not implemented.** Define the comparison contract and acceptance criteria as
+the next small milestone. Keep actual Human actions/trace, Stage-2/Stage-3
+executions, Replay elapsed time and modeled physical time distinct. This roadmap
+does not authorize a Model C refit or a new solver policy.
 
-Initial scope:
-
-- Record actual mouse movement only while the cursor is over the Live game board.
-- Store sampled pixel-space cursor points/timestamps separately from Replay.
-- Retain actual action/click markers.
-- After game completion, visualize the recorded cursor path over the board.
-- No OS-global mouse hook and no Stage-3 synthetic cursor reuse.
-- No physical-model calibration/refit or advanced path analytics yet.
-
-`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
-Human Mouse Trace is actual sampled Live-board cursor movement presentation data,
-not Stage-3 synthetic movement and not Model-C calibration evidence.
+Earlier closeouts retain their dated next-milestone statements as historical
+records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe
+the current state.
 
 ## Deferred / evidence-triggered
 
@@ -148,7 +171,7 @@ new evidence to promote that transport-hardening item.
 
 ## Boundaries and references
 
-`Replay != Stage-3 Trace Playback != ZiNi Trace`. The viewer never supplies solver
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`. The viewer never supplies solver
 decision input. Playback interval is not Model C time, CPU speed or human speed.
 V1 official 100k results, algorithm, profile and qualification remain frozen.
 Extended is separate scope and does not reopen accepted V1 or closed ZiNi work.

@@ -15,15 +15,24 @@ contains Korean characters. The source checkout and output can contain Korean
 characters. Run these commands from the repository root:
 
 ```powershell
-$buildEnv = Join-Path $env:TEMP 'minesweeper-release-build'
-python -m venv $buildEnv
+$buildId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$buildEnv = Join-Path $env:TEMP "minesweeper-release-build-$buildId"
+$buildRoot = Join-Path (Get-Location) "results/release-build/$buildId"
+if ((Test-Path -LiteralPath $buildEnv) -or (Test-Path -LiteralPath $buildRoot)) {
+    throw 'Choose a new build ID; preserve existing environments and artifacts.'
+}
+if ($buildEnv -match '[^\x00-\x7F]') { throw 'Choose an ASCII-only build environment path.' }
+New-Item -ItemType Directory -Path $buildRoot | Out-Null
+py -3.12 -m venv $buildEnv
 $buildPython = Join-Path $buildEnv 'Scripts/python.exe'
+$env:PYTHONDONTWRITEBYTECODE = '1'
 & $buildPython -m pip install PyQt5==5.15.11 PyQt5-Qt5==5.15.2 PyQt5-sip==12.19.0 pyinstaller==6.22.3 pyqtgraph==0.14.0 numpy==2.5.3 colorama==0.4.6
 $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $buildEnv 'Lib/site-packages/PyQt5/Qt5/plugins/platforms'
-& $buildPython -m unittest discover -s tests -v
-$env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) 'results/pyinstaller-cache'
+& $buildPython -B -m unittest discover -s tests -v
+if ($LASTEXITCODE -ne 0) { throw 'Tests failed; do not package.' }
+$env:PYINSTALLER_CONFIG_DIR = Join-Path $buildRoot 'pyinstaller-cache'
 $profile = (Resolve-Path 'calibration/stage3_physical_profile_v1.json').Path
-& $buildPython -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath results/dist --workpath results/build --specpath results --add-data "${profile};calibration" main.py
+& $buildPython -B -m PyInstaller --noconfirm --clean --onedir --windowed --name Minesweeper --distpath "$buildRoot/dist" --workpath "$buildRoot/build" --specpath "$buildRoot" --add-data "${profile};calibration" main.py
 ```
 
 Inspect the chosen build environment and output directories before reuse.
@@ -31,7 +40,8 @@ Acceptance requires a fresh ASCII-path environment and isolated environment,
 dist/work/spec/cache paths. Foundation used
 `results/stage3-visualizer-acceptance/<run-id>/`; Identity Separation used
 `results/stage3-identity-separation-acceptance/<run-id>/`; Modeled-Time Playback uses
-`results/stage3-modeled-playback-acceptance/<run-id>/`. Do not overwrite previous
+`results/stage3-modeled-playback-acceptance/<run-id>/`; Human Mouse Trace uses
+`results/human-mouse-trace-final-acceptance/<run-id>/`. Do not overwrite previous
 release/evidence output or change the normal development environment. `results/` is ignored; generated artifacts are
 not source files to commit.
 
@@ -73,7 +83,9 @@ describes `sys.frozen` and `sys.executable` in a bundle.
 
 ## Release checks
 
-- Run the focused `test_zini_worker_dispatch.py` tests and the full suite with PyQt installed.
+- Run focused physical mouse input, Mouse Trace recorder/UI/overlay, Replay,
+  ZiNi worker dispatch and Stage-3 execution/Visualizer tests, then full discovery
+  with PyQt installed. Record counts, skips and interpreter versions.
 - Run the built worker on a known board and confirm its token/result and exit code;
   check invalid arguments and a calculation error. Use a separate working directory.
 - Verify the packaged Stage-3 worker with trusted-local `{"token": 503001,
@@ -96,6 +108,9 @@ describes `sys.frozen` and `sys.executable` in a bundle.
 - Launch the built GUI, play a game to completion and wait for a numeric ZiNi.
   Reset or close during a pending calculation; check that the child exits and its
   payload/result files are removed. Check Replay loading and analysis.
+- Verify Human Mouse Trace recording/display, physical gesture behavior and a
+  trace-bearing Replay v2 load/seek/save round-trip. `mouse_trace` and
+  `mouse_trace_ui` use normal imports; no new data file or hidden import is required.
 - Ship the complete onedir folder with `LICENSE`, user documentation, and dependency
   notices/licenses. Provide the corresponding tagged source alongside the binary.
 - For a separately authorized release, ZIP the folder, record its SHA-256 and
@@ -180,3 +195,28 @@ See the [Modeled-Time closeout](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBAC
 for exact commands and evidence. No application/release version, build configuration,
 profile bytes or worker transport changed. No tag, release or ZIP was published;
 current main is not relabeled historical v0.2.0.
+
+## Human Mouse Trace final package acceptance (2026-10-16)
+
+Qualified implementation/package SHA:
+`e32145fa5c114e1ce500ad2e837ef6000cc49cca`.
+The fresh isolated acceptance root is
+`results/human-mouse-trace-final-acceptance/20261016-003839/`.
+Its `acceptance-summary.json` records the exact command, versions, test results,
+package hashes, both worker checks and automated native GUI smoke. Final user
+native/manual acceptance subsequently passed; see the
+[Human Mouse Trace closeout](docs/stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md).
+
+Python 3.12.10 x64, pip 25.0.1 and the pinned stack above produced an onedir/windowed
+AMD64 / PE32+ / GUI-subsystem package: build exit **0**, **60.658 s**.
+Source tests: **627 focused / 1825 full PASS**, zero failures/errors/skips.
+Fresh build environment: **1800 PASS / 25 optional image/video validation skips**,
+zero failures/errors; skip identities match the historical accepted category.
+Bundled Qt, both workers and frozen profile/table identities passed. Replay v2
+with Mouse Trace survived packaged GUI load/seek/save with exact JSON equality.
+
+EXE SHA-256: `d73e25b4f21306a951ddf3e90727b337f42a2a04a4678d19d0b7f8f6eb00c787`.
+The earlier `results/human-mouse-trace-final-acceptance/20261015-215537/` remains
+historical post-hardening evidence at `6fe61866681612060bbb3d57940c726de4f224b3`;
+it is not the final package because physical gesture semantics changed afterward.
+Both roots remain untouched. No new application version, tag or release is declared.

@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Recover the current project state safely when a chat is restarted or reaches its maximum length.  
-> Updated: 2026-10-15 (Asia/Seoul)
+> Updated: 2026-10-16 (Asia/Seoul)
 
 ---
 
@@ -32,26 +32,18 @@ Approved development interpreter:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Live Git verified on 2026-10-15 before Modeled-Time Playback closeout preparation:
+Live Git verified on 2026-10-16 before Human Mouse Trace documentation closeout:
 
-- branch: `main`; clean, inside work tree, non-bare
-- HEAD = local `origin/main`: `82c61d5447bf7cffc3c1d4fbcd392ef2945efa04`
-- commit: `feat: add stage3 modeled-time visualizer playback`
-- Slice 1: `b4ab1c8e9bbd9552d27daed884d97cf36d00aef6` — incremental TracePlayer
-- Slice 2: `01d91b397cc285825cf7083c88724328bbe6c587` — pure modeled-time controller
-- Slice 3: `82c61d5447bf7cffc3c1d4fbcd392ef2945efa04` — Visualizer / synthetic cursor
+- branch: `main`; clean working tree
+- HEAD = local `origin/main` = live remote main:
+  `e32145fa5c114e1ce500ad2e837ef6000cc49cca`
+- this is the qualified implementation/package SHA, including physical gesture fidelity
+- no Human Mouse Trace / physical gesture feature branches remained locally or remotely
 
-This is a dated preparation baseline, not a permanent latest-HEAD claim.
-No fetch was performed. Closeout branch: `docs/stage3-modeled-playback-closeout`.
-Documentation is awaiting user review; this preparation session has not staged,
-committed, merged or pushed it. Determine later integration state from live Git.
-
-Identity Separation closeout is integrated at
-`9a2b721f5fa4786b4b513a20984f5667949e2a95`; its implementation identities remain in
-the [Identity closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md).
-Foundation final documentation is integrated at
-`16ba355701744ec9827a73291546a656bed67980`; its historical Slice 1–5 identities
-remain in the [Foundation record](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md).
+This SHA is the qualified implementation/package baseline, not necessarily the
+latest main HEAD. Documentation-only closeout may advance main beyond it without
+replacing that implementation identity. Always read live Git for the latest HEAD.
+Earlier Extended implementation identities remain in their linked closeout records.
 
 Important Stage-3 V1 identities, verified in live Git:
 
@@ -130,18 +122,17 @@ merge/push to `main`.
 ### Recent maintenance / usability — CLOSED (2026-10-13)
 
 These are concise accepted closeouts. Test counts and desktop smoke results below
-come from historical completion records. Current Modeled-Time Playback acceptance
+come from historical completion records. Current Human Mouse Trace acceptance
 is recorded separately below and does not relabel historical smoke as newly run.
 Commit identities were read from live Git.
 
 - **ASCII path migration:** moved to the current ASCII root; **1414/1414 PASS**,
   **0 failures / 0 errors / 0 skips**, and post-migration normal-desktop smoke
   **PASS**, including Replay. Documentation closeout: `9a5f144`.
-- **Mouse-release input semantics:** gameplay commits on release; held preview
-  follows the cursor; same-origin BOTH is one CHORD gesture, while
-  different-origin LEFT/RIGHT remain independent. Reset/rebuild/Replay
-  transitions invalidate stale held input. Final automated verification and
-  desktop smoke **PASS**; merged/pushed to `main` at `7b5ba45`.
+- **Historical mouse input work (`7b5ba45`):** accepted held preview and stale-input
+  safeguards. Its physical gesture policy was superseded by the accepted
+  [Physical Mouse Gesture Fidelity correction](../ARCHITECTURE.md#physical-mouse-input)
+  at `e32145f`; use the current contract below.
 - **Usability Batch 1:** persistent Replay default directory; Simple Auto
   interval **0..2000 ms**, default **180 ms**, **0 = "최대 속도"**; pending
   single-shot timer safely reschedules. Final full suite **1492/1492 PASS** and
@@ -161,8 +152,7 @@ Commit identities were read from live Git.
 ## 4. Current milestone
 
 **Stage-3 Extended remains ACTIVE. Next active small milestone:
-Human Mouse Trace / Path Visualization (not implemented).**
-Same-board Human / Stage-2 / Stage-3 Comparison follows that milestone.
+Same-board Human / Stage-2 / Stage-3 Comparison (not implemented).**
 Stage-3 V1 / Model C remain CLOSED / FROZEN; ZiNi Improvement remains CLOSED.
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
@@ -175,48 +165,47 @@ Stage-3 V1 / Model C remain CLOSED / FROZEN; ZiNi Improvement remains CLOSED.
 - **Modeled-Time Playback / Synthetic Smooth Cursor Presentation —
   FINAL ACCEPTANCE PASS / CLOSED (2026-10-15)**:
   [closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md).
+- **Human Mouse Trace / Path Visualization — FINAL ACCEPTANCE PASS / CLOSED
+  (2026-10-16)**: [closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md).
+  Includes Physical Mouse Gesture Fidelity and performance hardening; final user
+  native acceptance of the final package passed.
 
-Accepted ownership and presentation:
+Current accepted contracts:
 
-- TracePlayer owns committed integer state and exact cumulative µs. `next()` applies
-  one action transactionally; arbitrary `go_to()`/`previous()` still rebuild from zero.
-- The Qt-independent controller uses monotonic anchoring and exact Fraction partial
-  time over opaque recorded durations; it owns pause/resume, speed and boundary catch-up.
-- Index remains default, 20..5000 ms/step, default 200. Modeled-Time defaults to 1×,
-  with 0.25× / 0.5× / 1× / 2× / 4× / 8× presentation rates and 16 ms Qt frame requests.
-  The controller clock, not timer tick count, determines modeled elapsed time.
-- Pending actions keep the pre-action board until their boundary. UI uses rendered
-  cell centers and straight smoothstep `q = u²(3 - 2u)`, without a separate dwell model.
-  Same-cell actions stay stationary. Partial frames update the overlay only;
-  catch-up refreshes the resulting committed board once.
-- Pause preserves partial progress; manual navigation or mode switching discards it.
-  The slider stays integer-based. Reopen defaults are Index / 200 ms / modeled 1×,
-  with no QSettings persistence. Synthetic motion is not an actual OS trajectory.
+- Human trace records actual Live-board accepted event samples in board-local Qt
+  logical pixels, with exact subpixel positions and an independent monotonic clock.
+  No timer sampling, distance filtering or semantic point dropping. Continuity
+  breaks create segments; marker action semantics come from actual ReplayEvent indices.
+- Recording defaults ON per app/session and locks on first committed timed human
+  OPEN/FLAG: L release for OPEN, R press for FLAG. Untimed pre-start CHORD cannot
+  start trace. OFF at that lock point, a committed Auto action or Replay append
+  failure after committed human input invalidates the Human trace.
+- Replay v2 can carry the separate Human trace attachment; v1 remains trace-free
+  and readable. Display is optional after a Live game or in Replay; seek retains
+  the attachment.
+- Mode A/C FLAG/UNFLAG commits immediately on R press; R release adds no FLAG.
+  Mode A keeps normal L-release OPEN/CHORD and independent R actions during L hold;
+  Mode C never CHORDs. Mode B arms on held-button overlap regardless of origins,
+  suppresses R FLAG only when L was already held, and never undoes an earlier
+  standalone R FLAG. First release attempts CHORD at the current target; trailing
+  release is inert, and new overlaps can re-arm with one button still held.
+  FLAGGED-center preview preserves the flag and depresses surrounding hidden cells.
+- Primitive recorder storage, pre-start gating, geometry cache and **16 MiB**
+  bounded raster/fallback preserve sample semantics. Final user testing found no
+  noticeable trace performance regression; zero overhead is not claimed.
+- Stage-3 synthetic cursor remains presentation only. TracePlayer owns committed
+  integer state; the modeled controller owns partial time. Recorded costs, frozen
+  V1 / Model C identities and official 100k evidence are unchanged.
 
-Final acceptance with development Python 3.12.10 / 64-bit:
-
-- Focused: **254 passed**, **29.048 s**, **0 failures / 0 errors / 0 skips**.
-- Full discovery: **1699 passed**, **130.978 s**, **0 failures / 0 errors / 0 skips**.
-- Fresh Windows x64 onedir/windowed PyInstaller 6.22.3 build:
-  **exit 0**, **83.6817627 s**, accepted absolute profile bundling.
-- Source/bundled profile bytes identical; both SHA-256
-  `52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b`.
-- Packaged worker from unrelated cwd: exit 0, valid token/envelope, no error,
-  **WON / 227 traces / 39,987,084 µs**; first action **126,005 µs**.
-  Deterministic source equivalence excludes decision CPU timing/runtime/object identity.
-- **Native packaged GUI PASS, project user, 2026-10-15: "A–K passed"**.
-  This covers Index, modeled controls, same-cell timing, smooth straight movement,
-  pause/resume, navigation, mode/rate changes, final total and close/reopen defaults.
-  It is qualitative UX acceptance, not a measured FPS or physical-model claim.
-
-New ignored package/evidence root:
-`results/stage3-modeled-playback-acceptance/20261015-113435/`.
-Exact commands, fingerprint, warning review and manual provenance are in the closeout.
-
-`Stage3Execution(spec, board, result)`, worker pickle transport, benchmark
-`solver_config_snapshot`, identities/profile/table, official 100k evidence, Replay,
-ZiNi, database/schema and QSettings remain unchanged. Slice 4 changes documentation
-only; no 100k rerun, new feature, release/version/tag/ZIP or physical-model redesign.
+Qualified acceptance: **627/627 focused**, **1825/1825 source full** with zero
+failures/errors/skips; fresh build environment **1800 passed / 25 optional image/video
+validation skips**, zero failures/errors. Fresh AMD64 GUI package, both workers,
+native GUI, Replay v2 trace round-trip and final user native check passed; no orphans.
+Authoritative technical evidence:
+`results/human-mouse-trace-final-acceptance/20261016-003839/acceptance-summary.json`.
+The earlier `20261015-215537/` root remains historical performance-hardening evidence,
+not the final package. The new closeout records user acceptance after that JSON's
+pre-user-check status; neither evidence root is rewritten.
 
 ---
 
@@ -235,31 +224,21 @@ only; no 100k rerun, new feature, release/version/tag/ZIP or physical-model rede
 
 Replay = playback of actually executed game actions.
 ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
-**Replay != Stage-3 Trace Playback != ZiNi Trace**; similar controls do not justify merging their models.
+**Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace**; similar controls do not justify merging their models.
 
 ---
 
 ## 6. Next action
 
-Review/integrate this documentation closeout, then design **Human Mouse Trace /
-Path Visualization (not implemented)**. This roadmap insertion was decided after
-Modeled-Time closeout preparation and changes planning only; no Mouse Trace
-implementation or new specification document is part of this closeout.
-**Same-board Human / Stage-2 / Stage-3 Comparison** comes after Mouse Trace.
+Define the scope and acceptance contract for
+**Same-board Human / Stage-2 / Stage-3 Comparison (not implemented)**.
 Use live Git/source/tests to determine whether later work has already begun.
-
-Initial planned scope:
-
-- Record actual mouse movement only while the cursor is over the Live game board.
-- Store sampled pixel-space cursor points/timestamps separately from Replay.
-- Retain actual action/click markers and visualize the recorded path over the board
-  after game completion.
-- No OS-global mouse hook or Stage-3 synthetic cursor reuse.
-- No physical-model calibration/refit or advanced path analytics yet.
+Do not treat this roadmap as implementation approval or claim later milestones exist.
 
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
-Human Mouse Trace is planned actual sampled Live-board cursor presentation data,
-not Stage-3 synthetic movement or Model-C calibration evidence.
+Human Mouse Trace is accepted actual sampled Live-board pointer presentation data,
+not Stage-3 synthetic movement, Model C calibration evidence or solver input.
+The next comparison must retain these separate models and time authorities.
 
 Keep presentation separate from planner inputs, physical identity and recorded
 costs. Retain Step 0/current PLAYING with known final WON, exact action-boundary
@@ -271,9 +250,8 @@ may show PyInstaller's uncaught-exception dialog rather than exit immediately.
 There is no false success; existing Cancel/close ownership/reaping remains.
 No new evidence promotes F-2 to required work.
 
-Preserve historical and new acceptance artifacts. No release/tag/ZIP or commit/
-push was performed in this preparation session. Do not reopen ZiNi work or consume
-its unopened final quality holdout.
+Preserve historical and new acceptance artifacts. This milestone created no
+release/tag/ZIP. Do not reopen ZiNi work or consume its unopened final quality holdout.
 
 ---
 
@@ -286,9 +264,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 1. **CLOSED:** Execution / Playback / Visualizer Foundation.
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
-4. **NEXT:** Human Mouse Trace / Path Visualization (not implemented).
-5. **NEXT AFTER THAT:** Same-board Human / Stage-2 / Stage-3 Comparison.
-6. **LATER:** Representative demonstrations / Timeline Analytics.
+4. **CLOSED:** Human Mouse Trace / Path Visualization.
+5. **NEXT:** Same-board Human / Stage-2 / Stage-3 Comparison.
+6. **LATER:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
 
@@ -340,6 +318,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)
 - [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)
 - [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)
 - [Foundation final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
@@ -422,27 +401,27 @@ source → tests → 실행 검증 → frozen specs/final adjudication → curre
 Execution / Playback / Visualizer Foundation CLOSED.
 Version / Settings Identity Separation FINAL ACCEPTANCE PASS / CLOSED.
 Modeled-Time Playback / Synthetic Smooth Cursor Presentation FINAL ACCEPTANCE PASS / CLOSED.
+Human Mouse Trace / Path Visualization FINAL ACCEPTANCE PASS / CLOSED.
+Qualified implementation/package SHA: e32145fa5c114e1ce500ad2e837ef6000cc49cca.
 Stage-3 Extended 전체는 ACTIVE이며 다음 작은 마일스톤은
-Human Mouse Trace / Path Visualization (아직 미구현)입니다.
-그다음은 Same-board Human / Stage-2 / Stage-3 Comparison입니다.
-Mouse Trace 초기 계획: Live 보드 위의 실제 이동만 pixel-space points/timestamps로
-sample하여 실제 action/click markers와 함께 Replay와 별도로 보관하고, 게임 종료 후
-보드 위에 경로를 표시합니다. OS-global hook, Stage-3 synthetic cursor 재사용,
-physical-model calibration/refit, advanced path analytics는 초기 범위에서 제외합니다.
-이번 closeout은 planning/docs만 수정하며 Mouse Trace를 구현하지 않습니다.
+Same-board Human / Stage-2 / Stage-3 Comparison (아직 미구현)입니다.
+Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
+Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
+FLAG는 R press, OPEN은 L release, Mode-B CHORD는 현재 target의 첫 release입니다.
+Source focused 627 / full 1825 PASS, fresh-env 1800 PASS + optional skips 25,
+최종 package 및 사용자 native/manual 수용 PASS입니다.
 후속 기능이 이미 구현됐다고 가정하지 말고 현재 source/tests로 확인하세요.
-Playback closeout: docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md.
+Closeout: docs/stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md.
 
 Application/release != algorithm != physical model/profile != presentation.
 Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace.
-Human Mouse Trace는 실제 sampled Live-board cursor presentation data의 계획이며,
-Stage-3 synthetic movement나 Model-C calibration evidence가 아닙니다.
+Human Mouse Trace는 실제 sampled Live-board pointer presentation data이며,
+OS-global tracking, Stage-3 synthetic movement, Model C calibration evidence나 solver 입력이 아닙니다.
 Presentation interval, Replay elapsed time, CPU decision time, modeled physical
 time은 별개입니다. Stage3Execution은 spec / board / result이며 viewer는 solver 입력이 아닙니다.
 Stage-3 설정 persistence와 registry는 없습니다.
 Frozen specs/profile, official evidence와 미개봉 ZiNi holdout을 보존하세요.
 F-2 packaged transport hardening은 OPTIONAL / DEFER입니다.
-사용자 review 전 commit/merge/push하지 마세요.
 현재 상태·남은 gate·다음 한 단계를 짧게 정리하고 이미 확인 가능한 내용은 다시 묻지 마세요.
 ```
 

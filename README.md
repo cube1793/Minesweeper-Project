@@ -8,6 +8,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **플레이 통계:** Time, Est Time, 3BV, 3BV/s, Ops, 클릭별 active/wasted 집계, CPS, Efficiency, IOE, Thrp, Corr, ZiNi, ZNE, ZNT
 - **Simple Algorithm:** 확정 수와 최소 지뢰 확률 후보 표시, 확정 수 자동 진행, 선택적인 추측 실행
 - **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 추천과 실제 다음 수 비교
+- **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 
 ## Simple Algorithm
 
@@ -107,7 +108,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - 실행 창을 닫으면 소유한 job과 결과 창도 정리합니다. 메인 창 종료도 이 경계를 따릅니다.
   Visualizer는 완료 실행을 읽기 전용으로 재생하며 solver에 판단 입력을 주지 않습니다.
 
-`Replay != Stage-3 Trace Playback != ZiNi Trace`입니다. Stage-3 V1 / Model C는
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`입니다. Stage-3 V1 / Model C는
 변경되지 않았습니다. 2026-10-14 자동 검증과 실제 Windows 패키지 수동 수용,
 독립 Claude 감사 및 ChatGPT 최종 판정을 통과하여 **Execution / Playback /
 Visualizer Foundation은 FINAL ADJUDICATION PASS / CLOSED**입니다.
@@ -139,19 +140,48 @@ fresh package/profile/worker 검증과 사용자의 native packaged GUI A–K �
 완료했습니다. [Closeout 기록](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)을
 참고하세요. 동결 Stage-3 알고리즘과 물리 모델 semantics는 변경하지 않았습니다.
 
-Stage-3 Extended 전체는 **ACTIVE**입니다. 다음 작은 활성 마일스톤은
-**Human Mouse Trace / Path Visualization (not implemented)**이며, 그다음은
-**Same-board Human / Stage-2 / Stage-3 Comparison**입니다. 이후 representative
-demonstrations / Timeline Analytics, 첫 실제 Extended algorithm research 순서입니다.
+Stage-3 Extended 전체는 **ACTIVE**입니다. Foundation, Identity Separation,
+Modeled-Time Playback과 **Human Mouse Trace / Path Visualization**은 CLOSED입니다.
+다음 작은 활성 마일스톤은 **Same-board Human / Stage-2 / Stage-3 Comparison**이며
+아직 구현하지 않았습니다. 이후 representative-board demonstrations / Timeline Analytics,
+첫 실제 Extended algorithm research 순서입니다.
 
-Human Mouse Trace의 초기 계획은 커서가 Live 게임 보드 위에 있을 때만 실제 이동을
-sampled pixel-space points/timestamps로 기록하고, 실제 action/click markers와 함께
-Replay와 별도로 보관하여 게임 종료 후 보드 위에 경로를 표시하는 것입니다.
-OS-global mouse hook, Stage-3 synthetic cursor 재사용, 물리 모델 calibration/refit과
-advanced path analytics는 초기 범위에서 제외합니다. 이 closeout에서는 구현하지 않습니다.
-`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`입니다.
-계획된 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며
-Stage-3 synthetic movement나 Model-C calibration evidence가 아닙니다.
+## Human Mouse Trace / Path Visualization — CLOSED
+
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-16)**. 물리 마우스 입력 보정과 성능
+hardening을 포함한 source/package 검증 및 최종 사용자 native 수용을 완료했습니다.
+Qualified implementation/package SHA는 `e32145fa5c114e1ce500ad2e837ef6000cc49cca`입니다.
+[Closeout 기록](docs/stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)에 증거를 정리했습니다.
+
+- **마우스 경로 기록**은 앱/session 기본 ON이며 첫 committed timed human OPEN/FLAG
+  전까지만 선택할 수 있습니다. 첫 OPEN은 L release, 첫 FLAG는 R press 관측에서
+  trace의 0 µs를 시작합니다. 시작 전 untimed CHORD는 trace를 시작하지 않습니다.
+  OFF도 첫 committed timed OPEN/FLAG에서 선택이 잠기며 해당 판의 trace를 무효화합니다.
+- 실제 Live 보드 포인터를 board-local Qt logical-pixel 좌표로 기록합니다. 전달·수용된
+  event sample의 subpixel 위치를 보존하며 timer sampling, 최소 거리 필터 또는
+  의미를 바꾸는 point dropping은 없습니다. Trace는 독립 monotonic clock을 사용하고
+  연속성이 끊기면 segment를 나눕니다.
+- 종료된 Human 판 또는 trace가 있는 Replay에서 **마우스 경로 표시**를 선택합니다.
+  Replay v2는 별도 Mouse Trace 모델을 attachment로 저장하며 marker의 action 의미는
+  실제 `ReplayEvent` index가 제공합니다. v1은 계속 읽을 수 있는 trace-free 형식입니다.
+- 실제 Auto action이 실행되면 그 판의 Human trace 자격을 잃습니다. Committed human
+  action의 Replay append 실패도 전체 trace를 무효화합니다.
+
+물리 입력은 UI 정책이며 Engine은 semantic OPEN / FLAG / CHORD만 받습니다.
+Mode A/C의 FLAG/UNFLAG는 **R press**에 즉시 실행되고 R release에는 반복되지 않습니다.
+Mode A는 R을 누른 중에도 L release의 OPEN/좌클릭 CHORD와 독립적인 R 입력을 유지하며,
+Mode C는 CHORD를 하지 않습니다. Mode B는 held-button overlap으로 BOTH를 구성합니다.
+L을 누른 중 R press는 FLAG를 억제하고, R 이후 L이 합류하면 이미 실행된 FLAG는
+유지됩니다. Press origin은 무관하며 첫 release에서 현재 pointer target으로 한 번
+CHORD를 시도합니다. 뒤 release는 inert이고, 한 버튼을 계속 누른 채 새 overlap을
+반복할 수 있습니다. FLAGGED 중심은 flag를 유지하면서 주변 HIDDEN 칸만 눌림 preview를
+표시합니다. 자세한 계약은 [입력 경계](ARCHITECTURE.md#physical-mouse-input)를 참고하세요.
+
+Primitive recorder 저장소, pre-start gating, geometry cache와 **16 MiB** bounded raster
+cache를 적용했습니다. Hardening 후 사용자 native 시험에서 trace ON은 수용 가능했고
+최종 패키지에서도 눈에 띄는 성능 회귀는 없었습니다. Zero overhead를 뜻하지 않습니다.
+Human Mouse Trace는 실제 sampled Live-board presentation data이며 OS-global trajectory,
+Stage-3 synthetic cursor, Model C calibration evidence 또는 solver 입력이 아닙니다.
 
 ## 실행 방법
 
@@ -178,6 +208,8 @@ Windows에서는 `main.py`가 Qt import 전에 설치된 PyQt5의 플랫폼 플�
 Minesweeper-Project/
 ├─ main.py                      # 진입점, engine 생성 및 UI 주입
 ├─ ui_manager.py                # PyQt5 화면, 입력, Live Auto, Replay 제어
+├─ mouse_trace.py               # Human 포인터 sample/segment와 순수 recorder
+├─ mouse_trace_ui.py            # 선택적 경로/Replay action marker overlay와 cache
 ├─ core_engine.py               # 게임 규칙, 상태, 시간·클릭 통계
 ├─ board_snapshot.py            # 불변 정적 보드 데이터
 ├─ board_analyzer.py            # 3BV/Ops 분석

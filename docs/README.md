@@ -65,15 +65,18 @@ Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
 1. **CLOSED** — Execution / Playback / Visualizer Foundation (2026-10-14).
 2. **CLOSED** — Version / Settings Identity Separation (2026-10-15).
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation (2026-10-15).
-4. **NEXT** — Human Mouse Trace / Path Visualization (not implemented).
-5. **NEXT AFTER THAT** — Same-board Human / Stage-2 / Stage-3 Comparison.
-6. **LATER** — Representative demonstrations / Timeline Analytics.
+4. **CLOSED** — Human Mouse Trace / Path Visualization (2026-10-16).
+5. **NEXT** — Same-board Human / Stage-2 / Stage-3 Comparison.
+6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
-Human Mouse Trace는 Live 보드 위의 실제 sampled pixel-space cursor points/timestamps와
-action/click markers를 Replay와 별도로 보관하고 게임 종료 후 경로를 표시하는 초기 계획이다.
-OS-global hook, Stage-3 synthetic cursor 재사용, physical-model calibration/refit과
-advanced path analytics는 포함하지 않으며 이 closeout에서는 구현하지 않는다.
+Human Mouse Trace는 Live 보드의 실제 event-driven pointer samples와 action markers를
+기록하고 종료 후 또는 Replay에서 선택적으로 표시한다. Board-local Qt logical pixels와
+독립 trace clock을 사용하며 Replay v2가 별도 trace 모델을 attachment로 운반한다.
+v1은 trace-free로 계속 읽을 수 있다. Physical gesture fidelity와 성능 hardening을
+포함한 최종 package 및 사용자 native 수용은 PASS다. 다음 Comparison과 이후 항목은
+아직 구현하지 않았다. OS-global hook, physical-model calibration/refit과 advanced path
+analytics는 이번 수용 범위가 아니다.
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며 Model-C
 calibration evidence가 아니다.
@@ -82,11 +85,15 @@ Modeled-Time은 기록된 duration을 사용하는 비영속 presentation이다.
 유지하며 synthetic cursor의 직선 smoothstep은 실제 OS 궤적이나 Model C 변경이 아니다.
 
 - [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md): Slice 1–3 commit, 최종 source tests, fresh package/profile/worker, 사용자 native GUI A–K PASS와 보존 경계.
+- [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md): 최종 구현/package SHA, physical gesture·trace·성능 계약, 627 focused / 1825 full PASS와 최종 사용자 native 수용.
 - [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md): 실제 구현 commit, 최종 tests, fresh package/worker, 사용자 native GUI 수용 및 보존 경계.
 - [Foundation 최종 판정](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md): 독립 감사 수치, F-1 문서 정리, F-2 OPTIONAL / DEFER와 후속 범위.
 - [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 초안 당시와 통합 이후의 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
 - [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
 - [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.
+
+이전 closeout의 “next” 문구는 당시 계획을 보존한 기록이다. 현재 순서는 위 roadmap과
+[Current handoff](CURRENT_HANDOFF.md)를 따른다.
 
 ## Experiments
 

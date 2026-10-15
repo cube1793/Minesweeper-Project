@@ -36,6 +36,8 @@ main.py ── engine 생성 → UI에 주입
                          ├─ Replay Statistics ──▶ replay_statistics.py
                          │                          ├─ replay_player.py
                          │                          └─ board_analyzer.py
+                         ├─ Human Mouse Trace ──▶ mouse_trace.py
+                         │                       mouse_trace_ui.py
                          └─ ZiNi worker
                               ╰─ subprocess ────▶ zini_metric_worker.py
                                                     └─ zini_calculator.py
@@ -281,6 +283,56 @@ slider 동기화는 취소하지 않는다. Mode 전환은 committed index를 �
 
 Replay 재생, Replay Analysis, Replay Statistics는 서로 다른 책임이다. 재생은 기록을 engine에 적용하고, Analysis는 현재 position의 추천을 설명하며, Statistics는 과거 행동의 통계를 집계한다. Analysis는 플레이 평가 점수를 계산하지 않는다.
 
+<a id="human-mouse-trace"></a>
+
+### Human Mouse Trace / Path Visualization
+
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-16)**. Qualified implementation/package
+SHA와 source·package·사용자 native 수용은
+[closeout](docs/stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)에 기록한다.
+
+| 소유자 | 책임 |
+| --- | --- |
+| `ui_manager.py` | Live 보드 event 수용·좌표 변환, physical action 관측, recording/eligibility 수명과 Replay event 연결 |
+| `mouse_trace.py` | Qt 독립 point/segment/data 계약, 독립 monotonic clock과 recorder; semantic action을 재정의하지 않음 |
+| `mouse_trace_ui.py` | 불변 trace와 Replay events의 선택적 정적 경로/marker 표시, 입력을 가로채지 않는 overlay와 cache |
+| `replay_model.py`, `replay_json.py` | Human Replay v2의 trace attachment 검증·저장·복원; v1은 trace-free로 계속 지원 |
+
+좌표는 **board-local Qt logical pixels**이며 전달된 subpixel 위치를 보존한다.
+Event-driven exact accepted samples만 기록하고 timer sampling, min-distance filtering,
+의미를 바꾸는 point dropping/throttling은 없다. 같은 segment의 연속된 동일 위치
+비-action sample만 중복 제거하며 action marker와 segment 경계는 보존한다. 보드 이탈,
+scroll/geometry·cell-size 변경, hide/deactivate 같은 연속성 단절은 segment를 나눈다.
+OS-global 좌표는 변환에만 쓰고 저장하지 않는다.
+
+Recording은 앱/session 기본 ON이다. 첫 committed timed human OPEN/FLAG 전까지만
+선택을 바꿀 수 있고, 그 action에서 선택이 잠긴다. OFF이면 그 판의 trace를
+무효화한다. 첫 OPEN은 L release, 첫 FLAG는 R press의 관측 위치/시각을 사용하며,
+Replay append 성공 후 그 관측이 trace의 **0 µs** 기준점이 된다. 관측은 동기
+engine/ZiNi/Replay 처리보다 먼저 얻는다. Untimed pre-start CHORD는 trace를 시작하지
+않으며 후속 CHORD도 timed OPEN/FLAG보다 먼저 trace를 시작할 수 없다.
+Mode-A CHORD marker는 L release, Mode-B marker는 armed BOTH의 첫 release를 쓴다.
+Replay elapsed time과 trace clock은 별개다.
+
+Marker는 실제 `ReplayEvent` index로 action 의미를 참조한다. Committed human action이
+Replay append 실패로 빠지면 전체 trace를 무효화한다. 실제 Auto action도 Human
+trace 자격을 무효화하며 Auto toggle만으로는 무효화하지 않는다. 종료된 Live 판은
+trace를 동결하고 표시를 허용한다. Replay seek는 전체 trace attachment를 유지한다.
+
+Recorder는 primitive tuple의 private 저장소를 사용해 public point 객체를 장기간
+보유하는 GC 비용을 피한다. Pre-start의 무관한 movement/press는 geometry 처리 전에
+gating하며 첫 FLAG가 가능한 R press만 필요한 정확한 관측을 얻는다. Mode-B에서
+L hold로 FLAG가 억제된 R press는 시작 전 관측을 materialize하지 않는다.
+Overlay는 transformed geometry와 bounded raster를 cache한다. Raster 예산은
+**16 MiB**이며 oversized 보드는 visible-region cache 또는 cached-geometry 직접
+렌더링으로 처리한다. 이 예산은 전체 trace/geometry 메모리 상한을 뜻하지 않는다.
+Hardening 후 native 사용자 시험에서 trace ON은 수용 가능했고 최종 package에서
+눈에 띄는 회귀는 없었다. Zero overhead나 새 microbenchmark 수치는 주장하지 않는다.
+
+`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
+Human trace는 실제 sampled Live-board pointer presentation data다. Model C calibration
+evidence, OS-global trajectory, Stage-3 synthetic cursor 또는 solver decision 입력이 아니다.
+
 ### ZiNi
 
 | 모듈 | 책임 |
@@ -333,6 +385,31 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 ```
 
 UI는 화음 입력 방식을 OPEN/CHORD 같은 action으로 변환한다. 실제 화음 성립 조건, 연쇄 개방과 승패는 engine이 처리한다. Live 기본 통계는 engine에서 받고, 일부 파생 Counters 조합은 UI에 남아 있다.
+
+<a id="physical-mouse-input"></a>
+
+**Physical mouse gesture policy** — L/R은 현재 held button 상태다.
+
+| 모드 | Press / release 의미 |
+| --- | --- |
+| A — left-click chord | R press target에서 즉시 FLAG/UNFLAG; R release는 FLAG에 inert. L release는 target에 따라 OPEN 또는 revealed-number CHORD. R을 누른 중에도 L-release CHORD가 가능하고, L hold 중 여러 R cycle은 독립적으로 FLAG한다. |
+| B — both-button chord | 단독 R press는 즉시 FLAG/UNFLAG. L이 먼저 held이면 R press FLAG를 억제하고 BOTH를 arm한다. R hold에 L이 합류해도 BOTH를 arm하되 이전 R action을 되돌리지 않는다. Press origin은 일치할 필요가 없다. |
+| C — chord disabled | A와 같은 즉시 R-press FLAG/UNFLAG와 inert R release. Hidden target의 L-release OPEN은 유지하며 revealed-number 또는 L/R overlap으로 CHORD하지 않는다. |
+
+Mode B의 armed overlap은 **어느 버튼이든 첫 release**에서 소비되고, 현재 release
+pointer target에 정확히 한 CHORD를 시도한다. 보드 밖 release도 overlap을 소비한다.
+같은 overlap의 trailing release는 추가 OPEN/FLAG/CHORD를 만들지 않는다. 남은
+버튼을 유지한 채 빠진 버튼을 다시 press하면 새 overlap을 arm하므로 all-buttons-up을
+요구하지 않는다. Mode A/C에서는 L hold 중 새로 FLAG된 같은 target을 L release로
+열지 않으며, 다른 unflagged hidden target은 정상 OPEN할 수 있다.
+
+Ordinary L-held preview는 유지한다. Mode-B BOTH preview는 현재 pointer를 따라
+HIDDEN, FLAGGED 또는 revealed 0..8 중심을 포함한 3×3 영역의 HIDDEN 칸을 누름 표시한다.
+FLAGGED 중심 자체는 flag/undepressed 상태를 유지한다. 첫 release 후 BOTH preview는
+끝나고 남은 single-button 표시로 돌아간다. Reset/rebuild/difficulty, hide/deactivate,
+Replay 진입·종료와 cell-size 변경은 stale held input을 무효화한다.
+Engine은 physical press/release/origin 정책을 모르며 semantic OPEN/FLAG/CHORD와
+기존 active/wasted 규칙만 처리한다.
 
 수동 `현재 상태 분석`은 행동을 실행하지 않는다. `분석 표시`가 OFF이면 그 결과는 다음 행동에 지워지고, ON이면 매 행동 후 갱신된다. Auto는 single-shot QTimer로 추천 하나만 예약하며, timeout에 observation 일치 여부와 HIDDEN target, 첫 수 정책의 유효성을 다시 검사한다.
 
@@ -493,6 +570,11 @@ ReplayPlayer는 fixed board로 복원하므로 index 0부터 `mines_placed=True`
 
 ### 5.4 Replay schema v1과 continuation의 한계
 
+현재 v2는 Human Mouse Trace attachment를 추가한다. `ReplayEvent`의 action/좌표/
+elapsed-time 계약은 그대로이고 v1도 계속 읽을 수 있다. v2는 Human trace가 있는
+기록에 쓰며 v1은 trace-free다. 두 버전 모두 아래 continuation metadata의 한계를
+해결하지 않으며 trace segment를 Replay 시작 상태 metadata로 해석하지 않는다.
+
 v1에는 board, events, 게임 단위 source_type과 schema_version이 있다. **Full-game/continuation/suffix 구분, 시작 observation, 이전 클릭 이력 metadata는 없다.** ReplayPlayer는 항상 클릭 없는 fixed board에서 시작하므로 중간 상태에서 시작한 구간만으로 원래 position을 복원할 수 없다. 이 구간도 Replay Analysis에서는 위 index 0 정책을 적용받는다.
 
 Runner는 이번 호출의 실제 행동만 기록하고 가짜 초기화 클릭을 추가하지 않는다. `started_from_hidden=False` 결과는 continuation이며, 이전 기록이 있다면 동일 board와 시간 순서를 유지해 `previous.events + result.replay_data.events`로 연결해야 한다. 이미 종료된 engine에 호출하면 새 moves/events는 비어 있다.
@@ -553,6 +635,8 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | BoardSnapshot / BoardAnalyzer | `test_engine_regression.py`, `test_board_analyzer.py` | snapshot 복사·불변성, 미배치 보드 거부, opening/border/isolated와 3BV/Ops |
 | Replay model / JSON | `test_replay_model.py`, `test_replay_json.py` | 좌표·개수·시간 순서 검증, fixed-board 복원, JSON round-trip과 오류 |
 | Replay recorder / player | `test_replay_recorder.py`, `test_replay_player.py` | capture 조건, 실제 event 누적, index 0·seek·next·previous |
+| Physical mouse input | `test_ui_mouse_input.py` | R-press FLAG, Mode A/B/C, origin-independent BOTH·첫 release·re-arm, FLAGGED-center preview와 stale input |
+| Human Mouse Trace | `test_mouse_trace.py`, `test_mouse_trace_ui.py`, `test_mouse_trace_overlay.py` | exact/subpixel sample·독립 clock·action 관측, eligibility·Replay v2, geometry/raster cache·oversized fallback |
 | Replay Statistics | `test_replay_statistics.py` | 완료/미완료 마스킹, counter·파생 공식, 이벤트 사이 시간, UI engine ownership과 snapshot 선택 |
 | Simple local inference | `test_simple_algorithm.py` | 두 직접 규칙, FLAG 우선·동률, 중복 제거, 모순·입력 검증, 비전파·subset 추론 범위 |
 | Exact probability | `test_simple_probability.py` | component 분할·전역 결합, floating 조합 가중, 정확한 world 수·Fraction·certainty·move 선택 |
@@ -582,7 +666,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation은 최종 수용으로 CLOSED다. Stage-3 Extended는 ACTIVE이며 다음은 미구현 Human Mouse Trace / Path Visualization이다. 그다음 Same-board Human / Stage-2 / Stage-3 Comparison, 이후 representative demonstrations / Timeline Analytics와 첫 실제 Extended algorithm research가 이어진다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation과 Human Mouse Trace / Path Visualization은 최종 수용으로 CLOSED다. Stage-3 Extended는 ACTIVE이며 다음은 미구현 Same-board Human / Stage-2 / Stage-3 Comparison이다. 이후 representative-board demonstrations / Timeline Analytics와 첫 실제 Extended algorithm research가 이어진다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -592,15 +676,11 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 
 현재 기능에 포함되지 않은 개선 후보다.
 
-다음 작은 마일스톤은 **Human Mouse Trace / Path Visualization (not implemented)**이다.
-초기 계획은 Live 게임 보드 위의 실제 마우스 이동만 pixel-space points/timestamps로
-sample하고, 실제 action/click markers를 유지하면서 Replay와 별도로 저장하여 게임 종료 후
-보드 위에 경로를 시각화하는 것이다. OS-global hook, Stage-3 synthetic cursor 재사용,
-physical-model calibration/refit 및 advanced path analytics는 초기 범위에 포함하지 않는다.
-`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
-계획된 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며,
-Stage-3 synthetic movement나 Model-C calibration evidence가 아니다.
-이 closeout은 roadmap만 갱신하며 새 recorder나 데이터 모델을 구현하지 않는다.
+다음 작은 마일스톤은 **Same-board Human / Stage-2 / Stage-3 Comparison**이며 아직
+구현하지 않았다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)을 유지한다.
+그 뒤 representative-board demonstrations / Timeline Analytics, 첫 실제 Extended
+algorithm research를 검토한다. 이 roadmap은 새로운 solver 정책이나 Model C refit을
+승인하지 않으며 Stage-3 synthetic cursor는 계속 presentation만 담당한다.
 
 - Live 파생 통계 계산기, Replay controller와 ZiNi worker 관리 서비스를 분리한다.
 - UI 표시 formatter와 계산 모델의 경계를 정리하고, exact analysis의 비동기 실행·취소 방식을 검토한다.
