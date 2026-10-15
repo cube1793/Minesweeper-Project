@@ -49,7 +49,7 @@ from datetime import datetime
 from enum import IntEnum
 
 from PyQt5.QtWidgets import (
-    QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
+    QApplication, QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
     QSpinBox, QDoubleSpinBox, QScrollArea, QSlider,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
@@ -70,6 +70,7 @@ from replay_player import ReplayPlayer
 from replay_analysis import ReplayStepAnalysis, analyze_replay_step
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
+from mouse_trace import MouseTraceRecorder
 from zini_calculator import ZiniNeighborhoodBeamConfig
 from zini_explorer import ZiniExplorerController
 
@@ -246,6 +247,7 @@ class CellButton(QPushButton):
         self.probability_text = ""
         self.setFocusPolicy(Qt.NoFocus)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
 
     def set_analysis_overlay(self, overlay: CellOverlay | None, show_probability=True):
         """Presentation only: leave button text, style and mouse behavior intact."""
@@ -369,6 +371,8 @@ class MinesweeperUI(QWidget):
         self._mouse_consumed = False
         self._mouse_position = None
         self._mouse_preview = set()
+        self._mouse_trace_recorder = MouseTraceRecorder(engine.width, engine.height)
+        self._mouse_trace_release = None
         self._analysis_result: LiveAnalysis | None = None
         self._replay_analysis_result: ReplayStepAnalysis | None = None
         self._replay_view_index = None
@@ -432,6 +436,7 @@ class MinesweeperUI(QWidget):
         self.render_board()
         # 시작 시 PLAYING 상태 → 3BV/Ops는 마스킹("-/-"), 클릭류는 "0"
         self._update_statistics_panel(self.engine.get_stats())
+        self.installEventFilter(self)
 
     def closeEvent(self, event):
         """Close auxiliary windows and their workers before accepting shutdown."""
@@ -440,6 +445,7 @@ class MinesweeperUI(QWidget):
                 event.ignore()
                 return
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.freeze()
         if self._benchmark_statistics_window is not None:
             self._benchmark_statistics_window.close()
         self._stop_simple_auto()
@@ -448,7 +454,16 @@ class MinesweeperUI(QWidget):
 
     def hideEvent(self, event):
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.break_segment()
         super().hideEvent(event)
+
+    def eventFilter(self, watched, event):
+        # These filters observe only the window/board/viewport, never consume
+        # input, and do not split segments at ordinary cell-to-cell crossings.
+        if event.type() in (QEvent.Leave, QEvent.Hide, QEvent.Move, QEvent.Resize,
+                            QEvent.WindowDeactivate, QEvent.WindowBlocked):
+            self._mouse_trace_recorder.break_segment()
+        return super().eventFilter(watched, event)
 
     def on_benchmark_statistics(self):
         """Own only the auxiliary viewer's lifetime; leave gameplay untouched."""
@@ -848,6 +863,12 @@ class MinesweeperUI(QWidget):
         self.scroll_area.setWidget(self.board_container)
         self.scroll_area.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.scroll_area.setWidgetResizable(False)
+        for widget in (self.board_container, self.scroll_area.viewport()):
+            widget.setMouseTracking(True)
+            widget.installEventFilter(self)
+        for scrollbar in (self.scroll_area.horizontalScrollBar(),
+                          self.scroll_area.verticalScrollBar()):
+            scrollbar.valueChanged.connect(self._break_mouse_trace_segment)
         main_layout.addWidget(self.scroll_area)
 
         self.replay_control_bar = QWidget()
@@ -884,6 +905,7 @@ class MinesweeperUI(QWidget):
     def _build_grid(self):
         """엔진 크기에 맞춰 그리드 버튼을 (재)생성한다."""
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.break_segment()
         for btn in self._buttons.values():
             self.grid.removeWidget(btn)
             btn.deleteLater()
@@ -1417,9 +1439,14 @@ class MinesweeperUI(QWidget):
             height=self.engine.height,
             num_mines=self.engine.num_mines,
         )
+        # Replacing the capture session also rejects a release dispatch that
+        # was interrupted by a reset/rebuild callback.
+        self._mouse_trace_recorder = MouseTraceRecorder(self.engine.width, self.engine.height)
+        self._mouse_trace_release = None
 
     def _record_replay_event(self, x: int, y: int, action: Action):
         """engine.step()으로 실제 처리된 클릭 이벤트를 recorder에 반영한다."""
+        event_index = None
         try:
             self._replay_recorder.record_event(
                 elapsed_time=self.engine.get_elapsed_time(),
@@ -1427,10 +1454,12 @@ class MinesweeperUI(QWidget):
                 y=y,
                 action=action,
             )
+            event_index = len(self._replay_recorder.events) - 1
             self._capture_replay_board_if_ready()
         except Exception as exc:
             # 리플레이 기록 실패가 기존 게임 플레이를 중단시키지 않도록 한다.
             print(f"[Replay warning] 이벤트 기록 실패: {exc}")
+        return event_index
 
     def _capture_replay_board_if_ready(self):
         """지뢰 배치가 확정된 뒤 한 번만 보드 정보를 recorder에 저장한다."""
@@ -1845,6 +1874,8 @@ class MinesweeperUI(QWidget):
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.invalidate()
+        self._mouse_trace_release = None
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._replay_view_index = None
@@ -2067,6 +2098,7 @@ class MinesweeperUI(QWidget):
     def on_cell_size_changed(self, value: int):
         """셀 크기 변경 시 모든 버튼과 컨테이너를 갱신."""
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.break_segment()
         self._cell_size = value
         for btn in self._buttons.values():
             btn.setFixedSize(value, value)
@@ -2075,6 +2107,7 @@ class MinesweeperUI(QWidget):
 
     def on_difficulty_changed(self, text: str):
         self._invalidate_mouse_input()
+        self._mouse_trace_recorder.break_segment()
         # Stop before a custom-difficulty dialog starts a nested Qt event loop.
         self._stop_simple_auto()
         preset = DIFFICULTY_PRESETS.get(text)
@@ -2135,6 +2168,47 @@ class MinesweeperUI(QWidget):
     # ------------------------------------------------------------------
     # 클릭 핸들러
     # ------------------------------------------------------------------
+    def _break_mouse_trace_segment(self, _value=None):
+        self._mouse_trace_recorder.break_segment()
+
+    def _mouse_trace_position(self, event):
+        recorder = self._mouse_trace_recorder
+        if (self._replay_mode or self.engine.status != GameStatus.PLAYING
+                or not recorder.eligible or recorder.frozen or not self.isActiveWindow()
+                or not self.board_container.isVisible()
+                or QApplication.activeModalWidget() is not None):
+            recorder.break_segment()
+            return None
+        if self._cell_at_mouse_position(event.globalPos()) is None:
+            recorder.break_segment()
+            return None
+        # Preserve the delivered subpixel position; global coordinates are only
+        # used to map into board space and are never retained in trace data.
+        position = event.screenPos()
+        origin = self.board_container.mapToGlobal(QPoint(0, 0))
+        x, y = position.x() - origin.x(), position.y() - origin.y()
+        viewport = self.scroll_area.viewport()
+        view_origin = viewport.mapToGlobal(QPoint(0, 0))
+        if not (0 <= x < self.engine.width * self._cell_size
+                and 0 <= y < self.engine.height * self._cell_size
+                and 0 <= position.x() - view_origin.x() < viewport.width()
+                and 0 <= position.y() - view_origin.y() < viewport.height()):
+            recorder.break_segment()
+            return None
+        return x, y
+
+    def _emit_mouse_release(self, target, signal_name, position, observed_ns):
+        # This context exists only during the existing synchronous semantic
+        # dispatch. Direct/Auto calls cannot borrow a previous release position.
+        self._mouse_trace_release = (
+            (self._mouse_trace_recorder, position, self._cell_size, observed_ns)
+            if position is not None else None
+        )
+        try:
+            getattr(target, signal_name).emit(target.x, target.y)
+        finally:
+            self._mouse_trace_release = None
+
     def _set_mouse_preview(self, cells):
         for cell in self._mouse_preview - cells:
             self._buttons[cell].setDown(False)
@@ -2196,6 +2270,16 @@ class MinesweeperUI(QWidget):
                 or self._replay_mode or self._game_over or not self.isVisible()):
             return
         kind = event.type()
+        trace_recorder = self._mouse_trace_recorder
+        trace_position = self._mouse_trace_position(event)
+        trace_observed_ns = None
+        if trace_position is not None:
+            if kind == QEvent.MouseButtonRelease:
+                # Observe before dispatch. Reading this clock does not start
+                # capture; a successful gameplay/Replay commit is still needed.
+                trace_observed_ns = trace_recorder.observation_time_ns()
+            else:
+                trace_recorder.record_position(*trace_position, self._cell_size)
         button = event.button()
         buttons = event.buttons() & (Qt.LeftButton | Qt.RightButton)
         if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
@@ -2230,6 +2314,8 @@ class MinesweeperUI(QWidget):
         elif kind == QEvent.MouseButtonRelease:
             if not self._mouse_buttons & button:
                 return
+            trace_event_count = len(self._replay_recorder.events)
+            trace_cell_size = self._cell_size
             both, consumed = self._mouse_both, self._mouse_consumed
             self._mouse_buttons = buttons
             self._mouse_origins.pop(button, None)
@@ -2252,9 +2338,9 @@ class MinesweeperUI(QWidget):
             if not consumed and not suppress_left and target is not None:
                 if both:
                     if self._chord_mode != ChordMode.DISABLED:
-                        target.both_clicked.emit(target.x, target.y)
+                        self._emit_mouse_release(target, "both_clicked", trace_position, trace_observed_ns)
                 elif button == Qt.LeftButton:
-                    target.left_clicked.emit(target.x, target.y)
+                    self._emit_mouse_release(target, "left_clicked", trace_position, trace_observed_ns)
                 elif button == Qt.RightButton:
                     # Remember only flags placed during this live LEFT hold,
                     # at the actual RIGHT release target, never its origin.
@@ -2263,7 +2349,7 @@ class MinesweeperUI(QWidget):
                         self.engine.get_observation()[target.y][target.x]
                         == CellState.FLAGGED
                     )
-                    target.right_clicked.emit(target.x, target.y)
+                    self._emit_mouse_release(target, "right_clicked", trace_position, trace_observed_ns)
                     if (self._mouse_buttons & Qt.LeftButton
                             and self._mouse_left_suppressed is suppressed):
                         # Dispatch can invalidate the gesture via a callback.
@@ -2275,6 +2361,16 @@ class MinesweeperUI(QWidget):
                             suppressed.add((target.x, target.y))
                         elif not is_flagged:
                             suppressed.discard((target.x, target.y))
+            if (trace_position is not None and trace_recorder is self._mouse_trace_recorder
+                    and len(self._replay_recorder.events) == trace_event_count
+                    and self._buttons.get((source.x, source.y)) is source
+                    and self._cell_size == trace_cell_size
+                    and self._mouse_trace_position(event) == trace_position):
+                # Committed actions already supplied this observation. An
+                # ignored release is still a sample unless dispatch changed
+                # the session, visibility, or geometry beneath it.
+                trace_recorder.record_position(*trace_position, trace_cell_size,
+                                               observed_ns=trace_observed_ns)
             self._update_mouse_preview()
             return
         else:
@@ -2327,11 +2423,26 @@ class MinesweeperUI(QWidget):
     def _apply_live_action(self, x, y, action, *, auto_observation=None):
         """One physical action, one event in the existing live recorder."""
         self._cancel_simple_auto_step()
+        release = self._mouse_trace_release
+        self._mouse_trace_release = None
+        before = self.engine.get_counter_snapshot()
         _, _, _, _, info = self.engine.step(x, y, action)
+        after = self.engine.get_counter_snapshot()
+        committed = (after["active_clicks"] + after["wasted_clicks"]
+                     > before["active_clicks"] + before["wasted_clicks"])
+        if committed and auto_observation is not None:
+            self._mouse_trace_recorder.invalidate()
         self._ensure_zini_metric_job()
         if action in (Action.OPEN, Action.FLAG):
             self._start_timer()
-        self._record_replay_event(x, y, action)
+        event_index = self._record_replay_event(x, y, action)
+        if committed and auto_observation is None and release is not None:
+            recorder, position, cell_size, observed_ns = release
+            if (recorder is self._mouse_trace_recorder and event_index is not None
+                    and (recorder.started or action in (Action.OPEN, Action.FLAG))):
+                recorder.record_action(*position, cell_size, event_index, observed_ns=observed_ns)
+        if self.engine.status != GameStatus.PLAYING:
+            self._mouse_trace_recorder.freeze()
         self._refresh_live_board(info, auto_observation=auto_observation)
 
     def on_reset(self):
