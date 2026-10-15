@@ -16,6 +16,12 @@ def _integer(value, name, minimum=0):
         raise ValueError(f"{name} must be an integer >= {minimum}.")
 
 
+def _position(value, name):
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or value < 0 or (isinstance(value, float) and not isfinite(value))):
+        raise ValueError(f"{name} must be a finite non-negative position.")
+
+
 @dataclass(frozen=True)
 class MouseTracePoint:
     elapsed_us: int
@@ -26,9 +32,7 @@ class MouseTracePoint:
     def __post_init__(self):
         _integer(self.elapsed_us, "elapsed_us")
         for name, value in (("x", self.x), ("y", self.y)):
-            if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or value < 0 or (isinstance(value, float) and not isfinite(value))):
-                raise ValueError(f"{name} must be a finite non-negative position.")
+            _position(value, name)
         if self.replay_event_index is not None:
             _integer(self.replay_event_index, "replay_event_index")
 
@@ -96,7 +100,11 @@ class MouseTraceRecorder:
         _integer(height, "height", 1)
         self.width = width
         self.height = height
-        self._segments: list[tuple[int, list[MouseTracePoint]]] = []
+        # Primitive tuples can be untracked by Python's cyclic GC. Retaining
+        # dataclass instances here makes full collections traverse every sample
+        # during Live input. Public points are returned normally and materialized
+        # afresh for snapshots; scalar types/values are never converted or packed.
+        self._segments: list[tuple[int, list[tuple[int, float, float, int | None]]]] = []
         self._segment_open = False
         self._origin_ns = None
         self._last_ns = None
@@ -170,13 +178,14 @@ class MouseTraceRecorder:
     def _append(self, x, y, cell_size, event_index, observed_ns=None):
         _integer(cell_size, "cell_size", 1)
         # Validate before changing any state, including the clock origin.
-        MouseTracePoint(0, x, y, event_index)
+        _position(x, "x")
+        _position(y, "y")
         if not (x < self.width * cell_size and y < self.height * cell_size):
             raise ValueError("Trace position is outside the board.")
         same_segment = self._segment_open and self._segments[-1][0] == cell_size
         if same_segment and event_index is None:
             last = self._segments[-1][1][-1]
-            if (x, y) == (last.x, last.y):
+            if (x, y) == (last[1], last[2]):
                 return None
         now = self.observation_time_ns() if observed_ns is None else observed_ns
         if observed_ns is not None:
@@ -185,7 +194,7 @@ class MouseTraceRecorder:
         point = MouseTracePoint((now - origin) // 1000, x, y, event_index)
         if not same_segment:
             self._segments.append((cell_size, []))
-        self._segments[-1][1].append(point)
+        self._segments[-1][1].append((point.elapsed_us, x, y, event_index))
         self._segment_open = True
         self._origin_ns = origin
         self._last_ns = now
@@ -197,5 +206,6 @@ class MouseTraceRecorder:
         if not self.eligible or not self.started:
             return None
         return MouseTraceData(self.width, self.height, tuple(
-            MouseTraceSegment(size, tuple(points)) for size, points in self._segments
+            MouseTraceSegment(size, tuple(MouseTracePoint(*point) for point in points))
+            for size, points in self._segments
         ))

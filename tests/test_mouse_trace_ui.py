@@ -138,6 +138,100 @@ class MouseTraceUITests(unittest.TestCase):
                 self.assertEqual(self.points()[0].elapsed_us, 0)
                 self.assert_last_position(target)
 
+    def test_prestart_gating_skips_geometry_but_keeps_first_release_policy(self):
+        for checked in (True, False):
+            with self.subTest(checked=checked):
+                self.ui.on_reset()
+                self.install_recorder()
+                self.ui.mouse_trace_record_checkbox.setChecked(checked)
+                with patch.object(self.ui, "_mouse_trace_position", wraps=self.ui._mouse_trace_position) as position:
+                    self.hover((1, 0))
+                    self.press((2, 0), Qt.RightButton)
+                    self.send(QEvent.MouseMove, (3, 0))
+                    position.assert_not_called()
+                    self.clock.assert_not_called()
+                    self.release((3, 0), Qt.RightButton)
+                    position.assert_called_once()
+                self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
+                self.assertEqual(self.recorder.started, checked)
+                self.assertEqual(self.recorder.eligible, checked)
+                if checked:
+                    self.assertEqual(self.markers()[0].elapsed_us, 0)
+                    self.assert_last_position((3, 0))
+                self.clock.reset_mock()
+
+    def test_invalidated_and_frozen_movement_skip_trace_geometry(self):
+        self.click()
+        for stop in (self.recorder.freeze, self.recorder.invalidate):
+            stop()
+            with patch.object(self.ui, "_mouse_trace_position") as position:
+                self.send(QEvent.MouseMove, (2, 0), receiver=self.ui._buttons[(2, 0)])
+                position.assert_not_called()
+
+    def test_consolidated_mapping_matches_original_qt_hit_test_and_float_bounds(self):
+        def original(event):
+            if self.ui._cell_at_mouse_position(event.globalPos()) is None:
+                return None
+            screen = event.screenPos()
+            origin = self.ui.board_container.mapToGlobal(QPoint(0, 0))
+            view = self.ui.scroll_area.viewport()
+            view_origin = view.mapToGlobal(QPoint(0, 0))
+            x, y = screen.x() - origin.x(), screen.y() - origin.y()
+            if (0 <= x < self.engine.width * self.ui._cell_size
+                    and 0 <= y < self.engine.height * self.ui._cell_size
+                    and 0 <= screen.x() - view_origin.x() < view.width()
+                    and 0 <= screen.y() - view_origin.y() < view.height()):
+                return x, y
+            return None
+
+        for large in (False, True):
+            if large:
+                self.ui._rebuild_game(50, 50, 10)
+                self.ui.resize(1000, 650)
+                self.app.processEvents()
+                self.ui.scroll_area.horizontalScrollBar().setValue(281)
+                self.ui.scroll_area.verticalScrollBar().setValue(279)
+                self.app.processEvents()
+            self.ui._buttons[(2, 0)].setEnabled(False)
+            self.ui._buttons[(3, 0)].hide()
+            self.ui.mouse_trace_overlay.show()  # Transparent child must not change hit acceptance.
+            board = self.ui.board_container
+            origin = QPointF(board.mapToGlobal(QPoint(0, 0)))
+            view = self.ui.scroll_area.viewport()
+            xs = [-.75, -.25, 0, 4.25, 27.49, 27.51, 28, 60, 90,
+                  board.width() - .75, board.width() - .25, board.width() + .25,
+                  -board.x() - .25, -board.x() + .25,
+                  -board.x() + view.width() - .25, -board.x() + view.width() + .25]
+            ys = [-.75, -.25, 0, 7.75, 28.25, board.height() - .25,
+                  -board.y() - .25, -board.y() + .25,
+                  -board.y() + view.height() - .25, -board.y() + view.height() + .25]
+            for x in xs:
+                for y in ys:
+                    event = QMouseEvent(QEvent.MouseMove, QPointF(x, y), origin + QPointF(x, y),
+                                        Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+                    with self.subTest(large=large, x=x, y=y):
+                        self.assertEqual(self.ui._mouse_trace_position(event), original(event))
+
+    def test_started_dispatch_keeps_every_delivered_subpixel_sample(self):
+        self.click((0, 0), Qt.RightButton)
+        first = self.points()[0]
+        events = self.ui._replay_recorder.events
+        counters = self.engine.get_counter_snapshot()
+        board_origin = QPointF(self.ui.board_container.mapToGlobal(QPoint(0, 0)))
+        expected = [first]
+        receiver = self.ui._buttons[(0, 0)]
+        for i in range(1, 201):
+            self.clock.return_value += 1000
+            local = QPointF(10 + i / 4, 10 + i / 8)
+            event = QMouseEvent(QEvent.MouseMove, local, board_origin + local,
+                                Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+            self.app.sendEvent(receiver, event)
+            expected.append(MouseTracePoint(i, event.screenPos().x() - board_origin.x(),
+                                           event.screenPos().y() - board_origin.y()))
+        self.assertEqual(self.points(), tuple(expected))
+        self.assertEqual(self.ui._replay_recorder.events, events)
+        self.assertEqual(self.engine.get_counter_snapshot(), counters)
+
     def test_qwindow_no_button_hover_after_start_is_sampled_without_gameplay(self):
         self.click()
         before = self.ui._replay_recorder.events
@@ -731,7 +825,7 @@ class MouseTraceUITests(unittest.TestCase):
 
     def paint_overlay(self):
         with patch("mouse_trace_ui.QPainter") as painter_class:
-            self.ui.mouse_trace_overlay.paintEvent(None)
+            self.ui.mouse_trace_overlay._draw_geometry(painter_class.return_value)
         return painter_class.return_value
 
     def test_recording_default_and_pre_action_choice_are_session_local(self):

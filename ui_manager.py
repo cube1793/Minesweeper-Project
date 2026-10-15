@@ -2255,20 +2255,35 @@ class MinesweeperUI(QWidget):
                 or QApplication.activeModalWidget() is not None):
             recorder.break_segment()
             return None
-        if self._cell_at_mouse_position(event.globalPos()) is None:
+        # QScrollArea owns the board directly under its viewport. Map once to
+        # board space and derive viewport coordinates from the board's offset.
+        # Keep Qt's integer childAt test as well as the original floating bounds:
+        # rounding at a clipped edge and disabled/stale children still matter.
+        board = self.board_container
+        viewport = self.scroll_area.viewport()
+        global_position = event.globalPos()
+        local = board.mapFromGlobal(global_position)
+        offset_x, offset_y = board.x(), board.y()
+        view_width, view_height = viewport.width(), viewport.height()
+        if not (0 <= local.x() + offset_x < view_width
+                and 0 <= local.y() + offset_y < view_height):
+            recorder.break_segment()
+            return None
+        cell = board.childAt(local)
+        if (not isinstance(cell, CellButton) or not cell.isEnabled()
+                or self._buttons.get((cell.x, cell.y)) is not cell):
             recorder.break_segment()
             return None
         # Preserve the delivered subpixel position; global coordinates are only
         # used to map into board space and are never retained in trace data.
         position = event.screenPos()
-        origin = self.board_container.mapToGlobal(QPoint(0, 0))
-        x, y = position.x() - origin.x(), position.y() - origin.y()
-        viewport = self.scroll_area.viewport()
-        view_origin = viewport.mapToGlobal(QPoint(0, 0))
+        origin_x = global_position.x() - local.x()
+        origin_y = global_position.y() - local.y()
+        x, y = position.x() - origin_x, position.y() - origin_y
         if not (0 <= x < self.engine.width * self._cell_size
                 and 0 <= y < self.engine.height * self._cell_size
-                and 0 <= position.x() - view_origin.x() < viewport.width()
-                and 0 <= position.y() - view_origin.y() < viewport.height()):
+                and 0 <= position.x() - (origin_x - offset_x) < view_width
+                and 0 <= position.y() - (origin_y - offset_y) < view_height):
             recorder.break_segment()
             return None
         return x, y
@@ -2347,7 +2362,13 @@ class MinesweeperUI(QWidget):
             return
         kind = event.type()
         trace_recorder = self._mouse_trace_recorder
-        trace_position = self._mouse_trace_position(event)
+        # Pre-start hover/press has no trace observation to contribute. Releases
+        # still carry physical-human provenance, geometry and observation time,
+        # even when the unchecked recording choice must lock on the first action.
+        trace_position = None
+        if (trace_recorder.eligible and not trace_recorder.frozen
+                and (trace_recorder.started or kind == QEvent.MouseButtonRelease)):
+            trace_position = self._mouse_trace_position(event)
         trace_observed_ns = None
         if trace_position is not None:
             if kind == QEvent.MouseButtonRelease:

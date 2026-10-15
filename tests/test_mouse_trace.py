@@ -1,7 +1,9 @@
 """Pure capture contract: fake clock only, no Qt, gameplay, or file I/O."""
 
 from dataclasses import FrozenInstanceError
+import gc
 import unittest
+import weakref
 from unittest.mock import Mock
 
 from mouse_trace import MouseTraceData, MouseTracePoint, MouseTraceRecorder, MouseTraceSegment
@@ -269,6 +271,74 @@ class MouseTraceTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.recorder.record_position(20, 20, 28)
             self.assertEqual(self.recorder.snapshot(), before)
+
+    def test_returned_point_is_immutable_but_not_retained_by_live_storage(self):
+        point = self.start()
+        reference = weakref.ref(point)
+        with self.assertRaises(FrozenInstanceError):
+            point.x = 0
+        expected = MouseTracePoint(0, 10.5, 15, 0)
+        del point
+        gc.collect()
+        self.assertIsNone(reference())
+        self.assertEqual(self.points(), (expected,))
+
+    def test_exact_stream_snapshot_and_v2_json_preserve_scalar_values(self):
+        from replay_json import replay_data_to_dict
+        from replay_model import ReplayBoard, ReplayData, ReplayEvent
+
+        first = self.start(index=1)  # A pre-start CHORD may already occupy 0.
+        self.clock.return_value += 1_234_567
+        self.assertEqual(self.recorder.record_position(12, 15.25, 28),
+                         MouseTracePoint(1234, 12, 15.25))
+        self.assertIsNone(self.recorder.record_position(12, 15.25, 28))
+        observed = self.recorder.observation_time_ns()
+        self.clock.return_value += 9_000_000
+        self.assertEqual(self.recorder.record_action(12, 15.25, 28, 2, observed_ns=observed),
+                         MouseTracePoint(1234, 12, 15.25, 2))
+        self.recorder.break_segment()
+        self.recorder.record_position(12, 15.25, 28)
+        self.recorder.record_position(10.125, 11, 14)
+        expected = MouseTraceData(3, 2, (
+            MouseTraceSegment(28, (first, MouseTracePoint(1234, 12, 15.25),
+                                   MouseTracePoint(1234, 12, 15.25, 2))),
+            MouseTraceSegment(28, (MouseTracePoint(10234, 12, 15.25),)),
+            MouseTraceSegment(14, (MouseTracePoint(10234, 10.125, 11),)),
+        ))
+        frozen = self.recorder.snapshot()
+        self.assertEqual(frozen, expected)
+        events = tuple(ReplayEvent(float(i), 0, 0, action)
+                       for i, action in enumerate(("CHORD", "OPEN", "FLAG")))
+        board = ReplayBoard(3, 2, 1, {(2, 1)})
+        self.assertEqual(replay_data_to_dict(ReplayData(board, events, "human", 2, frozen)),
+                         replay_data_to_dict(ReplayData(board, events, "human", 2, expected)))
+        self.assertIs(type(frozen.segments[0].points[1].x), int)
+        self.assertIs(type(frozen.segments[0].points[1].y), float)
+        self.recorder.record_position(13, 12, 14)
+        self.assertEqual(frozen, expected)
+
+    def test_append_validation_is_atomic_including_private_session_state(self):
+        for started in (False, True):
+            self.recorder.reset(3, 2)
+            if started:
+                self.start()
+                self.recorder.break_segment()
+            before = (self.recorder.snapshot(), self.recorder._segment_open,
+                      self.recorder._origin_ns, self.recorder._last_ns, self.recorder._last_event_index)
+            candidates = [(-1, 2, 28, 1, 10_000_000), (True, 2, 28, 1, 10_000_000),
+                          (float("nan"), 2, 28, 1, 10_000_000), (84, 2, 28, 1, 10_000_000),
+                          (1, 2, 0, 1, 10_000_000), (1, 2, 28, True, 10_000_000),
+                          (1, 2, 28, -1, 10_000_000), (1, 2, 28, 1, True),
+                          (1, 2, 28, 1, 1.5)]
+            if started:
+                candidates += [(1, 2, 28, 0, 10_000_000), (1, 2, 28, 1, 9_999_999)]
+            for x, y, size, index, timestamp in candidates:
+                with self.subTest(started=started, values=(x, y, size, index, timestamp)):
+                    with self.assertRaises(ValueError):
+                        self.recorder.record_action(x, y, size, index, observed_ns=timestamp)
+                    self.assertEqual((self.recorder.snapshot(), self.recorder._segment_open,
+                                      self.recorder._origin_ns, self.recorder._last_ns,
+                                      self.recorder._last_event_index), before)
 
 
 if __name__ == "__main__":
