@@ -5,6 +5,8 @@ never interpreted. Modeled microseconds come directly from the recorded traces,
 independently of the reconstruction engine's elapsed-time bookkeeping.
 """
 
+from copy import deepcopy
+
 from core_engine import GameStatus, MinesweeperEngine
 from simple_algorithm import Coordinate, Observation
 from stage3_execution import Stage3Execution
@@ -14,9 +16,10 @@ from stage3_runner import Stage3ActionTrace
 class Stage3TracePlayer:
     """Play one fixed execution, with index k meaning exactly traces[:k].
 
-    Seeking rebuilds from the fixed layout, as ReplayPlayer.go_to does. A new
-    state is published only after reconstruction checks succeed, so a rejected
-    seek leaves the previous observation, index, cursor and time intact.
+    Seeking rebuilds from the fixed layout, as ReplayPlayer.go_to does. Forward
+    advancement applies one trace to an isolated copy of the current engine.
+    Both paths publish only after validation, leaving the previous observation,
+    index, cursor and time intact on failure.
     """
 
     def __init__(self, execution: Stage3Execution):
@@ -76,22 +79,8 @@ class Stage3TracePlayer:
 
         engine = self._new_engine()
         cumulative_us = 0
-        for action_index, trace in enumerate(self.execution.result.traces[:index], start=1):
-            if engine.status != GameStatus.PLAYING:
-                raise ValueError(f"Trace {action_index} follows a terminal board.")
-            if (
-                isinstance(trace.modeled_action_us, bool)
-                or not isinstance(trace.modeled_action_us, int)
-                or trace.modeled_action_us < 0
-            ):
-                raise ValueError(f"Trace {action_index} modeled_action_us must be a nonnegative integer.")
-            engine.step(trace.move.x, trace.move.y, trace.move.action)
-            if engine.status != trace.status_after:
-                raise ValueError(f"Trace {action_index} status_after does not match reconstructed status.")
-            cumulative_us += trace.modeled_action_us
-
-        if index == self.step_count and engine.status != self.execution.result.status:
-            raise ValueError("Final reconstructed status does not match result.status.")
+        for action_index in range(1, index + 1):
+            cumulative_us += self._apply_trace(engine, action_index)
         self._engine = engine
         self._current_index = index
         self._cumulative_modeled_us = cumulative_us
@@ -101,7 +90,12 @@ class Stage3TracePlayer:
         """Apply the next trace; return False at the final index."""
         if self.current_index == self.step_count:
             return False
-        self.go_to(self.current_index + 1)
+        index = self.current_index + 1
+        engine = deepcopy(self._engine)
+        cumulative_us = self.cumulative_modeled_us + self._apply_trace(engine, index)
+        self._engine = engine
+        self._current_index = index
+        self._cumulative_modeled_us = cumulative_us
         return True
 
     def previous(self) -> bool:
@@ -110,6 +104,24 @@ class Stage3TracePlayer:
             return False
         self.go_to(self.current_index - 1)
         return True
+
+    def _apply_trace(self, engine: MinesweeperEngine, action_index: int) -> int:
+        """Apply and validate one recorded action on an unpublished candidate."""
+        trace = self.execution.result.traces[action_index - 1]
+        if engine.status != GameStatus.PLAYING:
+            raise ValueError(f"Trace {action_index} follows a terminal board.")
+        if (
+            isinstance(trace.modeled_action_us, bool)
+            or not isinstance(trace.modeled_action_us, int)
+            or trace.modeled_action_us < 0
+        ):
+            raise ValueError(f"Trace {action_index} modeled_action_us must be a nonnegative integer.")
+        engine.step(trace.move.x, trace.move.y, trace.move.action)
+        if engine.status != trace.status_after:
+            raise ValueError(f"Trace {action_index} status_after does not match reconstructed status.")
+        if action_index == self.step_count and engine.status != self.execution.result.status:
+            raise ValueError("Final reconstructed status does not match result.status.")
+        return trace.modeled_action_us
 
     def _new_engine(self) -> MinesweeperEngine:
         spec, board = self.execution.spec, self.execution.board

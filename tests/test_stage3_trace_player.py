@@ -2,13 +2,14 @@
 
 import unittest
 from contextlib import ExitStack
+from copy import deepcopy
 from dataclasses import replace
 from unittest.mock import patch
 
 from benchmark_board import BenchmarkBoard, BenchmarkSetSpec, calculate_board_fingerprint
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 from simple_algorithm import SimpleMove
-from stage3_execution import Stage3Execution
+from stage3_execution import Stage3Execution, run_expert_stage3_execution
 from stage3_runner import Stage3ActionTrace, Stage3RunResult, run_stage3
 from stage3_trace_player import Stage3TracePlayer
 
@@ -57,6 +58,162 @@ class Stage3TracePlayerTests(unittest.TestCase):
         self.assertEqual(player.current_cursor, expected_cursor)
         self.assertEqual(player.cumulative_modeled_us, sum(trace.modeled_action_us for trace in traces[:index]))
         self.assertIs(type(player.cumulative_modeled_us), int)
+
+    def assert_next_failure_is_atomic(self, player, exception, message):
+        before = self.state(player)
+        # Include nested engine data so failed candidates cannot leak changes
+        # to counters, timers, flags or reveal state through shared containers.
+        engine_state = deepcopy(player._engine.__dict__)
+        with self.assertRaisesRegex(exception, message):
+            player.next()
+        self.assertEqual(self.state(player), before)
+        self.assertEqual(player._engine.__dict__, engine_state)
+
+    def test_game_zero_incremental_prefixes_match_independent_reconstruction(self):
+        execution = run_expert_stage3_execution(0)
+        player, oracle = Stage3TracePlayer(execution), Stage3TracePlayer(execution)
+        traces = execution.result.traces
+        recorded = tuple((t.move, t.cursor_before, t.modeled_action_us, t.status_after) for t in traces)
+        self.assertEqual((player.step_count, execution.result.total_modeled_us), (227, 39987084))
+        cumulative = 0
+        for index in range(player.step_count + 1):
+            with self.subTest(index=index):
+                if index:
+                    trace = traces[index - 1]
+                    self.assertEqual(trace.cursor_before, player.current_cursor)
+                    self.assertTrue(player.next())
+                    cumulative += trace.modeled_action_us
+                    self.assertEqual(player.current_cursor, (trace.move.x, trace.move.y))
+                oracle.go_to(index)
+                self.assertEqual(self.state(player), self.state(oracle))
+                self.assertEqual(player.cumulative_modeled_us, cumulative)
+                self.assertIs(type(player.cumulative_modeled_us), int)
+                if index < player.step_count:
+                    self.assertEqual(traces[index].cursor_before, player.current_cursor)
+        self.assertEqual(player.status, execution.result.status)
+        self.assertEqual(player.cumulative_modeled_us, execution.result.total_modeled_us)
+        terminal = self.state(player)
+        self.assertFalse(player.next())
+        self.assertEqual(self.state(player), terminal)
+        self.assertEqual(tuple((t.move, t.cursor_before, t.modeled_action_us, t.status_after)
+                               for t in traces), recorded)
+
+    def test_incremental_next_applies_only_the_pending_recorded_action(self):
+        player = Stage3TracePlayer(self.suffix)
+        applied = []
+        real_step = MinesweeperEngine.step
+
+        def step(engine, x, y, action):
+            applied.append(SimpleMove(action, x, y))
+            return real_step(engine, x, y, action)
+
+        with patch.object(MinesweeperEngine, "step", new=step):
+            for index, trace in enumerate(self.suffix.result.traces, 1):
+                before = len(applied)
+                self.assertTrue(player.next())
+                self.assertEqual(applied[before:], [trace.move])
+                self.assert_prefix(player, index, self.suffix_prefixes)
+            self.assertFalse(player.next())
+        self.assertEqual(tuple(applied), self.suffix.result.moves)
+
+    def test_incremental_next_after_arbitrary_seeks_and_previous(self):
+        for execution, prefixes in (
+            (self.sequence, self.prefixes), (self.flood, self.flood_prefixes),
+            (self.loss, self.loss_prefixes), (self.first_loss, self.first_loss_prefixes),
+            (self.suffix, self.suffix_prefixes),
+        ):
+            player = Stage3TracePlayer(execution)
+            count = player.step_count
+            for index in (count, 0, count // 2, 1, count - 1, 0):
+                with self.subTest(count=count, index=index):
+                    player.go_to(index)
+                    self.assert_prefix(player, index, prefixes)
+                    before = self.state(player)
+                    with patch.object(MinesweeperEngine, "step", side_effect=AssertionError("same-index action")):
+                        self.assertEqual(player.go_to(index), before[-1])
+                    self.assertEqual(self.state(player), before)
+                    self.assertEqual(player.next(), index < count)
+                    advanced = min(index + 1, count)
+                    self.assert_prefix(player, advanced, prefixes)
+                    self.assertTrue(player.previous())
+                    self.assert_prefix(player, advanced - 1, prefixes)
+                    self.assertTrue(player.next())
+                    self.assert_prefix(player, advanced, prefixes)
+
+    def test_incremental_modeled_time_preserves_zero_and_large_integers(self):
+        costs = (0, 2**60 + 1, 3, 2**60 + 7)
+        result = replace(self.sequence.result, traces=tuple(
+            replace(trace, modeled_action_us=cost)
+            for trace, cost in zip(self.sequence.result.traces, costs)
+        ))
+        player = Stage3TracePlayer(replace(self.sequence, result=result))
+        for index in range(1, player.step_count + 1):
+            self.assertTrue(player.next())
+            self.assert_prefix(player, index, self.prefixes)
+            self.assertEqual(player.cumulative_modeled_us, sum(costs[:index]))
+        self.assertEqual(player.cumulative_modeled_us, result.total_modeled_us)
+
+    def test_incremental_trace_status_mismatch_is_atomic(self):
+        traces = list(self.sequence.result.traces)
+        traces[2] = replace(traces[2], status_after=GameStatus.LOST)
+        execution = replace(self.sequence, result=replace(self.sequence.result, traces=traces))
+        player = Stage3TracePlayer(execution)
+        player.go_to(2)
+        self.assert_next_failure_is_atomic(player, ValueError, "Trace 3 status_after")
+
+    def test_incremental_final_result_mismatch_is_atomic(self):
+        execution = replace(self.sequence, result=replace(self.sequence.result, status=GameStatus.LOST))
+        player = Stage3TracePlayer(execution)
+        player.go_to(player.step_count - 1)
+        self.assert_next_failure_is_atomic(player, ValueError, "result.status")
+
+    def test_incremental_action_after_terminal_is_rejected_before_step(self):
+        result = replace(self.flood.result, traces=self.flood.result.traces * 2)
+        player = Stage3TracePlayer(replace(self.flood, result=result))
+        self.assertTrue(player.next())
+        with patch.object(MinesweeperEngine, "step", side_effect=AssertionError("terminal action")):
+            self.assert_next_failure_is_atomic(player, ValueError, "Trace 2 follows a terminal board")
+
+    def test_incremental_step_exception_after_mutation_is_atomic_and_retryable(self):
+        player = Stage3TracePlayer(self.sequence)
+        player.go_to(1)
+        real_step = MinesweeperEngine.step
+
+        def fail_after_step(engine, x, y, action):
+            real_step(engine, x, y, action)
+            raise RuntimeError("failure after candidate mutation")
+
+        with patch.object(MinesweeperEngine, "step", new=fail_after_step):
+            self.assert_next_failure_is_atomic(player, RuntimeError, "candidate mutation")
+        self.assertTrue(player.next())
+        self.assert_prefix(player, 2, self.prefixes)
+
+    def test_incremental_invalid_pending_cost_is_atomic_before_step(self):
+        for invalid in (True, False, -1, 0.5, "1", None):
+            with self.subTest(cost=invalid):
+                traces = list(self.sequence.result.traces)
+                traces[2] = replace(traces[2], modeled_action_us=invalid)
+                execution = replace(self.sequence, result=replace(self.sequence.result, traces=traces))
+                player = Stage3TracePlayer(execution)
+                player.go_to(2)
+                with patch.object(MinesweeperEngine, "step", side_effect=AssertionError("invalid-cost action")):
+                    self.assert_next_failure_is_atomic(player, ValueError, "Trace 3 modeled_action_us")
+
+    def test_incremental_preserves_engine_owned_action_and_cursor_validation(self):
+        # Playback currently delegates invalid/no-op actions to the engine and
+        # does not validate cursor_before. Do not impose producer rules here.
+        for move in (SimpleMove(Action.OPEN, -1, 0), SimpleMove(999, 1, 0),
+                     SimpleMove(Action.OPEN, 0, 0), SimpleMove(Action.FLAG, 1, 0)):
+            with self.subTest(move=move):
+                pending = replace(self.sequence.result.traces[1], move=move, cursor_before=(3, 0))
+                result = Stage3RunResult(GameStatus.PLAYING, (self.sequence.result.traces[0], pending))
+                execution = replace(self.sequence, result=result)
+                player, oracle = Stage3TracePlayer(execution), Stage3TracePlayer(execution)
+                self.assertTrue(player.next())
+                self.assertTrue(player.next())
+                oracle.go_to(2)
+                self.assertEqual(self.state(player), self.state(oracle))
+                self.assertEqual(player.current_cursor, (move.x, move.y))
 
     def test_initial_index_is_the_all_hidden_fixed_board(self):
         player = Stage3TracePlayer(self.sequence)

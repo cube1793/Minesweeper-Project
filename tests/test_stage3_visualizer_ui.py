@@ -388,13 +388,13 @@ class Stage3VisualizerTests(unittest.TestCase):
     def test_programmatic_slider_refresh_does_not_seek_or_stop_timer(self):
         window = self.window
         window.play_button.click()
-        with patch.object(window.player, "go_to", wraps=window.player.go_to) as seek:
-            window.timer.timeout.emit()
-            seek.assert_called_once_with(1)
-            self.assertTrue(window.timer.isActive())
-            seek.reset_mock()
+        window.timer.timeout.emit()
+        self.assert_index(window, 1)
+        self.assertTrue(window.timer.isActive())
+        with patch.object(window.player, "go_to", side_effect=AssertionError("refresh sought")):
             window.refresh()
-            seek.assert_not_called()
+        self.assert_index(window, 1)
+        self.assertTrue(window.timer.isActive())
         self.assertFalse(window.slider.signalsBlocked())
         window.slider.blockSignals(True)
         window.refresh()
