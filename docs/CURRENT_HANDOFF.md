@@ -178,7 +178,7 @@ Reported Slice 1 verification: **29 focused passed; 202 relevant regression
 passed; combined reported total: 231 passed**, zero failures/errors/skips.
 No full suite, package or native GUI run was performed for Slice 1.
 
-**Slice 2 — Isolated execution and metrics ACTIVE (not complete).**
+**Slice 2 — Isolated execution and metrics COMPLETE / ACCEPTED** by ChatGPT final review.
 **Slice 2A — Pure isolated execution and metrics COMPLETE / ACCEPTED** by ChatGPT
 final review. The pure Qt-independent layer in
 [`same_board_runner.py`](../same_board_runner.py) uses separate fresh fixed-layout
@@ -207,8 +207,52 @@ Reported Slice 2A verification: **31 new Slice 2A passed; 29 Slice 1 passed;
 zero failures/errors/skips. No full suite, package or native GUI run was performed
 for Slice 2A.
 
-**NEXT — Slice 2B: worker/process integration.** Slice 2B has not begun (section 6).
+**Slice 2B — Worker/process integration COMPLETE / ACCEPTED** by ChatGPT final review.
 Slices 2A/2B are internal parts of the existing Slice 2, not new roadmap milestones.
+
+The dedicated PyQt-independent [`same_board_execution_worker.py`](../same_board_execution_worker.py)
+accepts exactly `{"token": request_token, "board": fixed_ReplayBoard}`. Human Replay
+events and Mouse Trace never enter the worker; they remain parent-owned. The worker
+executes the accepted solver-only fixed-layout Stage-2 + frozen Stage-3 path once.
+Legitimate solver LOSS never triggers regeneration/retry; solver failures remain
+failures, never fabricated LOSS. Source execution uses the module-relative worker
+script; frozen execution uses `--same-board-execution-worker`, dispatched before
+Qt GUI setup independently of the existing ZiNi and Stage-3 flags.
+
+[`SameBoardExecutionJob`](../same_board_execution_job.py) owns one active child and
+its private temporary directory. Normal poll/cancel process waits are nonblocking;
+terminate -> kill escalation, reap before cleanup, cleanup before terminal success,
+and retained ownership on reap/cleanup failure remain enforced. Stale/wrong-type
+tokens are rejected. Parent composition attaches solver evidence to the exact
+retained original Human context, preserving its Replay/Mouse Trace authorities.
+
+Parent revalidation covers comparison/outcome-bearing facts: recomputed layout
+identity, locally reauthenticated Model C, reconstructed/rechecked Stage-2 and
+Stage-3 executed streams, terminal outcomes and model totals, relied-upon native
+types, trace deltas and the Stage-3 cursor chain. It deliberately does **not**
+recursively deep-walk the complete nested decision-evidence graph on every run.
+Native decision/probability/plan evidence remains retained unchanged. Transport
+is trusted-local/private; this is not a security guarantee for arbitrary pickles.
+
+Independent Claude Code read-only audit: **BLOCKER 0; initially REQUIRED 1** —
+avoidable parent-side recursive decision-evidence traversal affected responsiveness.
+That REQUIRED finding was corrected and subsequently accepted by ChatGPT; no
+independent Claude re-audit of the correction is claimed.
+
+Representative genuine **30x16** evidence measured parent composition median
+**681.4 ms before / 92.1 ms after**, after-change range **86.1–96.2 ms**;
+separate after-change unpickle median **173.1 ms**. This demonstrates removal of
+the avoidable deep-walk stall, **not zero GUI-thread blocking**. No arbitrary
+runtime/FPS requirement is introduced; these are responsiveness observations,
+not frozen algorithm-performance evidence.
+
+Reported final Slice 2B verification: **84 Slice 2B passed; 31 Slice 2A passed;
+29 Slice 1 passed; 374 relevant regressions passed; combined reported verification:
+518 passed**, zero failures/errors/skips. No full suite, fresh package or native
+GUI acceptance was run for Slice 2B.
+
+**NEXT — Slice 3: Pure playback coordination.** Slice 3 has not begun; Comparison
+UI remains not begun and belongs to Slice 4 (section 6).
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
   [historical acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
@@ -285,12 +329,12 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-**NEXT — Slice 2B: worker/process integration.** Slice 2 remains ACTIVE, not complete;
-Slice 2A is COMPLETE / ACCEPTED. Slice 2B has not begun; its design and implementation
-are not complete. It is expected to make the accepted synchronous 2A execution
-usable without blocking the GUI while preserving parent-owned process lifecycle,
-cancellation, reaping, temporary-file cleanup and failure transport.
-Comparison UI and Slice 3 playback coordination have not begun and are not yet authorized.
+**NEXT — Slice 3: Pure playback coordination.** Slice 2, including internal
+Slices 2A/2B, is COMPLETE / ACCEPTED. Slice 3 has not begun. Its accepted boundary
+is deterministic reconstruction for Human, Stage 2 and Stage 3 with independent
+remembered action indices; switching runs restores that run's own index.
+No lockstep/common timeline, normalized progress or universal playback abstraction.
+No UI yet: Comparison UI remains not begun and belongs to Slice 4.
 Use live Git/source/tests to determine whether later work has already begun.
 Do not treat this roadmap as implementation approval or claim later milestones exist.
 No later Timeline Analytics or Extended algorithm research is authorized yet.
@@ -325,10 +369,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
-5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0 and 1
-   COMPLETE / ACCEPTED. Slice 2 — Isolated execution and metrics ACTIVE (not complete);
-   internal Slice 2A COMPLETE / ACCEPTED. **NEXT:** Slice 2B — worker/process
-   integration (not begun).
+5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0, 1 and 2
+   COMPLETE / ACCEPTED, including internal Slices 2A/2B. **NEXT:** Slice 3 — Pure
+   playback coordination (not begun); Comparison UI remains Slice 4 (not begun).
 6. **LATER:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
@@ -474,15 +517,20 @@ domain/admission foundation 및 focused tests이며 상세 수용 조건은 sect
 Contract: docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md.
 Slice 1 reported verification: focused 29 / relevant regression 202 / combined 231 passed,
 zero failures/errors/skips; Slice 1 full suite/package/native GUI run은 없습니다.
-Slice 2 — Isolated execution and metrics는 ACTIVE이며 아직 complete가 아닙니다.
-내부 Slice 2A — Pure isolated execution and metrics는 COMPLETE / ACCEPTED입니다.
+Slice 2 — Isolated execution and metrics는 COMPLETE / ACCEPTED입니다.
+내부 Slice 2A — Pure isolated execution and metrics 및
+Slice 2B — Worker/process integration도 COMPLETE / ACCEPTED입니다.
 정확한 Human layout에서 독립 solver 실행, native result/trace 보존, 분리된 metric과
 accepted Model C ordered-action seam의 범위는 section 4를 보세요.
 Slice 2A reported verification: new 31 / Slice 1 29 / relevant regression 274 / combined 334 passed,
 zero failures/errors/skips; Slice 2A full suite/package/native GUI run은 없습니다.
-NEXT: Slice 2B — worker/process integration (not begun; design/implementation not complete).
+Slice 2B final reported verification: 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 374 /
+combined 518 passed, zero failures/errors/skips; full suite/fresh package/native GUI acceptance는 없습니다.
+Parent ownership, corrected validation boundary, audit 및 responsiveness evidence는 section 4를 보세요.
+NEXT: Slice 3 — Pure playback coordination (not begun).
 Slice 2A/2B는 기존 Slice 2 내부 구분이며 새 roadmap milestone이 아닙니다.
-Comparison UI와 Slice 3 playback coordination은 미착수/미승인이며
+Slice 3은 deterministic reconstruction과 각 run의 독립 remembered index만 다루며 UI는 포함하지 않습니다.
+Comparison UI는 Slice 4이며 아직 미착수입니다.
 frozen Stage-3 V1 / Model C는 변경되지 않았습니다.
 Timeline Analytics 및 Extended 알고리즘 연구는 아직 승인되지 않았습니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,

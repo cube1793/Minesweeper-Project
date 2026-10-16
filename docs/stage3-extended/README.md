@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE — Slices 0 and 1 COMPLETE / ACCEPTED; Slice 2 ACTIVE (not complete), internal 2A COMPLETE / ACCEPTED; NEXT 2B** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE — Slices 0, 1 and 2 COMPLETE / ACCEPTED, including internal 2A/2B; NEXT Slice 3 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -160,7 +160,7 @@ Reported Slice 1 verification: **29 focused passed; 202 relevant regression
 passed; combined reported total: 231 passed**, zero failures/errors/skips.
 No full suite, package or native GUI run was performed for Slice 1.
 
-**Slice 2 — Isolated execution and metrics ACTIVE (not complete).**
+**Slice 2 — Isolated execution and metrics COMPLETE / ACCEPTED** by ChatGPT final review.
 **Slice 2A — Pure isolated execution and metrics COMPLETE / ACCEPTED** by ChatGPT
 final review. [`same_board_runner.py`](../../same_board_runner.py) runs unchanged
 Stage 2 (`accept_guesses=True`, `initial_open=(0,0)`, observer traces) and frozen
@@ -182,12 +182,30 @@ Reported Slice 2A verification: **31 new Slice 2A passed; 29 Slice 1 passed;
 274 relevant regression passed; combined reported verification: 334 passed**,
 zero failures/errors/skips. No full suite, package or native GUI run for Slice 2A.
 
-**NEXT — Slice 2B: worker/process integration.** Not begun; its design and
-implementation are not complete. It is expected to make accepted synchronous 2A
-execution usable without blocking the GUI while preserving parent-owned process
-lifecycle, cancellation, reaping, temporary-file cleanup and failure transport.
+**Slice 2B — Worker/process integration COMPLETE / ACCEPTED** by ChatGPT final review.
+The dedicated PyQt-independent worker receives only a request token and fixed
+ReplayBoard; Human Replay/Mouse Trace remain parent-owned. It executes the accepted
+solver path once, without regeneration/retry or fabricated LOSS on failure.
+`SameBoardExecutionJob` owns one child/private directory, cancellation/escalation,
+reaping and cleanup; success attaches evidence to the exact original Human context.
+Source/frozen dispatch is separate, with `--same-board-execution-worker` before Qt.
+Parent validation rechecks comparison/outcome-bearing facts without recursively
+walking nested decision evidence; native evidence remains retained unchanged.
+See the [current handoff](../CURRENT_HANDOFF.md#4-current-milestone) for the accepted
+lifecycle/validation boundary, corrected audit finding and qualified responsiveness
+measurements (not zero GUI-thread blocking or frozen algorithm-performance evidence).
+
+Reported final Slice 2B verification: **84 Slice 2B passed; 31 Slice 2A passed;
+29 Slice 1 passed; 374 relevant regressions passed; combined reported verification:
+518 passed**, zero failures/errors/skips. No full suite, fresh package or native
+GUI acceptance was run for Slice 2B.
+
 Slices 2A/2B remain internal parts of official Slice 2, not new roadmap milestones.
-Comparison UI and Slice 3 playback coordination are not yet authorized.
+**NEXT — Slice 3: Pure playback coordination.** Not begun: deterministic Human /
+Stage-2 / Stage-3 reconstruction and independent remembered action indices;
+switching restores the selected run's own index. No lockstep/common timeline,
+normalized progress or universal playback abstraction. No UI yet; Comparison UI
+remains Slice 4 and has not begun.
 Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and Extended
 algorithm research remain deferred and unauthorized. This milestone does not
 establish a general Human-versus-solver speed winner.

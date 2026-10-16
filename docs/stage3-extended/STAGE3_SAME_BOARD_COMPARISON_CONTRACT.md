@@ -2,12 +2,11 @@
 
 Status: **Comparison milestone ACTIVE; Slice 0 contract and Slice 1 — Comparison
 domain and admission COMPLETE / ACCEPTED**, following ChatGPT final review.
-**Slice 2 — Isolated execution and metrics ACTIVE (not complete).** Its internal
-**Slice 2A — Pure isolated execution and metrics is COMPLETE / ACCEPTED**:
-Qt-independent fixed-layout solver execution, native results/traces and separately
-labeled metrics. **NEXT — Slice 2B: worker/process integration**; not begun.
-Its design and implementation are not complete. Comparison UI and Slice 3 playback
-coordination are not yet authorized. This contract governs the first Comparison
+**Slice 2 — Isolated execution and metrics COMPLETE / ACCEPTED**, including internal
+**Slice 2A — Pure isolated execution and metrics** and **Slice 2B — Worker/process
+integration**, both **COMPLETE / ACCEPTED** by ChatGPT final review.
+**NEXT — Slice 3: Pure playback coordination**; not begun. Comparison UI remains
+Slice 4 and has not begun. This contract governs the first Comparison
 milestone within ACTIVE Stage-3 Extended; Stage-3 V1 and Model C remain frozen.
 
 ## 1. Purpose and scope
@@ -18,9 +17,9 @@ existing semantics and report factual outcomes, actions and separately labeled
 timing. This milestone does not establish a general Human-versus-solver speed
 winner or automatically constitute a controlled speed experiment.
 
-Slice 0 established the contract. Slice 1 covers domain/admission; accepted Slice
-2A covers pure isolated execution and metrics. Remaining milestone requirements
-below do not imply later implementation or completion of Slice 2.
+Slice 0 established the contract. Accepted Slice 1 covers domain/admission;
+accepted Slice 2 covers isolated execution/metrics and worker/process integration.
+Remaining milestone requirements below do not imply implementation of Slice 3 or UI.
 
 ## 2. Authoritative meaning of "same board"
 
@@ -252,23 +251,26 @@ must provide the relevant evidence before milestone acceptance.
 1. **COMPLETE / ACCEPTED — Comparison domain and admission:** immutable layout/run context, canonical
    identity validation, full-stream reconstruction and opening qualification;
    pure tests, without fabricated benchmark metadata.
-2. **ACTIVE / NOT COMPLETE — Isolated execution and metrics:** fixed-layout Stage-2/Stage-3 orchestration,
+2. **COMPLETE / ACCEPTED — Isolated execution and metrics:** fixed-layout Stage-2/Stage-3 orchestration,
    unchanged runners/Model C, separated timing and result validation; worker
    ownership, cancellation/cleanup and fixed-board tests.
    Internal **2A — Pure isolated execution and metrics: COMPLETE / ACCEPTED**.
-   **NEXT — 2B: worker/process integration**, not begun; design/implementation
-   are not complete. Expected to make synchronous 2A usable without blocking the
-   GUI, preserving parent-owned lifecycle, cancellation, reaping, temporary-file
-   cleanup and failure transport. These internal parts are not new roadmap milestones.
-3. **Pure playback coordination:** retain existing distinct stream models,
-   deterministic reconstruction and independent remembered indices; focused
-   reconstruction/isolation tests, without a universal playback abstraction.
-4. **Read-only comparison UI:** single renderer, selector, summary and selected
+   Internal **2B — Worker/process integration: COMPLETE / ACCEPTED**: board-only
+   solver transport, parent-owned lifecycle and retained Human context. Parent
+   validation rechecks comparison/outcome-bearing facts without deep-walking the
+   complete trusted-local decision-evidence graph; native evidence is retained.
+   These internal parts are not new roadmap milestones.
+3. **NEXT / NOT BEGUN — Pure playback coordination:** retain existing distinct
+   stream models; deterministic Human / Stage-2 / Stage-3 reconstruction and
+   independent remembered action indices. Switching restores that run's own index.
+   No lockstep/common timeline, normalized progress or universal playback abstraction;
+   no UI yet. Add focused reconstruction/isolation tests within this boundary.
+4. **NOT BEGUN — Read-only comparison UI:** single renderer, selector, summary and selected
    controls; Human-only optional Mouse Trace overlay; UI/lifecycle tests.
 5. **Acceptance and closeout:** full regression, native/manual validation,
    compatibility and frozen-evidence checks, then milestone documentation.
 
-Slices 0, 1 and internal 2A are accepted; official Slice 2 remains active.
-Slice 2A acceptance does not complete Slice 2 or authorize comparison UI or Slice 3
-playback coordination. Timeline Analytics and Extended algorithm research remain
-deferred and unauthorized.
+Slices 0, 1 and 2 are COMPLETE / ACCEPTED, including internal Slices 2A/2B.
+The Comparison milestone remains ACTIVE. Slice 3 is next and has not begun;
+Comparison UI remains Slice 4, not begun. Timeline Analytics and Extended
+algorithm research remain deferred and unauthorized.

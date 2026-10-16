@@ -67,12 +67,16 @@ option above bundles the existing `calibration/stage3_physical_profile_v1.json`
 at the same relative path. Preserve its exact bytes and frozen SHA-256 contract;
 do not regenerate or edit the profile for packaging.
 
-`main.py` dispatches both `--zini-metric-worker` and `--stage3-execution-worker`
-before Qt setup and GUI imports. Source entry points are
-`python zini_metric_worker.py <payload.pkl> <result.pkl>` and
-`python stage3_execution_worker.py <payload.pkl> <result.pkl>`; the bundle uses
-`Minesweeper.exe --zini-metric-worker <payload.pkl> <result.pkl>` and
-`Minesweeper.exe --stage3-execution-worker <payload.pkl> <result.pkl>`. The existing
+`main.py` dispatches `--zini-metric-worker`, `--stage3-execution-worker` and
+`--same-board-execution-worker` independently before Qt setup and GUI imports.
+Source entry points are `python zini_metric_worker.py <payload.pkl> <result.pkl>`,
+`python stage3_execution_worker.py <payload.pkl> <result.pkl>` and
+`python same_board_execution_worker.py <payload.pkl> <result.pkl>`; the bundle uses
+`Minesweeper.exe --zini-metric-worker <payload.pkl> <result.pkl>`,
+`Minesweeper.exe --stage3-execution-worker <payload.pkl> <result.pkl>` and
+`Minesweeper.exe --same-board-execution-worker <payload.pkl> <result.pkl>`.
+Same-board dispatch is implemented; Slice 2B included no fresh package or native
+GUI acceptance. The existing
 ZiNi polling and cancellation protocol is unchanged. `Stage3ExecutionJob` now
 owns Stage-3 process/token/polling/cancel/reap and the whole private job directory.
 The launcher owns this job and the read-only viewer; the main UI owns the launcher.
