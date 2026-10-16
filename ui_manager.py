@@ -68,6 +68,7 @@ from simple_algorithm import InconsistentObservationError
 from simple_decision import DecisionKind, analyze_position
 from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
+from replay_model import SOURCE_HUMAN
 from replay_analysis import ReplayStepAnalysis, analyze_replay_step
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
@@ -364,6 +365,7 @@ class MinesweeperUI(QWidget):
         self.engine = engine
         self._benchmark_statistics_window = None
         self._stage3_visualizer_launcher = None
+        self._same_board_comparison_launcher = None
         self._game_over = False
         self._buttons = {}
         self._mouse_buttons = Qt.NoButton
@@ -441,9 +443,14 @@ class MinesweeperUI(QWidget):
         # 시작 시 PLAYING 상태 → 3BV/Ops는 마스킹("-/-"), 클릭류는 "0"
         self._update_statistics_panel(self.engine.get_stats())
         self.installEventFilter(self)
+        self._update_same_board_comparison_action()
 
     def closeEvent(self, event):
         """Close auxiliary windows and their workers before accepting shutdown."""
+        if self._same_board_comparison_launcher is not None:
+            if not self._same_board_comparison_launcher.close():
+                event.ignore()
+                return
         if self._stage3_visualizer_launcher is not None:
             if not self._stage3_visualizer_launcher.close():
                 event.ignore()
@@ -495,6 +502,73 @@ class MinesweeperUI(QWidget):
     def _on_stage3_visualizer_closed(self):
         if self.sender() is self._stage3_visualizer_launcher:
             self._stage3_visualizer_launcher = None
+
+    def _update_same_board_comparison_action(self):
+        """Source eligibility only; admission gives precise comparison rejections."""
+        action = self.same_board_comparison_action
+        if self._same_board_comparison_launcher is not None:
+            action.setText("Open Comparison…")
+            enabled = True
+            explanation = "Open the Comparison launcher for its captured Human recording."
+        else:
+            action.setText("Compare as full-game Human Replay…")
+            explanation = "Finish the current game or load a full-game Human Replay."
+            if self._replay_mode:
+                replay = self._replay_data
+                if replay is None and self._replay_player is not None:
+                    replay = self._replay_player.replay_data
+                enabled = replay is not None and replay.source_type == SOURCE_HUMAN
+                if replay is not None and not enabled:
+                    explanation = "Same-board Comparison requires a Human-labeled Replay."
+            else:
+                enabled = (
+                    self.engine.status in (GameStatus.WON, GameStatus.LOST)
+                    and self.engine.get_board_snapshot().mines_placed
+                )
+            if enabled:
+                explanation = "Submit the entire recording as a full-game Human Replay for comparison."
+        action.setEnabled(enabled)
+        action.setToolTip(explanation)
+        action.setStatusTip(explanation)
+
+    def on_same_board_comparison(self):
+        """Explicit declaration captures one full Replay; never follows later source changes."""
+        try:
+            if self._same_board_comparison_launcher is None:
+                from same_board_comparison import HumanComparisonContext
+                from same_board_comparison_launcher import SameBoardComparisonLauncherWindow
+
+                source_description = (
+                    "currently loaded Replay" if self._replay_mode else "completed current game"
+                )
+                replay = self._build_current_replay_data(
+                    "Same-board Comparison", require_finished=True, allow_replay_mode=True,
+                )
+                if replay is None:
+                    return
+                # Activation of this deliberately named command is caller intent,
+                # not provenance proof. Admission still requires Human metadata.
+                context = HumanComparisonContext(replay, declared_full_game_human=True)
+                launcher = SameBoardComparisonLauncherWindow(
+                    context, self, source_description=source_description,
+                )
+                launcher.closed.connect(self._on_same_board_comparison_closed)
+                self._same_board_comparison_launcher = launcher
+                self._update_same_board_comparison_action()
+            self._same_board_comparison_launcher.show()
+            self._same_board_comparison_launcher.raise_()
+            self._same_board_comparison_launcher.activateWindow()
+        except Exception as exc:
+            # Comparison eligibility does not change ordinary Replay validity.
+            QMessageBox.information(
+                self, "Same-board Comparison",
+                f"Cannot use this Replay for Same-board Comparison\n{exc}",
+            )
+
+    def _on_same_board_comparison_closed(self):
+        if self.sender() is self._same_board_comparison_launcher:
+            self._same_board_comparison_launcher = None
+            self._update_same_board_comparison_action()
 
     def _engine_for_current_mode(self) -> MinesweeperEngine:
         """Return the current Replay engine without replacing the live engine."""
@@ -678,6 +752,8 @@ class MinesweeperUI(QWidget):
         self.benchmark_statistics_action.triggered.connect(self.on_benchmark_statistics)
         self.replay_directory_action = tools_menu.addAction("Replay 저장 폴더...")
         self.replay_directory_action.triggered.connect(self.on_replay_directory)
+        self.same_board_comparison_action = tools_menu.addAction("Compare as full-game Human Replay…")
+        self.same_board_comparison_action.triggered.connect(self.on_same_board_comparison)
         self.tools_button.setMenu(tools_menu)
         settings_bar.addWidget(self.tools_button)
         main_layout.addLayout(settings_bar)
@@ -1933,6 +2009,8 @@ class MinesweeperUI(QWidget):
         self._apply_initial_window_size()
         self._refresh_replay_view_after_move()
 
+        self._update_same_board_comparison_action()
+
     def _exit_replay_mode(self):
         """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
         self._invalidate_mouse_input()
@@ -1958,6 +2036,8 @@ class MinesweeperUI(QWidget):
         self._apply_initial_window_size()
         self._refresh_live_board()
         self._update_statistics_panel(self.engine.get_stats())
+
+        self._update_same_board_comparison_action()
 
     def _update_replay_status_label(self):
         """현재 리플레이 index/time을 표시한다."""
@@ -2200,6 +2280,7 @@ class MinesweeperUI(QWidget):
         self._refresh_live_board()
         # 새 판 시작 → PLAYING 상태의 마스킹/초기 값으로 통계 패널 초기화
         self._update_statistics_panel(self.engine.get_stats())
+        self._update_same_board_comparison_action()
 
     # ------------------------------------------------------------------
     # 클릭 핸들러
@@ -2564,6 +2645,7 @@ class MinesweeperUI(QWidget):
         self._refresh_live_board()
         # 리셋 직후에는 PLAYING 상태이므로 마스킹/초기 값이 표시된다.
         self._update_statistics_panel(self.engine.get_stats())
+        self._update_same_board_comparison_action()
 
     def _apply_stats_from_info(self, info: dict):
         """
@@ -2933,3 +3015,5 @@ class MinesweeperUI(QWidget):
             self._stop_timer()
             self.reset_button.setText("😎")
             self.render_board()
+        if status in (GameStatus.WON, GameStatus.LOST):
+            self._update_same_board_comparison_action()

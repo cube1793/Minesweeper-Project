@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Recover the current project state safely when a chat is restarted or reaches its maximum length.  
-> Updated: 2026-10-16 (Asia/Seoul)
+> Updated: 2026-10-17 (Asia/Seoul)
 
 ---
 
@@ -285,7 +285,71 @@ Reported Slice 3 verification: **29 Slice 3 focused passed; 84 Slice 2B passed;
 fingerprint regressions passed; combined reported verification: 312 passed**,
 zero failures/errors/skips. No full suite, package or native GUI run for Slice 3.
 
-**NEXT — Slice 4: Read-only comparison UI.** Slice 4 has not begun (section 6).
+**Slice 4 — Read-only comparison UI COMPLETE / ACCEPTED** by ChatGPT final
+adjudication, without production correction. Internal **4A — Read-only Comparison
+Result Viewer** and **4B — Launcher + Main UI Integration / Lifecycle** are both
+**COMPLETE / ACCEPTED**; they are subdivisions of official Slice 4, not new milestones.
+
+The presentation-only [`same_board_comparison_ui.py`](../same_board_comparison_ui.py)
+consumes one completed `SameBoardExecution` and owns one `SameBoardPlayback`, with
+no worker/job/process/timer. One read-only board renderer uses only the selected
+run's public observation. Human / Stage 2 / Stage 3 selection preserves independent
+remembered indices; First / Previous / Next / Last and the selected-run action-index
+slider are manual controls, with no autoplay or time coordination. The compact
+three-run summary keeps current reconstructed status separate from final outcome;
+first-open/layout qualification is factual, not controlled-experiment proof.
+The optional full Human Mouse Trace uses the original immutable attachment, is
+Human-only and independent of action index. The Stage-3 Visualizer stays separate.
+
+Displayed authorities remain explicit: Human Replay elapsed seconds; Stage-2
+Model C cost through termination µs; Stage-3 Model C cost through termination µs;
+Stage-2 decision compute ns; Stage-3 decision compute ns. No Human Model C time
+or generic time/speed winner, ranking or ratio is introduced.
+
+[`same_board_comparison_launcher.py`](../same_board_comparison_launcher.py) and the
+narrow `ui_manager.py` integration support both completed current Live games and
+currently retained Replays through the existing recorder/Replay source path; no
+Comparison-specific loader was added. Replay mode takes precedence and supplies
+the entire original `ReplayData`, regardless of displayed index. Explicit Tools
+action **Compare as full-game Human Replay…** declares
+`declared_full_game_human=True`; `source_type == SOURCE_HUMAN` (`"human"`) remains mandatory. Neither
+metadata, declaration nor reconstruction proves exclusively-Human historical input.
+
+One launcher retains exactly one admitted `HumanComparisonContext` for its
+lifetime. Replay seeks/replacement/exit, reset/new game, difficulty changes and
+later Live actions do not retarget it. While it exists, **Open Comparison…** only
+raises that owner. The launcher owns one unchanged `SameBoardExecutionJob`, active
+token/cancellation intent, one retained completed execution and at most one viewer.
+Run requires no active token AND an idle job. Normal Run/Cancel do not wait.
+Legitimate solver WON/LOST are successful execution results, not failures. Closing
+the viewer retains the completed result; reopening does not rerun solvers.
+
+Launcher close irreversibly begins shutdown and disables execution, then calls
+the accepted bounded `job.shutdown()`. Reap/cleanup failure rejects close and
+retains ownership for retry. Only successful job shutdown permits viewer closure;
+any rejected close leaves the launcher non-runnable, with safe close retry.
+Main close order is Comparison launcher, Stage-3 Visualizer launcher, then existing
+remaining teardown. Comparison close failure prevents all later teardown.
+
+Independent Claude Code **read-only** audit reported **BLOCKER 0 / REQUIRED 0 /
+OPTIONAL 4**, with a **PASS / accept Slice 4 as implemented** recommendation;
+Claude did not execute/rerun tests. ChatGPT independently reviewed source/tests
+and accepted without production correction. Optional dispositions: **O-1 DEFER /
+evidence-triggered**, theoretical matching success after cancellation intent (the
+real job terminal contract does not produce that path); **O-2 DEFER to Slice 5**,
+launcher coverage using real-job success/cancel; **O-3 optional Slice 5 coverage**,
+minor adjacent gaps where useful; **O-4 optional/deferred**, captured-source wording
+polish. None is a production acceptance blocker.
+
+Reported Slice 4 verification: **55 new 4B passed (31 launcher / 24 main UI);
+32 4A viewer; 29 Slice 3; 84 Slice 2B; 31 Slice 2A; 29 Slice 1; 370 relevant existing
+regressions; combined reported verification: 630 passed**, zero failures/errors/skips.
+No full suite, fresh package or native GUI acceptance has been completed for
+Slice 4; those remain Slice 5 evidence, not independent-audit test results.
+
+**NEXT — Slice 5: Acceptance and closeout.** Not begun (section 6). Stage-3 Extended
+and the Comparison milestone remain ACTIVE pending Slice 5 closeout; the milestone
+is not closed.
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
   [historical acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
@@ -362,14 +426,21 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-**NEXT — Slice 4: Read-only comparison UI.** Slices 0–3, including internal
-Slices 2A/2B, are COMPLETE / ACCEPTED. Slice 4 has not begun. Its existing accepted
-boundary is a separate read-only comparison window with one board renderer,
-Human / Stage 2 / Stage 3 selector, compact three-run summary and selected-run
-playback controls. Each run retains its own remembered index. Display first-open
-qualification and explicitly labeled separate metrics; the optional Human Mouse
-Trace overlay is Human-only. Execution/cancellation/failure states must be explicit.
-The existing Stage-3 Visualizer remains separate. No Timeline Analytics.
+**NEXT — Slice 5: Acceptance and closeout.** Slices 0–4, including internal
+2A/2B and 4A/4B, are COMPLETE / ACCEPTED. Slice 5 has not begun. The existing
+[milestone acceptance contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md#13-milestone-level-acceptance-contract)
+remains authoritative. As applicable, remaining acceptance includes:
+
+- full source regression and focused/relevant frozen-boundary regression;
+- fresh Windows package/build and packaged Same-board worker verification;
+- native/manual Comparison UI acceptance, including real Run / Cancel / result
+  reopen / launcher-close / main-close ownership;
+- existing Replay, Human Mouse Trace and Stage-3 Visualizer compatibility;
+- preservation of frozen Stage-3 V1 / Model C and historical evidence;
+- final documentation/housekeeping; feature → main merge/push only after final acceptance.
+
+The Comparison milestone remains ACTIVE until that closeout. No Slice 5 work
+is claimed by this documentation sync.
 Use live Git/source/tests to determine whether later work has already begun.
 Do not treat this roadmap as implementation approval or claim later milestones exist.
 No later Timeline Analytics or Extended algorithm research is authorized yet.
@@ -377,7 +448,7 @@ No later Timeline Analytics or Extended algorithm research is authorized yet.
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
 Human Mouse Trace is accepted actual sampled Live-board pointer presentation data,
 not Stage-3 synthetic movement, Model C calibration evidence or solver input.
-The next comparison must retain these separate models and time authorities.
+Comparison acceptance must retain these separate models and time authorities.
 
 Keep presentation separate from planner inputs, physical identity and recorded
 costs. Retain Step 0/current PLAYING with known final WON, exact action-boundary
@@ -404,9 +475,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
-5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0, 1, 2 and 3
-   COMPLETE / ACCEPTED, including internal Slices 2A/2B. **NEXT:** Slice 4 — Read-only
-   comparison UI (not begun).
+5. **ACTIVE pending Slice 5 closeout:** Same-board Human / Stage-2 / Stage-3 Comparison —
+   Slices 0–4 COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
+   **NEXT:** Slice 5 — Acceptance and closeout (not begun).
 6. **LATER:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
@@ -566,10 +637,17 @@ Slice 3 — Pure playback coordination도 COMPLETE / ACCEPTED입니다.
 same_board_playback.py는 원본 stream과 독립 action index / 현재 status와 final outcome을 보존합니다.
 Slice 3 reported verification: focused 29 / 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 139 /
 combined 312 passed, zero failures/errors/skips; full suite/package/native GUI run은 없습니다.
-NEXT: Slice 4 — Read-only comparison UI (not begun; accepted boundary는 section 6).
-Slice 2A/2B는 기존 Slice 2 내부 구분이며 새 roadmap milestone이 아닙니다.
+Slice 4 — Read-only comparison UI 및 내부 4A/4B는 COMPLETE / ACCEPTED입니다.
+4A viewer와 4B captured-source launcher/main lifecycle의 수용 범위는 section 4를 보세요.
+Slice 4 reported verification: 4B 55 (launcher 31 / main UI 24), 4A 32, Slice 3 29,
+2B 84, 2A 31, Slice 1 29, relevant regressions 370 / combined 630 passed,
+zero failures/errors/skips; full suite/fresh package/native GUI acceptance는 아직 없습니다.
+Claude read-only audit: BLOCKER 0 / REQUIRED 0 / OPTIONAL 4 / PASS; 테스트 재실행은 하지 않았습니다.
+ChatGPT가 source/tests를 독립 검토하여 production correction 없이 수용했습니다.
+NEXT: Slice 5 — Acceptance and closeout (not begun; 남은 gate는 section 6).
+Comparison milestone은 Slice 5 closeout 전까지 ACTIVE이며 아직 CLOSED가 아닙니다.
+2A/2B와 4A/4B는 각각 Slice 2와 Slice 4 내부 구분이며 새 roadmap milestone이 아닙니다.
 Slice 3은 deterministic reconstruction과 각 run의 독립 remembered index만 다루며 UI는 포함하지 않습니다.
-Comparison UI는 Slice 4이며 아직 미착수입니다.
 frozen Stage-3 V1 / Model C는 변경되지 않았습니다.
 Timeline Analytics 및 Extended 알고리즘 연구는 아직 승인되지 않았습니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,

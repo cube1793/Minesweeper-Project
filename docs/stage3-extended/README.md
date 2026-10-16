@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE — Slices 0, 1, 2 and 3 COMPLETE / ACCEPTED, including internal 2A/2B; NEXT Slice 4 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE pending Slice 5 closeout — Slices 0–4 COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B; NEXT Slice 5 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -225,8 +225,52 @@ Reported Slice 3 verification: **29 focused; 84 Slice 2B; 31 Slice 2A; 29 Slice 
 reported verification: 312 passed**, zero failures/errors/skips. No full suite,
 package or native GUI run for Slice 3.
 
-**NEXT — Slice 4: Read-only comparison UI.** Not begun; its high-level boundary
-remains [contract section 11](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md#11-minimum-first-version-ui-boundary).
+**Slice 4 — Read-only comparison UI COMPLETE / ACCEPTED** by ChatGPT final
+adjudication, including internal **4A — Read-only Comparison Result Viewer** and
+**4B — Launcher + Main UI Integration / Lifecycle**, both **COMPLETE / ACCEPTED**.
+4A/4B are parts of official Slice 4, not new roadmap milestones.
+
+4A [`same_board_comparison_ui.py`](../../same_board_comparison_ui.py) consumes one
+completed execution, owns one `SameBoardPlayback` and no worker/job/process/timer.
+One public-observation-only board, three-run selector, independent remembered
+indices and manual First / Previous / Next / Last / selected-run slider preserve
+current status versus final outcome. Factual summary/first-open qualification
+does not imply controlled conditions. The optional full immutable Human Mouse
+Trace is Human-only and independent of index. No autoplay/time coordination.
+Metrics stay separate: Human Replay elapsed seconds; Stage-2 and Stage-3 Model C
+cost through termination µs; Stage-2 and Stage-3 decision compute ns. No generic
+time/speed winner, ranking or ratio; the Stage-3 Visualizer remains separate.
+
+4B [`same_board_comparison_launcher.py`](../../same_board_comparison_launcher.py)
+captures one admitted context from either a completed Live game or the entire
+retained original Replay, regardless of displayed index, using existing sources.
+**Compare as full-game Human Replay…** declares caller intent, not provenance;
+Human metadata remains mandatory. No new loader. Later main source changes cannot
+retarget the launcher; **Open Comparison…** only raises the existing owner.
+It owns one unchanged job and retained result/viewer; Run requires no active token
+and an idle job, and normal Run/Cancel do not wait. Solver LOSS is a valid result;
+viewer reopen does not rerun execution. Shutdown permanently disables execution,
+retains ownership on failure and supports close retry. Job shutdown precedes
+viewer close; main close orders Comparison before Stage-3 before remaining
+teardown, stopping on Comparison close failure.
+
+Independent Claude Code read-only audit: **BLOCKER 0 / REQUIRED 0 / OPTIONAL 4 /
+PASS**; Claude did not execute/rerun tests. ChatGPT independently reviewed
+source/tests and accepted without production correction. Optional O-1–O-4 remain
+deferred/evidence-triggered or optional Slice 5 work, not blockers; see the
+[handoff acceptance record](../CURRENT_HANDOFF.md#4-current-milestone) for dispositions.
+
+Reported Slice 4 verification: **55 new 4B (31 launcher / 24 main UI); 32 4A;
+29 Slice 3; 84 Slice 2B; 31 Slice 2A; 29 Slice 1; 370 relevant existing regressions;
+combined reported verification: 630 passed**, zero failures/errors/skips.
+No full suite, fresh package or native GUI acceptance for Slice 4 is claimed.
+
+**NEXT — Slice 5: Acceptance and closeout.** Not begun. Comparison remains ACTIVE,
+not closed. Remaining gates are full source/frozen-boundary regression, fresh
+Windows package and packaged worker verification, native/manual UI and real
+Run/Cancel/reopen/close ownership, compatibility/frozen-evidence preservation and
+final documentation/housekeeping. Feature → main merge/push follows final
+acceptance only; see [handoff next action](../CURRENT_HANDOFF.md#6-next-action).
 Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and Extended
 algorithm research remain deferred and unauthorized. This milestone does not
 establish a general Human-versus-solver speed winner.

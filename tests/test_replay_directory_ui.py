@@ -150,7 +150,7 @@ class ReplayDirectoryUITests(unittest.TestCase):
         new = self.directory("new")
         self.choose(old)
         self.assertEqual([a.text() for a in self.ui.tools_button.menu().actions()],
-                         ["벤치마크 통계", "Replay 저장 폴더..."])
+                         ["벤치마크 통계", "Replay 저장 폴더...", "Compare as full-game Human Replay…"])
         dialog = self.choose(new)
         dialog.assert_called_once_with(self.ui, "Replay 저장 폴더 선택", old)
         self.assertEqual(self.settings.value(KEY), new)

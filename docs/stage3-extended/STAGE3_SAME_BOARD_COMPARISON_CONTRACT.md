@@ -6,8 +6,12 @@ domain and admission COMPLETE / ACCEPTED**, following ChatGPT final review.
 **Slice 2A — Pure isolated execution and metrics** and **Slice 2B — Worker/process
 integration**, both **COMPLETE / ACCEPTED** by ChatGPT final review.
 **Slice 3 — Pure playback coordination COMPLETE / ACCEPTED** by ChatGPT final review.
-**NEXT — Slice 4: Read-only comparison UI**; not begun. This contract governs the first Comparison
-milestone within ACTIVE Stage-3 Extended; Stage-3 V1 and Model C remain frozen.
+**Slice 4 — Read-only comparison UI COMPLETE / ACCEPTED**, including internal
+**4A — Read-only Comparison Result Viewer** and **4B — Launcher + Main UI
+Integration / Lifecycle**, both **COMPLETE / ACCEPTED** by ChatGPT final adjudication.
+**NEXT — Slice 5: Acceptance and closeout**; not begun. The Comparison milestone
+remains ACTIVE pending closeout within ACTIVE Stage-3 Extended; Stage-3 V1 and
+Model C remain frozen. Internal 2A/2B and 4A/4B are not new roadmap milestones.
 
 ## 1. Purpose and scope
 
@@ -19,8 +23,10 @@ winner or automatically constitute a controlled speed experiment.
 
 Slice 0 established the contract. Accepted Slice 1 covers domain/admission;
 accepted Slice 2 covers isolated execution/metrics and worker/process integration.
-Accepted Slice 3 covers pure playback coordination. Remaining milestone requirements
-below do not imply implementation of Slice 4 UI.
+Accepted Slice 3 covers pure playback coordination; accepted Slice 4 covers the
+read-only result viewer and captured-source launcher/main-UI lifecycle. Slice 5
+acceptance/closeout remains outstanding; implementation acceptance alone does not
+close the milestone.
 
 ## 2. Authoritative meaning of "same board"
 
@@ -197,6 +203,30 @@ Comparison failures and execution/cancellation state must be explicit rather
 than presented as fabricated game outcomes. The existing Stage-3 Visualizer
 remains valid and independent.
 
+The accepted Slice 4 viewer consumes one completed `SameBoardExecution` and owns
+one `SameBoardPlayback`, with no worker/job/process/timer. Rendering uses only the
+selected run's public observation. First / Previous / Next / Last and the slider
+navigate only that run's independent action index; no autoplay/time coordination.
+The optional full Human Mouse Trace remains the original attachment, displayed
+only for Human and independent of action index. Current reconstructed status and
+final outcome remain separate, including legitimate first-action solver LOSS.
+
+The launcher captures one admitted context from the existing completed Live-game
+Replay path or entire retained original Replay (Replay mode takes precedence;
+displayed index is irrelevant). No Comparison-specific loader is introduced.
+The explicit **Compare as full-game Human Replay…** action supplies caller intent
+for `declared_full_game_human=True`, never provenance proof; Human source metadata
+is still mandatory. Later main source changes cannot retarget the launcher.
+**Open Comparison…** raises that owner without recapture.
+
+Only the launcher owns the unchanged job, active token/cancellation intent and
+retained result/viewer. Run requires no active token and idle job state; normal
+Run/Cancel do not wait. Viewer close preserves the result for reopen without a
+solver rerun. Final shutdown is irreversible and uses bounded job shutdown before
+viewer close; rejected close retains ownership for retry and never re-enables
+execution. Main close orders Comparison, Stage-3 Visualizer, then remaining
+teardown; Comparison close failure prevents later teardown.
+
 ## 12. Non-goals and deferred work
 
 The following are outside Slice 0 and the first implementation unless later
@@ -243,6 +273,8 @@ the existing Stage-3 Visualizer. Leave benchmark/evidence artifacts untouched.
   failures/cancellation must not become wins/losses or leak workers/resources.
 - Full regression and native/manual acceptance of the completed integration,
   including existing Replay, Mouse Trace and Stage-3 Visualizer behavior.
+- Fresh Windows package/build and packaged Same-board worker verification,
+  including real Run/Cancel/result-reopen/launcher-close/main-close ownership.
 
 No arbitrary FPS or latency requirement is introduced. Implementation slices
 must provide the relevant evidence before milestone acceptance.
@@ -265,13 +297,19 @@ must provide the relevant evidence before milestone acceptance.
    stream models; deterministic Human / Stage-2 / Stage-3 reconstruction and
    independent remembered action indices. Switching restores that run's own index.
    No lockstep/common timeline, normalized progress or universal playback abstraction;
-   no UI yet. Focused reconstruction/isolation tests cover this boundary.
-4. **NEXT / NOT BEGUN — Read-only comparison UI:** single renderer, selector, summary and selected
-   controls; Human-only optional Mouse Trace overlay; UI/lifecycle tests.
-5. **Acceptance and closeout:** full regression, native/manual validation,
-   compatibility and frozen-evidence checks, then milestone documentation.
+   Slice 3 itself adds no UI. Focused reconstruction/isolation tests cover this boundary.
+4. **COMPLETE / ACCEPTED — Read-only comparison UI:** single renderer, selector,
+   summary and selected controls; Human-only optional Mouse Trace overlay;
+   captured-source launcher/main integration and UI/lifecycle tests. Internal
+   **4A — Read-only Comparison Result Viewer** and **4B — Launcher + Main UI
+   Integration / Lifecycle** are **COMPLETE / ACCEPTED**, not new milestones.
+5. **NEXT / NOT BEGUN — Acceptance and closeout:** full source and relevant
+   frozen-boundary regression, fresh Windows package/worker verification,
+   native/manual UI/lifecycle acceptance, compatibility and frozen-evidence
+   checks, then final documentation/housekeeping. Feature → main merge/push only
+   after final acceptance.
 
-Slices 0, 1, 2 and 3 are COMPLETE / ACCEPTED, including internal Slices 2A/2B.
-The Comparison milestone remains ACTIVE. Slice 4 — Read-only comparison UI is next
-and has not begun. Timeline Analytics and Extended
+Slices 0–4 are COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
+The Comparison milestone remains ACTIVE pending Slice 5 — Acceptance and closeout,
+which has not begun. Timeline Analytics and Extended
 algorithm research remain deferred and unauthorized.
