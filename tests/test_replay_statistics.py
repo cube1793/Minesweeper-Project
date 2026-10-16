@@ -471,10 +471,13 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         )
 
     def _ui_with_live_engine(self, live_engine):
+        def init_ui_stub(ui):
+            ui.same_board_comparison_action = Mock()
+
         with (
             patch.object(ui_manager, "QTimer", _TimerProbe),
             patch.object(ui_manager, "QSettings"),
-            patch.object(MinesweeperUI, "_init_ui"),
+            patch.object(MinesweeperUI, "_init_ui", init_ui_stub),
             patch.object(MinesweeperUI, "_init_shortcuts"),
             patch.object(MinesweeperUI, "render_board"),
             patch.object(MinesweeperUI, "_update_statistics_panel"),
