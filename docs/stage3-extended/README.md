@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **NEXT** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE — Slice 0 (contract documentation only)** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -137,12 +137,15 @@ For the last item, nearest exact-minimum-risk guess selection among equal-risk
 candidates using movement cost remains a candidate, not an adopted policy or
 authorization to modify V1. External screen-recording tools remain the default.
 
-## Next planned milestone — Same-board Human / Stage-2 / Stage-3 Comparison
+## Active milestone — Same-board Human / Stage-2 / Stage-3 Comparison
 
-**Not implemented.** Define the comparison contract and acceptance criteria as
-the next small milestone. Keep actual Human actions/trace, Stage-2/Stage-3
-executions, Replay elapsed time and modeled physical time distinct. This roadmap
-does not authorize a Model C refit or a new solver policy.
+**Slice 0 — contract documentation only; not implemented.** The active
+[comparison contract](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) defines exact
+same-layout execution, first-open qualification, admission, identity, metric
+separation and acceptance. It preserves each run's existing semantics, including
+legitimate solver first-action losses on fixed layouts. This milestone does not
+establish a general Human-versus-solver speed winner or authorize a Model C refit
+or a new solver policy.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe

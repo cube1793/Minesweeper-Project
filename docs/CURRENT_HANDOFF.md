@@ -151,9 +151,14 @@ Commit identities were read from live Git.
 
 ## 4. Current milestone
 
-**Stage-3 Extended remains ACTIVE. Next active small milestone:
-Same-board Human / Stage-2 / Stage-3 Comparison (not implemented).**
+**Stage-3 Extended remains ACTIVE. Active milestone:
+Same-board Human / Stage-2 / Stage-3 Comparison.**
 Stage-3 V1 / Model C remain CLOSED / FROZEN; ZiNi Improvement remains CLOSED.
+
+**Slice 0 — contract documentation COMPLETE / ACCEPTED.** The
+[comparison contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md)
+has passed ChatGPT review. Implementation has not begun; next is
+**Slice 1 — Comparison domain and admission** (section 6).
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
   [historical acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
@@ -230,10 +235,13 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-Define the scope and acceptance contract for
-**Same-board Human / Stage-2 / Stage-3 Comparison (not implemented)**.
+**NEXT — Slice 1: Comparison domain and admission.**
+Following the accepted Slice 0 contract, the next slice covers pure comparison
+domain/admission, layout identity, Human full-stream reconstruction/admission
+and opening qualification. Implementation has not begun.
 Use live Git/source/tests to determine whether later work has already begun.
 Do not treat this roadmap as implementation approval or claim later milestones exist.
+No later Timeline Analytics or Extended algorithm research is authorized yet.
 
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
 Human Mouse Trace is accepted actual sampled Live-board pointer presentation data,
@@ -257,7 +265,7 @@ release/tag/ZIP. Do not reopen ZiNi work or consume its unopened final quality h
 
 ## 7. Stage-3 Extended roadmap and boundaries
 
-Stage-3 Extended is the **active milestone**, separate from frozen V1.
+Stage-3 Extended remains **ACTIVE**, separate from frozen V1.
 
 Natural dependency roadmap — not a rigid chronological schedule:
 
@@ -265,7 +273,8 @@ Natural dependency roadmap — not a rigid chronological schedule:
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
-5. **NEXT:** Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slice 0 contract
+   complete/accepted; implementation not begun. **NEXT:** Slice 1 — Comparison domain and admission.
 6. **LATER:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
@@ -403,8 +412,14 @@ Version / Settings Identity Separation FINAL ACCEPTANCE PASS / CLOSED.
 Modeled-Time Playback / Synthetic Smooth Cursor Presentation FINAL ACCEPTANCE PASS / CLOSED.
 Human Mouse Trace / Path Visualization FINAL ACCEPTANCE PASS / CLOSED.
 Qualified implementation/package SHA: e32145fa5c114e1ce500ad2e837ef6000cc49cca.
-Stage-3 Extended 전체는 ACTIVE이며 다음 작은 마일스톤은
-Same-board Human / Stage-2 / Stage-3 Comparison (아직 미구현)입니다.
+Stage-3 Extended 전체는 ACTIVE이며 현재 활성 마일스톤은
+Same-board Human / Stage-2 / Stage-3 Comparison입니다.
+Slice 0 계약은 작성 완료 및 ChatGPT 검토 수용 상태이며 구현은 아직 시작하지 않았습니다.
+Contract: docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md.
+NEXT: Slice 1 — Comparison domain and admission.
+범위는 pure comparison domain/admission, layout identity,
+Human full-stream reconstruction/admission 및 opening qualification입니다.
+Timeline Analytics 및 Extended 알고리즘 연구는 아직 승인되지 않았습니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
 Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
 FLAG는 R press, OPEN은 L release, Mode-B CHORD는 현재 target의 첫 release입니다.
