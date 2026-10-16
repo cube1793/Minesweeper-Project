@@ -139,13 +139,11 @@ def validate_run_identity(
     return ModeledTimeRun(run_id, row["width"], row["height"], solver_stage)
 
 
-def _reconstruct(
-    *, game_index: int, result: str, total_actions: int,
-    game_first_click: tuple[int, int], rows: tuple[tuple[int, int, int, int, int], ...],
-    width: int, height: int, first_click: tuple[int, int], evaluation: ModelCEvaluation,
-) -> ModeledGameCost:
+def _evaluate_rows(
+    *, result: str, total_actions: int, rows: tuple[tuple[int, int, int, int, int], ...],
+    width: int, height: int, evaluation: ModelCEvaluation,
+) -> tuple[int, tuple[tuple[int, int, int], ...]]:
     _require_evaluation(evaluation)
-    _integer("game_index", game_index)
     _integer("width", width, 1)
     _integer("height", height, 1)
     if width > 30 or height > 16:
@@ -155,13 +153,6 @@ def _reconstruct(
     _integer("total_actions", total_actions, 1)
     if len(rows) != total_actions:
         raise ModeledTimeValidationError("Complete action row count must equal total_actions.")
-    for label, coordinate in (("run first click", first_click), ("game first click", game_first_click)):
-        if not isinstance(coordinate, (tuple, list)) or len(coordinate) != 2:
-            raise ModeledTimeValidationError(f"Invalid {label} coordinate.")
-        for value in coordinate:
-            _integer(label, value)
-        if tuple(coordinate) != (0, 0):
-            raise ModeledTimeValidationError(f"Canonical {label} must be (0, 0).")
     expected_terminal = schema.STATUS_AFTER_WON if result == "WIN" else schema.STATUS_AFTER_LOST
     cursor = evaluation.initial_cursor
     total = 0
@@ -188,7 +179,75 @@ def _reconstruct(
         total += evaluation.table[abs(x - cursor[0])][abs(y - cursor[1])]
         cursor = (x, y)
         actions.append((action, x, y))
-    return ModeledGameCost(game_index, result, total, tuple(actions))
+    return total, tuple(actions)
+
+
+def _reconstruct(
+    *, game_index: int, result: str, total_actions: int,
+    game_first_click: tuple[int, int], rows: tuple[tuple[int, int, int, int, int], ...],
+    width: int, height: int, first_click: tuple[int, int], evaluation: ModelCEvaluation,
+) -> ModeledGameCost:
+    _require_evaluation(evaluation)
+    _integer("game_index", game_index)
+    for label, coordinate in (("run first click", first_click), ("game first click", game_first_click)):
+        if not isinstance(coordinate, (tuple, list)) or len(coordinate) != 2:
+            raise ModeledTimeValidationError(f"Invalid {label} coordinate.")
+        for value in coordinate:
+            _integer(label, value)
+        if tuple(coordinate) != (0, 0):
+            raise ModeledTimeValidationError(f"Canonical {label} must be (0, 0).")
+    total, actions = _evaluate_rows(
+        result=result, total_actions=total_actions, rows=rows,
+        width=width, height=height, evaluation=evaluation,
+    )
+    return ModeledGameCost(game_index, result, total, actions)
+
+
+def _public_action_rows(actions) -> tuple[tuple[int, int, int, int, int], ...]:
+    from core_engine import Action, GameStatus
+
+    action_map = {"OPEN": schema.ACTION_OPEN, "FLAG": schema.ACTION_FLAG, "CHORD": schema.ACTION_CHORD}
+    status_map = {"PLAYING": schema.STATUS_AFTER_PLAYING, "WON": schema.STATUS_AFTER_WON, "LOST": schema.STATUS_AFTER_LOST}
+    try:
+        iterator = iter(actions)
+    except TypeError as exc:
+        raise ModeledTimeValidationError("Ordered actions must be iterable.") from exc
+    rows = []
+    for row in iterator:
+        if not isinstance(row, (tuple, list)) or len(row) != 5:
+            raise ModeledTimeValidationError("Each ordered action needs index, Action, x, y, GameStatus.")
+        index, action, x, y, status = row
+        if not isinstance(action, Action) or not isinstance(status, GameStatus):
+            raise ModeledTimeValidationError("In-memory action/status must be public Action/GameStatus enums.")
+        rows.append((index, action_map[action.name], x, y, status_map[status.name]))
+    return tuple(rows)
+
+
+def evaluate_ordered_actions(
+    actions, *, total_actions: int, terminal_status, width: int, height: int,
+    evaluation: ModelCEvaluation,
+) -> int:
+    """Return exact Model C microseconds for a complete ordered input stream.
+
+    Supply an iterable of (zero-based index, Action, x, y, GameStatus after input)
+    tuples projected from existing execution evidence, plus its authoritative
+    count and terminal status. No telemetry record, database or benchmark identity
+    is required. This performs structural validation, not Engine reconstruction.
+    The authenticated evaluation fixes cursor (0,0); canonical first OPEN(0,0)
+    and every actual input through termination, including a losing input, count.
+    No projected action stream is retained or returned as a new authority.
+    """
+    from core_engine import GameStatus
+
+    _require_evaluation(evaluation)
+    if not isinstance(terminal_status, GameStatus) or terminal_status not in (GameStatus.WON, GameStatus.LOST):
+        raise ModeledTimeValidationError("A terminal WON or LOST GameStatus is required.")
+    total, _ = _evaluate_rows(
+        result="WIN" if terminal_status == GameStatus.WON else "LOSS",
+        total_actions=total_actions, rows=_public_action_rows(actions),
+        width=width, height=height, evaluation=evaluation,
+    )
+    return total
 
 
 def reconstruct_game(
@@ -200,23 +259,13 @@ def reconstruct_game(
     Neither trace-provided costs nor automatic Engine effects are inputs.
     Board dimensions may be smaller for deterministic development fixtures.
     """
-    # Public enum types only, loaded at the in-memory boundary. Persisted
-    # reconstruction neither imports Engine here nor executes/replays actions.
-    from core_engine import Action, GameStatus
-
-    action_map = {"OPEN": schema.ACTION_OPEN, "FLAG": schema.ACTION_FLAG, "CHORD": schema.ACTION_CHORD}
-    status_map = {"PLAYING": schema.STATUS_AFTER_PLAYING, "WON": schema.STATUS_AFTER_WON, "LOST": schema.STATUS_AFTER_LOST}
-    rows = []
-    for event in events:
-        if not isinstance(event.action_type, Action) or not isinstance(event.status_after, GameStatus):
-            raise ModeledTimeValidationError("In-memory action/status must be public Action/GameStatus enums.")
-        rows.append((
-            event.action_index, action_map[event.action_type.name], event.x, event.y,
-            status_map[event.status_after.name],
-        ))
+    rows = _public_action_rows(
+        (event.action_index, event.action_type, event.x, event.y, event.status_after)
+        for event in events
+    )
     return _reconstruct(
         game_index=record.game_index, result=record.result, total_actions=record.total_actions,
-        game_first_click=(record.first_click_x, record.first_click_y), rows=tuple(rows),
+        game_first_click=(record.first_click_x, record.first_click_y), rows=rows,
         width=width, height=height, first_click=first_click, evaluation=evaluation,
     )
 

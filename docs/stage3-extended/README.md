@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE — Slices 0 and 1 COMPLETE / ACCEPTED; NEXT Slice 2** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE — Slices 0 and 1 COMPLETE / ACCEPTED; Slice 2 ACTIVE (not complete), internal 2A COMPLETE / ACCEPTED; NEXT 2B** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -160,11 +160,37 @@ Reported Slice 1 verification: **29 focused passed; 202 relevant regression
 passed; combined reported total: 231 passed**, zero failures/errors/skips.
 No full suite, package or native GUI run was performed for Slice 1.
 
-**NEXT — Slice 2: Isolated execution and metrics.** Not started: Stage-2/Stage-3
-comparison execution, comparison worker/UI integration and Model-C comparison
-work. Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and
-Extended algorithm research remain deferred and unauthorized. This milestone
-does not establish a general Human-versus-solver speed winner.
+**Slice 2 — Isolated execution and metrics ACTIVE (not complete).**
+**Slice 2A — Pure isolated execution and metrics COMPLETE / ACCEPTED** by ChatGPT
+final review. [`same_board_runner.py`](../../same_board_runner.py) runs unchanged
+Stage 2 (`accept_guesses=True`, `initial_open=(0,0)`, observer traces) and frozen
+Stage 3 on separate fresh fixed-layout engines using the exact admitted Human
+layout and authenticated Model C. Mined-origin immediate losses remain legitimate;
+no regeneration or retry. Native result/Replay/trace authorities remain separate;
+the Qt-independent immutable execution result/metric layer retains no live Engine
+or fabricated benchmark identity.
+
+Accepted `benchmark_modeled_time.evaluate_ordered_actions()` reuses existing
+authenticated validation/cost logic for complete canonical ordered inputs,
+including initial and terminal/losing costs, without DB, GameRecord or fabricated
+telemetry/benchmark identity. Existing evaluator callers are preserved.
+Human Replay elapsed seconds, each solver's Model C microseconds and each solver's
+decision-compute nanoseconds remain separate. No Human Model C time, generic speed
+field, winner, ratio or Timeline Analytics is added.
+
+Reported Slice 2A verification: **31 new Slice 2A passed; 29 Slice 1 passed;
+274 relevant regression passed; combined reported verification: 334 passed**,
+zero failures/errors/skips. No full suite, package or native GUI run for Slice 2A.
+
+**NEXT — Slice 2B: worker/process integration.** Not begun; its design and
+implementation are not complete. It is expected to make accepted synchronous 2A
+execution usable without blocking the GUI while preserving parent-owned process
+lifecycle, cancellation, reaping, temporary-file cleanup and failure transport.
+Slices 2A/2B remain internal parts of official Slice 2, not new roadmap milestones.
+Comparison UI and Slice 3 playback coordination are not yet authorized.
+Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and Extended
+algorithm research remain deferred and unauthorized. This milestone does not
+establish a general Human-versus-solver speed winner.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe
