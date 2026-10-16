@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE — Slice 0 (contract documentation only)** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE — Slices 0 and 1 COMPLETE / ACCEPTED; NEXT Slice 2** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -139,13 +139,32 @@ authorization to modify V1. External screen-recording tools remain the default.
 
 ## Active milestone — Same-board Human / Stage-2 / Stage-3 Comparison
 
-**Slice 0 — contract documentation only; not implemented.** The active
-[comparison contract](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) defines exact
+**Slice 0 — contract documentation COMPLETE / ACCEPTED.** The active
+[comparison contract](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) governs exact
 same-layout execution, first-open qualification, admission, identity, metric
-separation and acceptance. It preserves each run's existing semantics, including
-legitimate solver first-action losses on fixed layouts. This milestone does not
-establish a general Human-versus-solver speed winner or authorize a Model C refit
-or a new solver policy.
+separation and acceptance.
+
+**Slice 1 — Comparison domain and admission COMPLETE / ACCEPTED** by ChatGPT
+final review. The pure Qt-independent
+[`same_board_comparison.py`](../../same_board_comparison.py) and its
+[focused tests](../../tests/test_same_board_comparison.py) preserve the original
+Human Replay and separate Mouse Trace attachment. Admission requires both
+`source_type == SOURCE_HUMAN` and explicit `declared_full_game_human=True`;
+neither metadata, declaration nor successful reconstruction proves exclusively
+Human historical provenance. Identity uses exact layout equality and the existing
+canonical fingerprint. Full-stream reconstruction rejects incomplete and
+post-terminal streams; opening qualification remains factual, without implying
+controlled experimental conditions.
+
+Reported Slice 1 verification: **29 focused passed; 202 relevant regression
+passed; combined reported total: 231 passed**, zero failures/errors/skips.
+No full suite, package or native GUI run was performed for Slice 1.
+
+**NEXT — Slice 2: Isolated execution and metrics.** Not started: Stage-2/Stage-3
+comparison execution, comparison worker/UI integration and Model-C comparison
+work. Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and
+Extended algorithm research remain deferred and unauthorized. This milestone
+does not establish a general Human-versus-solver speed winner.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe

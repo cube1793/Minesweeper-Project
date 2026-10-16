@@ -1,8 +1,12 @@
 # Same-board Human / Stage-2 / Stage-3 Comparison Contract
 
-Status: **ACTIVE — Slice 0 (contract documentation only), 2026-10-16**.
-Implementation has not begun. This contract governs the first Comparison
-milestone; Stage-3 V1 and Model C remain frozen.
+Status: **Comparison milestone ACTIVE; Slice 0 contract and Slice 1 — Comparison
+domain and admission COMPLETE / ACCEPTED**, following ChatGPT final review.
+Only the pure Qt-independent domain/admission foundation and focused tests are
+implemented. **NEXT — Slice 2: Isolated execution and metrics**; not started.
+No comparison solver execution, worker/UI integration or Model-C comparison
+work has begun. This contract governs the first Comparison milestone;
+Stage-3 V1 and Model C remain frozen.
 
 ## 1. Purpose and scope
 
@@ -12,8 +16,8 @@ existing semantics and report factual outcomes, actions and separately labeled
 timing. This milestone does not establish a general Human-versus-solver speed
 winner or automatically constitute a controlled speed experiment.
 
-Slice 0 changes only this contract and the Extended README. It introduces no
-implementation, schema changes, test changes or test execution.
+Slice 0 established the contract. Slice 1 acceptance covers only domain/admission;
+the remaining milestone requirements below do not imply later implementation.
 
 ## 2. Authoritative meaning of "same board"
 
@@ -87,7 +91,10 @@ An admitted recording must:
    rules, including coordinates, order and elapsed-time constraints.
 2. Fit frozen Stage-3 supported dimensions: `1 <= width <= 30` and
    `1 <= height <= 16`, without resizing, transposing or refitting Model C.
-3. Be declared as a full-game Human recording for comparison purposes.
+3. Have `source_type == SOURCE_HUMAN` as a necessary metadata eligibility
+   condition AND explicit caller declaration `declared_full_game_human=True`.
+   Algorithm- or AI-labeled Replays are rejected for Human comparison even with
+   that declaration; their ordinary Replay validity is unchanged.
 4. Reconstruct deterministically from the fixed all-HIDDEN board to `WON` or
    `LOST`, applying every recorded event under existing Engine semantics.
 5. Contain no event after the first terminal state. Reject an extra event even
@@ -119,12 +126,14 @@ benchmark specifications, identity records and evidence remain untouched.
 
 ## 8. Provenance limitation
 
-Current Replay `source_type="human"` does not independently prove exclusively
-Human historical input. Use the neutral contract concept of a **user-declared
-Human/full-game recording**. Successful reconstruction proves the recorded
-stream is structurally executable to terminal state; it does not mathematically
-prove its historical origin or exclusively Human provenance, including for old
-Replay files. This milestone does not expand the Replay provenance schema.
+Current Replay `source_type="human"` is necessary metadata eligibility, not proof
+of exclusively Human historical input: Human-labeled recordings may contain
+historical Auto input. The explicit declaration is caller intent, not proof.
+Use the neutral contract concept of a **user-declared Human/full-game recording**.
+Successful reconstruction proves the recorded stream is structurally executable
+to terminal state; it does not mathematically prove its historical origin or
+exclusively Human provenance, including for old Replay files. This milestone
+does not expand the Replay provenance schema.
 
 ## 9. Metric and time authority separation
 
@@ -217,7 +226,7 @@ Presentation controls cannot affect solver behavior or recorded/model totals.
 default and explicit-opening behavior, frozen Stage-3 V1, frozen Model C and
 the existing Stage-3 Visualizer. Leave benchmark/evidence artifacts untouched.
 
-**Later testing expectations (not executed in Slice 0):**
+**Milestone testing expectations (each slice supplies its own evidence):**
 
 - Pure comparison-domain/admission tests; exact-layout identity and mismatch
   tests, including recomputation rather than trusting supplied hashes.
@@ -235,12 +244,12 @@ the existing Stage-3 Visualizer. Leave benchmark/evidence artifacts untouched.
 No arbitrary FPS or latency requirement is introduced. Implementation slices
 must provide the relevant evidence before milestone acceptance.
 
-## 14. Proposed implementation slices after Slice 0
+## 14. Implementation slices after Slice 0
 
-1. **Comparison domain and admission:** immutable layout/run context, canonical
+1. **COMPLETE / ACCEPTED — Comparison domain and admission:** immutable layout/run context, canonical
    identity validation, full-stream reconstruction and opening qualification;
    pure tests, without fabricated benchmark metadata.
-2. **Isolated execution and metrics:** fixed-layout Stage-2/Stage-3 orchestration,
+2. **NEXT / NOT STARTED — Isolated execution and metrics:** fixed-layout Stage-2/Stage-3 orchestration,
    unchanged runners/Model C, separated timing and result validation; worker
    ownership, cancellation/cleanup and fixed-board tests.
 3. **Pure playback coordination:** retain existing distinct stream models,
@@ -251,5 +260,5 @@ must provide the relevant evidence before milestone acceptance.
 5. **Acceptance and closeout:** full regression, native/manual validation,
    compatibility and frozen-evidence checks, then milestone documentation.
 
-These are proposed boundaries for later authorization, not work performed or
-implementation acceptance in Slice 0.
+Slice 1 is accepted. Slices 2–5 remain proposed boundaries for later authorization;
+Slice 1 acceptance does not authorize or claim their implementation.
