@@ -251,8 +251,41 @@ Reported final Slice 2B verification: **84 Slice 2B passed; 31 Slice 2A passed;
 518 passed**, zero failures/errors/skips. No full suite, fresh package or native
 GUI acceptance was run for Slice 2B.
 
-**NEXT — Slice 3: Pure playback coordination.** Slice 3 has not begun; Comparison
-UI remains not begun and belongs to Slice 4 (section 6).
+**Slice 3 — Pure playback coordination COMPLETE / ACCEPTED** by ChatGPT final review.
+The pure Qt-independent [`same_board_playback.py`](../same_board_playback.py)
+coordinates exactly three run identities: `HUMAN`, `STAGE2`, `STAGE3`. Human uses
+the original admitted Replay through existing `ReplayPlayer`; Stage 2 uses its
+native algorithm Replay through another `ReplayPlayer`. Stage 3 uses a dedicated
+Same-board fixed-layout trace player: arbitrary Human layouts must not fabricate
+benchmark-specific `Stage3Execution` / `BenchmarkBoard` identity. It executes only
+recorded `trace.move`; planner evidence and unexecuted plan suffixes are not
+executable playback input. Playback invokes no solver/planner/worker and does not
+reevaluate Model C.
+
+Index 0 is the exact fixed all-HIDDEN initial board; index n is the state after
+exactly the first n semantic inputs of that run. Each run retains its own index
+and valid range. Switching restores the selected run's remembered index without
+seeking or mutating another run. There is no clamping, index mapping or normalized
+progress; equal numeric indices do not mean equivalent game progress.
+
+Current reconstructed `status` is separate from recorded final outcome. A completed
+WON/LOST run is still PLAYING at index 0. A legitimate solver first-action LOSS
+is PLAYING at index 0 and LOST at index 1; Human outcome remains independently
+authoritative.
+
+Navigation does not mutate Human Replay, Mouse Trace, Stage-2 Replay/results/traces,
+Stage-3 results/traces or metrics. Mouse Trace remains a separate attachment,
+not played/transformed in Slice 3. No generic time/speed/progress authority,
+common timeline, lockstep, synchronized three-board playback or universal
+player/registry abstraction was introduced. No autoplay, Qt timer, interpolation
+or UI was implemented.
+
+Reported Slice 3 verification: **29 Slice 3 focused passed; 84 Slice 2B passed;
+31 Slice 2A passed; 29 Slice 1 passed; 139 existing player/Engine/Replay/Mouse Trace/
+fingerprint regressions passed; combined reported verification: 312 passed**,
+zero failures/errors/skips. No full suite, package or native GUI run for Slice 3.
+
+**NEXT — Slice 4: Read-only comparison UI.** Slice 4 has not begun (section 6).
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
   [historical acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
@@ -329,12 +362,14 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-**NEXT — Slice 3: Pure playback coordination.** Slice 2, including internal
-Slices 2A/2B, is COMPLETE / ACCEPTED. Slice 3 has not begun. Its accepted boundary
-is deterministic reconstruction for Human, Stage 2 and Stage 3 with independent
-remembered action indices; switching runs restores that run's own index.
-No lockstep/common timeline, normalized progress or universal playback abstraction.
-No UI yet: Comparison UI remains not begun and belongs to Slice 4.
+**NEXT — Slice 4: Read-only comparison UI.** Slices 0–3, including internal
+Slices 2A/2B, are COMPLETE / ACCEPTED. Slice 4 has not begun. Its existing accepted
+boundary is a separate read-only comparison window with one board renderer,
+Human / Stage 2 / Stage 3 selector, compact three-run summary and selected-run
+playback controls. Each run retains its own remembered index. Display first-open
+qualification and explicitly labeled separate metrics; the optional Human Mouse
+Trace overlay is Human-only. Execution/cancellation/failure states must be explicit.
+The existing Stage-3 Visualizer remains separate. No Timeline Analytics.
 Use live Git/source/tests to determine whether later work has already begun.
 Do not treat this roadmap as implementation approval or claim later milestones exist.
 No later Timeline Analytics or Extended algorithm research is authorized yet.
@@ -369,9 +404,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
-5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0, 1 and 2
-   COMPLETE / ACCEPTED, including internal Slices 2A/2B. **NEXT:** Slice 3 — Pure
-   playback coordination (not begun); Comparison UI remains Slice 4 (not begun).
+5. **ACTIVE:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0, 1, 2 and 3
+   COMPLETE / ACCEPTED, including internal Slices 2A/2B. **NEXT:** Slice 4 — Read-only
+   comparison UI (not begun).
 6. **LATER:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
@@ -527,7 +562,11 @@ zero failures/errors/skips; Slice 2A full suite/package/native GUI run은 없습
 Slice 2B final reported verification: 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 374 /
 combined 518 passed, zero failures/errors/skips; full suite/fresh package/native GUI acceptance는 없습니다.
 Parent ownership, corrected validation boundary, audit 및 responsiveness evidence는 section 4를 보세요.
-NEXT: Slice 3 — Pure playback coordination (not begun).
+Slice 3 — Pure playback coordination도 COMPLETE / ACCEPTED입니다.
+same_board_playback.py는 원본 stream과 독립 action index / 현재 status와 final outcome을 보존합니다.
+Slice 3 reported verification: focused 29 / 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 139 /
+combined 312 passed, zero failures/errors/skips; full suite/package/native GUI run은 없습니다.
+NEXT: Slice 4 — Read-only comparison UI (not begun; accepted boundary는 section 6).
 Slice 2A/2B는 기존 Slice 2 내부 구분이며 새 roadmap milestone이 아닙니다.
 Slice 3은 deterministic reconstruction과 각 run의 독립 remembered index만 다루며 UI는 포함하지 않습니다.
 Comparison UI는 Slice 4이며 아직 미착수입니다.

@@ -129,7 +129,7 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE — Slices 0, 1 and 2 COMPLETE / ACCEPTED, including internal 2A/2B; NEXT Slice 3 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
+5. **ACTIVE — Slices 0, 1, 2 and 3 COMPLETE / ACCEPTED, including internal 2A/2B; NEXT Slice 4 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **LATER** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
@@ -201,11 +201,32 @@ Reported final Slice 2B verification: **84 Slice 2B passed; 31 Slice 2A passed;
 GUI acceptance was run for Slice 2B.
 
 Slices 2A/2B remain internal parts of official Slice 2, not new roadmap milestones.
-**NEXT — Slice 3: Pure playback coordination.** Not begun: deterministic Human /
-Stage-2 / Stage-3 reconstruction and independent remembered action indices;
-switching restores the selected run's own index. No lockstep/common timeline,
-normalized progress or universal playback abstraction. No UI yet; Comparison UI
-remains Slice 4 and has not begun.
+
+**Slice 3 — Pure playback coordination COMPLETE / ACCEPTED** by ChatGPT final review.
+Pure Qt-independent [`same_board_playback.py`](../../same_board_playback.py) retains
+three distinct runs (`HUMAN`, `STAGE2`, `STAGE3`): original Human and native Stage-2
+Replays use existing `ReplayPlayer`; Stage 3 uses its fixed-layout trace player
+without fabricated benchmark identity. Only recorded `trace.move` executes, never
+planner evidence or plan suffixes. No solver/planner/worker/Model-C rerun occurs.
+
+Each run retains its own action index/range; switching restores that index without
+changing another run. Index 0 is the fixed all-HIDDEN board; n applies exactly n
+inputs. Current `status` and final outcome remain separate, including PLAYING at
+index 0 then LOST at index 1 for a legitimate first-action solver loss. Sources,
+Mouse Trace attachment and metrics remain unchanged. No common timeline, clamping,
+index mapping, normalized progress, lockstep, synchronized three-board playback,
+generic time/speed/progress authority or universal player/registry was introduced.
+Slice 3 includes no Mouse Trace playback/transformation, autoplay, Qt timer,
+interpolation or UI. See the [handoff](../CURRENT_HANDOFF.md#4-current-milestone)
+for the accepted playback boundary.
+
+Reported Slice 3 verification: **29 focused; 84 Slice 2B; 31 Slice 2A; 29 Slice 1;
+139 existing player/Engine/Replay/Mouse Trace/fingerprint regressions; combined
+reported verification: 312 passed**, zero failures/errors/skips. No full suite,
+package or native GUI run for Slice 3.
+
+**NEXT — Slice 4: Read-only comparison UI.** Not begun; its high-level boundary
+remains [contract section 11](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md#11-minimum-first-version-ui-boundary).
 Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and Extended
 algorithm research remain deferred and unauthorized. This milestone does not
 establish a general Human-versus-solver speed winner.

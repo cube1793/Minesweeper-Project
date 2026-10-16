@@ -5,8 +5,8 @@ domain and admission COMPLETE / ACCEPTED**, following ChatGPT final review.
 **Slice 2 — Isolated execution and metrics COMPLETE / ACCEPTED**, including internal
 **Slice 2A — Pure isolated execution and metrics** and **Slice 2B — Worker/process
 integration**, both **COMPLETE / ACCEPTED** by ChatGPT final review.
-**NEXT — Slice 3: Pure playback coordination**; not begun. Comparison UI remains
-Slice 4 and has not begun. This contract governs the first Comparison
+**Slice 3 — Pure playback coordination COMPLETE / ACCEPTED** by ChatGPT final review.
+**NEXT — Slice 4: Read-only comparison UI**; not begun. This contract governs the first Comparison
 milestone within ACTIVE Stage-3 Extended; Stage-3 V1 and Model C remain frozen.
 
 ## 1. Purpose and scope
@@ -19,7 +19,8 @@ winner or automatically constitute a controlled speed experiment.
 
 Slice 0 established the contract. Accepted Slice 1 covers domain/admission;
 accepted Slice 2 covers isolated execution/metrics and worker/process integration.
-Remaining milestone requirements below do not imply implementation of Slice 3 or UI.
+Accepted Slice 3 covers pure playback coordination. Remaining milestone requirements
+below do not imply implementation of Slice 4 UI.
 
 ## 2. Authoritative meaning of "same board"
 
@@ -260,17 +261,17 @@ must provide the relevant evidence before milestone acceptance.
    validation rechecks comparison/outcome-bearing facts without deep-walking the
    complete trusted-local decision-evidence graph; native evidence is retained.
    These internal parts are not new roadmap milestones.
-3. **NEXT / NOT BEGUN — Pure playback coordination:** retain existing distinct
+3. **COMPLETE / ACCEPTED — Pure playback coordination:** retain existing distinct
    stream models; deterministic Human / Stage-2 / Stage-3 reconstruction and
    independent remembered action indices. Switching restores that run's own index.
    No lockstep/common timeline, normalized progress or universal playback abstraction;
-   no UI yet. Add focused reconstruction/isolation tests within this boundary.
-4. **NOT BEGUN — Read-only comparison UI:** single renderer, selector, summary and selected
+   no UI yet. Focused reconstruction/isolation tests cover this boundary.
+4. **NEXT / NOT BEGUN — Read-only comparison UI:** single renderer, selector, summary and selected
    controls; Human-only optional Mouse Trace overlay; UI/lifecycle tests.
 5. **Acceptance and closeout:** full regression, native/manual validation,
    compatibility and frozen-evidence checks, then milestone documentation.
 
-Slices 0, 1 and 2 are COMPLETE / ACCEPTED, including internal Slices 2A/2B.
-The Comparison milestone remains ACTIVE. Slice 3 is next and has not begun;
-Comparison UI remains Slice 4, not begun. Timeline Analytics and Extended
+Slices 0, 1, 2 and 3 are COMPLETE / ACCEPTED, including internal Slices 2A/2B.
+The Comparison milestone remains ACTIVE. Slice 4 — Read-only comparison UI is next
+and has not begun. Timeline Analytics and Extended
 algorithm research remain deferred and unauthorized.
