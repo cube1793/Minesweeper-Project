@@ -14,12 +14,12 @@ Focused/frozen **386 PASS**, full source **2184 PASS**, failures/errors/skips �
 [최종 closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)과
 [수용 계약](STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)을 보존한다.
 **CURRENT — Selected Exemplar Board-State Reconstruction / Human Interpretation
-Viewer: ACTIVE, Slices 0 and 1 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review**
+Viewer: ACTIVE, Slices 0–2 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review**
 (2026-10-18). 각 slice **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
 [Viewer 계약](STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)의 discovery는 ChatGPT
-**PASS / BLOCKER 0 / REQUIRED 0**로 수용했다. **CURRENT / AUTHORIZED — Slice 2:
-Accepted-Evidence Loader**.
-이 문서 전환 시점에 **implementation NOT YET BEGUN**이며 **Slices 3–4 NOT BEGUN**이다.
+**PASS / BLOCKER 0 / REQUIRED 0**로 수용했다. **CURRENT / AUTHORIZED — Slice 3:
+Standalone Inspection UI**.
+이 문서 전환 시점에 **implementation NOT YET BEGUN**이며 **Slice 4 NOT BEGUN**이다.
 Viewer는 고정 exemplar의 human/domain
 해석을 지원하며, 첫 실제 Extended 알고리즘 연구 방향의 선택·명세와 연구/구현 승인은
 별도의 명시적 scope/specification 결정이다.
@@ -157,10 +157,10 @@ results retain their original identity and meaning.
    Internal Slice 3B — selection / selected-action report COMPLETE / ACCEPTED.
    Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.
 7. **ACTIVE — interpretation support** — Selected Exemplar Board-State Reconstruction /
-   Human Interpretation Viewer; **Slices 0 and 1 COMPLETE / ACCEPTED by ChatGPT final review;
-   each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 2 CURRENT / AUTHORIZED —
-   Accepted-Evidence Loader**; implementation NOT YET BEGUN at this transition.
-   Slices 3–4 NOT BEGUN. Human/domain interpretation of
+   Human Interpretation Viewer; **Slices 0–2 COMPLETE / ACCEPTED by ChatGPT final review;
+   each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 3 CURRENT / AUTHORIZED —
+   Standalone Inspection UI**; implementation NOT YET BEGUN at this transition.
+   Slice 4 NOT BEGUN. Human/domain interpretation of
    fixed exemplars supports a later choice/specification of the first actual Extended
    algorithm research direction; research/implementation requires separate approval.
 
@@ -168,7 +168,7 @@ For later algorithm research, nearest exact-minimum-risk guess selection among e
 candidates using movement cost remains a candidate, not an adopted policy or
 authorization to modify V1. External screen-recording tools remain the default.
 
-## Selected Exemplar Board-State Viewer — CURRENT / Slice 2
+## Selected Exemplar Board-State Viewer — CURRENT / Slice 3
 
 The [consolidated contract](STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md) is **Slice 0
 COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
@@ -176,8 +176,10 @@ Its unchanged accepted scope freezes admission to
 **73758, 73024, 93557 and 1**, preserving closed Timeline memberships. No selection,
 ranking, substitution, arbitrary-ID browsing or algorithm research is authorized.
 Live Git at this transition: `feature/stage3-exemplar-board-viewer`, HEAD
-`2d6690df114902d32dfaf8f517d0d677cc3008b4` (Slice-0 acceptance commit), main baseline
+`eb52ed43354664e7deee59a10749c6c9afb95fe7` (accepted Slice-1 implementation commit), main baseline
 `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`; later branch/HEAD state comes from live Git.
+Accepted Slice-2 source/tests are untracked at this transition; no Slice-2 commit
+identity is assigned.
 
 **Slice 1 — Qt-independent Pure Reconstruction COMPLETE / ACCEPTED by ChatGPT final
 review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Accepted files:
@@ -196,6 +198,33 @@ separate; original `TimelineAnalytics` retains Model C / geometry / metadata
 authority, with no Engine retained. Bounded synthetic Slice-1 fixtures used no DB,
 official exemplar inputs, benchmark-board generation, Qt/UI, ZiNi, solver/planner
 or algorithm research.
+
+**Slice 2 — Accepted-Evidence Loader COMPLETE / ACCEPTED by ChatGPT final review;
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Accepted files:
+[`exemplar_board_evidence.py`](../../exemplar_board_evidence.py) and
+[`tests/test_exemplar_board_evidence.py`](../../tests/test_exemplar_board_evidence.py).
+Reported verification: **34 new focused evidence-loader tests + 173 bounded
+existing regressions = 207 PASS; 0 failures / 0 errors / 0 skips**. No full-suite
+claim; no verification is rerun by this documentation transition.
+
+The accepted boundary authenticates the exact two DB sources, owns immutable
+read-only connections and admits exactly one accepted run per role. Fixed-four
+admission, selected-only GameRecord/ActionEvent decoding and explicit enum mappings
+preserve Fraction/None/zero exactly. Admitted-board generation requires
+generated/persisted/fixed fingerprint equality. Authenticated frozen Model C,
+existing `project_timeline()` and accepted Slice-1 `reconstruct_board()` produce
+an immutable bundle with no live DB connection or Engine. No G4/HTML runtime input,
+selection/ranking/arbitrary browsing, Qt/UI, ZiNi, solver/planner or algorithm research.
+
+Accepted bounded real-evidence smoke: exact accepted DB hashes authenticated,
+exact accepted runs discovered, requested/processed/stored **100000 / 100000 /
+100000** per source and exact official coverage PASS. Exactly **four boards**
+generated, **eight selected streams** loaded/projected/reconstructed, all fixed
+fingerprints and accepted action/outcome/Model-C totals matched. All **1,508
+persisted actions** reconciled with **0 status / 0 safe-reveal / 0 explicit-FLAG
+mismatches**. Source hashes/sizes/mtimes were unchanged after close; no sidecars
+or output artifacts; no solver/planner, selection, G4 or report rerun. This is
+accepted Slice-2 implementation evidence, **not final viewer closeout**.
 
 Required future inputs are the two exact accepted analysis DBs, tracked fixed
 exemplar identities and authenticated frozen Model C. G4/HTML remain historical
@@ -237,17 +266,24 @@ This is feasibility evidence, not implementation acceptance. Slice 0 is document
 only and does not repeat DB reads or board generation.
 
 Slices: **0 Contract → 1 Pure reconstruction → 2 Accepted-evidence loader →
-3 Standalone inspection UI → 4 Acceptance / Closeout**. **Slices 0 and 1 COMPLETE / ACCEPTED**.
-**NEXT / CURRENT / AUTHORIZED — Slice 2: Accepted-Evidence Loader**;
+3 Standalone inspection UI → 4 Acceptance / Closeout**. **Slices 0–2 COMPLETE / ACCEPTED**.
+**NEXT / CURRENT / AUTHORIZED — Slice 3: Standalone Inspection UI**;
 implementation **NOT YET BEGUN** at this documentation transition.
-**Slices 3–4 NOT BEGUN**. Slice 2 owns exact accepted DB authentication, immutable
-read-only SQLite lifecycle, run/configuration and fixed four-ID admission,
-selected-only GameRecord/ActionEvent decoding, deterministic admitted-board
-generation, fingerprint equality, Model C authentication, `project_timeline()`
-validation and composition into accepted `reconstruct_board()`.
-It excludes Qt/UI, navigation controller, Answer Overlay rendering, ZiNi
-calculation, solver/planner execution, new selection/ranking, arbitrary-ID browsing,
-official 100k rerun and algorithm research.
+**Slice 4 NOT BEGUN**. Slices 0–2 technical semantics remain frozen.
+Slice 3 may implement the thin standalone Qt UI and explicit two-DB path launch/load
+flow through accepted `load_accepted_exemplar_evidence()` only. Keep one board,
+fixed exemplar/solver selectors, independent remembered positions per pair,
+First/Previous/Next/Last, integer frame slider, direct frame/action entry,
+Before/After, default-OFF HIDDEN-only Answer Overlay, previous/current targets and
+selected action-target transition. Factual board/solver references, Classic
+Counters/final-run summary, Model C and action context remain separate. Optional
+existing bounded ZiNi reference lifecycle stays within the accepted contract.
+No direct DB reads outside the loader or regeneration/reconstruction on navigation;
+no solver/planner or selection/ranking rerun, arbitrary browsing, shared/common
+playhead, normalized progress, synchronized side-by-side, autoplay or modeled-time
+animation. Do not fabricate historical elapsed time or cursor trajectory/speed,
+make automatic route/quality/causal judgments, alter frozen Model C/V1 or perform
+algorithm research.
 Frozen V1/Model C, closed Timeline/Same-board/ZiNi, both Timeline
 reports, official 100k and unopened ZiNi holdout remain preserved.
 
@@ -578,8 +614,8 @@ The [closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md) and
 exemplars and both report runs. No visual/manual substitution, official
 100k/solver rerun or frozen-evidence modification. Final source regression and
 source/report/document reconciliation PASS; no GUI/package gate was required.
-**CURRENT — viewer Slice 2 Accepted-Evidence Loader authorized following Slices 0
-and 1 COMPLETE / ACCEPTED; implementation NOT YET BEGUN at this transition**, as recorded
+**CURRENT — viewer Slice 3 Standalone Inspection UI authorized following Slices 0–2
+COMPLETE / ACCEPTED; implementation NOT YET BEGUN at this transition**, as recorded
 above. Timeline remains CLOSED. Choosing/specifying the first actual Extended
 algorithm research direction follows interpretation; algorithm research or
 implementation requires a separate explicit scope/specification decision.

@@ -1,22 +1,22 @@
 # Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer — Contract
 
-Status: **ACTIVE — Slices 0 and 1 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.**
+Status: **ACTIVE — Slices 0–2 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.**
 Each slice: **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Date: **2026-10-18 (Asia/Seoul)**.
-**CURRENT / AUTHORIZED — Slice 2: Accepted-Evidence Loader.**
+**CURRENT / AUTHORIZED — Slice 3: Standalone Inspection UI.**
 Implementation is **NOT YET BEGUN** at this documentation transition.
-**Slices 3–4: NOT BEGUN.**
+**Slice 4: NOT BEGUN.**
 The preceding read-only discovery is **COMPLETE / ACCEPTED** by ChatGPT:
 **STAGE-3 EXTENDED — SELECTED EXEMPLAR BOARD-STATE VIEWER DISCOVERY PASS;
 BLOCKER 0 / REQUIRED 0**. Discovery and contract acceptance remain distinct from
-the separately accepted Slice-1 implementation below. This turn records the
-status transition only and does not begin Slice 2.
+the separately accepted Slice-1 and Slice-2 implementations below. This turn
+records the status transition only and does not begin Slice 3.
 
 Live Git verified for this transition: branch `feature/stage3-exemplar-board-viewer`,
-HEAD `2d6690df114902d32dfaf8f517d0d677cc3008b4`
-(`docs: accept exemplar board viewer slice 0 contract`); main baseline
+HEAD `eb52ed43354664e7deee59a10749c6c9afb95fe7`
+(`feat: add exemplar board pure reconstruction`); main baseline
 `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`. These are dated recovery facts;
-live Git remains authoritative for current branch/HEAD. No Slice-1 implementation
-commit identity is assigned by this documentation transition.
+live Git remains authoritative for current branch/HEAD. Accepted Slice-2 source
+and tests are untracked at this transition; no Slice-2 commit identity is assigned.
 
 Stage-3 Extended remains **ACTIVE**. [Timeline Analytics](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
 remains **FINAL ACCEPTANCE PASS / CLOSED**, with its qualified implementation
@@ -551,8 +551,8 @@ modules are not refactoring targets merely to make this viewer more generic.
 | --- | --- | --- |
 | 0 | Contract | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
 | 1 | Qt-independent Pure Reconstruction | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
-| 2 | Accepted-Evidence Loader | CURRENT / AUTHORIZED; implementation NOT YET BEGUN at this transition |
-| 3 | Standalone inspection UI | NOT BEGUN |
+| 2 | Accepted-Evidence Loader | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
+| 3 | Standalone Inspection UI | CURRENT / AUTHORIZED; implementation NOT YET BEGUN at this transition |
 | 4 | Acceptance / Closeout | NOT BEGUN |
 
 ### Accepted Slice-1 implementation and verification
@@ -574,6 +574,37 @@ remains the Model C / geometry / metadata authority; no Engine is retained.
 Slice 1 used bounded synthetic fixtures only: no DB/official exemplar inputs,
 benchmark-board generation, Qt/UI, ZiNi, solver/planner execution or algorithm
 research. These accepted implementation and contract semantics remain unchanged.
+
+### Accepted Slice-2 implementation and verification
+
+[`exemplar_board_evidence.py`](../../exemplar_board_evidence.py) and
+[`tests/test_exemplar_board_evidence.py`](../../tests/test_exemplar_board_evidence.py)
+are **COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
+Reported verification: **34 new focused evidence-loader tests + 173 bounded
+existing regressions = 207 PASS; 0 failures / 0 errors / 0 skips**.
+No full suite is claimed. This documentation transition does not rerun tests or
+the accepted bounded real-evidence smoke.
+
+The accepted loader authenticates the exact two DB sources, owns the immutable
+read-only lifecycle and requires exactly one accepted run per role. Fixed-four
+admission and selected-only GameRecord/ActionEvent decoding preserve explicit
+enum mappings, exact Fraction values, None and integer zero. Only admitted boards
+are generated, with generated/persisted/fixed fingerprint equality. Frozen Model C
+authentication, existing `project_timeline()` validation and accepted Slice-1
+`reconstruct_board()` composition produce an immutable bundle; no live DB
+connection or Engine is retained. No G4/HTML runtime input, selection/ranking,
+arbitrary browsing, Qt/UI, ZiNi, solver/planner or algorithm research is included.
+
+**Accepted bounded Slice-2 real-evidence smoke:** exact accepted Stage-2/Stage-3
+hashes authenticated; exact accepted runs discovered; requested/processed/stored
+counts **100000 / 100000 / 100000** per source and exact official coverage PASS.
+Exactly **four boards** were generated and **eight selected streams** were
+loaded/projected/reconstructed. All fixed fingerprints matched; all **1,508
+persisted actions** reconciled with **0 status / 0 safe-reveal / 0 explicit-FLAG
+mismatches**. Accepted action/outcome/Model-C totals matched. Source hashes,
+sizes and mtimes were unchanged after close; no sidecars or output artifacts.
+No solver/planner, selection, G4 or report rerun occurred. This is accepted
+Slice-2 implementation evidence, **not final viewer closeout**.
 
 ### Pure tests
 
@@ -740,18 +771,26 @@ trace / post-hoc Model C / presentation authorities separate. No new telemetry,
 schema, physical model, algorithm/profile selection, main-app integration or
 release/package work is authorized here.
 
-**NEXT / CURRENT / AUTHORIZED:** Slice 2 — Accepted-Evidence Loader.
-Implementation is NOT YET BEGUN at this documentation transition; Slices 0 and 1
-are COMPLETE / ACCEPTED, and Slices 3–4 remain NOT BEGUN.
-Slice 2 owns exact accepted Stage-2/Stage-3 DB source authentication, immutable
-read-only SQLite lifecycle, run/configuration admission, fixed four-ID admission,
-selected-only GameRecord/ActionEvent decoding, deterministic board generation for
-admitted IDs, fingerprint equality, Model C authentication, `project_timeline()`
-construction/validation and composition into accepted `reconstruct_board()`.
-It excludes Qt/UI, navigation controller, Answer Overlay rendering, ZiNi
-calculation, solver/planner execution, new selection/ranking, arbitrary-ID
-browsing, official 100k rerun and algorithm research.
-The accepted consolidated contract's technical requirements remain unchanged.
+**NEXT / CURRENT / AUTHORIZED:** Slice 3 — Standalone Inspection UI.
+Implementation is NOT YET BEGUN at this documentation transition; Slices 0–2
+are COMPLETE / ACCEPTED, and Slice 4 remains NOT BEGUN.
+Slice 3 may implement the thin standalone Qt UI and explicit two-DB path
+launch/load flow through `load_accepted_exemplar_evidence()` only. Keep one board,
+fixed exemplar/Stage-2/Stage-3 selectors and independent remembered positions per
+`(game, solver)`, First/Previous/Next/Last, integer frame slider, direct frame/action
+entry and Before/After. Presentation includes default-OFF HIDDEN-only Answer
+Overlay, previous/current target markers, selected action-target transition,
+factual board/solver references, Classic Counters/final-run summary, Model C and
+action context. The existing bounded ZiNi reference lifecycle is optional only
+as specified by this contract.
+
+Slice 3 must not read DBs outside the accepted loader or regenerate/reconstruct
+on navigation. No solver/planner or selection/ranking rerun, arbitrary browsing,
+shared/common playhead, normalized progress, synchronized side-by-side, autoplay
+or modeled-time animation. Do not fabricate historical elapsed time or cursor
+trajectory/speed, make automatic route/quality/causal judgments, alter frozen
+Model C/V1 or perform algorithm research. Slices 0–2 technical semantics remain
+frozen; this status transition changes no accepted contract requirement.
 The viewer supports human/domain interpretation; choosing/specifying any actual
 Extended algorithm research direction remains a separate explicit decision.
 
