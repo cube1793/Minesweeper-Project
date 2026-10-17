@@ -43,12 +43,13 @@ Timeline Analytics qualified implementation/source candidate, accepted on 2026-1
 This qualified implementation identity remains fixed after any later documentation-only
 closeout commit. Live Git is authoritative for current branch/HEAD/integration state.
 Stage-3 Extended remains ACTIVE. Current scope is **Selected Exemplar Board-State
-Reconstruction / Human Interpretation Viewer — Slice 0 COMPLETE / ACCEPTED by
-ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **CURRENT / AUTHORIZED:
-Slice 1 — Qt-independent Pure Reconstruction**, implementation NOT YET BEGUN at
-this documentation transition. Slices 2–4 remain NOT BEGUN.
+Reconstruction / Human Interpretation Viewer — Slices 0 and 1 COMPLETE / ACCEPTED
+by ChatGPT final review; each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
+**CURRENT / AUTHORIZED: Slice 2 — Accepted-Evidence Loader**, implementation
+NOT YET BEGUN at this documentation transition. Slices 3–4 remain NOT BEGUN.
 Live Git verified on 2026-10-18: `feature/stage3-exemplar-board-viewer`,
-HEAD and main baseline `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
+HEAD `2d6690df114902d32dfaf8f517d0d677cc3008b4` (Slice-0 acceptance commit),
+main baseline `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
 The viewer supports domain interpretation before separately scoping algorithm research.
 
 Historical Same-board acceptance baseline, verified on 2026-10-17:
@@ -174,13 +175,30 @@ Commit identities were read from live Git.
 ## 4. Current milestone
 
 **ACTIVE — Selected Exemplar Board-State Reconstruction / Human Interpretation
-Viewer. Slice 0 — FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review
-(2026-10-18); BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
+Viewer. Slices 0 and 1 — FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review
+(2026-10-18); each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
 See the [viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md).
 ChatGPT accepted the preceding **DISCOVERY PASS; BLOCKER 0 / REQUIRED 0**.
-**CURRENT / AUTHORIZED — Slice 1: Qt-independent Pure Reconstruction**, using
-bounded synthetic fixtures only. Implementation is **NOT YET BEGUN** at this
+**CURRENT / AUTHORIZED — Slice 2: Accepted-Evidence Loader**.
+Implementation is **NOT YET BEGUN** at this
 documentation transition. No algorithm research is authorized.
+
+Accepted Slice-1 implementation:
+[`exemplar_board_reconstruction.py`](../exemplar_board_reconstruction.py) and
+[`tests/test_exemplar_board_reconstruction.py`](../tests/test_exemplar_board_reconstruction.py).
+Reported verification: **32 new focused reconstruction + 28 timeline analytics +
+27 Engine regression + 4 board analyzer + 9 Replay player = 100 PASS**;
+**0 failures / 0 errors / 0 skips**. No full suite is claimed; no tests are rerun
+by this documentation transition.
+
+Accepted boundary: Qt-independent, already-finalized `BoardSnapshot` plus
+already-validated `TimelineAnalytics`; immutable N+1 public frames and exact
+newly-revealed-safe coordinate sets; terminal Engine feedback preserved; explicit
+FLAG separated from automatic effects; static 3BV/Ops/isolated references and
+final public Engine counter summary only. Original `TimelineAnalytics` retains
+Model C / geometry / metadata authority; no Engine is retained. Slice 1 used
+bounded synthetic fixtures only, with no DB/official exemplar inputs,
+benchmark-board generation, Qt/UI, ZiNi, solver/planner or algorithm research.
 
 The accepted consolidated Slice-0 contract includes the following unchanged scope:
 
@@ -223,11 +241,17 @@ The accepted consolidated Slice-0 contract includes the following unchanged scop
   No solver/planner/runner calls; official artifacts unchanged. This is discovery
   evidence, not viewer implementation acceptance; Slice 0 does not repeat the proof.
 - Slices: **0 Contract → 1 Pure reconstruction → 2 Accepted-evidence loader →
-  3 Standalone inspection UI → 4 Acceptance / Closeout**. Slice 0 COMPLETE / ACCEPTED;
-  Slice 1 CURRENT / AUTHORIZED, implementation NOT YET BEGUN; Slices 2–4 NOT BEGUN.
-- Slice 1 excludes the official DB loader, fixed official exemplar IDs as runtime
-  inputs, Qt/UI, ZiNi calculation, official board regeneration/proof, solver/planner
-  execution and algorithm research.
+  3 Standalone inspection UI → 4 Acceptance / Closeout**. Slices 0 and 1 COMPLETE /
+  ACCEPTED; Slice 2 CURRENT / AUTHORIZED, implementation NOT YET BEGUN;
+  Slices 3–4 NOT BEGUN.
+- Slice 2 owns exact accepted DB authentication, immutable read-only SQLite
+  lifecycle, run/configuration and fixed four-ID admission, selected-only
+  GameRecord/ActionEvent decoding, deterministic admitted-board generation,
+  fingerprint equality, Model C authentication, `project_timeline()` validation
+  and composition into accepted `reconstruct_board()`.
+- Slice 2 excludes Qt/UI, navigation controller, Answer Overlay rendering, ZiNi
+  calculation, solver/planner execution, new selection/ranking, arbitrary-ID
+  browsing, official 100k rerun and algorithm research.
 - Preserve frozen V1/Model C, closed Timeline/Same-board/ZiNi, both Timeline report
   runs, official 100k and the unopened ZiNi final holdout.
 
@@ -723,13 +747,15 @@ full source **2184 PASS**, zero failures/errors/skips; no GUI/package gate requi
 See the [closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md) and
 [accepted contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md).
 
-**CURRENT / NEXT / AUTHORIZED:** Slice 1 — Qt-independent Pure Reconstruction under
+**CURRENT / NEXT / AUTHORIZED:** Slice 2 — Accepted-Evidence Loader under
 the [accepted viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md),
-using bounded synthetic fixtures only. Slice 0 COMPLETE / ACCEPTED by ChatGPT final
-review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice-1 implementation is NOT YET BEGUN
-at this documentation transition; Slices 2–4 NOT BEGUN. No official DB loader,
-official exemplar IDs as runtime inputs, Qt/UI, ZiNi calculation, official board
-regeneration/proof or solver/planner execution belongs to Slice 1. The viewer supports human/domain
+following Slices 0 and 1 COMPLETE / ACCEPTED by ChatGPT final review; each
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice-2 implementation is NOT YET BEGUN
+at this documentation transition; Slices 3–4 NOT BEGUN. Its authenticated
+fixed-four evidence/loading/reconstruction-composition boundary is recorded in
+the current milestone section. No Qt/UI, navigation controller, Answer Overlay
+rendering, ZiNi calculation, solver/planner execution, new selection/ranking,
+arbitrary-ID browsing or official 100k rerun belongs to Slice 2. The viewer supports human/domain
 interpretation of the fixed exemplars before choosing/specifying an actual
 Extended algorithm research direction. No new algorithm research or implementation
 is authorized. Timeline has no remaining technical gate; Extended remains ACTIVE.
@@ -784,10 +810,10 @@ Natural dependency roadmap — not a rigid chronological schedule:
    Internal Slice 3B — selection / selected-action report COMPLETE / ACCEPTED.
    Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.
 7. **ACTIVE — interpretation support:** Selected Exemplar Board-State Reconstruction /
-   Human Interpretation Viewer; **Slice 0 COMPLETE / ACCEPTED by ChatGPT final review;
-   BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 1 CURRENT / AUTHORIZED —
-   Qt-independent Pure Reconstruction**, bounded synthetic fixtures only;
-   implementation NOT YET BEGUN at this transition. Slices 2–4 NOT BEGUN. This supports evidence-guided
+   Human Interpretation Viewer; **Slices 0 and 1 COMPLETE / ACCEPTED by ChatGPT final review;
+   each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 2 CURRENT / AUTHORIZED —
+   Accepted-Evidence Loader**; implementation NOT YET BEGUN at this transition.
+   Slices 3–4 NOT BEGUN. This supports evidence-guided
    human/domain interpretation of fixed exemplars/report before choosing/specifying
    the first actual Extended algorithm research direction. Actual algorithm research
    requires separate explicit scope/specification; no candidate policy is adopted.
@@ -828,7 +854,7 @@ Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the closed milestones, including Timeline
 Analytics with Slices 0–4 and internal 3A/3B accepted, from the viewer's accepted
-Slice-0 contract and authorized Slice 1 for domain interpretation before separately scoped algorithm
+Slice-0 contract, accepted Slice-1 reconstruction and authorized Slice 2 for domain interpretation before separately scoped algorithm
 research. Arbitrary native Stage-3
 seeks still rebuild from index 0; incremental forward is implemented,
 while arbitrary-seek caching is deferred.
@@ -843,7 +869,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
-- [Selected Exemplar Board-State Viewer — accepted Slice-0 contract; Slice 1 authorized](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
+- [Selected Exemplar Board-State Viewer — Slices 0–1 accepted; Slice 2 authorized](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
 - [Timeline Analytics closeout — FINAL ACCEPTANCE PASS / CLOSED](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
 - [Timeline Analytics contract — Slices 0–4 accepted](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
 - [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)
@@ -1002,15 +1028,25 @@ Frozen V1/Model C, official 100k, Same-board CLOSED, ZiNi CLOSED 및 미개봉 f
 Human은 DEFER이며 Human/Replay/solver trace의 clock/authority를 합치지 않습니다.
 CURRENT: Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer.
 Discovery PASS / BLOCKER 0 / REQUIRED 0 수용.
-Slice 0 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.
-BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slices 2–4 NOT BEGUN.
+Slices 0 and 1 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.
+각 slice BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slices 3–4 NOT BEGUN.
 Contract: docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md.
-CURRENT / AUTHORIZED: Slice 1 — Qt-independent Pure Reconstruction, bounded synthetic fixtures only.
+Accepted Slice-1 files: exemplar_board_reconstruction.py / tests/test_exemplar_board_reconstruction.py.
+Verification: 32 reconstruction + 28 timeline + 27 Engine + 4 board analyzer + 9 Replay player = 100 PASS;
+0 failures / 0 errors / 0 skips, no full-suite claim. 이 문서 전환은 검증을 재실행하지 않습니다.
+Finalized BoardSnapshot + validated TimelineAnalytics에서 immutable N+1 public frames/new-safe sets,
+terminal feedback, explicit FLAG/automatic-effect separation, static board references와 final public counters를 보존합니다.
+원래 TimelineAnalytics가 Model C/geometry/metadata authority이며 Engine은 보유하지 않습니다.
+Slice 1은 synthetic only였으며 DB/official exemplar/benchmark generation/Qt/ZiNi/solver/planner/research를 사용하지 않았습니다.
+CURRENT / AUTHORIZED: Slice 2 — Accepted-Evidence Loader.
 이 documentation transition 시점에 implementation NOT YET BEGUN. 이 turn은 문서 상태 전환만 수행했습니다.
-Slice 1은 official DB loader, official exemplar IDs runtime inputs, Qt/UI, ZiNi calculation,
-official board regeneration/proof, solver/planner execution, algorithm research를 포함하지 않습니다.
+Slice 2는 exact accepted DB authentication, immutable read-only lifecycle, run/config/fixed-four admission,
+selected-only decode, admitted-board generation/fingerprint gate, Model C authentication/project_timeline,
+accepted reconstruct_board composition을 담당합니다.
+Qt/UI/navigation/Answer Overlay rendering/ZiNi/solver/planner/new selection/arbitrary-ID browsing/100k rerun/research는 제외합니다.
 2026-10-18 확인 branch: feature/stage3-exemplar-board-viewer;
-HEAD/main baseline: 50a8fee544ed6779dbcd7dd2fbb422c07cce59de. 이후 live Git이 우선합니다.
+HEAD: 2d6690df114902d32dfaf8f517d0d677cc3008b4 (Slice-0 acceptance commit);
+main baseline: 50a8fee544ed6779dbcd7dd2fbb422c07cce59de. 이후 live Git이 우선합니다.
 Admission은 73758/73024/93557/1로 고정하며 selection/ranking/substitution을 하지 않습니다.
 두 accepted DB + tracked fixed identities + frozen Model C가 viewer의 필수 입력입니다.
 G4/HTML은 historical provenance이며 viewer runtime 필수 입력이나 새 G4 인증 주장이 아닙니다.
@@ -1028,7 +1064,7 @@ selected action-target arrow/dx/dy/d²는 실제 cursor trajectory가 아니며 
 자동 route-quality/ZiNi-speed-winner 판단 없이 HUMAN domain interpretation만 지원합니다.
 Discovery: 4 fingerprints 일치, 8 streams /1508 actions, status/reveal/explicit-FLAG mismatch 모두 0,
 solver/planner/runner calls 없음, official artifacts 불변. 구현 acceptance로 취급하지 마세요.
-NEXT는 승인된 Slice 1 Pure Reconstruction이며 새 알고리즘 연구/구현은 별도 명시적 scope/specification 결정이 필요합니다.
+NEXT는 승인된 Slice 2 Accepted-Evidence Loader이며 새 알고리즘 연구/구현은 별도 명시적 scope/specification 결정이 필요합니다.
 현재 branch/HEAD/integration 상태는 live Git이 authoritative입니다. Closeout은 Git 작업 지시가 아닙니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
 Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
