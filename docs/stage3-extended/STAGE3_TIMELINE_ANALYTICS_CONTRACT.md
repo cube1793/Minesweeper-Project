@@ -1,6 +1,6 @@
 # Representative-board Demonstrations / Timeline Analytics — Contract
 
-Status: **ACTIVE — Slice 3 ACTIVE; Slices 0, 1 and 2 COMPLETE / ACCEPTED.**
+Status: **ACTIVE — Slices 0–3 COMPLETE / ACCEPTED; NEXT: Slice 4 — Acceptance / Closeout.**
 Date: **2026-10-17 (Asia/Seoul)**.
 ChatGPT adjudication of the preceding read-only discovery:
 **STAGE-3 EXTENDED TIMELINE ANALYTICS — DISCOVERY PASS**.
@@ -18,12 +18,12 @@ final review.** Final Slice-2 adjudication:
 ACCEPTED by ChatGPT final review.** Final adjudication:
 **STAGE-3 EXTENDED TIMELINE ANALYTICS — SLICE 3A CORRECTION / PREFLIGHT PASS**;
 **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
-**Slice 3 — Read-only accepted-evidence report / static visualization is ACTIVE,
-not complete.** No actual official exemplar game IDs have been selected or disclosed.
-**NEXT / now authorized scope — Internal Slice 3B:** apply the accepted selector
-to authenticated official evidence, load only unique selected games' detailed
-action streams, and build the read-only report/static visualization. Slice 3B
-has NOT begun.
+**Internal Slice 3B COMPLETE / ACCEPTED by ChatGPT final adjudication:**
+**STAGE-3 EXTENDED TIMELINE ANALYTICS — SLICE 3B FINAL PASS**;
+**BLOCKER 0 / REQUIRED 0 / OPTIONAL 5**.
+**Slice 3 — Read-only accepted-evidence report / static visualization COMPLETE /
+ACCEPTED as a whole. NEXT: Slice 4 — Acceptance / Closeout.** Slice 4 has not begun;
+the milestone remains ACTIVE pending closeout.
 
 Accepted Slice-1 implementation: [`timeline_analytics.py`](../../timeline_analytics.py)
 and [`tests/test_timeline_analytics.py`](../../tests/test_timeline_analytics.py).
@@ -55,8 +55,9 @@ Verification: **67 complete telemetry-repository PASS; 238 bounded relevant
 regressions PASS; total 305 PASS**. Four existing solver/Engine execution tests
 were intentionally excluded; **no full suite is claimed**.
 
-The exact four official artifact hashes were reauthenticated. Fresh Stage-2 and
-Stage-3 run identity/coverage checks **PASS**; both runs are official-eligible exact
+During internal Slice 3A, the exact four official artifact hashes were
+reauthenticated. Fresh Stage-2 and Stage-3 run identity/coverage checks **PASS**;
+both runs are official-eligible exact
 `EXPERT_GENERAL_V1 [0,100000)`. Model C authentication and **100,000 paired-prefix
 identity validation PASS**. Independently read outcomes reconcile:
 **WW 37,702 / WL 0 / LW 0 / LL 62,298**. The independently derived WW index set
@@ -64,7 +65,92 @@ exactly equals the authenticated G4 paired-delta index set: **37,702; missing 0;
 extra 0**. Official artifact bytes/timestamps remained unchanged; no new sidecars
 remained. No solver, Engine, board generator, official benchmark rerun, detailed
 selected-action loading, report/chart generation, Human data or ZiNi holdout was
-used. No actual official exemplar ID has been selected or disclosed.
+used. No actual official exemplar ID was selected or disclosed during Slice 3A.
+
+### Accepted Slice-3B implementation and evidence
+
+Accepted implementation: [`scripts/stage3_timeline_report.py`](../../scripts/stage3_timeline_report.py)
+and [`tests/test_stage3_timeline_report.py`](../../tests/test_stage3_timeline_report.py).
+Final focused verification after R-1: **34 report + 29 representative selector +
+28 timeline analytics + 67 telemetry repository = 158 PASS**; **174 bounded
+regressions PASS; reported total 332 PASS**. Four existing solver/Engine execution
+tests were intentionally excluded. **No full-suite claim yet**; full source
+regression remains a Slice-4 gate.
+
+Independent Claude Code read-only audit inspected the actual pre-correction
+report, independently authenticated/recomputed selection, and independently
+reproduced all **1,508 action rows and 16 SVGs with 0 mismatch**. Claude's audit
+verdict was **BLOCKER 0 / REQUIRED 0**, with OPTIONAL O-1..O-6. ChatGPT promoted
+O-1 to REQUIRED R-1 for report provenance/semantic wording. R-1 was subsequently
+corrected and accepted; **O-1 is SATISFIED**. Remaining dispositions:
+
+| Finding | Disposition |
+| --- | --- |
+| O-2 — Chart common-scale change | DEFER |
+| O-3 — Parse-hashed-bytes TOCTOU hardening | NONBLOCKING |
+| O-4 — Selected-action SQL-test hardening | DEFER |
+| O-5 — Additional synthetic failure branches | DEFER |
+| O-6 — Extended run/git/config provenance | DEFER to Slice 4 / closeout if useful |
+
+Final accepted **deterministically selected category exemplars**, not a
+statistically representative sample:
+
+| Category | Accepted `game_index` | Exact WW `delta_us` |
+| --- | --- | --- |
+| Maximum Stage-3 WW advantage | 73758 | -27009085 |
+| Median-delta WW exemplar | 73024 | -16487355 |
+| Closest-to-zero Stage-3 WW advantage | 93557 | -7877513 |
+| Stage-2 WW advantage | EMPTY | — |
+| Exact WW tie | EMPTY | — |
+| WL | EMPTY | — |
+| LW | EMPTY | — |
+| LL | 1 | — |
+
+Lower-median zero-based rank: **18850 of 37702 WW**. Unique selected games:
+**1, 73024, 73758, 93557**. No visual/manual substitution occurred. These results
+are fixed; acceptance/closeout does not replace or rerun exemplar selection.
+
+| Game | Outcomes | Stage-2 / Stage-3 actions | Stage-2 / Stage-3 Model C us | Reconciliation / interpretation |
+| --- | --- | --- | --- | --- |
+| 1 | LL | 4 / 4 | 720354 / 720354 | Termination costs only, not time-to-win |
+| 73024 | WW | 313 / 207 | 53655374 / 37168019 | Exact G4 delta -16487355 us |
+| 73758 | WW | 320 / 177 | 57365067 / 30355982 | Exact G4 delta -27009085 us |
+| 93557 | WW | 279 / 204 | 47034727 / 39157214 | Exact G4 delta -7877513 us |
+
+Final corrected report:
+`results/stage3-timeline-analytics/20261017T113748060625Z-99dafa139703/report.html`.
+Size: **470817 bytes**. SHA-256:
+`b680e5bdc1e4598bee089a4def67728bb851758f7c4de75a4b9cdc62f57f72d3`.
+Corrected report-script SHA-256:
+`50f9d88e80b971596de59eadae1bb3bf96ee0d4da88d252684a7cbf0a15eb387`.
+The earlier
+`results/stage3-timeline-analytics/20261017T103913620889Z-54082dd14870/report.html`
+is preserved as historical pre-final 3B evidence. Both reports are ignored local
+evidence; **do not overwrite or delete either report**. No further report
+generation is part of this acceptance record.
+
+Accepted R-1 semantics: both displayed solver timelines are **post-hoc Model C
+evaluations of persisted actions**. Stage 2 did not natively declare Model C;
+Stage-3 collection declared it and checked its native total, but the reduced
+persisted report events retain no native per-action costs/cursor fields.
+Stage-2 compute scope is analysis; Stage-3 scope is analysis plus planning;
+historical scopes/environments differ and no cross-stage compute-speed winner
+is inferred. Stage-2 guess candidate count is exact-minimum-risk tie multiplicity /
+final selector pool size. Official Stage-3 candidate count remains unavailable,
+including on guesses. Missing native cursor/action-cost fields, Replay timestamps,
+full probability coordinate maps and chosen plans are not fabricated.
+
+All four official artifact hashes, run/prefix/paired identity and selected WW G4
+deltas revalidated. Official artifact bytes, sizes and modification timestamps
+remained unchanged; no new DB sidecars appeared. No solver, Engine, board
+generation, official 100k rerun, Human data or ZiNi holdout was used.
+
+**Slice 4 — Acceptance / Closeout** will perform final source/report
+reconciliation, relevant frozen regressions, full source regression with
+`C:\venvs\minesweeper\Scripts\python.exe`, final report/document inspection and
+documentation closeout. No GUI/package acceptance is required because no
+production GUI/package surface changed. These gates are pending, not claimed
+complete by Slice-3 acceptance.
 
 Stage-3 V1 / Model C remain **CLOSED / FROZEN**. Same-board Human / Stage-2 /
 Stage-3 Comparison remains **FINAL ACCEPTANCE PASS / CLOSED**. ZiNi Improvement
@@ -84,16 +170,16 @@ retain their accepted responsibilities and behavior.
 
 Slice 0 drafting was documentation-only; that temporary task authorization is
 historical. **Slices 0, 1 and 2 are COMPLETE / ACCEPTED by ChatGPT final review.**
-**Slice 3 — Read-only accepted-evidence report / static visualization is ACTIVE,
-not complete. Internal Slice 3A is COMPLETE / ACCEPTED.** The **NEXT / now
-authorized scope is Internal Slice 3B**, within the accepted module and acceptance
-boundaries below: apply the accepted selector, load only unique selected games'
-detailed action streams, and build the read-only report/static visualization.
+**Slice 3 — Read-only accepted-evidence report / static visualization, including
+internal Slices 3A and 3B, is COMPLETE / ACCEPTED.** The **NEXT scope is Slice 4 —
+Acceptance / Closeout**, within the unchanged module and acceptance boundaries
+below. Preserve the accepted selection and both report runs; do not substitute
+exemplars or generate another report as part of this documentation update.
 
-**Slice 3 is the FIRST scope authorized to authenticate and read the exact accepted
+**Slice 3 was the FIRST scope authorized to authenticate and read the exact accepted
 official Stage-2/Stage-3 DB and G4 artifacts.** Internal Slice 3A completed that
-preflight without exemplar selection. **Internal Slice 3B is the FIRST point where
-actual official exemplar IDs may be selected and disclosed**, using **only the
+preflight without exemplar selection. **Internal Slice 3B first selected and
+disclosed actual official exemplar IDs**, using **only the
 already-accepted deterministic rules**.
 No visual/manual substitution is allowed after selection. **Read-only/report
 output only:** do not rerun the official 100k or any solver, and do not modify
@@ -101,7 +187,7 @@ frozen official evidence. Slices 0–2 accessed no official evidence and selecte
 no actual official exemplar IDs.
 
 The implementation feature branch `feature/stage3-timeline-analytics` remains
-active and must remain active **before and during Slice-3 implementation**.
+active for Slice-4 acceptance/closeout.
 Live Git remains authoritative for current branch/HEAD state; do not infer a
 commit identity from this document.
 
@@ -111,10 +197,10 @@ The roadmap is:
    Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 1 — Pure timeline analytics COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT final review.
-   Slice 3 — Read-only accepted-evidence report / static visualization ACTIVE, not complete.
+   Slice 3 — Read-only accepted-evidence report / static visualization COMPLETE / ACCEPTED.
    Internal Slice 3A — accepted-evidence opening correction / preflight COMPLETE / ACCEPTED.
-   NEXT — Internal Slice 3B: accepted selection, unique selected-game action loading,
-   and read-only report/static visualization; first actual exemplar selection/disclosure.
+   Internal Slice 3B — selection / selected-action report COMPLETE / ACCEPTED.
+   NEXT — Slice 4: Acceptance / Closeout.
 7. **LATER — first actual Extended algorithm research**.
 
 ## 2. Authoritative input family and artifact identity
@@ -249,8 +335,8 @@ roadmap name may continue to say **대표 보드**, subject to this limitation.
 
 These rules must be declared and accepted **before actual exemplar game IDs are
 selected**. No actual official exemplar IDs were selected or disclosed in Slices
-0–2 or internal Slice 3A; Slice 2 used bounded synthetic fixtures only. Internal Slice 3B is
-the first authorized point for real accepted-evidence selection and disclosure.
+0–2 or internal Slice 3A; Slice 2 used bounded synthetic fixtures only. Internal
+Slice 3B completed the first authorized real accepted-evidence selection and disclosure.
 No visually interesting replacement is permitted
 afterward. The first outcome letter below is Stage 2; the second is Stage 3.
 
@@ -365,8 +451,9 @@ not authorization to implement an extension.
 ## 8. Module and ownership boundary
 
 `timeline_analytics.py` and `representative_boards.py` are implemented and accepted
-in Slices 1 and 2 respectively. The report entry point remains planned; the
-ownership boundaries are unchanged:
+in Slices 1 and 2 respectively. The report entry point
+[`scripts/stage3_timeline_report.py`](../../scripts/stage3_timeline_report.py) is
+implemented and accepted in Slice 3B; the ownership boundaries are unchanged:
 
 | Component | Responsibility and exclusions |
 | --- | --- |
@@ -429,17 +516,15 @@ analytical values; record rendering details needed to reproduce the display.
 | 0 — Contract | COMPLETE / ACCEPTED by ChatGPT final review. This document and current milestone status establish the accepted contract before implementation or actual exemplar-ID selection. |
 | 1 — Pure timeline analytics | COMPLETE / ACCEPTED by ChatGPT final review. Immutable single-game projection in `timeline_analytics.py` and focused tests in `tests/test_timeline_analytics.py`; 28 focused PASS and 257 bounded existing regressions PASS, with four execution cases intentionally excluded and no full-suite claim. No actual exemplar IDs selected. |
 | 2 — Pure deterministic exemplar selection | COMPLETE / ACCEPTED by ChatGPT final review. `representative_boards.py` and `tests/test_representative_boards.py`; 29 focused, 28 Slice-1 timeline and 75 bounded comparison/statistics regressions PASS, total 132 PASS. Selector fixtures were synthetic/in-memory; no official evidence access or actual official exemplar-ID selection. |
-| 3 — Read-only accepted-evidence report / static visualization | ACTIVE, not complete. Internal 3A is accepted; internal 3B is next. No official 100k/solver rerun or frozen-evidence modification. |
+| 3 — Read-only accepted-evidence report / static visualization | COMPLETE / ACCEPTED as a whole, including internal 3A and 3B. No official 100k/solver rerun or frozen-evidence modification. |
 | 3A — Internal opening correction / preflight | COMPLETE / ACCEPTED by ChatGPT final review. Explicit immutable read-only seam and accepted-evidence identity/coverage/pairing/outcome/WW-set checks PASS; 67 repository + 238 bounded regressions = 305 PASS, four execution tests excluded, no full-suite claim. No actual exemplar IDs selected or disclosed. |
-| 3B — Internal selection / selected-action loading / report | NEXT / AUTHORIZED; NOT BEGUN. First actual official exemplar selection/disclosure using only accepted deterministic rules, with no visual/manual substitution. Load detailed actions only for unique selected games and build the read-only report/static visualization. |
-| 4 — Acceptance / closeout | Exact real-evidence reconciliation, relevant frozen regressions, full source regression, report inspection and documentation closeout. |
+| 3B — Internal selection / selected-action loading / report | COMPLETE / ACCEPTED; SLICE 3B FINAL PASS, BLOCKER 0 / REQUIRED 0 / OPTIONAL 5. Fixed selection, selected-only detail loading and corrected static report accepted; 158 focused + 174 bounded regressions = 332 PASS, four execution tests excluded, no full-suite claim yet. |
+| 4 — Acceptance / closeout | NEXT; not begun. Final source/report reconciliation, relevant frozen regressions, full source regression with the approved interpreter, final report/document inspection and documentation closeout. No GUI/package acceptance required for the unchanged production GUI/package surface. |
 
-**Slices 0, 1 and 2 and internal Slice 3A are COMPLETE / ACCEPTED. Slice 3 remains
-ACTIVE, not complete; no actual official exemplar game IDs have been selected or
-disclosed. NEXT / now authorized scope — Internal Slice 3B**, with the implementation
-feature branch remaining active before and during that work. Actual exemplar-ID
-selection/disclosure begins only in 3B under the accepted read-only/report boundary
-and fixed rules. Internal 3A/3B subdivide Slice 3; they do not create new milestones.
+**Slices 0, 1, 2 and 3, including internal Slices 3A and 3B, are COMPLETE /
+ACCEPTED. NEXT — Slice 4: Acceptance / Closeout**, with the implementation
+feature branch remaining active. Preserve accepted exemplar memberships and both
+report runs. Internal 3A/3B subdivide Slice 3; they do not create new milestones.
 Do not mark a slice accepted without its review/evidence.
 Package/native GUI acceptance is conditional on a later GUI/package-surface change,
 not a requirement of this report boundary.
@@ -506,6 +591,6 @@ test, benchmark, package, GUI or real-report acceptance claim.
 - [Historical/provisional extension backlog](../../STAGE3_EXTENSION_BACKLOG.md)
 
 Historical closeouts retain their dated status and evidence. This contract and
-the current handoff/Extended roadmap describe accepted Slices 0/1/2 and internal
-3A, active Slice 3 and next internal 3B without rewriting those closeouts or
-implying later slice acceptance.
+the current handoff/Extended roadmap describe accepted Slices 0–3, including
+internal 3A/3B, and next Slice 4 without rewriting those closeouts or implying
+closeout acceptance.
