@@ -43,14 +43,14 @@ Timeline Analytics qualified implementation/source candidate, accepted on 2026-1
 This qualified implementation identity remains fixed after any later documentation-only
 closeout commit. Live Git is authoritative for current branch/HEAD/integration state.
 Stage-3 Extended remains ACTIVE. Current scope is **Selected Exemplar Board-State
-Reconstruction / Human Interpretation Viewer — Slices 0–2 COMPLETE / ACCEPTED
+Reconstruction / Human Interpretation Viewer — Slices 0–3 COMPLETE / ACCEPTED
 by ChatGPT final review; each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
-**CURRENT / AUTHORIZED: Slice 3 — Standalone Inspection UI**, implementation
-NOT YET BEGUN at this documentation transition. Slice 4 remains NOT BEGUN.
+**CURRENT / AUTHORIZED: Slice 4 — Acceptance / Closeout**, acceptance work
+NOT YET BEGUN at this documentation transition.
 Live Git verified on 2026-10-18: `feature/stage3-exemplar-board-viewer`,
-HEAD `eb52ed43354664e7deee59a10749c6c9afb95fe7` (accepted Slice-1 implementation commit),
+HEAD `35069307ce34b53f8e42a850e29ee810ccd4a1a7` (accepted Slice-2 implementation commit),
 main baseline `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
-Accepted Slice-2 source/tests are untracked at this transition; no Slice-2 commit
+Accepted Slice-3 source/launcher/tests are untracked at this transition; no Slice-3 commit
 identity is assigned. Live Git remains authoritative for later state.
 The viewer supports domain interpretation before separately scoping algorithm research.
 
@@ -177,12 +177,12 @@ Commit identities were read from live Git.
 ## 4. Current milestone
 
 **ACTIVE — Selected Exemplar Board-State Reconstruction / Human Interpretation
-Viewer. Slices 0–2 — FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review
+Viewer. Slices 0–3 — FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review
 (2026-10-18); each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
 See the [viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md).
 ChatGPT accepted the preceding **DISCOVERY PASS; BLOCKER 0 / REQUIRED 0**.
-**CURRENT / AUTHORIZED — Slice 3: Standalone Inspection UI**.
-Implementation is **NOT YET BEGUN** at this
+**CURRENT / AUTHORIZED — Slice 4: Acceptance / Closeout**.
+Acceptance work is **NOT YET BEGUN** at this
 documentation transition. No algorithm research is authorized.
 
 Accepted Slice-1 implementation:
@@ -229,6 +229,45 @@ Source hashes/sizes/mtimes remained unchanged after close; no sidecars or output
 artifacts. No solver/planner, selection, G4 or report rerun. This is accepted
 Slice-2 implementation evidence, **not final viewer closeout**.
 
+**Slice 3 — Standalone Inspection UI COMPLETE / ACCEPTED by ChatGPT final review;
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Accepted implementation:
+[`exemplar_board_viewer_ui.py`](../exemplar_board_viewer_ui.py),
+[`scripts/exemplar_board_viewer.py`](../scripts/exemplar_board_viewer.py) and
+[`tests/test_exemplar_board_viewer_ui.py`](../tests/test_exemplar_board_viewer_ui.py).
+Reported verification: **33 viewer UI + 4 launcher + 34 accepted evidence-loader +
+32 accepted reconstruction + 6 selected Stage-3 visualizer rendering + 5 selected
+ZiNi Explorer rendering + 2 adapted unchanged Same-board navigation assertions =
+116 PASS; 0 failures / 0 errors / 0 skips**. The two Same-board assertions used
+hand-recorded synthetic setup instead of solver-producing setup; assertions were
+unchanged. No full-suite claim; no verification is rerun by this transition.
+
+Accepted bounded real-evidence offscreen smoke loaded exact accepted Stage-2 /
+Stage-3 sources through the Slice-2 API: **2 DB opens during initial load only,
+4 board generations, 8 selected-action streams, 8 timeline projections and
+8 reconstructions**. All eight game/solver pairs were inspected at initial,
+middle and final states. Before/After, Answer Overlay ON/OFF, first-action and
+LOSS terminal presentation were exercised; same-target and long-transition
+presentation were checked where present. After initial load, navigation/selection/
+toggles caused **0 DB opens / 0 board generations / 0 Engine reconstructions /
+0 timeline projections / 0 solver/planner/selection calls**. Source hashes/sizes/
+mtimes were unchanged; no sidecars or output artifacts. This is accepted Slice-3
+evidence, **not final native/manual acceptance**.
+
+Accepted boundary: standalone Qt UI, explicit accepted-loader-based launcher,
+one board, four fixed exemplars, Stage-2/Stage-3 selector and eight independent
+remembered inspection positions. First/Previous/Next/Last, integer frame slider,
+direct frame/action entry and Before/After use immutable frames. Default-OFF
+HIDDEN-only Answer Overlay, exact terminal Engine feedback, new-safe AFTER-only
+highlighting and recorded previous/current target geometry remain separate; no
+first-action origin path is fabricated. All 17 classic Counters rows remain;
+historical Time/Est Time/3BV/s/CPS are unavailable and Efficiency/IOE/Thrp/Corr use
+accepted final facts. **ZiNi/ZNE/ZNT rows remain; calculation is DEFERRED** because
+there is no narrow public reusable job owner. Only immediate reference numbers
+are omitted; the private main-UI lifecycle is not duplicated. Separate Model C
+and exact persisted Action Context remain. No DB/Engine/reconstruction on
+navigation, autoplay/timer/modeled animation, shared/common playhead, normalized
+progress, solver/planner/selection/ranking, algorithm research or main-app integration.
+
 The accepted consolidated Slice-0 contract includes the following unchanged scope:
 
 - Fixed admission: **73758, 73024, 93557, 1**, with frozen Timeline memberships.
@@ -251,7 +290,8 @@ The accepted consolidated Slice-0 contract includes the following unchanged scop
   separately reported public-seam need, never private-state duplication.
 - Keep exact existing Efficiency/IOE/Thrp/Corr formulas and ZiNi availability:
   bounded best-so-far ZiNi reference when available on WON/LOST; ZNE/ZNT only WON.
-  ZiNi calculation belongs to the later reference/UI owner, not Slice 1 or navigation.
+  Optional ZiNi calculation belongs to a separate reference/UI owner, not Slice 1
+  or navigation; the accepted Slice-3 implementation explicitly defers calculation.
   Mechanical active/wasted and ZiNi are references, not strategic/speed judgments.
 - Stage 2 selects **OPEN/FLAG on HIDDEN only**; CHORD absence is structural, not
   a decision to reject CHORD. Stage 3 recorded action space is OPEN/FLAG/CHORD.
@@ -270,18 +310,15 @@ The accepted consolidated Slice-0 contract includes the following unchanged scop
   No solver/planner/runner calls; official artifacts unchanged. This is discovery
   evidence, not viewer implementation acceptance; Slice 0 does not repeat the proof.
 - Slices: **0 Contract → 1 Pure reconstruction → 2 Accepted-evidence loader →
-  3 Standalone inspection UI → 4 Acceptance / Closeout**. Slices 0–2 COMPLETE /
-  ACCEPTED; Slice 3 CURRENT / AUTHORIZED, implementation NOT YET BEGUN;
-  Slice 4 NOT BEGUN. Slices 0–2 technical semantics remain frozen.
-- Slice 3 may implement a thin standalone Qt UI with explicit two-DB path
-  launch/load through accepted `load_accepted_exemplar_evidence()` only; one board,
-  fixed exemplar and solver selectors, independent remembered positions per pair,
-  First/Previous/Next/Last, integer frame slider, direct frame/action entry and
-  Before/After. Keep default-OFF HIDDEN-only Answer Overlay, previous/current
-  targets and selected action-target transition, factual board/solver references,
-  Classic Counters/final-run summary, Model C and action context. Optional existing
-  bounded ZiNi reference lifecycle remains limited to the accepted contract.
-- Slice 3 excludes direct DB reads outside the loader, regeneration/reconstruction
+  3 Standalone inspection UI → 4 Acceptance / Closeout**. Slices 0–3 COMPLETE /
+  ACCEPTED; Slice 4 CURRENT / AUTHORIZED, acceptance work NOT YET BEGUN.
+  Slices 0–3 technical semantics remain frozen.
+- Future Slice 4 owns independent audit disposition if performed, focused/frozen
+  verification, final source regression scope, bounded real four-case proof,
+  source preservation checks, bounded native/manual presentation inspection,
+  final closeout documentation and milestone closure adjudication. This transition
+  performs no Slice-4 acceptance and adds no viewer features; the milestone stays ACTIVE.
+- The accepted viewer excludes direct DB reads outside the loader, regeneration/reconstruction
   on navigation, solver/planner or selection/ranking reruns, arbitrary browsing,
   shared/common playhead, normalized progress, synchronized side-by-side, autoplay
   and modeled-time animation. No fabricated historical elapsed time or cursor
@@ -782,13 +819,14 @@ full source **2184 PASS**, zero failures/errors/skips; no GUI/package gate requi
 See the [closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md) and
 [accepted contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md).
 
-**CURRENT / NEXT / AUTHORIZED:** Slice 3 — Standalone Inspection UI under
+**CURRENT / NEXT / AUTHORIZED:** Slice 4 — Acceptance / Closeout under
 the [accepted viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md),
-following Slices 0–2 COMPLETE / ACCEPTED by ChatGPT final review; each
-BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice-3 implementation is NOT YET BEGUN
-at this documentation transition; Slice 4 NOT BEGUN. Its one-board, independent
-inspection/navigation and default-OFF Answer Overlay boundary is recorded in
-the current milestone section. Loading uses the accepted Slice-2 API only;
+following Slices 0–3 COMPLETE / ACCEPTED by ChatGPT final review; each
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice-4 acceptance work is NOT YET BEGUN
+at this documentation transition. Future acceptance responsibilities are recorded
+in the current milestone section; no acceptance or new feature work is performed
+by this transition. The accepted one-board inspection/navigation and default-OFF
+Answer Overlay boundaries remain frozen. Loading uses the accepted Slice-2 API only;
 navigation performs no DB/Engine reconstruction. No solver/planner execution,
 new selection/ranking, arbitrary-ID browsing or official 100k rerun.
 The viewer supports human/domain
@@ -799,7 +837,8 @@ is authorized. Timeline has no remaining technical gate; Extended remains ACTIVE
 Preserve fixed category memberships, both report runs and official evidence.
 No visual/manual substitution, official 100k/solver rerun or frozen-evidence change.
 Human Replay/Mouse Trace adapters remain deferred. The standalone viewer Qt
-surface is now authorized for Slice 3, but implementation has not begun.
+surface is COMPLETE / ACCEPTED in Slice 3; final native/manual acceptance remains
+with Slice 4.
 No new Model C, database/schema or telemetry is authorized. Read live Git for current
 branch/HEAD state; later documentation commits do not replace qualified source identity.
 
@@ -846,10 +885,10 @@ Natural dependency roadmap — not a rigid chronological schedule:
    Internal Slice 3B — selection / selected-action report COMPLETE / ACCEPTED.
    Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.
 7. **ACTIVE — interpretation support:** Selected Exemplar Board-State Reconstruction /
-   Human Interpretation Viewer; **Slices 0–2 COMPLETE / ACCEPTED by ChatGPT final review;
-   each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 3 CURRENT / AUTHORIZED —
-   Standalone Inspection UI**; implementation NOT YET BEGUN at this transition.
-   Slice 4 NOT BEGUN. This supports evidence-guided
+   Human Interpretation Viewer; **Slices 0–3 COMPLETE / ACCEPTED by ChatGPT final review;
+   each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 4 CURRENT / AUTHORIZED —
+   Acceptance / Closeout**; acceptance work NOT YET BEGUN at this transition.
+   This supports evidence-guided
    human/domain interpretation of fixed exemplars/report before choosing/specifying
    the first actual Extended algorithm research direction. Actual algorithm research
    requires separate explicit scope/specification; no candidate policy is adopted.
@@ -890,8 +929,9 @@ Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the closed milestones, including Timeline
 Analytics with Slices 0–4 and internal 3A/3B accepted, from the viewer's accepted
-Slice-0 contract, Slice-1 reconstruction and Slice-2 loader, with Slice 3 authorized
-for domain interpretation before separately scoped algorithm
+Slice-0 contract, Slice-1 reconstruction, Slice-2 loader and Slice-3 standalone UI,
+with Slice 4 authorized for acceptance/closeout but not yet begun. These support
+domain interpretation before separately scoped algorithm
 research. Arbitrary native Stage-3
 seeks still rebuild from index 0; incremental forward is implemented,
 while arbitrary-seek caching is deferred.
@@ -906,7 +946,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
-- [Selected Exemplar Board-State Viewer — Slices 0–2 accepted; Slice 3 authorized](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
+- [Selected Exemplar Board-State Viewer — Slices 0–3 accepted; Slice 4 authorized](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
 - [Timeline Analytics closeout — FINAL ACCEPTANCE PASS / CLOSED](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
 - [Timeline Analytics contract — Slices 0–4 accepted](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
 - [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)
@@ -1065,8 +1105,9 @@ Frozen V1/Model C, official 100k, Same-board CLOSED, ZiNi CLOSED 및 미개봉 f
 Human은 DEFER이며 Human/Replay/solver trace의 clock/authority를 합치지 않습니다.
 CURRENT: Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer.
 Discovery PASS / BLOCKER 0 / REQUIRED 0 수용.
-Slices 0–2 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.
-각 slice BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice 4 NOT BEGUN.
+Slices 0–3 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.
+각 slice BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice 4 CURRENT / AUTHORIZED;
+acceptance work NOT YET BEGUN at this documentation transition.
 Contract: docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md.
 Accepted Slice-1 files: exemplar_board_reconstruction.py / tests/test_exemplar_board_reconstruction.py.
 Verification: 32 reconstruction + 28 timeline + 27 Engine + 4 board analyzer + 9 Replay player = 100 PASS;
@@ -1089,25 +1130,45 @@ Slice 2는 exact authentication/immutable lifecycle/one run per role/fixed-four 
 exact enum/Fraction/None/zero, admitted-board fingerprint gate, frozen Model C/project_timeline,
 accepted reconstruct_board composition을 구현했습니다. Immutable bundle에 live DB/Engine은 없습니다.
 G4/HTML runtime input, selection/ranking/arbitrary browsing, Qt/ZiNi/solver/planner/research는 제외했습니다.
-CURRENT / AUTHORIZED: Slice 3 — Standalone Inspection UI.
-이 documentation transition 시점에 implementation NOT YET BEGUN. 이 turn은 문서 상태 전환만 수행했습니다.
-Slice 3는 accepted loader API를 통한 explicit two-DB launch/load와 one-board Qt inspection,
-independent remembered positions, frame/action navigation, Before/After, default-OFF HIDDEN-only overlay,
-target markers/transition, factual references/Counters/Model C/action context를 구현할 수 있습니다.
-Optional bounded ZiNi reference lifecycle은 accepted contract 범위만 허용됩니다.
+Accepted Slice-3 files: exemplar_board_viewer_ui.py / scripts/exemplar_board_viewer.py /
+tests/test_exemplar_board_viewer_ui.py. Slice 3 COMPLETE / ACCEPTED by ChatGPT final review;
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.
+Verification: 33 viewer UI + 4 launcher + 34 evidence-loader + 32 reconstruction +
+6 Stage-3 rendering + 5 ZiNi Explorer rendering + 2 adapted unchanged Same-board
+navigation assertions = 116 PASS; 0 failures / 0 errors / 0 skips; no full-suite claim.
+Accepted offscreen smoke: exact sources loaded through Slice-2 API; initial load only
+2 DB opens / 4 board generations / 8 selected-action streams / 8 projections / 8 reconstructions.
+All 8 pairs initial/middle/final, Before/After, Answer Overlay ON/OFF, first-action/LOSS terminal,
+same-target/long-transition where present were exercised. After load, navigation/selection/toggles:
+0 DB opens / 0 board generation / 0 Engine reconstruction / 0 timeline projection /
+0 solver/planner/selection calls. Source hashes/sizes/mtimes unchanged; no sidecars/output artifacts.
+이는 accepted Slice-3 evidence이며 final native/manual acceptance가 아닙니다.
+Accepted UI: explicit accepted-loader launcher, one board, fixed four/Stage2/Stage3 selectors,
+eight independent remembered positions, First/Previous/Next/Last, integer frame slider,
+direct frame/action entry, Before/After, default-OFF HIDDEN-only overlay, exact terminal feedback,
+AFTER-only new-safe highlighting, recorded targets/transition, no first-action origin path,
+17-row Counters with unavailable historical time/rates and accepted final ratios,
+separate Model C / exact Action Context. ZiNi/ZNE/ZNT rows retained; calculation DEFERRED.
+No public reusable ZiNi job owner exists; only immediate reference numbers are omitted.
+CURRENT / AUTHORIZED: Slice 4 — Acceptance / Closeout.
+이 documentation transition 시점에 acceptance work NOT YET BEGUN. 이 turn은 문서 상태 전환만 수행했습니다.
+Future Slice 4: independent audit disposition if performed, focused/frozen verification,
+final source regression scope, bounded real four-case proof, source preservation checks,
+bounded native/manual presentation inspection, final closeout documentation and closure adjudication.
+새 viewer feature나 main-app integration을 추가하지 않습니다.
 Direct DB reads outside loader, navigation regeneration/reconstruction, solver/planner/selection/ranking,
 arbitrary browsing/shared playhead/normalized progress/synchronized side-by-side/autoplay/modeled animation은 금지합니다.
 Historical time/cursor trajectory/speed를 만들거나 route/quality/causal 판단, frozen V1/Model C 변경,
-algorithm research를 하지 않습니다. Slices 0–2 technical semantics는 frozen입니다.
+algorithm research를 하지 않습니다. Slices 0–3 technical semantics는 frozen입니다.
 2026-10-18 확인 branch: feature/stage3-exemplar-board-viewer;
-HEAD: eb52ed43354664e7deee59a10749c6c9afb95fe7 (accepted Slice-1 implementation commit);
+HEAD: 35069307ce34b53f8e42a850e29ee810ccd4a1a7 (accepted Slice-2 implementation commit);
 main baseline: 50a8fee544ed6779dbcd7dd2fbb422c07cce59de. 이후 live Git이 우선합니다.
-Accepted Slice-2 files는 이 전환 시점에 untracked이며 Slice-2 commit SHA를 만들지 않습니다.
+Accepted Slice-3 files는 이 전환 시점에 untracked이며 Slice-3 commit SHA를 만들지 않습니다.
 Admission은 73758/73024/93557/1로 고정하며 selection/ranking/substitution을 하지 않습니다.
 두 accepted DB + tracked fixed identities + frozen Model C가 viewer의 필수 입력입니다.
 G4/HTML은 historical provenance이며 viewer runtime 필수 입력이나 새 G4 인증 주장이 아닙니다.
 독립 immutable frames와 Before/After, Terminal Engine feedback, default-OFF HIDDEN-only Answer Overlay,
-one board + game/solver selector를 명세했습니다. Loader는 COMPLETE / ACCEPTED이며 UI는 아직 구현되지 않았습니다.
+one board + game/solver selector를 보존합니다. Loader와 UI 모두 COMPLETE / ACCEPTED입니다.
 정적 3BV/Ops/isolated는 answer-derived board reference, 최종 Counters는 current Engine
 reconstruction reference입니다. 17개 classic rows를 유지하되 Time/Est Time/3BV/s/CPS는 unavailable.
 Engine public snapshot의 raw totals/completed 3BV와 get_stats의 final formatting을 재사용합니다.
@@ -1120,7 +1181,7 @@ selected action-target arrow/dx/dy/d²는 실제 cursor trajectory가 아니며 
 자동 route-quality/ZiNi-speed-winner 판단 없이 HUMAN domain interpretation만 지원합니다.
 Discovery: 4 fingerprints 일치, 8 streams /1508 actions, status/reveal/explicit-FLAG mismatch 모두 0,
 solver/planner/runner calls 없음, official artifacts 불변. 구현 acceptance로 취급하지 마세요.
-NEXT는 승인된 Slice 3 Standalone Inspection UI이며 새 알고리즘 연구/구현은 별도 명시적 scope/specification 결정이 필요합니다.
+NEXT는 승인된 Slice 4 Acceptance / Closeout이며 새 알고리즘 연구/구현은 별도 명시적 scope/specification 결정이 필요합니다.
 현재 branch/HEAD/integration 상태는 live Git이 authoritative입니다. Closeout은 Git 작업 지시가 아닙니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
 Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
