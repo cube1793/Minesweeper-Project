@@ -154,6 +154,28 @@ Commit identities were read from live Git.
 
 ## 4. Current milestone
 
+**ACTIVE — Representative-board Demonstrations / Timeline Analytics. Slice 0 —
+Contract COMPLETE / ACCEPTED by ChatGPT final review (2026-10-17, Asia/Seoul).**
+ChatGPT adjudicated the read-only discovery **DISCOVERY PASS**. The accepted
+[Timeline Analytics contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
+records the scope and boundaries. **Implementation has NOT begun; no actual
+exemplar game IDs have been selected.** **NEXT / now authorized implementation
+scope — Slice 1: Pure timeline analytics.**
+
+The first implementation is a read-only report from exact accepted official
+Stage-2 / Stage-3 artifacts, with deterministically selected category exemplars
+(not a statistically representative sample), independent completed-action-count
+timelines and bounded static visualization. Human adapters and interactive GUI
+are deferred. No algorithm, Model C, schema or telemetry changes are in scope.
+Slice 1 — Pure timeline analytics is the now-authorized implementation scope,
+but has NOT begun. No actual exemplar IDs may be selected in Slice 1; exemplar
+selection remains in the accepted Slice 2/3 scope. The implementation feature
+branch `feature/stage3-timeline-analytics` must exist and remain active **before
+and during Slice-1 implementation**. Live Git remains authoritative for current
+branch/HEAD state; do not infer a commit identity from this document.
+
+### Closed Same-board baseline — preserved acceptance
+
 **Stage-3 Extended remains ACTIVE. Same-board Human / Stage-2 / Stage-3 Comparison:
 FINAL ACCEPTANCE PASS / CLOSED (2026-10-17, Asia/Seoul).** Slices 0–5 are
 COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B. No Same-board
@@ -479,12 +501,26 @@ remains. On recovery, read live Git for the latest branch, HEAD, remote and merg
 state. The qualified acceptance SHA is historical identity, not a permanent
 branch tip or an instruction to perform further Git integration.
 
-**NEXT CANDIDATE / NOT BEGUN — Representative-board demonstrations / Timeline
-Analytics.** Stage-3 Extended remains ACTIVE; first actual Extended algorithm
-research remains LATER. This roadmap is not implementation authorization. No
-analytics, new physical model, Comparison solver cursor overlay or provenance
-schema expansion begins with this closeout. Read live Git/source/tests before
-assuming any later work has begun.
+**ACTIVE — Representative-board Demonstrations / Timeline Analytics. Slice 0 —
+Contract COMPLETE / ACCEPTED by ChatGPT final review.** The
+[accepted contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md) governs
+the next step. **Implementation has NOT begun. No actual exemplar game IDs have
+been selected. NEXT / now authorized implementation scope — Slice 1: Pure
+timeline analytics** over existing solver telemetry. No actual exemplar IDs may
+be selected in Slice 1. Exemplar selection remains in the accepted Slice 2/3
+scope: pure selector work in Slice 2 and accepted-evidence selection/report
+integration in Slice 3.
+
+Exact accepted Stage-2 DB, Stage-3 DB, G4 comparison and G4 result hashes are
+required before real-evidence report acceptance. Reuse accepted G4 deltas, load
+only selected games' detailed actions, and never rerun the official 100k. Human
+Replay/Mouse Trace adapters and production Qt UI are deferred; no new algorithm,
+Model C, database/schema or telemetry is authorized. First actual Extended
+algorithm research remains LATER. The implementation feature branch
+`feature/stage3-timeline-analytics` must exist and remain active **before and
+during Slice-1 implementation**. Live Git remains authoritative for current
+branch/HEAD state. Slice-0 drafting restrictions are historical task boundaries,
+not the post-acceptance implementation authorization.
 
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
 Human Mouse Trace is accepted actual sampled Live-board pointer presentation data,
@@ -501,8 +537,9 @@ may show PyInstaller's uncaught-exception dialog rather than exit immediately.
 There is no false success; existing Cancel/close ownership/reaping remains.
 No new evidence promotes F-2 to required work.
 
-Preserve historical and new acceptance artifacts. This milestone created no
-release/tag/ZIP. Do not reopen ZiNi work or consume its unopened final quality holdout.
+Preserve historical and new acceptance artifacts. The Same-board closeout created
+no release/tag/ZIP; Timeline Slice 0 adds no generated evidence. Do not reopen ZiNi
+work or consume its unopened final quality holdout.
 
 ---
 
@@ -518,7 +555,10 @@ Natural dependency roadmap — not a rigid chronological schedule:
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
 5. **CLOSED:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0–5
    COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
-6. **NEXT CANDIDATE / NOT BEGUN:** Representative-board demonstrations / Timeline Analytics.
+6. **ACTIVE:** Representative-board Demonstrations / Timeline Analytics —
+   Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
+   Implementation has NOT begun. NEXT / now authorized implementation scope —
+   Slice 1: Pure timeline analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
 
@@ -556,8 +596,8 @@ Boundaries:
 
 Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
-the Extended README distinguishes the finally adjudicated closed foundation,
-the next unstarted roadmap candidate and later planning. Arbitrary Stage-3 seeks still rebuild from
+the Extended README distinguishes the closed milestones, active Timeline Analytics
+Slice-0 contract and later algorithm research. Arbitrary Stage-3 seeks still rebuild from
 index 0; incremental forward is implemented, while arbitrary-seek caching is deferred.
 
 ---
@@ -570,6 +610,7 @@ Start from:
 - `docs/stage3-v1/README.md`
 - `docs/stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md`
 - `docs/stage3-extended/README.md`
+- [Timeline Analytics contract — Slice 0 accepted](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
 - [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)
 - [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)
 - [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)
@@ -677,9 +718,22 @@ O-1 DEFER/evidence-triggered, O-2 SATISFIED, O-3 NONBLOCKING, O-4 DEFER.
 Comparison slider track page-step는 OPTIONAL/DEFER; Human trace/solver synthetic 표현 분리는 KEEP.
 Same-board 구현 또는 기술 수용 작업은 남아 있지 않습니다. 수용 SHA는 역사적 identity이며
 현재 Git 통합 상태나 후속 Git 작업 지시를 의미하지 않습니다.
-Stage-3 Extended는 ACTIVE; NEXT CANDIDATE는 Representative-board demonstrations /
-Timeline Analytics (NOT BEGUN), 첫 Extended algorithm research는 LATER입니다.
-이 closeout은 analytics, 새 물리 모델, Comparison solver overlay, provenance schema 확장을 승인하지 않습니다.
+Stage-3 Extended는 ACTIVE; Representative-board Demonstrations / Timeline Analytics는
+ACTIVE이며 Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review입니다.
+Read-only discovery는 ChatGPT DISCOVERY PASS입니다.
+Contract: docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md.
+구현은 시작하지 않았고 실제 exemplar game ID도 선택하지 않았습니다.
+NEXT / now authorized implementation scope — Slice 1: Pure timeline analytics.
+Slice 1은 승인된 다음 구현 범위이지만 아직 시작하지 않았습니다.
+Slice 1에서는 실제 exemplar ID를 선택하면 안 됩니다. Exemplar selection은 accepted
+Slice 2/3 범위이며 Slice 2는 pure selector, Slice 3는 accepted-evidence selection/report 통합입니다.
+implementation feature branch feature/stage3-timeline-analytics는 Slice 1 구현 시작 전부터
+구현 중에도 존재하고 active 상태를 유지해야 합니다. 현재 branch/HEAD 상태는 live Git이
+authoritative이며 이 문서에서 commit identity를 추정하지 마세요.
+첫 구현 입력은 exact accepted official Stage-2/Stage-3 DB 및 G4 evidence뿐입니다.
+계약의 네 artifact hash를 real-report 수용 전에 검증하고, official 100k는 재실행하지 않습니다.
+독립 completed-action-count timeline과 static report이며 Human adapter/interactive GUI는 DEFER입니다.
+새 algorithm/Model C/schema/telemetry는 범위 밖이고 첫 Extended algorithm research는 LATER입니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
 Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
 FLAG는 R press, OPEN은 L release, Mode-B CHORD는 현재 target의 첫 release입니다.

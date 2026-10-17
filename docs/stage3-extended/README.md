@@ -6,6 +6,12 @@ Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen bas
 ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
 **Stage-3 Extended는 ACTIVE**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
 
+현재 milestone은 **Representative-board Demonstrations / Timeline Analytics —
+ACTIVE**다. Read-only discovery는 ChatGPT **DISCOVERY PASS**이며
+[계약](STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)은 **Slice 0 — Contract COMPLETE / ACCEPTED
+by ChatGPT final review**다. **구현은 시작하지 않았고 실제 exemplar game ID도 선택하지 않았다.**
+**NEXT / now authorized implementation scope — Slice 1: Pure timeline analytics.**
+
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
 자동 검증과 실제 Windows worker/profile/startup, 사용자의 packaged interactive
@@ -130,12 +136,55 @@ results retain their original identity and meaning.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
 5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison (Slices 0–5 COMPLETE / ACCEPTED).
-6. **NEXT CANDIDATE / NOT BEGUN** — Representative-board demonstrations / Timeline Analytics.
+6. **ACTIVE** — Representative-board Demonstrations / Timeline Analytics;
+   Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
+   Implementation has NOT begun. NEXT / now authorized implementation scope —
+   Slice 1: Pure timeline analytics.
 7. **LATER** — First actual Extended algorithm research.
 
 For the last item, nearest exact-minimum-risk guess selection among equal-risk
 candidates using movement cost remains a candidate, not an adopted policy or
 authorization to modify V1. External screen-recording tools remain the default.
+
+## Representative-board Demonstrations / Timeline Analytics — ACTIVE
+
+**Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review
+(2026-10-17, Asia/Seoul).** Read-only discovery received ChatGPT **DISCOVERY PASS**.
+The [accepted contract](STAGE3_TIMELINE_ANALYTICS_CONTRACT.md) records the scope.
+**Implementation has NOT begun. No actual exemplar game IDs have been selected.**
+**NEXT / now authorized implementation scope — Slice 1: Pure timeline analytics.**
+
+The first implementation uses only exact accepted official Stage-2 / Stage-3
+benchmark artifacts. All four accepted DB/G4 artifact hashes must be verified
+before real-evidence report acceptance. Fixed selection rules identify
+**deterministically selected category exemplars**, not a statistically
+representative sample (the roadmap term 대표 보드 retains this limitation).
+Rules must be accepted before selecting IDs; no replacement for visual variety.
+
+Each solver's horizontal coordinate is its own completed semantic action count:
+origin 0, persisted `action_index i` maps to `i + 1`. Equal counts do not imply
+equal progress. Frozen Model C supplies a common measurement scale, not a shared
+execution clock. Compute timings remain separate diagnostics; paired speed
+interpretation is WW-only, while LOSS cost is cost through termination.
+
+Planned boundaries are pure `timeline_analytics.py`, pure
+`representative_boards.py`, and a thin read-only evidence/report entry point under
+`scripts/`. The report includes independent tables and bounded static timelines,
+with output in a new ignored `results/` location. No production Qt UI or new
+plotting dependency merely for convenience. Human/native-decision adapters and
+interactive GUI are deferred; no algorithm, Model C, schema or telemetry changes.
+The official 100k and unopened ZiNi holdout remain untouched.
+
+Slices: **0 Contract → 1 Pure timeline analytics → 2 Pure deterministic exemplar
+selection → 3 Read-only accepted-evidence report / static visualization →
+4 Acceptance / closeout**. Slice 0 is accepted; Slice 1 has not begun.
+The now-authorized implementation scope is **Slice 1 — Pure timeline analytics**.
+No actual exemplar IDs may be selected in Slice 1. Exemplar selection remains in
+the accepted Slice 2/3 scope: pure selector work in Slice 2 and accepted-evidence
+selection/report integration in Slice 3. The implementation feature branch
+`feature/stage3-timeline-analytics` must exist and remain active **before and
+during Slice-1 implementation**. Live Git remains authoritative for current
+branch/HEAD state; do not infer a commit identity from this document.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 
@@ -294,11 +343,15 @@ normal drag/seek is correct. Separate Human recorded trace versus Stage-3
 Visualizer synthetic cursor authorities are **KEEP**; Comparison adds no solver
 cursor overlay. No general Human-versus-solver speed winner is established.
 
-Stage-3 Extended remains ACTIVE; frozen V1 / Model C remain unchanged. **NEXT
-CANDIDATE / NOT BEGUN — Representative-board demonstrations / Timeline Analytics**.
-First actual Extended algorithm research remains LATER. Closure authorizes no
-analytics implementation, new physical model, Comparison solver overlay or
-provenance schema expansion. No Same-board implementation work remains.
+Stage-3 Extended remains ACTIVE; frozen V1 / Model C remain unchanged.
+**Representative-board Demonstrations / Timeline Analytics is ACTIVE — Slice 0 —
+Contract COMPLETE / ACCEPTED by ChatGPT final review**, under the
+[accepted contract](STAGE3_TIMELINE_ANALYTICS_CONTRACT.md). Implementation has NOT begun.
+No actual exemplar game IDs have been selected. **NEXT / now authorized
+implementation scope — Slice 1: Pure timeline analytics.**
+First actual Extended algorithm research remains LATER. The Same-board closeout
+itself authorizes no analytics implementation, new physical model, Comparison
+solver overlay or provenance schema expansion. No Same-board implementation work remains.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe
