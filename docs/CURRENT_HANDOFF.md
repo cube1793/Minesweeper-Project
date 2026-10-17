@@ -160,8 +160,11 @@ ChatGPT adjudicated the read-only discovery **DISCOVERY PASS**. The accepted
 [Timeline Analytics contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
 records the scope and boundaries. **Slice 1 — Pure timeline analytics COMPLETE /
 ACCEPTED by ChatGPT final review: SLICE 1 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
-No actual exemplar game IDs have been selected. **NEXT / now authorized scope —
-Slice 2: Pure deterministic exemplar selection.** Slice 2 has NOT begun.
+**Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT
+final review: SLICE 2 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
+No actual official exemplar game IDs have been selected. **NEXT / now authorized
+scope — Slice 3: Read-only accepted-evidence report / static visualization.**
+Slice 3 has NOT begun.
 
 Accepted Slice-1 implementation: [`timeline_analytics.py`](../timeline_analytics.py)
 and [`tests/test_timeline_analytics.py`](../tests/test_timeline_analytics.py).
@@ -174,16 +177,28 @@ artifact was accessed, no actual exemplar IDs were selected, and no solver runs,
 benchmarks, builds or GUI were used. Frozen V1 / Model C are unchanged;
 Human remains deferred.
 
+Accepted Slice-2 implementation: [`representative_boards.py`](../representative_boards.py)
+and [`tests/test_representative_boards.py`](../tests/test_representative_boards.py).
+Verification: **29 focused PASS; 28 Slice-1 timeline PASS; 75 bounded existing
+comparison/statistics regressions PASS. Total reported verification: 132 PASS.**
+All Slice-2 selector fixtures were synthetic/in-memory; existing regressions used
+synthetic SQLite fixtures. No official DB/G4 artifact was accessed and no actual
+official exemplar ID was selected. No solver, benchmark, build, GUI or full-suite
+execution occurred. Frozen V1 / Model C are unchanged; Human remains deferred.
+
 The first implementation is a read-only report from exact accepted official
 Stage-2 / Stage-3 artifacts, with deterministically selected category exemplars
 (not a statistically representative sample), independent completed-action-count
 timelines and bounded static visualization. Human adapters and interactive GUI
 are deferred. No algorithm, Model C, schema or telemetry changes are in scope.
-Slice 2 implements/tests the deterministic selector using **bounded synthetic
-fixtures only**. **No actual official exemplar game IDs may be selected in
-Slice 2; real accepted-evidence selection remains Slice 3.** The implementation
+**Slice 3 is the FIRST scope authorized to authenticate and read the exact accepted
+official Stage-2/Stage-3 DB and G4 artifacts.** Actual official exemplar IDs may
+first be selected there, using only the already-accepted deterministic rules;
+no visual/manual substitution is allowed after selection. **Read-only/report
+output only:** do not rerun the official 100k or any solver, and do not modify
+frozen official evidence. The implementation
 feature branch `feature/stage3-timeline-analytics` remains active and must remain
-active **before and during Slice-2 implementation**. Live Git remains authoritative
+active **before and during Slice-3 implementation**. Live Git remains authoritative
 for current branch/HEAD state; do not infer a commit identity from this document.
 
 ### Closed Same-board baseline — preserved acceptance
@@ -513,15 +528,15 @@ remains. On recovery, read live Git for the latest branch, HEAD, remote and merg
 state. The qualified acceptance SHA is historical identity, not a permanent
 branch tip or an instruction to perform further Git integration.
 
-**ACTIVE — Representative-board Demonstrations / Timeline Analytics. Slice 0 —
-Contract and Slice 1 — Pure timeline analytics COMPLETE / ACCEPTED by ChatGPT
-final review.** The
+**ACTIVE — Representative-board Demonstrations / Timeline Analytics. Slices 0, 1
+and 2 COMPLETE / ACCEPTED by ChatGPT final review.** The
 [accepted contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md) governs
-the next step. **No actual exemplar game IDs have been selected. NEXT / now
-authorized scope — Slice 2: Pure deterministic exemplar selection.** Slice 2
-has NOT begun and implements/tests only the pure selector with bounded synthetic
-fixtures. **No actual official exemplar IDs may be selected in Slice 2.** Real
-accepted-evidence selection/report integration remains Slice 3.
+the next step. **No actual official exemplar game IDs have been selected. NEXT /
+now authorized scope — Slice 3: Read-only accepted-evidence report / static
+visualization.** Slice 3 has NOT begun. It is the first scope authorized to
+authenticate/read exact accepted official DB/G4 artifacts and select actual
+official exemplar IDs using only accepted rules. No visual/manual substitution,
+official 100k/solver rerun or frozen-evidence modification; read-only/report output only.
 
 Exact accepted Stage-2 DB, Stage-3 DB, G4 comparison and G4 result hashes are
 required before real-evidence report acceptance. Reuse accepted G4 deltas, load
@@ -530,7 +545,7 @@ Replay/Mouse Trace adapters and production Qt UI are deferred; no new algorithm,
 Model C, database/schema or telemetry is authorized. First actual Extended
 algorithm research remains LATER. The implementation feature branch
 `feature/stage3-timeline-analytics` remains active and must remain active **before
-and during Slice-2 implementation**. Live Git remains authoritative for current
+and during Slice-3 implementation**. Live Git remains authoritative for current
 branch/HEAD state. Slice-0 drafting restrictions are historical task boundaries,
 not the post-acceptance implementation authorization.
 
@@ -570,8 +585,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 6. **ACTIVE:** Representative-board Demonstrations / Timeline Analytics —
    Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 1 — Pure timeline analytics COMPLETE / ACCEPTED by ChatGPT final review.
-   NEXT / now authorized scope — Slice 2: Pure deterministic exemplar selection
-   using bounded synthetic fixtures only; real exemplar selection remains Slice 3.
+   Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT final review.
+   NEXT / now authorized scope — Slice 3: Read-only accepted-evidence report /
+   static visualization; first authorized official-evidence access and selection.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
 
@@ -610,7 +626,7 @@ Boundaries:
 Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the closed milestones, active Timeline Analytics
-with Slices 0/1 accepted and Slice 2 next, and later algorithm research. Arbitrary
+with Slices 0/1/2 accepted and Slice 3 next, and later algorithm research. Arbitrary
 Stage-3 seeks still rebuild from index 0; incremental forward is implemented,
 while arbitrary-seek caching is deferred.
 
@@ -735,21 +751,31 @@ Same-board 구현 또는 기술 수용 작업은 남아 있지 않습니다. 수
 Stage-3 Extended는 ACTIVE; Representative-board Demonstrations / Timeline Analytics는
 ACTIVE이며 Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review입니다.
 Slice 1 — Pure timeline analytics도 COMPLETE / ACCEPTED by ChatGPT final review입니다.
-최종 판정은 SLICE 1 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0입니다.
+Slice-1 판정은 SLICE 1 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0입니다.
+Slice 2 — Pure deterministic exemplar selection도 COMPLETE / ACCEPTED by ChatGPT final review입니다.
+최종 Slice-2 판정은 SLICE 2 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0입니다.
 Read-only discovery는 ChatGPT DISCOVERY PASS입니다.
 Contract: docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md.
 Slice-1 구현: timeline_analytics.py, tests/test_timeline_analytics.py.
-검증: 28 focused PASS; 257 bounded existing regressions PASS.
+Slice-1 검증: 28 focused PASS; 257 bounded existing regressions PASS.
 기존 solver/Engine 실행 사례 4개는 의도적으로 제외했으며 full suite PASS 주장이 아닙니다.
 Projection/focused tests는 DB 없이 in-memory synthetic facts만 사용했고,
 기존 regressions는 synthetic SQLite fixtures만 사용했습니다. Official benchmark DB/artifact 접근,
 실제 exemplar ID 선택, solver 실행, benchmark/build/GUI 실행은 없었습니다.
 Frozen V1 / Model C는 변경되지 않았으며 Human은 계속 DEFER입니다.
-NEXT / now authorized scope — Slice 2: Pure deterministic exemplar selection.
-Slice 2는 아직 시작하지 않았으며 bounded synthetic fixtures만으로 selector를 구현/검증합니다.
-Slice 2에서도 실제 official exemplar game ID를 선택하면 안 됩니다.
-실제 accepted-evidence selection/report 통합은 Slice 3에 남아 있습니다.
-implementation feature branch feature/stage3-timeline-analytics는 현재 active이며 Slice 2 구현
+Slice-2 구현: representative_boards.py, tests/test_representative_boards.py.
+Slice-2 검증: 29 focused PASS; 28 Slice-1 timeline PASS;
+75 bounded existing comparison/statistics regressions PASS; total reported verification 132 PASS.
+Slice-2 selector fixtures는 모두 synthetic/in-memory였고 기존 regressions는 synthetic SQLite fixtures였습니다.
+Official DB/G4 artifact 접근이나 실제 official exemplar ID 선택은 없었습니다.
+Solver/benchmark/build/GUI/full-suite 실행은 없었으며 Frozen V1 / Model C는 그대로입니다. Human은 DEFER입니다.
+NEXT / now authorized scope — Slice 3: Read-only accepted-evidence report / static visualization.
+Slice 3는 아직 시작하지 않았습니다. Exact accepted official Stage-2/Stage-3 DB와 G4 artifacts를
+authenticate/read하고 실제 official exemplar ID를 선택할 수 있는 첫 범위입니다.
+이미 수용된 deterministic rules만 사용하며 선택 후 visual/manual substitution은 금지합니다.
+Official 100k 또는 solver를 재실행하거나 frozen official evidence를 수정하지 않습니다.
+Read-only/report output만 허용합니다.
+implementation feature branch feature/stage3-timeline-analytics는 현재 active이며 Slice 3 구현
 시작 전부터 구현 중에도 active 상태를 유지해야 합니다. 현재 branch/HEAD 상태는 live Git이
 authoritative이며 이 문서에서 commit identity를 추정하지 마세요.
 첫 구현 입력은 exact accepted official Stage-2/Stage-3 DB 및 G4 evidence뿐입니다.
