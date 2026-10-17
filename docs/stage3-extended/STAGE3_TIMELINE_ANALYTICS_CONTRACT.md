@@ -1,6 +1,7 @@
 # Representative-board Demonstrations / Timeline Analytics — Contract
 
-Status: **ACTIVE — Slices 0–3 COMPLETE / ACCEPTED; NEXT: Slice 4 — Acceptance / Closeout.**
+Status: **FINAL ACCEPTANCE PASS / CLOSED — Slices 0–4 COMPLETE / ACCEPTED.**
+Stage-3 Extended remains **ACTIVE**; only this milestone closes.
 Date: **2026-10-17 (Asia/Seoul)**.
 ChatGPT adjudication of the preceding read-only discovery:
 **STAGE-3 EXTENDED TIMELINE ANALYTICS — DISCOVERY PASS**.
@@ -22,8 +23,13 @@ ACCEPTED by ChatGPT final review.** Final adjudication:
 **STAGE-3 EXTENDED TIMELINE ANALYTICS — SLICE 3B FINAL PASS**;
 **BLOCKER 0 / REQUIRED 0 / OPTIONAL 5**.
 **Slice 3 — Read-only accepted-evidence report / static visualization COMPLETE /
-ACCEPTED as a whole. NEXT: Slice 4 — Acceptance / Closeout.** Slice 4 has not begun;
-the milestone remains ACTIVE pending closeout.
+ACCEPTED as a whole.**
+**Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.** Final adjudication:
+**STAGE-3 EXTENDED TIMELINE ANALYTICS — FINAL ACCEPTANCE PASS / CLOSED**;
+**BLOCKER 0 / REQUIRED 0**. See the [final closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md).
+Qualified implementation/source candidate: `4c488e033dd045f1c203ff500d824cfaffb7cc67`
+(`feat: add timeline analytics report`); a later documentation-only commit does
+not replace this qualified identity.
 
 Accepted Slice-1 implementation: [`timeline_analytics.py`](../../timeline_analytics.py)
 and [`tests/test_timeline_analytics.py`](../../tests/test_timeline_analytics.py).
@@ -74,8 +80,8 @@ and [`tests/test_stage3_timeline_report.py`](../../tests/test_stage3_timeline_re
 Final focused verification after R-1: **34 report + 29 representative selector +
 28 timeline analytics + 67 telemetry repository = 158 PASS**; **174 bounded
 regressions PASS; reported total 332 PASS**. Four existing solver/Engine execution
-tests were intentionally excluded. **No full-suite claim yet**; full source
-regression remains a Slice-4 gate.
+tests were intentionally excluded. **No full-suite result was claimed at Slice 3B**;
+final Slice-4 regression results are recorded below.
 
 Independent Claude Code read-only audit inspected the actual pre-correction
 report, independently authenticated/recomputed selection, and independently
@@ -90,7 +96,7 @@ corrected and accepted; **O-1 is SATISFIED**. Remaining dispositions:
 | O-3 — Parse-hashed-bytes TOCTOU hardening | NONBLOCKING |
 | O-4 — Selected-action SQL-test hardening | DEFER |
 | O-5 — Additional synthetic failure branches | DEFER |
-| O-6 — Extended run/git/config provenance | DEFER to Slice 4 / closeout if useful |
+| O-6 — Extended run/git/config provenance | DEFER / NONBLOCKING |
 
 Final accepted **deterministically selected category exemplars**, not a
 statistically representative sample:
@@ -145,12 +151,35 @@ deltas revalidated. Official artifact bytes, sizes and modification timestamps
 remained unchanged; no new DB sidecars appeared. No solver, Engine, board
 generation, official 100k rerun, Human data or ZiNi holdout was used.
 
-**Slice 4 — Acceptance / Closeout** will perform final source/report
-reconciliation, relevant frozen regressions, full source regression with
-`C:\venvs\minesweeper\Scripts\python.exe`, final report/document inspection and
-documentation closeout. No GUI/package acceptance is required because no
-production GUI/package surface changed. These gates are pending, not claimed
-complete by Slice-3 acceptance.
+### Final Slice-4 acceptance
+
+**COMPLETE / ACCEPTED; FINAL ACCEPTANCE PASS / CLOSED; BLOCKER 0 / REQUIRED 0.**
+Approved interpreter: `C:\venvs\minesweeper\Scripts\python.exe`, Python 3.12.10,
+64-bit AMD64. Focused/frozen **386 discovered / 386 PASS**, 0 failures/errors/skips,
+6.198 s unittest / 6.935 s process. Full source **2184 discovered / 2184 PASS**,
+0 failures/errors/skips, 141.186 s unittest / 144.019 s process, using
+`C:\venvs\minesweeper\Scripts\python.exe -B -m unittest discover -s tests -v`.
+Ordinary tests included solver/Engine execution; no official benchmark/evidence
+rerun occurred. Source/report reconciliation and final report/document inspection
+passed. No fresh package/build/native GUI gate was required or run because no
+production GUI/package surface changed.
+
+Ignored local evidence: `results/stage3-timeline-analytics-closeout/20261017T131224859Z/`
+contains `focused-tests.txt`, `full-tests.txt` and `acceptance-summary.json`.
+All four official artifact and frozen Model C hashes reauthenticated; artifact
+bytes/timestamps and both reports were unchanged, with no DB sidecars. The final
+report's generation HEAD `c32e34c...` / `git_dirty=True` is accepted provenance:
+its script SHA matches the exact script committed in qualified candidate `4c488e...`.
+Full identities and report preservation are in the [closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md).
+No Claude re-audit after R-1 is claimed or required; ChatGPT/Codex verified its
+wording-only correction through source/tests/report. O-6 remains DEFER / NONBLOCKING:
+current artifact/run/model/script provenance is sufficient and does not justify
+regenerating an accepted report.
+
+**NEXT — evidence-guided human/domain interpretation of the accepted fixed
+exemplars and report**, to choose/specify the first actual Extended algorithm
+research direction. Any algorithm change or research implementation requires a
+separate explicit scope/specification decision; none is authorized by closeout.
 
 Stage-3 V1 / Model C remain **CLOSED / FROZEN**. Same-board Human / Stage-2 /
 Stage-3 Comparison remains **FINAL ACCEPTANCE PASS / CLOSED**. ZiNi Improvement
@@ -171,10 +200,11 @@ retain their accepted responsibilities and behavior.
 Slice 0 drafting was documentation-only; that temporary task authorization is
 historical. **Slices 0, 1 and 2 are COMPLETE / ACCEPTED by ChatGPT final review.**
 **Slice 3 — Read-only accepted-evidence report / static visualization, including
-internal Slices 3A and 3B, is COMPLETE / ACCEPTED.** The **NEXT scope is Slice 4 —
-Acceptance / Closeout**, within the unchanged module and acceptance boundaries
-below. Preserve the accepted selection and both report runs; do not substitute
-exemplars or generate another report as part of this documentation update.
+internal Slices 3A and 3B, is COMPLETE / ACCEPTED.** **Slice 4 is COMPLETE /
+ACCEPTED; this milestone is FINAL ACCEPTANCE PASS / CLOSED.** The module and
+technical boundaries below remain unchanged. Preserve accepted selection and
+both report runs. Next work is human/domain interpretation to specify a research
+direction; actual algorithm implementation requires separate explicit scope approval.
 
 **Slice 3 was the FIRST scope authorized to authenticate and read the exact accepted
 official Stage-2/Stage-3 DB and G4 artifacts.** Internal Slice 3A completed that
@@ -186,22 +216,23 @@ output only:** do not rerun the official 100k or any solver, and do not modify
 frozen official evidence. Slices 0–2 accessed no official evidence and selected
 no actual official exemplar IDs.
 
-The implementation feature branch `feature/stage3-timeline-analytics` remains
-active for Slice-4 acceptance/closeout.
-Live Git remains authoritative for current branch/HEAD state; do not infer a
-commit identity from this document.
+The qualified implementation was accepted on `feature/stage3-timeline-analytics`.
+Live Git remains authoritative for current branch/HEAD and integration state;
+a later documentation-only commit does not replace the qualified candidate.
 
 The roadmap is:
 
-6. **ACTIVE — Representative-board Demonstrations / Timeline Analytics**:
+6. **CLOSED — Representative-board Demonstrations / Timeline Analytics**:
    Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 1 — Pure timeline analytics COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 3 — Read-only accepted-evidence report / static visualization COMPLETE / ACCEPTED.
    Internal Slice 3A — accepted-evidence opening correction / preflight COMPLETE / ACCEPTED.
    Internal Slice 3B — selection / selected-action report COMPLETE / ACCEPTED.
-   NEXT — Slice 4: Acceptance / Closeout.
-7. **LATER — first actual Extended algorithm research**.
+   Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.
+7. **NEXT — evidence-guided interpretation leading to first actual Extended
+   algorithm research**. Interpret the fixed exemplars/report before selecting
+   a direction; implementation requires a separate explicit scope/specification decision.
 
 ## 2. Authoritative input family and artifact identity
 
@@ -518,13 +549,13 @@ analytical values; record rendering details needed to reproduce the display.
 | 2 — Pure deterministic exemplar selection | COMPLETE / ACCEPTED by ChatGPT final review. `representative_boards.py` and `tests/test_representative_boards.py`; 29 focused, 28 Slice-1 timeline and 75 bounded comparison/statistics regressions PASS, total 132 PASS. Selector fixtures were synthetic/in-memory; no official evidence access or actual official exemplar-ID selection. |
 | 3 — Read-only accepted-evidence report / static visualization | COMPLETE / ACCEPTED as a whole, including internal 3A and 3B. No official 100k/solver rerun or frozen-evidence modification. |
 | 3A — Internal opening correction / preflight | COMPLETE / ACCEPTED by ChatGPT final review. Explicit immutable read-only seam and accepted-evidence identity/coverage/pairing/outcome/WW-set checks PASS; 67 repository + 238 bounded regressions = 305 PASS, four execution tests excluded, no full-suite claim. No actual exemplar IDs selected or disclosed. |
-| 3B — Internal selection / selected-action loading / report | COMPLETE / ACCEPTED; SLICE 3B FINAL PASS, BLOCKER 0 / REQUIRED 0 / OPTIONAL 5. Fixed selection, selected-only detail loading and corrected static report accepted; 158 focused + 174 bounded regressions = 332 PASS, four execution tests excluded, no full-suite claim yet. |
-| 4 — Acceptance / closeout | NEXT; not begun. Final source/report reconciliation, relevant frozen regressions, full source regression with the approved interpreter, final report/document inspection and documentation closeout. No GUI/package acceptance required for the unchanged production GUI/package surface. |
+| 3B — Internal selection / selected-action loading / report | COMPLETE / ACCEPTED; SLICE 3B FINAL PASS, BLOCKER 0 / REQUIRED 0 / OPTIONAL 5. Fixed selection, selected-only detail loading and corrected static report accepted; 158 focused + 174 bounded regressions = 332 PASS, four execution tests excluded, no full-suite claim at Slice 3B. |
+| 4 — Acceptance / closeout | COMPLETE / ACCEPTED. Final source/report/document reconciliation and frozen/full regressions PASS: 386 focused / 2184 full, zero failures/errors/skips. FINAL ACCEPTANCE PASS / CLOSED. No fresh package/build/native GUI gate required or run. |
 
-**Slices 0, 1, 2 and 3, including internal Slices 3A and 3B, are COMPLETE /
-ACCEPTED. NEXT — Slice 4: Acceptance / Closeout**, with the implementation
-feature branch remaining active. Preserve accepted exemplar memberships and both
-report runs. Internal 3A/3B subdivide Slice 3; they do not create new milestones.
+**Slices 0–4, including internal Slices 3A and 3B, are COMPLETE / ACCEPTED;
+FINAL ACCEPTANCE PASS / CLOSED.** Stage-3 Extended remains ACTIVE. Preserve
+accepted exemplar memberships and both report runs. Internal 3A/3B subdivide
+Slice 3; they do not create new milestones.
 Do not mark a slice accepted without its review/evidence.
 Package/native GUI acceptance is conditional on a later GUI/package-surface change,
 not a requirement of this report boundary.
@@ -582,6 +613,7 @@ test, benchmark, package, GUI or real-report acceptance claim.
 
 ## 12. References and preserved decisions
 
+- [Final closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
 - [Current handoff](../CURRENT_HANDOFF.md)
 - [Extended roadmap](README.md)
 - [V1 final adjudication and artifact identities](../stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
@@ -591,6 +623,6 @@ test, benchmark, package, GUI or real-report acceptance claim.
 - [Historical/provisional extension backlog](../../STAGE3_EXTENSION_BACKLOG.md)
 
 Historical closeouts retain their dated status and evidence. This contract and
-the current handoff/Extended roadmap describe accepted Slices 0–3, including
-internal 3A/3B, and next Slice 4 without rewriting those closeouts or implying
-closeout acceptance.
+the current handoff/Extended roadmap record accepted Slices 0–4, including
+internal 3A/3B, and the closed Timeline milestone without rewriting historical
+closeouts. Next work is interpretation; no new algorithm implementation is authorized.

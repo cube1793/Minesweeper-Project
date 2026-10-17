@@ -725,7 +725,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Representative-board demonstrations / Timeline Analytics는 NEXT CANDIDATE / NOT BEGUN, 첫 실제 Extended algorithm research는 LATER다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Representative-board Demonstrations / Timeline Analytics는 FINAL ACCEPTANCE PASS / CLOSED다. 다음은 수용된 고정 Timeline exemplars/report의 human/domain 해석으로 첫 실제 Extended algorithm research 방향을 선택·명세하는 단계다. 실제 알고리즘 연구/구현은 별도의 명시적 scope/specification 결정이 필요하다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -735,12 +735,15 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 
 현재 기능에 포함되지 않은 개선 후보다.
 
-Same-board Comparison은 **FINAL ACCEPTANCE PASS / CLOSED**다. 다음 roadmap 후보는
-**Representative-board demonstrations / Timeline Analytics — NEXT CANDIDATE / NOT BEGUN**이며
-첫 실제 Extended algorithm research는 LATER다. Human Mouse Trace는
-[수용된 계약](#human-mouse-trace)을 유지한다. 이 closeout은 analytics 구현, 새로운
-solver 정책, Model C refit, Comparison solver cursor overlay나 provenance schema
-확장을 승인하지 않는다. 기존 Stage-3 synthetic cursor는 계속 별도 presentation이다.
+Same-board Comparison과 **Representative-board Demonstrations / Timeline Analytics**는
+**FINAL ACCEPTANCE PASS / CLOSED**다. Stage-3 Extended 자체는 **ACTIVE**다.
+다음은 수용된 고정 Timeline exemplars/report의 human/domain 해석으로 첫 실제
+Extended algorithm research 방향을 선택·명세하는 단계다. Closeout만으로 새로운
+알고리즘 구현이나 solver 정책은 승인되지 않으며, 실제 알고리즘 연구/구현은 별도의
+명시적 scope/specification 결정이 필요하다. Human Mouse Trace는
+[수용된 계약](#human-mouse-trace)을 유지한다. Model C refit, Comparison solver cursor
+overlay나 provenance schema 확장도 승인된 것이 아니다. 기존 Stage-3 synthetic cursor는
+계속 별도 presentation이다.
 
 - Live 파생 통계 계산기, Replay controller와 ZiNi worker 관리 서비스를 분리한다.
 - UI 표시 formatter와 계산 모델의 경계를 정리하고, exact analysis의 비동기 실행·취소 방식을 검토한다.

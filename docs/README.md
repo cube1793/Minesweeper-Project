@@ -67,15 +67,19 @@ Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation (2026-10-15).
 4. **CLOSED** — Human Mouse Trace / Path Visualization (2026-10-16).
 5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison (2026-10-17).
-6. **NEXT CANDIDATE / NOT BEGUN** — Representative-board demonstrations / Timeline Analytics.
-7. **LATER** — First actual Extended algorithm research.
+6. **CLOSED** — Representative-board Demonstrations / Timeline Analytics (Slices 0–4 COMPLETE / ACCEPTED).
+7. **NEXT** — Evidence-guided interpretation leading to first actual Extended algorithm research.
+   고정 exemplar/report의 human/domain 해석으로 연구 방향을 선택·명세합니다.
+   실제 알고리즘 변경/연구 구현은 별도의 명시적 scope/specification 결정이 필요합니다.
 
 Human Mouse Trace는 Live 보드의 실제 event-driven pointer samples와 action markers를
 기록하고 종료 후 또는 Replay에서 선택적으로 표시한다. Board-local Qt logical pixels와
 독립 trace clock을 사용하며 Replay v2가 별도 trace 모델을 attachment로 운반한다.
 v1은 trace-free로 계속 읽을 수 있다. Physical gesture fidelity와 성능 hardening을
 포함한 최종 package 및 사용자 native 수용은 PASS다. Same-board Comparison도 Slice 0–5
-수용을 완료했다. 다음 roadmap candidate인 Timeline Analytics는 시작하지 않았으며 구현 승인이 아니다.
+수용을 완료했다. Timeline Analytics도 **FINAL ACCEPTANCE PASS / CLOSED**이며
+Slices 0–4 (internal 3A/3B 포함)를 수용했다. 다음은 고정 evidence의 해석 단계로,
+새 알고리즘이 이미 승인되거나 구현되었다는 뜻이 아니다.
 OS-global hook, physical-model calibration/refit과 advanced path
 analytics는 이번 수용 범위가 아니다.
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
@@ -85,6 +89,8 @@ calibration evidence가 아니다.
 Modeled-Time은 기록된 duration을 사용하는 비영속 presentation이다. Index 기본 모드를
 유지하며 synthetic cursor의 직선 smoothstep은 실제 OS 궤적이나 Model C 변경이 아니다.
 
+- [Timeline Analytics closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md): FINAL ACCEPTANCE PASS / CLOSED; qualified source `4c488e0`, 386 focused / 2184 full PASS, 고정 exemplars/report와 해석 한계.
+- [Timeline Analytics contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md): Slices 0–4 COMPLETE / ACCEPTED; 독립 action-count timeline, frozen Model C와 deterministic category selection 경계.
 - [Same-board Comparison closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md): 최종 candidate `a59d0d9`, 916 focused / 2085 full PASS, fresh package·실제 worker lifecycle, 사용자 A–L PASS와 비차단 UX 처분.
 - [Same-board Comparison contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md): 수용된 layout/admission/실행/metric/playback 경계; FINAL ACCEPTANCE PASS / CLOSED.
 - [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md): Slice 1–3 commit, 최종 source tests, fresh package/profile/worker, 사용자 native GUI A–K PASS와 보존 경계.
