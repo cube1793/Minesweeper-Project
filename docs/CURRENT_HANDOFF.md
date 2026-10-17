@@ -45,13 +45,23 @@ closeout commit. Live Git is authoritative for current branch/HEAD/integration s
 Stage-3 Extended remains ACTIVE. Current scope is **Selected Exemplar Board-State
 Reconstruction / Human Interpretation Viewer — Slices 0–3 COMPLETE / ACCEPTED
 by ChatGPT final review; each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
-**CURRENT / AUTHORIZED: Slice 4 — Acceptance / Closeout**, acceptance work
-NOT YET BEGUN at this documentation transition.
-Live Git verified on 2026-10-18: `feature/stage3-exemplar-board-viewer`,
-HEAD `35069307ce34b53f8e42a850e29ee810ccd4a1a7` (accepted Slice-2 implementation commit),
-main baseline `50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
-Accepted Slice-3 source/launcher/tests are untracked at this transition; no Slice-3 commit
-identity is assigned. Live Git remains authoritative for later state.
+**CURRENT / AUTHORIZED: Slice 4 — Acceptance / Closeout.**
+Independent pre-closeout audit is complete and the required production
+correction has been accepted. Final Slice-4 acceptance gates remain pending.
+Live Git verified on 2026-10-18 (Asia/Seoul), before this documentation refresh:
+branch `feature/stage3-exemplar-board-viewer`, HEAD
+`2c9ba42fb394ee528a035a85c3a2c8146b86a7f9` — `fix: prevent exemplar viewer focus-loss navigation`.
+The worktree was clean, nothing staged, and HEAD matched the local
+`origin/feature/stage3-exemplar-board-viewer` ref (ahead 0 / behind 0);
+no remote fetch was performed. Main baseline remains
+`50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
+This correction commit is the current live implementation candidate, **not a
+final qualified SHA**. Qualification requires final Slice-4 verification at the
+chosen committed SHA. Live Git overrides these dated recovery facts.
+Previously audited Slice-3 candidate: `d338dcffa212e52efb23af9d9db41841348ade96`;
+Claude verdict CONDITIONAL / BLOCKER 0 / REQUIRED 2. R-1 is now SATISFIED at the
+current correction commit, with 111 correction tests PASS and no remaining
+REQUIRED production correction. R-2 remains the final provenance closeout task.
 The viewer supports domain interpretation before separately scoping algorithm research.
 
 Historical Same-board acceptance baseline, verified on 2026-10-17:
@@ -182,8 +192,41 @@ Viewer. Slices 0–3 — FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final rev
 See the [viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md).
 ChatGPT accepted the preceding **DISCOVERY PASS; BLOCKER 0 / REQUIRED 0**.
 **CURRENT / AUTHORIZED — Slice 4: Acceptance / Closeout**.
-Acceptance work is **NOT YET BEGUN** at this
-documentation transition. No algorithm research is authorized.
+Independent pre-closeout audit is complete and the required production
+correction has been accepted. Final Slice-4 acceptance gates remain pending.
+No algorithm research is authorized.
+
+### Independent pre-closeout audit and accepted R-1 correction
+
+Claude Code independently audited committed Slice-3 candidate
+`d338dcffa212e52efb23af9d9db41841348ade96` (`feat: add exemplar board inspection viewer`).
+Verdict: **INDEPENDENT AUDIT CONDITIONAL — BLOCKER 0 / REQUIRED 2**.
+
+**R-1 SATISFIED — ChatGPT final correction review PASS / ACCEPTED.** The
+`QSpinBox.editingFinished` focus-loss signal could reinterpret a mirrored entry
+value as navigation. Current correction commit `2c9ba42fb394ee528a035a85c3a2c8146b86a7f9`
+(`fix: prevent exemplar viewer focus-loss navigation`) changed only
+`exemplar_board_viewer_ui.py` and `tests/test_exemplar_board_viewer_ui.py`.
+Ordinary focus loss and Tab no longer navigate; initial mode and BEFORE positions
+survive focus changes. Return/Enter commits explicitly exactly once; Go buttons
+use the same helpers. `_Position` remains the navigation authority.
+
+Reported correction verification: **45 tests.test_exemplar_board_viewer_ui +
+32 tests.test_exemplar_board_reconstruction + 34 tests.test_exemplar_board_evidence
+= 111 PASS; 0 failures / 0 errors / 0 skips**. No full suite is claimed or rerun
+by this documentation refresh. **No REQUIRED production correction remains.**
+
+**R-2 OPEN — Slice-4 documentation / provenance closeout task**, not a remaining
+production defect. Closeout must identify the final qualified committed SHA and
+run final Slice-4 verification at that SHA. The earlier Slice-3 verification and
+offscreen evidence were gathered before its commit; they remain accepted slice
+evidence, not retroactively commit-qualified final acceptance evidence.
+
+Audit dispositions: **O-1 label-test hardening, O-2 literal ratio-oracle hardening
+and O-6 neutral ZiNi wording SATISFIED**; **O-3 / O-4 DEFER**; **O-5 DEFER TO
+CLOSEOUT** (define/display Model C seconds as exact microseconds / 1_000_000 in
+the final record); **O-7 / O-8 NO CHANGE**. No Claude re-audit after R-1 is required
+or claimed. Final Slice-4 acceptance gates have not yet been run.
 
 Accepted Slice-1 implementation:
 [`exemplar_board_reconstruction.py`](../exemplar_board_reconstruction.py) and
@@ -311,13 +354,14 @@ The accepted consolidated Slice-0 contract includes the following unchanged scop
   evidence, not viewer implementation acceptance; Slice 0 does not repeat the proof.
 - Slices: **0 Contract → 1 Pure reconstruction → 2 Accepted-evidence loader →
   3 Standalone inspection UI → 4 Acceptance / Closeout**. Slices 0–3 COMPLETE /
-  ACCEPTED; Slice 4 CURRENT / AUTHORIZED, acceptance work NOT YET BEGUN.
+  ACCEPTED; Slice 4 CURRENT / AUTHORIZED, audit complete and R-1 ACCEPTED;
+  final acceptance gates pending.
   Slices 0–3 technical semantics remain frozen.
-- Future Slice 4 owns independent audit disposition if performed, focused/frozen
-  verification, final source regression scope, bounded real four-case proof,
-  source preservation checks, bounded native/manual presentation inspection,
-  final closeout documentation and milestone closure adjudication. This transition
-  performs no Slice-4 acceptance and adds no viewer features; the milestone stays ACTIVE.
+- Remaining Slice-4 gates: focused/frozen verification, final source/full regression,
+  bounded real four-case proof, source preservation checks, bounded native/manual
+  presentation inspection, final closeout documentation including R-2 provenance
+  and milestone closure adjudication. This refresh runs no final acceptance gates
+  and adds no viewer features; the milestone stays ACTIVE.
 - The accepted viewer excludes direct DB reads outside the loader, regeneration/reconstruction
   on navigation, solver/planner or selection/ranking reruns, arbitrary browsing,
   shared/common playhead, normalized progress, synchronized side-by-side, autoplay
@@ -822,10 +866,12 @@ See the [closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md) and
 **CURRENT / NEXT / AUTHORIZED:** Slice 4 — Acceptance / Closeout under
 the [accepted viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md),
 following Slices 0–3 COMPLETE / ACCEPTED by ChatGPT final review; each
-BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice-4 acceptance work is NOT YET BEGUN
-at this documentation transition. Future acceptance responsibilities are recorded
-in the current milestone section; no acceptance or new feature work is performed
-by this transition. The accepted one-board inspection/navigation and default-OFF
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Independent pre-closeout audit is complete;
+R-1 is SATISFIED by the accepted correction (111 PASS). No REQUIRED production
+correction remains; R-2 final committed-SHA qualification/provenance remains OPEN.
+Final Slice-4 acceptance gates remain pending as recorded in the current milestone
+section. This refresh performs no final verification or new feature work.
+The accepted one-board inspection/navigation and default-OFF
 Answer Overlay boundaries remain frozen. Loading uses the accepted Slice-2 API only;
 navigation performs no DB/Engine reconstruction. No solver/planner execution,
 new selection/ranking, arbitrary-ID browsing or official 100k rerun.
@@ -887,7 +933,8 @@ Natural dependency roadmap — not a rigid chronological schedule:
 7. **ACTIVE — interpretation support:** Selected Exemplar Board-State Reconstruction /
    Human Interpretation Viewer; **Slices 0–3 COMPLETE / ACCEPTED by ChatGPT final review;
    each BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**. **Slice 4 CURRENT / AUTHORIZED —
-   Acceptance / Closeout**; acceptance work NOT YET BEGUN at this transition.
+   Acceptance / Closeout**; independent audit complete, R-1 correction ACCEPTED,
+   final acceptance gates pending.
    This supports evidence-guided
    human/domain interpretation of fixed exemplars/report before choosing/specifying
    the first actual Extended algorithm research direction. Actual algorithm research
@@ -930,7 +977,8 @@ the visualization. New Extended documentation belongs in `docs/stage3-extended/`
 the Extended README distinguishes the closed milestones, including Timeline
 Analytics with Slices 0–4 and internal 3A/3B accepted, from the viewer's accepted
 Slice-0 contract, Slice-1 reconstruction, Slice-2 loader and Slice-3 standalone UI,
-with Slice 4 authorized for acceptance/closeout but not yet begun. These support
+with Slice 4 authorized, independent audit complete and R-1 correction accepted;
+final acceptance gates remain pending. These support
 domain interpretation before separately scoped algorithm
 research. Arbitrary native Stage-3
 seeks still rebuild from index 0; incremental forward is implemented,
@@ -1107,7 +1155,20 @@ CURRENT: Selected Exemplar Board-State Reconstruction / Human Interpretation Vie
 Discovery PASS / BLOCKER 0 / REQUIRED 0 수용.
 Slices 0–3 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.
 각 slice BLOCKER 0 / REQUIRED 0 / OPTIONAL 0. Slice 4 CURRENT / AUTHORIZED;
-acceptance work NOT YET BEGUN at this documentation transition.
+Independent pre-closeout audit is complete and the required production
+correction has been accepted. Final Slice-4 acceptance gates remain pending.
+Claude audited d338dcffa212e52efb23af9d9db41841348ade96:
+INDEPENDENT AUDIT CONDITIONAL — BLOCKER 0 / REQUIRED 2.
+R-1 focus-loss navigation defect FIXED / ChatGPT PASS / ACCEPTED / SATISFIED at the current correction commit.
+Correction verification: 45 viewer UI module + 32 reconstruction + 34 evidence-loader = 111 PASS;
+0 failures / 0 errors / 0 skips; no full-suite claim. No REQUIRED production correction remains.
+Ordinary focus loss/Tab do not navigate; initial/BEFORE positions survive;
+Return/Enter commits exactly once, Go uses the same helpers, _Position remains authority.
+O-1/O-2/O-6 SATISFIED; O-3/O-4 DEFER; O-5 DEFER TO CLOSEOUT
+(Model C seconds = exact microseconds / 1_000_000); O-7/O-8 NO CHANGE.
+R-2 OPEN: final closeout must identify a qualified committed SHA and verify at that SHA.
+Earlier precommit Slice-3 evidence is accepted historical slice evidence, not final commit-qualified evidence.
+No Claude re-audit after R-1 is required or claimed.
 Contract: docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md.
 Accepted Slice-1 files: exemplar_board_reconstruction.py / tests/test_exemplar_board_reconstruction.py.
 Verification: 32 reconstruction + 28 timeline + 27 Engine + 4 board analyzer + 9 Replay player = 100 PASS;
@@ -1151,19 +1212,22 @@ AFTER-only new-safe highlighting, recorded targets/transition, no first-action o
 separate Model C / exact Action Context. ZiNi/ZNE/ZNT rows retained; calculation DEFERRED.
 No public reusable ZiNi job owner exists; only immediate reference numbers are omitted.
 CURRENT / AUTHORIZED: Slice 4 — Acceptance / Closeout.
-이 documentation transition 시점에 acceptance work NOT YET BEGUN. 이 turn은 문서 상태 전환만 수행했습니다.
-Future Slice 4: independent audit disposition if performed, focused/frozen verification,
-final source regression scope, bounded real four-case proof, source preservation checks,
-bounded native/manual presentation inspection, final closeout documentation and closure adjudication.
+Independent pre-closeout audit complete / R-1 correction accepted; final Slice-4 gates pending.
+이 refresh는 문서만 갱신하며 final acceptance를 수행하지 않습니다.
+Remaining gates: focused/frozen verification, final source/full regression, bounded real four-case proof,
+source preservation, bounded native/manual inspection, R-2 qualified-SHA provenance and final closeout adjudication.
 새 viewer feature나 main-app integration을 추가하지 않습니다.
 Direct DB reads outside loader, navigation regeneration/reconstruction, solver/planner/selection/ranking,
 arbitrary browsing/shared playhead/normalized progress/synchronized side-by-side/autoplay/modeled animation은 금지합니다.
 Historical time/cursor trajectory/speed를 만들거나 route/quality/causal 판단, frozen V1/Model C 변경,
 algorithm research를 하지 않습니다. Slices 0–3 technical semantics는 frozen입니다.
-2026-10-18 확인 branch: feature/stage3-exemplar-board-viewer;
-HEAD: 35069307ce34b53f8e42a850e29ee810ccd4a1a7 (accepted Slice-2 implementation commit);
+2026-10-18 refresh 전 확인 branch: feature/stage3-exemplar-board-viewer;
+HEAD: 2c9ba42fb394ee528a035a85c3a2c8146b86a7f9
+subject: fix: prevent exemplar viewer focus-loss navigation
+clean worktree / nothing staged / local origin tracking ref와 ahead 0, behind 0; fetch는 수행하지 않았습니다.
 main baseline: 50a8fee544ed6779dbcd7dd2fbb422c07cce59de. 이후 live Git이 우선합니다.
-Accepted Slice-3 files는 이 전환 시점에 untracked이며 Slice-3 commit SHA를 만들지 않습니다.
+이 correction commit은 current implementation candidate이며 final qualified SHA가 아닙니다.
+최종 qualification은 선택된 committed SHA에서 Slice-4 verification을 수행한 뒤 판정합니다.
 Admission은 73758/73024/93557/1로 고정하며 selection/ranking/substitution을 하지 않습니다.
 두 accepted DB + tracked fixed identities + frozen Model C가 viewer의 필수 입력입니다.
 G4/HTML은 historical provenance이며 viewer runtime 필수 입력이나 새 G4 인증 주장이 아닙니다.
