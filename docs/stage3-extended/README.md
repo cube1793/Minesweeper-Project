@@ -129,17 +129,23 @@ results retain their original identity and meaning.
 2. **CLOSED** — Version / Settings Identity Separation.
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
-5. **ACTIVE pending Slice 5 closeout — Slices 0–4 COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B; NEXT Slice 5 (not begun)** — Same-board Human / Stage-2 / Stage-3 Comparison.
-6. **LATER** — Representative-board demonstrations / Timeline Analytics.
+5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison (Slices 0–5 COMPLETE / ACCEPTED).
+6. **NEXT CANDIDATE / NOT BEGUN** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
 For the last item, nearest exact-minimum-risk guess selection among equal-risk
 candidates using movement cost remains a candidate, not an adopted policy or
 authorization to modify V1. External screen-recording tools remain the default.
 
-## Active milestone — Same-board Human / Stage-2 / Stage-3 Comparison
+## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 
-**Slice 0 — contract documentation COMPLETE / ACCEPTED.** The active
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-17, Asia/Seoul).** Slices 0–5 are
+COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B. Qualified source/package
+candidate: `a59d0d963bdf1544a03968163b884342e2797ee0`. The
+[final closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md) records automated and
+user packaged native/manual acceptance, chronology and nonblocking dispositions.
+
+**Slice 0 — contract documentation COMPLETE / ACCEPTED.** The accepted
 [comparison contract](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) governs exact
 same-layout execution, first-open qualification, admission, identity, metric
 separation and acceptance.
@@ -256,24 +262,43 @@ teardown, stopping on Comparison close failure.
 
 Independent Claude Code read-only audit: **BLOCKER 0 / REQUIRED 0 / OPTIONAL 4 /
 PASS**; Claude did not execute/rerun tests. ChatGPT independently reviewed
-source/tests and accepted without production correction. Optional O-1–O-4 remain
-deferred/evidence-triggered or optional Slice 5 work, not blockers; see the
-[handoff acceptance record](../CURRENT_HANDOFF.md#4-current-milestone) for dispositions.
+source/tests and accepted without production correction. Final dispositions:
+O-1 DEFER/evidence-triggered; O-2 SATISFIED by real packaged-worker lifecycle
+acceptance; O-3 NONBLOCKING after 2085/2085 full source PASS; O-4 DEFER (manual
+acceptance did not expose wording confusion). See the
+[closeout audit record](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md#audit-disposition-and-nonblocking-ux).
 
 Reported Slice 4 verification: **55 new 4B (31 launcher / 24 main UI); 32 4A;
 29 Slice 3; 84 Slice 2B; 31 Slice 2A; 29 Slice 1; 370 relevant existing regressions;
 combined reported verification: 630 passed**, zero failures/errors/skips.
 No full suite, fresh package or native GUI acceptance for Slice 4 is claimed.
 
-**NEXT — Slice 5: Acceptance and closeout.** Not begun. Comparison remains ACTIVE,
-not closed. Remaining gates are full source/frozen-boundary regression, fresh
-Windows package and packaged worker verification, native/manual UI and real
-Run/Cancel/reopen/close ownership, compatibility/frozen-evidence preservation and
-final documentation/housekeeping. Feature → main merge/push follows final
-acceptance only; see [handoff next action](../CURRENT_HANDOFF.md#6-next-action).
-Frozen Stage-3 V1 / Model C remain unchanged. Timeline Analytics and Extended
-algorithm research remain deferred and unauthorized. This milestone does not
-establish a general Human-versus-solver speed winner.
+**Slice 5 — Acceptance / Packaging / Native Manual Closeout COMPLETE / ACCEPTED.**
+Final root: `results/same-board-comparison-final-acceptance/20261017-022243/`.
+Source: **916 focused / 2085 full PASS**, zero failures/errors/skips. Fresh-env:
+**2085 discovered / 2060 PASS / 25 permitted optional image/video skips**, zero
+failures/errors. Fresh onedir/windowed build: **exit 0, 63.789 s**; frozen profile
+bytes match. Safe/mined packaged worker results, deterministic source equivalence,
+existing dispatches, native startup and seven real packaged-child lifecycle cases
+passed. The project user reported **A–L PASS** on that exact package, including a
+Human WON / Stage 2 LOST / Stage 3 LOST comparison and full loaded-Replay capture.
+
+The historical `20261017-014937/` root stays **BLOCKED**: nine isolated fixture
+errors, corrected only in `tests/test_replay_statistics.py` at `a59d0d9` after
+accepted Slice-4 commit `d81caa9`. The final acceptance restarted from the new
+clean SHA; raw evidence remains unchanged. Full identity/hashes and manual gates
+are in the [closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md).
+
+Standard Comparison slider track page-step behavior is **OPTIONAL / DEFER**;
+normal drag/seek is correct. Separate Human recorded trace versus Stage-3
+Visualizer synthetic cursor authorities are **KEEP**; Comparison adds no solver
+cursor overlay. No general Human-versus-solver speed winner is established.
+
+Stage-3 Extended remains ACTIVE; frozen V1 / Model C remain unchanged. **NEXT
+CANDIDATE / NOT BEGUN — Representative-board demonstrations / Timeline Analytics**.
+First actual Extended algorithm research remains LATER. Closure authorizes no
+analytics implementation, new physical model, Comparison solver overlay or
+provenance schema expansion. No Same-board implementation work remains.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe

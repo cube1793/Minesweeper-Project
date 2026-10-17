@@ -1,7 +1,8 @@
 # Same-board Human / Stage-2 / Stage-3 Comparison Contract
 
-Status: **Comparison milestone ACTIVE; Slice 0 contract and Slice 1 — Comparison
-domain and admission COMPLETE / ACCEPTED**, following ChatGPT final review.
+Status: **FINAL ACCEPTANCE PASS / CLOSED — Same-board Human / Stage-2 / Stage-3
+Comparison (2026-10-17, Asia/Seoul).** Slice 0 contract and Slice 1 — Comparison
+domain and admission are COMPLETE / ACCEPTED, following ChatGPT final review.
 **Slice 2 — Isolated execution and metrics COMPLETE / ACCEPTED**, including internal
 **Slice 2A — Pure isolated execution and metrics** and **Slice 2B — Worker/process
 integration**, both **COMPLETE / ACCEPTED** by ChatGPT final review.
@@ -9,9 +10,11 @@ integration**, both **COMPLETE / ACCEPTED** by ChatGPT final review.
 **Slice 4 — Read-only comparison UI COMPLETE / ACCEPTED**, including internal
 **4A — Read-only Comparison Result Viewer** and **4B — Launcher + Main UI
 Integration / Lifecycle**, both **COMPLETE / ACCEPTED** by ChatGPT final adjudication.
-**NEXT — Slice 5: Acceptance and closeout**; not begun. The Comparison milestone
-remains ACTIVE pending closeout within ACTIVE Stage-3 Extended; Stage-3 V1 and
-Model C remain frozen. Internal 2A/2B and 4A/4B are not new roadmap milestones.
+**Slice 5 — Acceptance / Packaging / Native Manual Closeout COMPLETE / ACCEPTED.**
+Automated 5A and user packaged native/manual 5B passed; the
+[closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md) records evidence and identity.
+Stage-3 Extended remains ACTIVE; Stage-3 V1 / Model C remain CLOSED / FROZEN.
+Internal 2A/2B and 4A/4B are not new roadmap milestones.
 
 ## 1. Purpose and scope
 
@@ -25,8 +28,9 @@ Slice 0 established the contract. Accepted Slice 1 covers domain/admission;
 accepted Slice 2 covers isolated execution/metrics and worker/process integration.
 Accepted Slice 3 covers pure playback coordination; accepted Slice 4 covers the
 read-only result viewer and captured-source launcher/main-UI lifecycle. Slice 5
-acceptance/closeout remains outstanding; implementation acceptance alone does not
-close the milestone.
+fulfilled the milestone-level acceptance contract with source regression, fresh
+package/worker/lifecycle verification and project-user native/manual A–L PASS.
+This document remains the authoritative accepted technical contract after closure.
 
 ## 2. Authoritative meaning of "same board"
 
@@ -279,6 +283,12 @@ the existing Stage-3 Visualizer. Leave benchmark/evidence artifacts untouched.
 No arbitrary FPS or latency requirement is introduced. Implementation slices
 must provide the relevant evidence before milestone acceptance.
 
+**Fulfilled by Slice 5:** qualified candidate
+`a59d0d963bdf1544a03968163b884342e2797ee0`, final automated root
+`results/same-board-comparison-final-acceptance/20261017-022243/`, and subsequent
+user native/manual A–L PASS. See the [closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)
+for counts, package/profile hashes, historical blocked attempt and nonblocking dispositions.
+
 ## 14. Implementation slices after Slice 0
 
 1. **COMPLETE / ACCEPTED — Comparison domain and admission:** immutable layout/run context, canonical
@@ -303,13 +313,14 @@ must provide the relevant evidence before milestone acceptance.
    captured-source launcher/main integration and UI/lifecycle tests. Internal
    **4A — Read-only Comparison Result Viewer** and **4B — Launcher + Main UI
    Integration / Lifecycle** are **COMPLETE / ACCEPTED**, not new milestones.
-5. **NEXT / NOT BEGUN — Acceptance and closeout:** full source and relevant
+5. **COMPLETE / ACCEPTED — Acceptance and closeout:** full source and relevant
    frozen-boundary regression, fresh Windows package/worker verification,
    native/manual UI/lifecycle acceptance, compatibility and frozen-evidence
    checks, then final documentation/housekeeping. Feature → main merge/push only
    after final acceptance.
 
-Slices 0–4 are COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
-The Comparison milestone remains ACTIVE pending Slice 5 — Acceptance and closeout,
-which has not begun. Timeline Analytics and Extended
-algorithm research remain deferred and unauthorized.
+Slices 0–5 are COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
+The Comparison milestone is FINAL ACCEPTANCE PASS / CLOSED. Stage-3 Extended
+remains ACTIVE. Representative-board demonstrations / Timeline Analytics is the
+NEXT CANDIDATE / NOT BEGUN; implementation and Extended algorithm research remain
+unauthorized by this closeout.

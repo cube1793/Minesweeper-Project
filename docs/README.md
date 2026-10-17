@@ -58,7 +58,7 @@ Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 B
 - [ZiNi 개선 기록 안내](zini-improvement/README.md)
 - [최종 판정](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md): 수용 범위, 정확한 개발 결과, Family A NO-GO와 해석 한계.
 
-## Stage 3 Extended — Active milestone
+## Stage 3 Extended — Current roadmap
 
 Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
 
@@ -66,16 +66,17 @@ Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
 2. **CLOSED** — Version / Settings Identity Separation (2026-10-15).
 3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation (2026-10-15).
 4. **CLOSED** — Human Mouse Trace / Path Visualization (2026-10-16).
-5. **NEXT** — Same-board Human / Stage-2 / Stage-3 Comparison.
-6. **LATER** — Representative-board demonstrations / Timeline Analytics.
+5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison (2026-10-17).
+6. **NEXT CANDIDATE / NOT BEGUN** — Representative-board demonstrations / Timeline Analytics.
 7. **LATER** — First actual Extended algorithm research.
 
 Human Mouse Trace는 Live 보드의 실제 event-driven pointer samples와 action markers를
 기록하고 종료 후 또는 Replay에서 선택적으로 표시한다. Board-local Qt logical pixels와
 독립 trace clock을 사용하며 Replay v2가 별도 trace 모델을 attachment로 운반한다.
 v1은 trace-free로 계속 읽을 수 있다. Physical gesture fidelity와 성능 hardening을
-포함한 최종 package 및 사용자 native 수용은 PASS다. 다음 Comparison과 이후 항목은
-아직 구현하지 않았다. OS-global hook, physical-model calibration/refit과 advanced path
+포함한 최종 package 및 사용자 native 수용은 PASS다. Same-board Comparison도 Slice 0–5
+수용을 완료했다. 다음 roadmap candidate인 Timeline Analytics는 시작하지 않았으며 구현 승인이 아니다.
+OS-global hook, physical-model calibration/refit과 advanced path
 analytics는 이번 수용 범위가 아니다.
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
 Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며 Model-C
@@ -84,6 +85,8 @@ calibration evidence가 아니다.
 Modeled-Time은 기록된 duration을 사용하는 비영속 presentation이다. Index 기본 모드를
 유지하며 synthetic cursor의 직선 smoothstep은 실제 OS 궤적이나 Model C 변경이 아니다.
 
+- [Same-board Comparison closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md): 최종 candidate `a59d0d9`, 916 focused / 2085 full PASS, fresh package·실제 worker lifecycle, 사용자 A–L PASS와 비차단 UX 처분.
+- [Same-board Comparison contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md): 수용된 layout/admission/실행/metric/playback 경계; FINAL ACCEPTANCE PASS / CLOSED.
 - [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md): Slice 1–3 commit, 최종 source tests, fresh package/profile/worker, 사용자 native GUI A–K PASS와 보존 경계.
 - [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md): 최종 구현/package SHA, physical gesture·trace·성능 계약, 627 focused / 1825 full PASS와 최종 사용자 native 수용.
 - [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md): 실제 구현 commit, 최종 tests, fresh package/worker, 사용자 native GUI 수용 및 보존 경계.

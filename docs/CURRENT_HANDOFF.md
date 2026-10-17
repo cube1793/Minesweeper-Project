@@ -32,17 +32,20 @@ Approved development interpreter:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Live Git verified on 2026-10-16 before Human Mouse Trace documentation closeout:
+Historical Same-board acceptance baseline, verified on 2026-10-17:
 
-- branch: `main`; clean working tree
-- HEAD = local `origin/main` = live remote main:
-  `e32145fa5c114e1ce500ad2e837ef6000cc49cca`
-- this is the qualified implementation/package SHA, including physical gesture fidelity
-- no Human Mouse Trace / physical gesture feature branches remained locally or remotely
+- qualified development branch at acceptance: `feature/stage3-same-board-comparison`;
+  clean tracked baseline, nothing staged at that verification
+- at acceptance, HEAD matched local `origin/feature/stage3-same-board-comparison`:
+  `a59d0d963bdf1544a03968163b884342e2797ee0`
+- qualified source/package candidate: `test: fix replay statistics UI fixture`
+- preceding accepted Slice-4 implementation/docs:
+  `d81caa95fc0e181d199fdf4c770873241f0f1eac` — `feat: add same-board comparison UI`
+- `a59d0d9` changes only `tests/test_replay_statistics.py`; no production behavior change
 
-This SHA is the qualified implementation/package baseline, not necessarily the
-latest main HEAD. Documentation-only closeout may advance main beyond it without
-replacing that implementation identity. Always read live Git for the latest HEAD.
+The qualified package/source SHA remains the historical acceptance identity.
+Read live Git for current branch existence, latest HEAD, remote refs and merge
+state; later Git integration does not replace the qualified candidate identity.
 Earlier Extended implementation identities remain in their linked closeout records.
 
 Important Stage-3 V1 identities, verified in live Git:
@@ -151,8 +154,11 @@ Commit identities were read from live Git.
 
 ## 4. Current milestone
 
-**Stage-3 Extended remains ACTIVE. Active milestone:
-Same-board Human / Stage-2 / Stage-3 Comparison.**
+**Stage-3 Extended remains ACTIVE. Same-board Human / Stage-2 / Stage-3 Comparison:
+FINAL ACCEPTANCE PASS / CLOSED (2026-10-17, Asia/Seoul).** Slices 0–5 are
+COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B. No Same-board
+implementation work remains. See the
+[final closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md).
 Stage-3 V1 / Model C remain CLOSED / FROZEN; ZiNi Improvement remains CLOSED.
 
 **Slice 0 — contract documentation COMPLETE / ACCEPTED.** The
@@ -336,20 +342,61 @@ OPTIONAL 4**, with a **PASS / accept Slice 4 as implemented** recommendation;
 Claude did not execute/rerun tests. ChatGPT independently reviewed source/tests
 and accepted without production correction. Optional dispositions: **O-1 DEFER /
 evidence-triggered**, theoretical matching success after cancellation intent (the
-real job terminal contract does not produce that path); **O-2 DEFER to Slice 5**,
-launcher coverage using real-job success/cancel; **O-3 optional Slice 5 coverage**,
-minor adjacent gaps where useful; **O-4 optional/deferred**, captured-source wording
-polish. None is a production acceptance blocker.
+real job contract and acceptance evidence do not expose that path);
+**O-2 SATISFIED by Slice 5A**, real packaged-worker/job/launcher lifecycle evidence;
+**O-3 NONBLOCKING**, 2085/2085 full development PASS with no new production defect;
+**O-4 DEFER**, captured-source wording polish (user acceptance reported no confusion
+requiring a correction). None is a production acceptance blocker.
 
 Reported Slice 4 verification: **55 new 4B passed (31 launcher / 24 main UI);
 32 4A viewer; 29 Slice 3; 84 Slice 2B; 31 Slice 2A; 29 Slice 1; 370 relevant existing
 regressions; combined reported verification: 630 passed**, zero failures/errors/skips.
-No full suite, fresh package or native GUI acceptance has been completed for
-Slice 4; those remain Slice 5 evidence, not independent-audit test results.
+Those were Slice-4-only counts; full source/package/native acceptance below is
+Slice 5 evidence, not independent-audit test results.
 
-**NEXT — Slice 5: Acceptance and closeout.** Not begun (section 6). Stage-3 Extended
-and the Comparison milestone remain ACTIVE pending Slice 5 closeout; the milestone
-is not closed.
+**Slice 5 — Acceptance / Packaging / Native Manual Closeout COMPLETE / ACCEPTED.**
+Qualified candidate: `a59d0d963bdf1544a03968163b884342e2797ee0`.
+Final evidence root: `results/same-board-comparison-final-acceptance/20261017-022243/`;
+primary `acceptance-summary.json`, package `dist/Minesweeper/`.
+
+- Source focused: **916 PASS**, 0 failures/errors/skips, **44.286 s**.
+- Full development: **2085 PASS**, 0 failures/errors/skips, **118.136 s**.
+- Fresh Python 3.12.10 x64 / pip 25.0.1 / documented pins: **2085 discovered,
+  2060 PASS, 25 permitted optional image/video replay-validation skips**, 0 failures/errors.
+- Fresh onedir/windowed AMD64 / PE32+ / GUI build: **exit 0, 63.789 s**.
+  EXE SHA-256: `4893d24e1f9d50e47008f94aff4399188123331f49d3cd8d70ab3bc5eab6a5e8`.
+- Frozen profile source/package bytes match SHA-256
+  `52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b`.
+  Specs/runner/planner unchanged; no official 100k regeneration or ZiNi holdout consumption.
+- Packaged safe-origin board: **WON/WON, 4 actions / 504,020 µs each**; mined origin:
+  **LOST/LOST, one OPEN(0,0) / 126,005 µs each**, no regeneration/retry.
+  Deterministic source/package equality excludes runtime decision-compute clocks
+  and Stage-2 Replay elapsed engine-clock timestamps, not arbitrary semantic differences.
+- Packaged failure boundaries, existing Stage-3/ZiNi dispatch compatibility and
+  native startup/normal close PASS. Seven actual packaged-child lifecycle cases
+  PASS; `packaged-lifecycle.json` records each PID/private directory, successful
+  reap/removal and original Human context/Replay/Mouse Trace identity retention.
+- **Project user, 2026-10-17 (Asia/Seoul): packaged native/manual A–L PASS** on this
+  exact package: startup, both source routes, Run/result facts, independent indices,
+  Human-only full trace, reopen, Cancel, active launcher/main close and existing-feature
+  compatibility. This is reported interaction evidence, not inferred from screenshots.
+  Human WON / Stage 2 LOST / Stage 3 LOST displayed legitimate results; a loaded
+  Replay at another index still supplied its entire stream and viewer Human index 0.
+
+Historical `results/same-board-comparison-final-acceptance/20261017-014937/` remains
+**BLOCKED**: 2085 discovered / 2076 passed / 9 fixture errors / 0 failures/skips.
+The no-op `_init_ui()` fixture lacked mandatory `same_board_comparison_action`.
+Only `tests/test_replay_statistics.py` changed in the accepted correction; verification
+was **9/9 affected, 158/158 related, 2085/2085 full PASS**. No production correction.
+The final automated root restarted from the new clean candidate. Its JSON remains
+the pre-manual snapshot; the [closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)
+records subsequent user PASS without rewriting raw evidence.
+
+Nonblocking UX: standard Comparison slider track page-step is **OPTIONAL / DEFER**;
+drag/arbitrary selected-run seek works, exact track jump was not required.
+**KEEP** Human recorded Mouse Trace separate from the independent Visualizer's
+synthetic Stage-3 cursor; Comparison has no solver overlay. Changing production
+would reopen package qualification. No generic speed winner/ranking/ratio is claimed.
 
 - **Execution / Playback / Visualizer Foundation — CLOSED (2026-10-14)**:
   [historical acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
@@ -426,29 +473,23 @@ ZiNi Trace = playback/explanation of answer-board-based ZiNi simulation choices.
 
 ## 6. Next action
 
-**NEXT — Slice 5: Acceptance and closeout.** Slices 0–4, including internal
-2A/2B and 4A/4B, are COMPLETE / ACCEPTED. Slice 5 has not begun. The existing
-[milestone acceptance contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md#13-milestone-level-acceptance-contract)
-remains authoritative. As applicable, remaining acceptance includes:
+Same-board Comparison is **FINAL ACCEPTANCE PASS / CLOSED**, with Slices 0–5
+COMPLETE / ACCEPTED. No Same-board implementation or technical acceptance gate
+remains. On recovery, read live Git for the latest branch, HEAD, remote and merge
+state. The qualified acceptance SHA is historical identity, not a permanent
+branch tip or an instruction to perform further Git integration.
 
-- full source regression and focused/relevant frozen-boundary regression;
-- fresh Windows package/build and packaged Same-board worker verification;
-- native/manual Comparison UI acceptance, including real Run / Cancel / result
-  reopen / launcher-close / main-close ownership;
-- existing Replay, Human Mouse Trace and Stage-3 Visualizer compatibility;
-- preservation of frozen Stage-3 V1 / Model C and historical evidence;
-- final documentation/housekeeping; feature → main merge/push only after final acceptance.
-
-The Comparison milestone remains ACTIVE until that closeout. No Slice 5 work
-is claimed by this documentation sync.
-Use live Git/source/tests to determine whether later work has already begun.
-Do not treat this roadmap as implementation approval or claim later milestones exist.
-No later Timeline Analytics or Extended algorithm research is authorized yet.
+**NEXT CANDIDATE / NOT BEGUN — Representative-board demonstrations / Timeline
+Analytics.** Stage-3 Extended remains ACTIVE; first actual Extended algorithm
+research remains LATER. This roadmap is not implementation authorization. No
+analytics, new physical model, Comparison solver cursor overlay or provenance
+schema expansion begins with this closeout. Read live Git/source/tests before
+assuming any later work has begun.
 
 `Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`.
 Human Mouse Trace is accepted actual sampled Live-board pointer presentation data,
 not Stage-3 synthetic movement, Model C calibration evidence or solver input.
-Comparison acceptance must retain these separate models and time authorities.
+The closed Comparison contract retains these separate models and time authorities.
 
 Keep presentation separate from planner inputs, physical identity and recorded
 costs. Retain Step 0/current PLAYING with known final WON, exact action-boundary
@@ -475,10 +516,9 @@ Natural dependency roadmap — not a rigid chronological schedule:
 2. **CLOSED:** Version / Settings Identity Separation.
 3. **CLOSED:** Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
 4. **CLOSED:** Human Mouse Trace / Path Visualization.
-5. **ACTIVE pending Slice 5 closeout:** Same-board Human / Stage-2 / Stage-3 Comparison —
-   Slices 0–4 COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
-   **NEXT:** Slice 5 — Acceptance and closeout (not begun).
-6. **LATER:** Representative-board demonstrations / Timeline Analytics.
+5. **CLOSED:** Same-board Human / Stage-2 / Stage-3 Comparison — Slices 0–5
+   COMPLETE / ACCEPTED, including internal 2A/2B and 4A/4B.
+6. **NEXT CANDIDATE / NOT BEGUN:** Representative-board demonstrations / Timeline Analytics.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
 
@@ -517,7 +557,7 @@ Boundaries:
 Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the finally adjudicated closed foundation,
-the next active milestone and later planning. Arbitrary Stage-3 seeks still rebuild from
+the next unstarted roadmap candidate and later planning. Arbitrary Stage-3 seeks still rebuild from
 index 0; incremental forward is implemented, while arbitrary-seek caching is deferred.
 
 ---
@@ -614,42 +654,32 @@ Execution / Playback / Visualizer Foundation CLOSED.
 Version / Settings Identity Separation FINAL ACCEPTANCE PASS / CLOSED.
 Modeled-Time Playback / Synthetic Smooth Cursor Presentation FINAL ACCEPTANCE PASS / CLOSED.
 Human Mouse Trace / Path Visualization FINAL ACCEPTANCE PASS / CLOSED.
-Qualified implementation/package SHA: e32145fa5c114e1ce500ad2e837ef6000cc49cca.
-Stage-3 Extended 전체는 ACTIVE이며 현재 활성 마일스톤은
-Same-board Human / Stage-2 / Stage-3 Comparison입니다.
-Slice 0 계약과 Slice 1 — Comparison domain and admission은 COMPLETE / ACCEPTED입니다.
-Slice 1은 원본 Human Replay와 별도 Mouse Trace attachment를 보존하는 순수 Qt-independent
-domain/admission foundation 및 focused tests이며 상세 수용 조건은 section 4를 보세요.
+Human Mouse Trace qualified SHA: e32145fa5c114e1ce500ad2e837ef6000cc49cca.
+Same-board Human / Stage-2 / Stage-3 Comparison: FINAL ACCEPTANCE PASS / CLOSED.
+Slice 0–5 및 내부 2A/2B·4A/4B는 COMPLETE / ACCEPTED입니다.
+Qualified source/package SHA: a59d0d963bdf1544a03968163b884342e2797ee0.
+Qualified development branch at acceptance: feature/stage3-same-board-comparison.
+이후 branch 존재 여부 / 최신 HEAD / merge 상태는 live Git에서 확인하세요.
+Closeout: docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md.
 Contract: docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md.
-Slice 1 reported verification: focused 29 / relevant regression 202 / combined 231 passed,
-zero failures/errors/skips; Slice 1 full suite/package/native GUI run은 없습니다.
-Slice 2 — Isolated execution and metrics는 COMPLETE / ACCEPTED입니다.
-내부 Slice 2A — Pure isolated execution and metrics 및
-Slice 2B — Worker/process integration도 COMPLETE / ACCEPTED입니다.
-정확한 Human layout에서 독립 solver 실행, native result/trace 보존, 분리된 metric과
-accepted Model C ordered-action seam의 범위는 section 4를 보세요.
-Slice 2A reported verification: new 31 / Slice 1 29 / relevant regression 274 / combined 334 passed,
-zero failures/errors/skips; Slice 2A full suite/package/native GUI run은 없습니다.
-Slice 2B final reported verification: 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 374 /
-combined 518 passed, zero failures/errors/skips; full suite/fresh package/native GUI acceptance는 없습니다.
-Parent ownership, corrected validation boundary, audit 및 responsiveness evidence는 section 4를 보세요.
-Slice 3 — Pure playback coordination도 COMPLETE / ACCEPTED입니다.
-same_board_playback.py는 원본 stream과 독립 action index / 현재 status와 final outcome을 보존합니다.
-Slice 3 reported verification: focused 29 / 2B 84 / 2A 31 / Slice 1 29 / relevant regressions 139 /
-combined 312 passed, zero failures/errors/skips; full suite/package/native GUI run은 없습니다.
-Slice 4 — Read-only comparison UI 및 내부 4A/4B는 COMPLETE / ACCEPTED입니다.
-4A viewer와 4B captured-source launcher/main lifecycle의 수용 범위는 section 4를 보세요.
-Slice 4 reported verification: 4B 55 (launcher 31 / main UI 24), 4A 32, Slice 3 29,
-2B 84, 2A 31, Slice 1 29, relevant regressions 370 / combined 630 passed,
-zero failures/errors/skips; full suite/fresh package/native GUI acceptance는 아직 없습니다.
-Claude read-only audit: BLOCKER 0 / REQUIRED 0 / OPTIONAL 4 / PASS; 테스트 재실행은 하지 않았습니다.
-ChatGPT가 source/tests를 독립 검토하여 production correction 없이 수용했습니다.
-NEXT: Slice 5 — Acceptance and closeout (not begun; 남은 gate는 section 6).
-Comparison milestone은 Slice 5 closeout 전까지 ACTIVE이며 아직 CLOSED가 아닙니다.
-2A/2B와 4A/4B는 각각 Slice 2와 Slice 4 내부 구분이며 새 roadmap milestone이 아닙니다.
-Slice 3은 deterministic reconstruction과 각 run의 독립 remembered index만 다루며 UI는 포함하지 않습니다.
-frozen Stage-3 V1 / Model C는 변경되지 않았습니다.
-Timeline Analytics 및 Extended 알고리즘 연구는 아직 승인되지 않았습니다.
+최종 evidence: results/same-board-comparison-final-acceptance/20261017-022243/.
+Package: 위 root의 dist/Minesweeper/.
+EXE SHA-256: 4893d24e1f9d50e47008f94aff4399188123331f49d3cd8d70ab3bc5eab6a5e8.
+Source focused 916 / full 2085 PASS, zero failures/errors/skips.
+Fresh-env: 2085 discovered / 2060 PASS / optional image-video skips 25, zero failures/errors.
+Fresh package exit 0; safe/mined worker·기존 dispatch·7 real packaged lifecycle PASS.
+프로젝트 사용자 2026-10-17 native/manual A–L PASS; 정확한 package와 상세 gate는 closeout 참조.
+Historical 20261017-014937 root는 BLOCKED (2076 PASS / 9 fixture errors)로 보존합니다.
+a59d0d9는 tests/test_replay_statistics.py만 보정했으며 production 변경은 없습니다.
+9/9 affected, 158/158 related, 2085/2085 full PASS 후 새 SHA/root에서 수용을 재시작했습니다.
+Claude read-only audit: BLOCKER 0 / REQUIRED 0 / OPTIONAL 4 / PASS; 테스트 재실행 없음.
+O-1 DEFER/evidence-triggered, O-2 SATISFIED, O-3 NONBLOCKING, O-4 DEFER.
+Comparison slider track page-step는 OPTIONAL/DEFER; Human trace/solver synthetic 표현 분리는 KEEP.
+Same-board 구현 또는 기술 수용 작업은 남아 있지 않습니다. 수용 SHA는 역사적 identity이며
+현재 Git 통합 상태나 후속 Git 작업 지시를 의미하지 않습니다.
+Stage-3 Extended는 ACTIVE; NEXT CANDIDATE는 Representative-board demonstrations /
+Timeline Analytics (NOT BEGUN), 첫 Extended algorithm research는 LATER입니다.
+이 closeout은 analytics, 새 물리 모델, Comparison solver overlay, provenance schema 확장을 승인하지 않습니다.
 Human Mouse Trace는 Live-board logical-pixel event samples와 독립 clock을 사용하며,
 Replay v2 attachment / 선택적 표시 / 성능 hardening / 물리 입력 보정을 수용했습니다.
 FLAG는 R press, OPEN은 L release, Mode-B CHORD는 현재 target의 첫 release입니다.

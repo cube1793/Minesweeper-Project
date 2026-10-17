@@ -75,8 +75,9 @@ Source entry points are `python zini_metric_worker.py <payload.pkl> <result.pkl>
 `Minesweeper.exe --zini-metric-worker <payload.pkl> <result.pkl>`,
 `Minesweeper.exe --stage3-execution-worker <payload.pkl> <result.pkl>` and
 `Minesweeper.exe --same-board-execution-worker <payload.pkl> <result.pkl>`.
-Same-board dispatch is implemented; Slice 2B included no fresh package or native
-GUI acceptance. The existing
+Slice 2B itself included no fresh package or native GUI acceptance; final Same-board
+Slice 5 subsequently passed both, as recorded in the dated acceptance section below.
+The existing
 ZiNi polling and cancellation protocol is unchanged. `Stage3ExecutionJob` now
 owns Stage-3 process/token/polling/cancel/reap and the whole private job directory.
 The launcher owns this job and the read-only viewer; the main UI owns the launcher.
@@ -224,3 +225,42 @@ The earlier `results/human-mouse-trace-final-acceptance/20261015-215537/` remain
 historical post-hardening evidence at `6fe61866681612060bbb3d57940c726de4f224b3`;
 it is not the final package because physical gesture semantics changed afterward.
 Both roots remain untouched. No new application version, tag or release is declared.
+
+## Same-board Comparison final package acceptance (2026-10-17)
+
+**FINAL ACCEPTANCE PASS / CLOSED.** Qualified source/package candidate:
+`a59d0d963bdf1544a03968163b884342e2797ee0`. This test-only Replay-statistics fixture
+correction follows the accepted UI commit `d81caa95fc0e181d199fdf4c770873241f0f1eac`;
+it changes no production behavior. See the
+[Same-board closeout](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md).
+
+Final evidence: `results/same-board-comparison-final-acceptance/20261017-022243/`.
+Accepted package: its `dist/Minesweeper/` directory. Python **3.12.10 x64**, pip
+**25.0.1**, fresh ASCII-path environment and documented pins produced an
+onedir/windowed AMD64 / PE32+ / GUI-subsystem build: **exit 0, 63.789 s**.
+EXE SHA-256: `4893d24e1f9d50e47008f94aff4399188123331f49d3cd8d70ab3bc5eab6a5e8`.
+Normal imports bundled all required modules without new hidden imports;
+`qwindows.dll` was present and loaded during native startup. Bundled profile bytes
+match source and the frozen SHA above.
+
+Source **916 focused / 2085 full PASS**, zero failures/errors/skips. Fresh full
+discovery: **2085 total / 2060 PASS / 25 optional image/video replay-validation
+skips**, zero failures/errors; every skip identity is recorded in the summary.
+Packaged Same-board safe-origin **WON/WON, 4 actions / 504,020 µs each** and
+mined-origin **LOST/LOST, one OPEN(0,0) / 126,005 µs each** passed without
+regeneration/retry. Source/package deterministic equivalence excludes only runtime
+decision-compute clocks and Stage-2 Replay elapsed engine-clock timestamps.
+Failure envelopes, existing Stage-3/ZiNi dispatches and native startup/normal close passed.
+
+Seven real packaged-child owner cases passed: job safe/mined success, job Cancel,
+launcher success/result reopen, launcher Cancel, active launcher close and active
+main close. Each child was reaped and its exact private directory removed;
+`packaged-lifecycle.json` records PIDs/paths and retained Human authority identities.
+The project user subsequently reported native/manual **A–L PASS** on this exact
+package, including source capture, independent indices, Human-only Mouse Trace,
+legitimate solver losses, Run/Cancel/reopen/close and existing-feature compatibility.
+
+The `20261017-014937/` root remains historical **BLOCKED** (nine isolated fixture
+errors), not overwritten or relabeled. The final automated JSON remains its
+pre-manual snapshot; the tracked closeout records subsequent user acceptance.
+No fresh rebuild, release, tag or ZIP was created during documentation closeout.

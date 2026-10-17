@@ -9,6 +9,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Simple Algorithm:** 확정 수와 최소 지뢰 확률 후보 표시, 확정 수 자동 진행, 선택적인 추측 실행
 - **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 추천과 실제 다음 수 비교
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
+- **Same-board Comparison:** 완료 Human Replay의 정확한 고정 배치에서 Human / Stage 2 / Stage 3 결과와 독립 action-index 재생 비교
 
 ## Simple Algorithm
 
@@ -140,11 +141,39 @@ fresh package/profile/worker 검증과 사용자의 native packaged GUI A–K �
 완료했습니다. [Closeout 기록](docs/stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)을
 참고하세요. 동결 Stage-3 알고리즘과 물리 모델 semantics는 변경하지 않았습니다.
 
-Stage-3 Extended 전체는 **ACTIVE**입니다. Foundation, Identity Separation,
-Modeled-Time Playback과 **Human Mouse Trace / Path Visualization**은 CLOSED입니다.
-다음 작은 활성 마일스톤은 **Same-board Human / Stage-2 / Stage-3 Comparison**이며
-아직 구현하지 않았습니다. 이후 representative-board demonstrations / Timeline Analytics,
-첫 실제 Extended algorithm research 순서입니다.
+Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같습니다.
+
+1. **CLOSED** — Execution / Playback / Visualizer Foundation.
+2. **CLOSED** — Version / Settings Identity Separation.
+3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation.
+4. **CLOSED** — Human Mouse Trace / Path Visualization.
+5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison.
+6. **NEXT CANDIDATE / NOT BEGUN** — Representative-board demonstrations / Timeline Analytics.
+7. **LATER** — First actual Extended algorithm research.
+
+## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
+
+**FINAL ACCEPTANCE PASS / CLOSED (2026-10-17)**. Source/package/lifecycle 검증과
+프로젝트 사용자의 native/manual **A–L PASS**를 수용했습니다. Qualified source/package
+SHA는 `a59d0d963bdf1544a03968163b884342e2797ee0`입니다.
+[Closeout 기록](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)과
+[기술 계약](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md)을 참고하세요.
+
+- 완료된 Live 판 또는 Human-labeled Replay에서 **도구 → Compare as full-game Human Replay…**를
+  선택합니다. 이 명시적 동작은 전체 Human 기록으로 제출한다는 의도이며 역사적 출처의 증명이 아닙니다.
+  Replay는 현재 표시 index와 무관하게 원본 전체를 사용합니다. 미완료·terminal 이후 event 등은
+  Comparison 전용 admission 사유로 거절하며 일반 Replay 사용 규칙을 바꾸지 않습니다.
+- 실행 창은 한 번 capture한 context를 유지합니다. Main의 새 게임·Replay 교체로 대상이 바뀌지
+  않으며 **Open Comparison…**은 기존 창을 엽니다. **Run / Cancel / Open Result**로 실행·취소·
+  완료 결과 재열기를 제어하며 결과 창 재열기는 solver를 다시 실행하지 않습니다.
+- 결과 창은 한 보드와 Human / Stage 2 / Stage 3 선택, First / Previous / Next / Last 및
+  선택 run의 slider를 제공합니다. 각 run의 index를 독립적으로 기억하며 autoplay나 공통 timeline은 없습니다.
+  현재 재구성 status와 최종 outcome은 별개입니다. 전체 Human Mouse Trace는 Human에서만 표시합니다.
+- Human Replay elapsed **s**, 각 solver의 Model C cost through termination **µs**, 각 solver의
+  decision compute **ns**를 구분합니다. 일반 speed winner/ranking/ratio는 없습니다.
+- 이미 확정된 배치를 그대로 쓰므로 `(0,0)` 지뢰에 대한 solver 첫 OPEN 패배도 정상 결과입니다.
+  같은 배치나 recorded start는 동일한 역사적 mine-placement policy, 실행 의미, exclusively-Human
+  provenance 또는 통제 실험의 증명이 아닙니다. 기존 Stage-3 Visualizer는 별도로 유지됩니다.
 
 ## Human Mouse Trace / Path Visualization — CLOSED
 
@@ -227,6 +256,13 @@ Minesweeper-Project/
 ├─ stage3_trace_player.py       # 정수 index 재구성·incremental next()
 ├─ stage3_modeled_playback.py   # 순수 modeled timeline·정확한 부분 시간·배속
 ├─ stage3_visualizer_ui.py      # 모드 controls·Qt frame 요청·synthetic cursor 표시
+├─ same_board_comparison.py     # Human full-stream admission·고정 layout identity
+├─ same_board_runner.py         # 독립 solver 실행·native evidence·분리된 metric
+├─ same_board_execution_worker.py # token + 고정 board만 받는 subprocess
+├─ same_board_execution_job.py  # parent 소유 process·취소·reap·cleanup
+├─ same_board_playback.py       # 세 run의 독립 remembered action index
+├─ same_board_comparison_launcher.py # captured context·job·완료 결과 소유
+├─ same_board_comparison_ui.py  # 읽기 전용 결과·public observation·Human overlay
 ├─ replay_model.py              # Replay 데이터 계약
 ├─ replay_recorder.py           # 실제 이벤트와 확정 보드 기록
 ├─ replay_json.py               # JSON 변환·파일 입출력
