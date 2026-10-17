@@ -136,14 +136,25 @@ def connect_database_for_continuation(path: str | Path) -> sqlite3.Connection:
     return connection
 
 
-def connect_database_readonly(path: str | Path) -> sqlite3.Connection:
+def connect_database_readonly(
+    path: str | Path, *, immutable: bool = False,
+) -> sqlite3.Connection:
     """Open an existing V1 telemetry file for passive reads and verify FK=ON.
 
     The caller owns close. URI escaping preserves literal filename characters;
     mode=ro rejects missing files and prevents writes to the database. No schema
     initialization, journal/synchronous changes, or checkpointing occurs here.
+
+    immutable=True is the caller's assertion that this is a stable, preserved
+    file that will not change during the connection lifetime. SQLite then skips
+    locking and change detection; this option must not be used for a live source.
+    The default retains ordinary mode=ro behavior.
     """
+    if type(immutable) is not bool:
+        raise ValueError("immutable must be a bool.")
     uri = Path(path).resolve().as_uri() + "?mode=ro"
+    if immutable:
+        uri += "&immutable=1"
     connection = sqlite3.connect(uri, uri=True, isolation_level=None)
     try:
         connection.execute("PRAGMA foreign_keys = ON")

@@ -162,9 +162,14 @@ records the scope and boundaries. **Slice 1 — Pure timeline analytics COMPLETE
 ACCEPTED by ChatGPT final review: SLICE 1 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
 **Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT
 final review: SLICE 2 PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
-No actual official exemplar game IDs have been selected. **NEXT / now authorized
-scope — Slice 3: Read-only accepted-evidence report / static visualization.**
-Slice 3 has NOT begun.
+**Slice 3 — Read-only accepted-evidence report / static visualization is ACTIVE,
+not complete. Internal Slice 3A — accepted-evidence opening correction / preflight
+COMPLETE / ACCEPTED by ChatGPT final review: SLICE 3A CORRECTION / PREFLIGHT PASS;
+BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** No actual official exemplar game IDs have
+been selected or disclosed. **NEXT / now authorized scope — Internal Slice 3B:**
+apply the accepted selector to authenticated official evidence, load only unique
+selected games' detailed action streams, and build the read-only report/static
+visualization. Slice 3B has NOT begun.
 
 Accepted Slice-1 implementation: [`timeline_analytics.py`](../timeline_analytics.py)
 and [`tests/test_timeline_analytics.py`](../tests/test_timeline_analytics.py).
@@ -186,14 +191,36 @@ synthetic SQLite fixtures. No official DB/G4 artifact was accessed and no actual
 official exemplar ID was selected. No solver, benchmark, build, GUI or full-suite
 execution occurred. Frozen V1 / Model C are unchanged; Human remains deferred.
 
+Accepted Slice-3A correction: [`telemetry_repository.py`](../telemetry_repository.py)
+and [`tests/test_telemetry_repository.py`](../tests/test_telemetry_repository.py).
+`connect_database_readonly(path, *, immutable=False)` preserves default `mode=ro`
+behavior and supports explicit `mode=ro&immutable=1` for authenticated stable
+preserved artifacts. `immutable=True` asserts that the source will not change
+during the connection lifetime; it is not for live sources.
+Verification: **67 complete telemetry-repository PASS; 238 bounded relevant
+regressions PASS; total 305 PASS**. Four existing solver/Engine execution tests
+were intentionally excluded; **no full suite is claimed**.
+
+The exact four official artifact hashes were reauthenticated. Fresh Stage-2 and
+Stage-3 run identity/coverage checks **PASS**; both runs are official-eligible exact
+`EXPERT_GENERAL_V1 [0,100000)`. Model C authentication and **100,000 paired-prefix
+identity validation PASS**. Independent outcomes reconcile:
+**WW 37,702 / WL 0 / LW 0 / LL 62,298**. The independently derived WW index set
+exactly equals the authenticated G4 paired-delta index set: **37,702; missing 0;
+extra 0**. Official artifact bytes/timestamps remained unchanged; no new sidecars
+remained. No solver, Engine, board generator, official benchmark rerun, detailed
+selected-action loading, report/chart generation, Human data or ZiNi holdout was
+used. No actual official exemplar ID has been selected or disclosed.
+
 The first implementation is a read-only report from exact accepted official
 Stage-2 / Stage-3 artifacts, with deterministically selected category exemplars
 (not a statistically representative sample), independent completed-action-count
 timelines and bounded static visualization. Human adapters and interactive GUI
 are deferred. No algorithm, Model C, schema or telemetry changes are in scope.
 **Slice 3 is the FIRST scope authorized to authenticate and read the exact accepted
-official Stage-2/Stage-3 DB and G4 artifacts.** Actual official exemplar IDs may
-first be selected there, using only the already-accepted deterministic rules;
+official Stage-2/Stage-3 DB and G4 artifacts.** Internal 3A completed the preflight.
+**Internal Slice 3B is the FIRST point where actual official exemplar IDs may be
+selected and disclosed**, using only the already-accepted deterministic rules;
 no visual/manual substitution is allowed after selection. **Read-only/report
 output only:** do not rerun the official 100k or any solver, and do not modify
 frozen official evidence. The implementation
@@ -531,12 +558,15 @@ branch tip or an instruction to perform further Git integration.
 **ACTIVE — Representative-board Demonstrations / Timeline Analytics. Slices 0, 1
 and 2 COMPLETE / ACCEPTED by ChatGPT final review.** The
 [accepted contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md) governs
-the next step. **No actual official exemplar game IDs have been selected. NEXT /
-now authorized scope — Slice 3: Read-only accepted-evidence report / static
-visualization.** Slice 3 has NOT begun. It is the first scope authorized to
-authenticate/read exact accepted official DB/G4 artifacts and select actual
-official exemplar IDs using only accepted rules. No visual/manual substitution,
-official 100k/solver rerun or frozen-evidence modification; read-only/report output only.
+the next step. **Slice 3 is ACTIVE, not complete. Internal Slice 3A — accepted-evidence
+opening correction / preflight COMPLETE / ACCEPTED by ChatGPT final review.**
+No actual official exemplar game IDs have been selected or disclosed.
+**NEXT / now authorized scope — Internal Slice 3B:** apply the accepted selector
+to authenticated official evidence, load only unique selected games' detailed
+actions, and build the read-only report/static visualization. This is the first
+point where actual official exemplar IDs may be selected and disclosed. Use only
+accepted rules; no visual/manual substitution, official 100k/solver rerun or
+frozen-evidence modification. Read-only/report output only; 3B has not begun.
 
 Exact accepted Stage-2 DB, Stage-3 DB, G4 comparison and G4 result hashes are
 required before real-evidence report acceptance. Reuse accepted G4 deltas, load
@@ -586,8 +616,10 @@ Natural dependency roadmap — not a rigid chronological schedule:
    Slice 0 — Contract COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 1 — Pure timeline analytics COMPLETE / ACCEPTED by ChatGPT final review.
    Slice 2 — Pure deterministic exemplar selection COMPLETE / ACCEPTED by ChatGPT final review.
-   NEXT / now authorized scope — Slice 3: Read-only accepted-evidence report /
-   static visualization; first authorized official-evidence access and selection.
+   Slice 3 — Read-only accepted-evidence report / static visualization ACTIVE, not complete.
+   Internal Slice 3A — accepted-evidence opening correction / preflight COMPLETE / ACCEPTED.
+   NEXT — Internal Slice 3B: accepted selection, unique selected-game action loading,
+   and read-only report/static visualization; first actual exemplar selection/disclosure.
 7. **LATER:** First actual Extended algorithm research; nearest equal-minimum-risk
    guess selection using movement cost is a candidate, not an adopted policy.
 
@@ -626,8 +658,9 @@ Boundaries:
 Built-in screen recording is not currently a priority; external tools can record
 the visualization. New Extended documentation belongs in `docs/stage3-extended/`;
 the Extended README distinguishes the closed milestones, active Timeline Analytics
-with Slices 0/1/2 accepted and Slice 3 next, and later algorithm research. Arbitrary
-Stage-3 seeks still rebuild from index 0; incremental forward is implemented,
+with Slices 0/1/2 and internal 3A accepted, Slice 3 active and internal 3B next,
+and later algorithm research. Arbitrary Stage-3 seeks still rebuild from index 0;
+incremental forward is implemented,
 while arbitrary-seek caching is deferred.
 
 ---
@@ -769,9 +802,25 @@ Slice-2 검증: 29 focused PASS; 28 Slice-1 timeline PASS;
 Slice-2 selector fixtures는 모두 synthetic/in-memory였고 기존 regressions는 synthetic SQLite fixtures였습니다.
 Official DB/G4 artifact 접근이나 실제 official exemplar ID 선택은 없었습니다.
 Solver/benchmark/build/GUI/full-suite 실행은 없었으며 Frozen V1 / Model C는 그대로입니다. Human은 DEFER입니다.
-NEXT / now authorized scope — Slice 3: Read-only accepted-evidence report / static visualization.
-Slice 3는 아직 시작하지 않았습니다. Exact accepted official Stage-2/Stage-3 DB와 G4 artifacts를
-authenticate/read하고 실제 official exemplar ID를 선택할 수 있는 첫 범위입니다.
+Slice 3 — Read-only accepted-evidence report / static visualization은 ACTIVE이며 완료가 아닙니다.
+Internal Slice 3A — accepted-evidence opening correction / preflight는 ChatGPT final review로
+COMPLETE / ACCEPTED입니다. SLICE 3A CORRECTION / PREFLIGHT PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.
+수용된 변경 파일: telemetry_repository.py, tests/test_telemetry_repository.py.
+connect_database_readonly(path, *, immutable=False)는 기본 mode=ro를 유지하며,
+인증된 stable preserved artifact에 명시적 mode=ro&immutable=1을 지원합니다.
+검증: 67 complete telemetry-repository PASS + 238 bounded relevant regressions PASS = 305 PASS.
+기존 solver/Engine 실행 테스트 4개는 의도적으로 제외했으며 full-suite PASS 주장이 아닙니다.
+네 official artifact hash 재인증, Stage-2/Stage-3 fresh identity/coverage, Model C 인증,
+100,000 paired-prefix identity validation은 PASS입니다. 두 run은 official-eligible exact
+EXPERT_GENERAL_V1 [0,100000)입니다. 독립 outcomes: WW 37,702 / WL 0 / LW 0 / LL 62,298.
+독립 WW index set과 인증된 G4 paired-delta index set은 정확히 일치합니다: 37,702; missing 0; extra 0.
+Official artifact bytes/timestamps는 불변이며 새 sidecar는 남지 않았습니다.
+Solver/Engine/board generator/official benchmark rerun, 상세 selected-action loading,
+report/chart 생성, Human data 및 ZiNi holdout 사용은 없었습니다. 실제 official exemplar ID는
+아직 선택하거나 공개하지 않았습니다.
+NEXT / now authorized scope — Internal Slice 3B: 인증된 official evidence에 수용된 selector 적용,
+unique selected games의 상세 action stream만 읽고 read-only report/static visualization 생성.
+3B는 아직 시작하지 않았으며 실제 official exemplar ID 선택과 공개를 처음 허용하는 시점입니다.
 이미 수용된 deterministic rules만 사용하며 선택 후 visual/manual substitution은 금지합니다.
 Official 100k 또는 solver를 재실행하거나 frozen official evidence를 수정하지 않습니다.
 Read-only/report output만 허용합니다.

@@ -257,6 +257,20 @@ class ContinuationConnectionTests(RepositoryTestCase):
 
 
 class ReadonlyConnectionTests(RepositoryTestCase):
+    def test_default_and_explicit_false_keep_mode_ro_and_read_committed_wal(self):
+        run_id = self.create_run()
+        real_connect = sqlite3.connect
+        for options in ({}, {"immutable": False}):
+            with self.subTest(options=options):
+                with patch.object(repository.sqlite3, "connect", wraps=real_connect) as connect:
+                    reader = repository.connect_database_readonly(self.database_path, **options)
+                self.addCleanup(reader.close)
+                connect.assert_called_once_with(
+                    self.database_path.as_uri() + "?mode=ro", uri=True, isolation_level=None,
+                )
+                self.assertEqual(repository.fetch_run(reader, run_id)["run_id"], run_id)
+                reader.close()
+
     def test_supported_database_is_readonly_and_caller_owns_close(self):
         run_id = self.create_run()
         with patch.object(schema, "initialize_schema") as initialize:
@@ -352,6 +366,141 @@ class ReadonlyConnectionTests(RepositoryTestCase):
         reader = repository.connect_database_readonly(str(renamed))
         self.addCleanup(reader.close)
         self.assertEqual(reader.execute("PRAGMA user_version").fetchone()[0], 1)
+
+
+class ImmutableReadonlyConnectionTests(RepositoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.run_id = self.create_run()
+        # Finish the synthetic writer before asserting an immutable main file.
+        self.connection.close()
+
+    def test_supported_wal_file_is_readonly_preserved_and_caller_owned(self):
+        before = self.database_path.read_bytes()
+        before_mtime = self.database_path.stat().st_mtime_ns
+        before_files = set(self.database_path.parent.iterdir())
+        self.assertEqual(before[18:20], b"\x02\x02")
+        self.assertEqual(before_files, {self.database_path})
+        statements = []
+        real_connect = sqlite3.connect
+
+        def traced_connect(*args, **kwargs):
+            reader = real_connect(*args, **kwargs, factory=ClosingConnection)
+            reader.set_trace_callback(statements.append)
+            return reader
+
+        with patch.object(repository.sqlite3, "connect", side_effect=traced_connect) as connect, \
+                patch.object(schema, "initialize_schema") as initialize, \
+                patch.object(repository, "_configure_writer") as configure_writer:
+            reader = repository.connect_database_readonly(self.database_path, immutable=True)
+        self.addCleanup(reader.close)
+        connect.assert_called_once_with(
+            self.database_path.as_uri() + "?mode=ro&immutable=1", uri=True, isolation_level=None,
+        )
+        initialize.assert_not_called()
+        configure_writer.assert_not_called()
+        self.assertEqual(statements, [
+            "PRAGMA foreign_keys = ON", "PRAGMA foreign_keys", "PRAGMA user_version",
+            "SELECT 1 FROM benchmark_runs LIMIT 0", "SELECT 1 FROM games LIMIT 0",
+            "SELECT 1 FROM action_events LIMIT 0",
+        ])
+        self.assertIsNone(reader.isolation_level)
+        self.assertIs(reader.row_factory, sqlite3.Row)
+        self.assertFalse(reader.in_transaction)
+        self.assertFalse(reader.closed)
+        self.assertEqual(reader.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+        self.assertEqual(repository.fetch_run(reader, self.run_id)["run_id"], self.run_id)
+        with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+            reader.execute("UPDATE benchmark_runs SET processed_games = 1")
+        with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+            reader.execute("CREATE TABLE accidental_write (value)")
+        self.assertEqual(set(self.database_path.parent.iterdir()), before_files)
+        reader.close()
+        self.assertTrue(reader.closed)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            reader.execute("SELECT 1")
+        self.assertEqual(self.database_path.read_bytes(), before)
+        self.assertEqual(self.database_path.stat().st_mtime_ns, before_mtime)
+        self.assertEqual(set(self.database_path.parent.iterdir()), before_files)
+
+    def test_missing_path_is_not_created(self):
+        missing = self.database_path.with_name("missing.sqlite3")
+        before_files = set(self.database_path.parent.iterdir())
+        with self.assertRaises(sqlite3.OperationalError):
+            repository.connect_database_readonly(missing, immutable=True)
+        self.assertFalse(missing.exists())
+        self.assertEqual(set(self.database_path.parent.iterdir()), before_files)
+
+    def test_unsupported_version_including_zero_closes_failed_reader(self):
+        for version in (0, 2, 99):
+            with self.subTest(version=version):
+                writer = sqlite3.connect(self.database_path, isolation_level=None)
+                try:
+                    writer.execute(f"PRAGMA user_version = {version}")
+                finally:
+                    writer.close()
+                reader = sqlite3.connect(
+                    self.database_path.as_uri() + "?mode=ro&immutable=1", uri=True,
+                    isolation_level=None, factory=ClosingConnection,
+                )
+                self.addCleanup(reader.close)
+                with patch.object(repository.sqlite3, "connect", return_value=reader), \
+                        self.assertRaisesRegex(ValueError, "physical schema version"):
+                    repository.connect_database_readonly(self.database_path, immutable=True)
+                self.assertTrue(reader.closed)
+
+    def test_missing_required_tables_close_reader_without_repair(self):
+        for table in ("action_events", "games", "benchmark_runs"):
+            with self.subTest(table=table):
+                writer = sqlite3.connect(self.database_path, isolation_level=None)
+                try:
+                    writer.execute(f"DROP TABLE {table}")
+                finally:
+                    writer.close()
+                before = self.database_path.read_bytes()
+                reader = sqlite3.connect(
+                    self.database_path.as_uri() + "?mode=ro&immutable=1", uri=True,
+                    isolation_level=None, factory=ClosingConnection,
+                )
+                self.addCleanup(reader.close)
+                with patch.object(repository.sqlite3, "connect", return_value=reader), \
+                        self.assertRaisesRegex(sqlite3.OperationalError, "no such table"):
+                    repository.connect_database_readonly(self.database_path, immutable=True)
+                self.assertTrue(reader.closed)
+                self.assertEqual(self.database_path.read_bytes(), before)
+
+    def test_refused_foreign_keys_closes_reader(self):
+        reader = sqlite3.connect(
+            self.database_path.as_uri() + "?mode=ro&immutable=1", uri=True,
+            isolation_level=None, factory=RefusedPragmaConnection,
+        )
+        self.addCleanup(reader.close)
+        reader.refused_pragma = "foreign_keys"
+        reader.refused_value = 0
+        with patch.object(repository.sqlite3, "connect", return_value=reader), \
+                self.assertRaisesRegex(RuntimeError, "foreign_keys=ON was not established"):
+            repository.connect_database_readonly(self.database_path, immutable=True)
+        self.assertTrue(reader.closed)
+
+    def test_uri_filename_escaping_preserves_unicode_hash_and_percent(self):
+        renamed = self.database_path.with_name("통계 #100%.sqlite3")
+        self.database_path.rename(renamed)
+        real_connect = sqlite3.connect
+        with patch.object(repository.sqlite3, "connect", wraps=real_connect) as connect:
+            reader = repository.connect_database_readonly(str(renamed), immutable=True)
+        self.addCleanup(reader.close)
+        connect.assert_called_once_with(
+            renamed.as_uri() + "?mode=ro&immutable=1", uri=True, isolation_level=None,
+        )
+        self.assertEqual(repository.fetch_run(reader, self.run_id)["run_id"], self.run_id)
+
+    def test_immutable_requires_an_actual_bool_before_opening(self):
+        for value in (0, 1, -1, 0.0, 1.0, "", "true", "false", b"1", None, [], {},
+                      Decimal(1), Fraction(1)):
+            with self.subTest(value=value), patch.object(repository.sqlite3, "connect") as connect:
+                with self.assertRaisesRegex(ValueError, "immutable must be a bool"):
+                    repository.connect_database_readonly(self.database_path, immutable=value)
+                connect.assert_not_called()
 
 
 class RepositoryRunTests(RepositoryTestCase):
