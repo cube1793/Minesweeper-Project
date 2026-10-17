@@ -17,7 +17,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from qt_bootstrap import configure_qt_plugin_path
 configure_qt_plugin_path()
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import QPoint, Qt, QTimer
 from PyQt5.QtGui import QFontDatabase
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLabel
@@ -121,6 +121,24 @@ class ViewerTests(unittest.TestCase):
             self.assertEqual(cell.logical_state, frame.observation[y][x])
         self.assertIn(frame.status.name, self.window.status_label.text())
 
+    def focus_entry(self, entry):
+        self.window.activateWindow()
+        QTest.mouseClick(entry.lineEdit(), Qt.LeftButton)
+        self.app.processEvents()
+        self.assertTrue(entry.hasFocus() or entry.lineEdit().hasFocus())
+
+    def type_entry(self, entry, text):
+        self.focus_entry(entry)
+        QTest.keyClick(entry.lineEdit(), Qt.Key_A, Qt.ControlModifier)
+        QTest.keyClicks(entry.lineEdit(), text)
+        self.app.processEvents()
+
+    def click_answer_checkbox(self):
+        checkbox = self.window.answer_checkbox
+        QTest.mouseClick(checkbox, Qt.LeftButton, pos=QPoint(8, checkbox.height() // 2))
+        self.app.processEvents()
+        self.assertTrue(checkbox.hasFocus())
+
     def test_input_requires_exact_bundle_family_and_four_distinct_games(self):
         for value in (None, object(), self.bundle.exemplars, replace(self.bundle, exemplars=()),
                       replace(self.bundle, exemplars=(self.bundle.exemplars[0],) * 4)):
@@ -198,18 +216,93 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual((w.frame_slider.minimum(), w.frame_slider.maximum()), (0, 9))
         w.frame_slider.setValue(4)
         self.assertEqual((w.position.action_ordinal, w.position.before), (4, False))
-        w.frame_entry.setValue(2)
-        w.frame_go.click()
-        self.assertEqual(w.position.frame_index, 2)
-        w.action_entry.setValue(6)
-        w.action_go.click()
-        self.assertEqual(w.position.action_ordinal, 6)
-        w.frame_entry.setValue(3)
-        w.frame_entry.editingFinished.emit()
-        self.assertEqual(w.position.frame_index, 3)
-        w.action_entry.setValue(4)
-        w.action_entry.editingFinished.emit()
+        self.type_entry(w.frame_entry, '2')
         self.assertEqual(w.position.frame_index, 4)
+        QTest.mouseClick(w.frame_go, Qt.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(w.position.frame_index, 2)
+        self.type_entry(w.action_entry, '6')
+        self.assertEqual(w.position.action_ordinal, 2)
+        QTest.mouseClick(w.action_go, Qt.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(w.position.action_ordinal, 6)
+
+    def test_initial_action_entry_focus_loss_by_click_preserves_initial(self):
+        w = self.window
+        position = w.position
+        self.focus_entry(w.action_entry)
+        self.click_answer_checkbox()
+        self.assertEqual(w.position, position)
+        self.assertIsNone(w.position.action_ordinal)
+        self.assertEqual(w.position.frame_index, 0)
+
+    def test_before_action_frame_entry_focus_loss_preserves_selected_action_and_side(self):
+        w = self.window
+        w.select_action(3)
+        w.set_before(True)
+        position = w.position
+        self.focus_entry(w.frame_entry)
+        self.click_answer_checkbox()
+        self.assertEqual(w.position, position)
+        self.assertEqual((w.position.action_ordinal, w.position.before, w.position.frame_index), (3, True, 2))
+
+    def test_initial_action_entry_tab_away_preserves_initial(self):
+        w = self.window
+        position = w.position
+        self.focus_entry(w.action_entry)
+        QTest.keyClick(w.action_entry, Qt.Key_Tab)
+        self.app.processEvents()
+        self.assertFalse(w.action_entry.hasFocus() or w.action_entry.lineEdit().hasFocus())
+        self.assertEqual(w.position, position)
+
+    def test_frame_entry_return_and_enter_interpret_text_and_commit_once(self):
+        w = self.window
+        for key in (Qt.Key_Return, Qt.Key_Enter):
+            with self.subTest(key=key):
+                w.select_frame(0)
+                self.type_entry(w.frame_entry, '4')
+                self.assertFalse(w.frame_entry.keyboardTracking())
+                self.assertEqual(w.frame_entry.value(), 0)
+                self.assertIsNone(w.position.action_ordinal)
+                with patch.object(w, 'select_frame', wraps=w.select_frame) as select:
+                    QTest.keyClick(w.frame_entry.lineEdit(), key)
+                    self.app.processEvents()
+                select.assert_called_once_with(4)
+                self.assertEqual((w.position.action_ordinal, w.position.before), (4, False))
+
+    def test_action_entry_return_and_enter_interpret_text_and_commit_once(self):
+        w = self.window
+        for key in (Qt.Key_Return, Qt.Key_Enter):
+            with self.subTest(key=key):
+                w.select_frame(0)
+                self.type_entry(w.action_entry, '3')
+                self.assertFalse(w.action_entry.keyboardTracking())
+                self.assertEqual(w.action_entry.value(), 1)
+                self.assertIsNone(w.position.action_ordinal)
+                with patch.object(w, 'select_action', wraps=w.select_action) as select:
+                    QTest.keyClick(w.action_entry.lineEdit(), key)
+                    self.app.processEvents()
+                select.assert_called_once_with(3)
+                self.assertEqual((w.position.action_ordinal, w.position.before), (3, False))
+
+    def test_uncommitted_edited_text_focus_loss_does_not_navigate(self):
+        w = self.window
+        for entry in (w.frame_entry, w.action_entry):
+            with self.subTest(entry=entry):
+                w.select_frame(0)
+                position = w.position
+                self.type_entry(entry, '3')
+                self.click_answer_checkbox()
+                self.assertEqual(w.position, position)
+
+    def test_navigation_button_after_entry_focus_loss_navigates_only_once(self):
+        w = self.window
+        self.focus_entry(w.action_entry)
+        with patch.object(w, 'select_frame', wraps=w.select_frame) as select:
+            QTest.mouseClick(w.next_button, Qt.LeftButton)
+            self.app.processEvents()
+        select.assert_called_once_with(1)
+        self.assertEqual((w.position.action_ordinal, w.position.before), (1, False))
 
     def test_before_after_labels_and_frame_navigation_semantics(self):
         w = self.window
@@ -420,7 +513,7 @@ class ViewerTests(unittest.TestCase):
                 self.assertEqual(w.counter_values[label].text(), getattr(final, field))
             for name in ('Time', 'Est Time', '3BV/s', 'CPS'):
                 self.assertEqual(w.counter_values[name].text(), '-')
-                self.assertIn('historical elapsed time unavailable', w.counter_values[name].toolTip())
+                self.assertEqual(w.counter_values[name].toolTip(), 'historical elapsed time unavailable')
             initial = self.texts(w.counter_values)
             w.last_button.click()
             w.answer_checkbox.setChecked(True)
@@ -428,22 +521,27 @@ class ViewerTests(unittest.TestCase):
 
     def test_counter_ratios_rounding_and_zero_denominators(self):
         original_game = self.bundle.exemplars[0]
-        for active, wasted, b in ((3, 4, 2), (0, 0, 0), (0, 2, 1)):
+        cases = (
+            (3, 4, 2, ('29%', '0.2857', '0.6667', '0.4286')),
+            (4, 4, 1, ('12%', '0.1250', '0.2500', '0.5000')),
+            (0, 0, 0, ('-', '-', '-', '-')),
+            (0, 2, 1, ('50%', '0.5000', '-', '0.0000')),
+        )
+        for active, wasted, b, expected in cases:
             final = replace(original_game.stage2.final_counters, active_clicks=active,
                             wasted_clicks=wasted, completed_3bv=b)
             game = replace(original_game, stage2=replace(original_game.stage2, final_counters=final))
             w = ui.ExemplarBoardViewerWindow(replace(self.bundle, exemplars=(game, *self.bundle.exemplars[1:])))
             try:
-                t = active + wasted
-                expected = {'Efficiency': f'{b/t:.0%}' if t else '-', 'IOE': f'{b/t:.4f}' if t else '-',
-                            'Thrp': f'{b/active:.4f}' if active else '-', 'Corr': f'{active/t:.4f}' if t else '-'}
-                for name, value in expected.items():
+                for name, value in zip(('Efficiency', 'IOE', 'Thrp', 'Corr'), expected):
                     self.assertEqual(w.counter_values[name].text(), value)
             finally:
                 w.close()
                 w.deleteLater()
 
     def test_zini_rows_retained_and_explicitly_deferred_on_win_and_loss(self):
+        self.assertEqual(ui.ZINI_NOTE,
+            'Optional answer-derived ZiNi reference is not calculated in this standalone viewer.')
         for game in (10, 20):
             self.window.select_pair(game, 'stage3')
             for name in ('ZiNi', 'ZNE', 'ZNT'):
@@ -514,12 +612,36 @@ class ViewerTests(unittest.TestCase):
     def test_five_areas_and_scroll_containers_remain_available_on_small_window(self):
         from PyQt5.QtWidgets import QGroupBox
         titles = [group.title() for group in self.window.findChildren(QGroupBox)]
-        self.assertEqual(len(titles), 5)
+        self.assertCountEqual(titles, [
+            'Board / Solver Reference', 'Classic Counters / Final Run Summary',
+            'Model C', 'Action Context', 'Board Presentation — Public View',
+        ])
         self.window.resize(800, 600)
         self.app.processEvents()
         self.assertIs(self.window.board_scroll.widget(), self.window.board)
         self.assertTrue(self.window.sidebar_scroll.widgetResizable())
         self.assertEqual(self.window.board.width(), self.window.reconstruction.board_snapshot.width * 28)
+
+    def test_authority_labels_preserve_exact_semantic_boundaries(self):
+        texts = [label.text() for label in self.window.findChildren(QLabel)]
+        self.assertIn('Reconstructed Counters — current Engine semantics; FINAL RUN SUMMARY', texts)
+        self.assertIn('Historical elapsed time unavailable. Mechanical active/wasted '
+                      'classification is not strategic quality.', texts)
+        self.assertIn('3BV / Ops / isolated number count = answer-derived board references, '
+                      'not solver-visible evidence.', texts)
+        self.assertEqual(self.window.answer_checkbox.text(), 'Show hidden answers — reference overlay')
+        self.assertEqual(ui.TRANSITION_NOTE, 'Action-target transition — not recorded cursor trajectory')
+        self.assertIn('Action-target transition — not recorded cursor trajectory. Orange outline: '
+                      'selected target; blue ring: previous recorded target; green: newly revealed safe cells AFTER.', texts)
+        model_note = (
+            'Both timelines are post-hoc Model C evaluations of persisted actions. '
+            'Stage 2 did not natively declare Model C; Stage 3 declared it during collection, '
+            'but these events retain no native per-action cost/cursor fields. '
+            'This is modeled physical execution time, not Replay elapsed, CPU decision '
+            'time or recorded cursor trajectory.'
+        )
+        self.assertEqual(ui.MODEL_NOTE, model_note)
+        self.assertIn(model_note, texts)
 
     def test_construction_navigation_and_toggles_do_no_domain_work(self):
         with ExitStack() as guards:

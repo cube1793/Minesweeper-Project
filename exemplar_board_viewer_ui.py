@@ -8,7 +8,7 @@ the stored public frame. Each game/solver pair owns one inspection position.
 from dataclasses import dataclass
 from fractions import Fraction
 
-from PyQt5.QtCore import QPointF, Qt, QSignalBlocker
+from PyQt5.QtCore import QPointF, Qt, QSignalBlocker, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QGraphicsOpacityEffect, QGridLayout,
@@ -27,7 +27,7 @@ COUNTER_ROWS = ('Time', 'Est Time', '3BV', '3BV/s', 'Clicks', 'Left', 'Right',
                 'Chord', 'CPS', 'Efficiency', 'IOE', 'Ops', 'Thrp', 'Corr',
                 'ZiNi', 'ZNE', 'ZNT')
 TRANSITION_NOTE = 'Action-target transition — not recorded cursor trajectory'
-ZINI_NOTE = 'Optional answer-derived ZiNi reference not calculated in this Slice-3 viewer.'
+ZINI_NOTE = 'Optional answer-derived ZiNi reference is not calculated in this standalone viewer.'
 MODEL_NOTE = (
     'Both timelines are post-hoc Model C evaluations of persisted actions. '
     'Stage 2 did not natively declare Model C; Stage 3 declared it during collection, '
@@ -70,6 +70,19 @@ def _fact(value):
     if isinstance(value, Fraction):
         return f'{value.numerator}/{value.denominator}'
     return str(value)
+
+
+class _DirectEntry(QSpinBox):
+    """Own Return/Enter explicitly; focus loss only edits the displayed value."""
+
+    commit_requested = pyqtSignal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.commit_requested.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
 
 class _AnswerGlyph(QWidget):
@@ -315,7 +328,7 @@ class ExemplarBoardViewerWindow(QWidget):
         self.frame_slider.setAccessibleName('Completed frame index')
         main.addWidget(self.frame_slider)
         entries = QHBoxLayout()
-        self.frame_entry, self.action_entry = QSpinBox(), QSpinBox()
+        self.frame_entry, self.action_entry = _DirectEntry(), _DirectEntry()
         self.frame_entry.setKeyboardTracking(False)
         self.action_entry.setKeyboardTracking(False)
         self.frame_go, self.action_go = QPushButton('Go frame'), QPushButton('Go action')
@@ -341,10 +354,11 @@ class ExemplarBoardViewerWindow(QWidget):
         self.before_button.clicked.connect(lambda: self.set_before(True))
         self.after_button.clicked.connect(lambda: self.set_before(False))
         self.frame_slider.valueChanged.connect(self.select_frame)
-        self.frame_entry.editingFinished.connect(lambda: self.select_frame(self.frame_entry.value()))
-        self.action_entry.editingFinished.connect(lambda: self.select_action(self.action_entry.value()))
-        self.frame_go.clicked.connect(lambda: self.select_frame(self.frame_entry.value()))
-        self.action_go.clicked.connect(lambda: self.select_action(self.action_entry.value()))
+        # Focus loss is not navigation: these entries also mirror inspection state.
+        self.frame_entry.commit_requested.connect(self._commit_frame_entry)
+        self.action_entry.commit_requested.connect(self._commit_action_entry)
+        self.frame_go.clicked.connect(self._commit_frame_entry)
+        self.action_go.clicked.connect(self._commit_action_entry)
         self.answer_checkbox.toggled.connect(self._refresh)
         self.resize(1280, 850)
         self._refresh()
@@ -394,6 +408,14 @@ class ExemplarBoardViewerWindow(QWidget):
             raise ValueError('Frame index must be an integer in 0..N, excluding bool.')
         self._positions[self.pair] = _Position(index if index else None)
         self._refresh()
+
+    def _commit_frame_entry(self):
+        self.frame_entry.interpretText()
+        self.select_frame(self.frame_entry.value())
+
+    def _commit_action_entry(self):
+        self.action_entry.interpretText()
+        self.select_action(self.action_entry.value())
 
     def select_action(self, ordinal):
         if type(ordinal) is not int or not 1 <= ordinal <= self.action_count:
