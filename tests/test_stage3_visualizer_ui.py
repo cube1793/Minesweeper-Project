@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -938,11 +938,286 @@ class Stage3VisualizerTests(unittest.TestCase):
         self.assertTrue(window.timer.isActive())
         self.assertEqual(window.modeled_playback.partial_modeled_us, 7)
 
-    def test_module_dependencies_are_only_presentation_and_no_hidden_truth(self):
+    def test_reference_controls_default_off_and_layers_are_mouse_transparent(self):
+        w = self.window
+        self.assertEqual(w.answer_checkbox.text(), "Show hidden answers")
+        self.assertEqual(w.route_checkbox.text(), "Show action-target route")
+        self.assertIn("not recorded cursor trajectory", w.route_checkbox.toolTip())
+        layers = (w.answer_overlay, w.route_overlay, w.overlay)
+        self.assertEqual(tuple(child for child in w.board_container.children() if child in layers), layers)
+        for layer in layers:
+            self.assertTrue(layer.testAttribute(Qt.WA_TransparentForMouseEvents))
+            self.assertEqual(layer.geometry(), w.board_container.rect())
+        for checkbox, layer in ((w.answer_checkbox, w.answer_overlay), (w.route_checkbox, w.route_overlay)):
+            self.assertFalse(checkbox.isChecked())
+            self.assertTrue(layer.isHidden())
+        w.on_next()
+        self.assertEqual(w.overlay.action_target, (0, 0))  # Existing context needs neither reference toggle.
+
+    def test_answers_derive_once_from_retained_finalized_board_and_dimensions(self):
+        execution = execution_fixture("flood")
+        with patch.object(stage3_visualizer_ui, "derive_answer_clues",
+                          wraps=stage3_visualizer_ui.derive_answer_clues) as derive:
+            w = self.create_window(execution)
+            derive.assert_called_once_with(4, 1, execution.board.mine_positions)
+            self.assertIs(derive.call_args.args[2], execution.board.mine_positions)
+            self.assertEqual(w.answer_overlay.answers, ((1, -1, 1, 0),))
+            answers = w.answer_overlay.answers
+            with self.assertRaises(TypeError):
+                answers[0][0] = 8
+            for index in (1, 2, 0):
+                w.on_slider_changed(index)
+                w.answer_checkbox.toggle()
+                w.route_checkbox.toggle()
+            w.on_play_pause()
+            w.timer.timeout.emit()
+            w.timer.timeout.emit()
+            self.assertIs(w.answer_overlay.answers, answers)
+            self.assertEqual(derive.call_count, 1)
+
+    def test_hidden_answers_preserve_public_text_accessibility_flags_and_terminal_feedback(self):
+        for kind in ("win", "loss", "flood"):
+            w = self.create_window(execution_fixture(kind))
+            for index in range(w.player.step_count + 1):
+                w.on_slider_changed(index)
+                observation = w.player.get_observation()
+                expected = tuple(tuple(value == H for value in row) for row in observation)
+                self.assertEqual(w.answer_overlay.hidden_mask, expected)
+                def public():
+                    return tuple((cell.logical_state, cell.text(), cell.toolTip(), cell.accessibleName(),
+                                  cell.accessibleDescription(), cell.styleSheet()) for cell in w.cells.values())
+                before = public()
+                for checked in (True, False):
+                    w.answer_checkbox.setChecked(checked)
+                    self.assertEqual(public(), before)
+                    self.assertEqual(w.player.get_observation(), observation)
+            if kind == "loss":
+                self.assertEqual(w.answer_overlay.hidden_mask, ((False, False, False, True, False, False),))
+                self.assertEqual(tuple(cell.logical_state for cell in w.cells.values()),
+                                 (1, CellState.EXPLODED, CellState.FALSE_FLAG, H, CellState.MINE, F))
+
+    def test_answer_mask_uses_public_observation_even_at_a_retained_mine(self):
+        w = self.window
+        observation = [[H, 3, F], [CellState.EXPLODED, CellState.FALSE_FLAG, CellState.MINE]]
+        with patch.object(w.player, "get_observation", return_value=observation):
+            w.refresh()
+        self.assertEqual(w.answer_overlay.answers[0][1], -1)
+        self.assertEqual(w.answer_overlay.hidden_mask, ((True, False, False), (False, False, False)))
+        w.answer_checkbox.setChecked(True)
+        self.assertEqual(w.cells[(1, 0)].text(), "3")
+        painter = Mock()
+        with patch.object(stage3_visualizer_ui, "QPainter", return_value=painter):
+            w.answer_overlay.paintEvent(None)
+        self.assertEqual([call.args[2] for call in painter.drawText.call_args_list], ["1"])
+        painter.setOpacity.assert_called_once_with(0.35)
+
+    def test_answer_painter_shows_mine_and_clue_keeps_zero_blank_and_restores_off(self):
+        w = self.create_window(execution_fixture("flood"))
+        w.show()
+        self.app.processEvents()
+        before = w.board_container.grab().toImage()
+        w.answer_checkbox.setChecked(True)
+        self.assertTrue(w.answer_overlay.isVisible())
+        # Literal painter commands avoid changing the process-wide font database
+        # on Windows offscreen Qt, which may expose no installed glyph fonts.
+        painter = Mock()
+        with patch.object(stage3_visualizer_ui, "QPainter", return_value=painter):
+            w.answer_overlay.paintEvent(None)
+        self.assertEqual([(call.args[0].x(), call.args[2]) for call in painter.drawText.call_args_list],
+                         [(0, "1"), (28, "✹"), (56, "1")])
+        painter.setOpacity.assert_called_once_with(0.35)
+        w.answer_checkbox.setChecked(False)
+        self.assertTrue(w.answer_overlay.isHidden())
+        self.assertEqual(before, w.board_container.grab().toImage())
+
+    def test_route_prefix_zero_one_middle_final_and_repeated_executed_targets(self):
+        first = self.execution.result.traces[0]
+        repeated = replace(first, safe_cells_opened_delta=0)
+        traces = (first, repeated, *self.execution.result.traces[1:])
+        execution = replace(self.execution, result=replace(self.execution.result, traces=traces))
+        w = self.create_window(execution)
+        targets = ((0, 0), (0, 0), (1, 0), (0, 0), (2, 0), (2, 1))
+        self.assertEqual(w.route_overlay.targets, ())
+        w.route_checkbox.setChecked(True)
+        for k in (0, 1, 2, 3, 6, 4, 0):
+            w.on_slider_changed(k)
+            self.assertEqual(w.route_overlay.targets, targets[:k])
+            painter = Mock()
+            with patch.object(stage3_visualizer_ui, "QPainter", return_value=painter):
+                w.route_overlay.paintEvent(None)
+            if k < 2:
+                painter.drawPolyline.assert_not_called()
+            else:
+                self.assertEqual(painter.drawPolyline.call_count, 2)
+                self.assertEqual(tuple(painter.drawPolyline.call_args.args[0]),
+                                 tuple(w.overlay.cell_center(target) for target in targets[:k]))
+
+    def test_route_has_no_fabricated_origin_or_planned_suffix(self):
+        # The first executed target differs from the declared (0, 0) cursor.
+        # Decision evidence is deliberately inaccessible; it is not route data.
+        decision_reads = []
+        class UnreadDecision:
+            def __getattr__(self, name):
+                decision_reads.append(name)
+                raise AssertionError("Planner evidence read")
+        decision = UnreadDecision()
+        trace = replace(self.execution.result.traces[0], move=SimpleMove(Action.FLAG, 1, 0),
+                        decision=decision, safe_cells_opened_delta=0, explicit_flag_delta=1)
+        execution = replace(self.execution, result=Stage3RunResult(P, (trace,)))
+        w = self.create_window(execution)
+        w.on_last()
+        self.assertEqual(w.route_overlay.targets, ((1, 0),))
+        self.assertEqual(w.overlay.movement_line, ((0, 0), (1, 0)))
+        painter = Mock()
+        with patch.object(stage3_visualizer_ui, "QPainter", return_value=painter):
+            w.route_overlay.paintEvent(None)
+        painter.drawPolyline.assert_not_called()
+        self.assertEqual(decision_reads, [])
+
+    def test_route_pixels_and_shared_style_restore_when_disabled(self):
+        w = self.window
+        w.show()
+        self.app.processEvents()
+        w.on_slider_changed(2)
+        w.overlay.hide()
+        before = w.board_container.grab().toImage()
+        w.route_checkbox.setChecked(True)
+        self.assertNotEqual(before, w.board_container.grab().toImage())
+        painter = Mock()
+        with patch.object(stage3_visualizer_ui, "QPainter", return_value=painter):
+            w.route_overlay.paintEvent(None)
+        self.assertEqual([(call.args[0].color().getRgb(), call.args[0].widthF())
+                          for call in painter.setPen.call_args_list],
+                         [((255, 255, 255, 100), 3.5), ((90, 70, 115, 165), 2.0)])
+        w.route_checkbox.setChecked(False)
+        self.assertEqual(before, w.board_container.grab().toImage())
+
+    def test_partial_modeled_motion_keeps_reference_prefix_until_exact_commit(self):
+        w, clock = self.create_modeled_window(1)
+        w.answer_checkbox.setChecked(True)
+        w.route_checkbox.setChecked(True)
+        mask, route = w.answer_overlay.hidden_mask, w.route_overlay.targets
+        w.on_play_pause()
+        with patch.object(w, "refresh", wraps=w.refresh) as refresh:
+            clock.advance(self.execution.result.traces[1].modeled_action_us * 250)
+            w.timer.timeout.emit()
+            self.assertEqual(w.overlay.cursor_center, QPointF(14 + 28 * 5 / 32, 14))
+            self.assertEqual(w.overlay.action_target, (1, 0))  # Pending context remains independent.
+            self.assertEqual(w.player.current_index, 1)
+            self.assertIs(w.answer_overlay.hidden_mask, mask)
+            self.assertIs(w.route_overlay.targets, route)
+            self.assertEqual(route, ((0, 0),))
+            refresh.assert_not_called()
+            clock.advance(self.execution.result.traces[1].modeled_action_us * 750)
+            w.timer.timeout.emit()
+            refresh.assert_called_once_with()
+        self.assertEqual(w.player.current_index, 2)
+        self.assertEqual(w.route_overlay.targets, ((0, 0), (1, 0)))
+        self.assertFalse(w.answer_overlay.hidden_mask[0][1])
+
+    def test_reference_toggles_are_independent_during_index_modeled_and_paused_playback(self):
+        for mode in ("Index", "Modeled-Time", "paused"):
+            w, clock = self.create_modeled_window(1)
+            if mode == "Index":
+                w.mode_combo.setCurrentText(mode)
+            w.on_play_pause()
+            if mode != "Index":
+                clock.advance(7000)
+                w.timer.timeout.emit()
+            if mode == "paused":
+                w.on_play_pause()
+            def state():
+                return (w.player.current_index, w.player.cumulative_modeled_us,
+                        w.modeled_playback.partial_modeled_us, w.modeled_playback.running,
+                        w.timer.isActive(), w.timer.interval(), QPointF(w.overlay.cursor_center))
+            before = state()
+            for answers, route in ((False, False), (True, False), (False, True), (True, True)):
+                w.answer_checkbox.setChecked(answers)
+                w.route_checkbox.setChecked(route)
+                self.assertEqual(state(), before)
+                self.assertEqual(w.answer_overlay.isHidden(), not answers)
+                self.assertEqual(w.route_overlay.isHidden(), not route)
+                layers = (w.answer_overlay, w.route_overlay, w.overlay)
+                self.assertEqual(tuple(c for c in w.board_container.children() if c in layers), layers)
+
+    def test_reference_toggles_and_partial_repaint_do_no_domain_or_board_work(self):
+        w, clock = self.create_modeled_window(1)
+        w.show()
+        self.app.processEvents()
+        w.on_play_pause()
+        forbidden = (
+            "stage3_execution.run_expert_stage3_execution", "stage3_runner.run_stage3",
+            "stage3_planner.plan_position", "stage3_planner.analyze_position",
+            "simple_decision.analyze_position", "simple_probability.calculate_probabilities",
+            "stage3_execution.generate_board", "benchmark_board.generate_board",
+            "benchmark_modeled_time.authenticate_model_c", "benchmark_modeled_time.evaluate_ordered_actions",
+            "stage3_physical.load_timing_table", "stage3_physical.action_cost",
+            "stage3_execution_job.Stage3ExecutionJob.start", "subprocess.Popen",
+            "core_engine.MinesweeperEngine.__init__", "core_engine.MinesweeperEngine.step",
+            "core_engine.MinesweeperEngine.reset_with_mines", "stage3_visualizer_ui.derive_answer_clues",
+            "stage3_visualizer_ui.Stage3VisualizerCell.render_state",
+        )
+        with ExitStack() as stack:
+            guards = [stack.enter_context(patch(name, side_effect=AssertionError(name))) for name in forbidden]
+            for owner, names in ((w, ("refresh",)), (w.player, ("get_observation", "go_to", "next", "previous"))):
+                guards.extend(stack.enter_context(patch.object(owner, name, side_effect=AssertionError(name)))
+                              for name in names)
+            for answers, route in ((True, False), (False, True), (True, True), (False, False)):
+                w.answer_checkbox.setChecked(answers)
+                w.route_checkbox.setChecked(route)
+                clock.advance(1000)
+                w.timer.timeout.emit()
+                self.assertFalse(w.board_container.grab().isNull())
+            self.assertTrue(w.error_label.isHidden(), w.error_label.text())
+            self.assertEqual(w.modeled_playback.partial_modeled_us, 4)
+            for guard in guards:
+                guard.assert_not_called()
+
+    def test_reference_overlays_update_on_index_autoplay_and_navigation(self):
+        w = self.window
+        w.answer_checkbox.setChecked(True)
+        w.route_checkbox.setChecked(True)
+        targets = ((0, 0), (1, 0), (0, 0), (2, 0), (2, 1))
+        w.on_play_pause()
+        for k in range(1, 6):
+            w.timer.timeout.emit()
+            self.assertEqual(w.route_overlay.targets, targets[:k])
+            self.assertEqual(w.answer_overlay.hidden_mask,
+                             tuple(tuple(value == H for value in row) for row in w.player.get_observation()))
+        self.assertFalse(w.timer.isActive())
+        for operation, k in ((w.on_previous, 4), (w.on_first, 0), (w.on_next, 1), (w.on_last, 5)):
+            operation()
+            self.assertEqual(w.route_overlay.targets, targets[:k])
+
+    def test_close_with_reference_overlays_then_reopen_has_fresh_defaults(self):
+        w, clock = self.create_modeled_window(1)
+        w.answer_checkbox.setChecked(True)
+        w.route_checkbox.setChecked(True)
+        w.on_play_pause()
+        clock.advance(7000)
+        w.timer.timeout.emit()
+        w.close()
+        with patch.object(w, "refresh", side_effect=AssertionError("Closed refresh")), patch.object(
+            w.player, "next", side_effect=AssertionError("Closed advance"),
+        ):
+            clock.advance(10**12)
+            w.timer.timeout.emit()
+        self.assertFalse(w.timer.isActive())
+        self.assertFalse(w.modeled_playback.running)
+        reopened = self.create_window(self.execution)
+        self.assertFalse(reopened.answer_checkbox.isChecked())
+        self.assertFalse(reopened.route_checkbox.isChecked())
+        self.assertTrue(reopened.answer_overlay.isHidden())
+        self.assertTrue(reopened.route_overlay.isHidden())
+        self.assertEqual(reopened.route_overlay.targets, ())
+        self.assertEqual(reopened.player.current_index, 0)
+
+    def test_module_dependencies_allow_only_finalized_truth_for_reference_rendering(self):
         source = Path(stage3_visualizer_ui.__file__).read_text(encoding="utf-8")
         module = ast.parse(source)
         allowed = {"PyQt5", "core_engine", "stage3_execution", "stage3_trace_player",
-                   "stage3_identity", "stage3_physical", "stage3_modeled_playback"}
+                   "stage3_identity", "stage3_physical", "stage3_modeled_playback",
+                   "visualization_reference_overlays"}
         for node in ast.walk(module):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
@@ -952,9 +1227,22 @@ class Stage3VisualizerTests(unittest.TestCase):
                 continue
             for name in names:
                 self.assertIn(name.split(".")[0], allowed)
-        for forbidden in ("mine_positions", "decision_compute_ns", "run_stage3", "run_expert_stage3_execution",
+        # The sole truth read must feed the neutral clue derivation, never a
+        # planner/admissibility path or a private execution/Engine mutation.
+        truth_reads = [node for node in ast.walk(module)
+                       if isinstance(node, ast.Attribute) and node.attr == "mine_positions"]
+        self.assertEqual(len(truth_reads), 1)
+        self.assertEqual(ast.unparse(truth_reads[0]), "execution.board.mine_positions")
+        derivations = [node for node in ast.walk(module) if isinstance(node, ast.Call)
+                       and isinstance(node.func, ast.Name) and node.func.id == "derive_answer_clues"]
+        self.assertEqual(len(derivations), 1)
+        self.assertEqual([ast.unparse(arg) for arg in derivations[0].args],
+                         ["execution.spec.width", "execution.spec.height", "execution.board.mine_positions"])
+        self.assertIs(derivations[0].args[2], truth_reads[0])
+        for forbidden in ("decision_compute_ns", "run_stage3", "run_expert_stage3_execution",
                           "plan_position", "subprocess", "ReplayData", "ReplayPlayer", "QSettings",
-                          "load_timing_table", "authenticate_model_c", "action_cost"):
+                          "load_timing_table", "authenticate_model_c", "action_cost", "._engine",
+                          "same_board_comparison_ui", "exemplar_board_viewer_ui"):
             self.assertNotIn(forbidden, source)
 
     def test_construction_navigation_and_autoplay_never_call_producers(self):

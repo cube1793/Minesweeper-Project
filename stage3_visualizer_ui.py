@@ -8,7 +8,7 @@ is advanced only by the pure modeled playback controller.
 from PyQt5.QtCore import QPointF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen
 from PyQt5.QtWidgets import (
-    QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
+    QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
     QSpinBox, QStyle, QStyleOptionSlider, QVBoxLayout, QWidget,
 )
 
@@ -18,6 +18,9 @@ import stage3_identity
 import stage3_physical
 from stage3_trace_player import Stage3TracePlayer
 from stage3_modeled_playback import SUPPORTED_SPEEDS, Stage3ModeledPlayback
+from visualization_reference_overlays import (
+    derive_answer_clues, paint_hidden_answers, paint_action_target_route,
+)
 
 
 CELL_SIZE = 28
@@ -180,6 +183,38 @@ class _IndexSlider(QSlider):
         super().mousePressEvent(event)
 
 
+class _AnswerReferenceOverlay(QWidget):
+    """Paint supplied fixed answers only through the current public HIDDEN mask."""
+
+    def __init__(self, parent, answers, font):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.answers, self.answer_font = answers, font
+        self.hidden_mask = ()
+
+    def paintEvent(self, event):
+        if self.hidden_mask:
+            painter = QPainter(self)
+            paint_hidden_answers(painter, self.answers, self.hidden_mask, CELL_SIZE, self.answer_font)
+
+
+class _ActionRouteOverlay(QWidget):
+    """Paint only the completed target prefix supplied by the window."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.targets = ()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        paint_action_target_route(painter, [_MovementOverlay.cell_center(target) for target in self.targets])
+
+
 class Stage3VisualizerWindow(QWidget):
     """A separate window with its own player for one immutable execution."""
 
@@ -250,9 +285,17 @@ class Stage3VisualizerWindow(QWidget):
         self.board_container.setFixedSize(
             execution.spec.width * CELL_SIZE, execution.spec.height * CELL_SIZE,
         )
+        answers = derive_answer_clues(execution.spec.width, execution.spec.height,
+                                      execution.board.mine_positions)
+        self.answer_overlay = _AnswerReferenceOverlay(self.board_container, answers, self.cells[(0, 0)].font())
+        self._action_targets = tuple((trace.move.x, trace.move.y) for trace in execution.result.traces)
+        self._reference_index = None
+        self.route_overlay = _ActionRouteOverlay(self.board_container)
         self.overlay = _MovementOverlay(self.board_container)
-        self.overlay.setGeometry(self.board_container.rect())
-        self.overlay.raise_()
+        # Public cells < answers < completed route < existing segment/cursor.
+        for overlay in (self.answer_overlay, self.route_overlay, self.overlay):
+            overlay.setGeometry(self.board_container.rect())
+            overlay.raise_()
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidget(self.board_container)
         self.scroll_area.setWidgetResizable(False)
@@ -261,6 +304,20 @@ class Stage3VisualizerWindow(QWidget):
         self.legend_label = QLabel(MOVEMENT_LEGEND)
         self.legend_label.setWordWrap(True)
         layout.addWidget(self.legend_label)
+
+        references = QHBoxLayout()
+        self.answer_checkbox = QCheckBox("Show hidden answers")
+        self.answer_checkbox.setToolTip("Faint finalized-board reference on current public HIDDEN cells only.")
+        self.answer_checkbox.toggled.connect(self._update_reference_visibility)
+        references.addWidget(self.answer_checkbox)
+        self.route_checkbox = QCheckBox("Show action-target route")
+        self.route_checkbox.setToolTip(
+            "Action-target route — not recorded cursor trajectory. Completed targets only; no future targets."
+        )
+        self.route_checkbox.toggled.connect(self._update_reference_visibility)
+        references.addWidget(self.route_checkbox)
+        references.addStretch()
+        layout.addLayout(references)
 
         controls = QHBoxLayout()
         for name, text, icon, handler in (
@@ -430,11 +487,20 @@ class Stage3VisualizerWindow(QWidget):
 
     def refresh(self):
         player = self.player
-        for y, row in enumerate(player.get_observation()):
+        observation = player.get_observation()
+        for y, row in enumerate(observation):
             for x, value in enumerate(row):
                 self.cells[(x, y)].render_state(value)
         trace = player.current_trace
         index, count = player.current_index, player.step_count
+        self.answer_overlay.hidden_mask = tuple(tuple(value == CellState.HIDDEN for value in row)
+                                                for row in observation)
+        self.answer_overlay.update()
+        if index != self._reference_index:
+            self.route_overlay.targets = self._action_targets[:index]
+            self._reference_index = index
+            self.route_overlay.update()
+        self._update_reference_visibility()
         self.step_label.setText(f"Step {index} / {count}")
         self.status_label.setText(f"Current reconstructed status: {player.status.name}")
         values = {
@@ -469,6 +535,12 @@ class Stage3VisualizerWindow(QWidget):
         if index == count:
             self._stop_autoplay()
         self._update_presentation()
+
+    def _update_reference_visibility(self, _checked=None):
+        if self._closed:
+            return
+        self.answer_overlay.setVisible(self.answer_checkbox.isChecked())
+        self.route_overlay.setVisible(self.route_checkbox.isChecked())
 
     def _cancel_partial(self):
         self._stop_autoplay()
