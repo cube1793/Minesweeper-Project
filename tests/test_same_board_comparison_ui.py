@@ -3,6 +3,7 @@
 import ast
 from contextlib import ExitStack
 from copy import deepcopy
+from fractions import Fraction
 import os
 from pathlib import Path
 import unittest
@@ -14,10 +15,11 @@ from qt_bootstrap import configure_qt_plugin_path
 
 configure_qt_plugin_path()
 try:
-    from PyQt5.QtCore import QEvent, Qt, QTimer
-    from PyQt5.QtGui import QCloseEvent, QFontDatabase
+    from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
+    from PyQt5.QtGui import QCloseEvent, QFontDatabase, QMouseEvent
     from PyQt5.QtTest import QSignalSpy, QTest
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QWidget
+    from PyQt5.QtWidgets import (QApplication, QLabel, QPushButton, QScrollArea, QWidget,
+                                QStyle, QStyleOptionSlider, QStyleOptionSpinBox)
 except ImportError:
     QApplication = None
 else:
@@ -30,6 +32,7 @@ from replay_model import ReplayBoard, ReplayData, ReplayEvent
 from same_board_comparison import HumanComparisonContext
 from same_board_playback import ComparisonRun, SameBoardPlayback
 from same_board_runner import run_same_board_comparison
+from same_board_timed_playback import PlaybackMode
 from tests.test_same_board_playback import captured_comparison
 from tests.test_same_board_runner import human_context
 
@@ -65,12 +68,13 @@ class SameBoardComparisonUITests(unittest.TestCase):
             QFontDatabase.removeApplicationFont(cls._test_font_id)
 
     def setUp(self):
+        self.clock_ns = 0
         self.windows = []
         self.addCleanup(self.close_windows)
         self.window = self.create_window(self.execution)
 
     def create_window(self, execution, parent=None):
-        window = SameBoardComparisonWindow(execution, parent)
+        window = SameBoardComparisonWindow(execution, parent, clock=lambda: self.clock_ns)
         self.windows.append(window)
         return window
 
@@ -121,7 +125,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.assertIs(window.parent(), parent)
         self.assertIs(window.execution, self.execution)
         self.assertIs(window.playback.execution, self.execution)
-        self.assertEqual(len(window.findChildren(QScrollArea)), 1)
+        self.assertEqual(len(window.findChildren(QScrollArea)), 3)
         self.assertIs(window.scroll_area.widget(), window.board_container)
         self.assertFalse(window.scroll_area.widgetResizable())
         self.assertEqual(len(window.findChildren(Stage3VisualizerCell)), 24)
@@ -301,8 +305,9 @@ class SameBoardComparisonUITests(unittest.TestCase):
                 window.on_last()
                 self.assertEqual(self.summary(window), before)
             labels = " ".join(label.text().lower() for label in window.findChildren(QLabel))
-            for forbidden in ("winner", "ranking", "faster", "slower", "%", "score", "speed", "time-to-win"):
+            for forbidden in ("winner", "ranking", "faster", "slower", "%", "score", "time-to-win"):
                 self.assertNotIn(forbidden, labels)
+            self.assertIn('playback speed:', labels)
 
     def test_canonical_first_open_qualification_and_caveat(self):
         window = self.create_window(self.canonical)
@@ -532,16 +537,19 @@ class SameBoardComparisonUITests(unittest.TestCase):
         window.on_next()
         self.assertEqual(window.status_label.text(), "Current reconstructed status: LOST")
 
-    def test_viewer_has_no_timer_process_controls_or_hidden_render_access(self):
+    def test_viewer_owns_presentation_timer_and_reference_truth_but_no_execution_or_private_state(self):
         window = self.window
-        self.assertEqual(window.findChildren(QTimer), [])
+        self.assertEqual(window.findChildren(QTimer), [window.presentation_timer])
+        self.assertEqual(window.presentation_timer.interval(), 16)
         self.assertEqual({button.text() for button in window.findChildren(QPushButton)},
-                         {"First", "Previous", "Next", "Last"})
-        for name in ("job", "worker", "process", "token", "timer", "speed", "modeled_playback"):
+                         {"First", "Previous", "Next", "Last", "Play"})
+        for name in ("job", "worker", "process", "token", "modeled_playback"):
             self.assertFalse(hasattr(window, name), name)
         tree = ast.parse(Path(ui.__file__).read_text(encoding="utf-8"))
         attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-        self.assertFalse(attributes & {"mine_positions", "terminal_observation", "_human", "_stage2", "_stage3"})
+        self.assertFalse(attributes & {"terminal_observation", "_human", "_stage2", "_stage3"})
+        self.assertEqual(sum(isinstance(node, ast.Attribute) and node.attr == 'mine_positions'
+                             for node in ast.walk(tree)), 1)
         imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         self.assertFalse(imports & {"ui_manager", "same_board_execution_job", "same_board_execution_worker", "subprocess"})
 
@@ -550,11 +558,14 @@ class SameBoardComparisonUITests(unittest.TestCase):
         window.resize(1000, 820)
         window.show()
         self.app.processEvents()
-        for label in window.findChildren(QLabel):
-            if label.wordWrap() and not label.isHidden():
-                with self.subTest(text=label.text()):
-                    self.assertTrue(label.hasHeightForWidth())
-                    self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+        for tab in range(window.tabs.count()):
+            window.tabs.setCurrentIndex(tab)
+            self.app.processEvents()
+            for label in window.findChildren(QLabel):
+                if label.wordWrap() and label.isVisibleTo(window):
+                    with self.subTest(text=label.text()):
+                        self.assertTrue(label.hasHeightForWidth())
+                        self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
 
     def test_close_emits_once_and_late_navigation_is_inert(self):
         window = self.window
@@ -593,6 +604,542 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
         self.assertTrue(sip.isdeleted(window))
         self.assertEqual(len(signal), 1)
+
+    def test_direct_track_seek_and_native_handle_drag(self):
+        window = self.window
+        window.show()
+        self.app.processEvents()
+        slider = window.slider
+        QTest.mouseClick(slider, Qt.LeftButton, pos=QPoint(slider.width() * 4 // 5, slider.height() // 2))
+        self.assertGreaterEqual(window.playback.current_index, 15)
+        self.assert_presentation()
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        handle = slider.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, slider)
+        QTest.mousePress(slider, Qt.LeftButton, pos=handle.center())
+        self.assertTrue(slider.isSliderDown())
+        target = QPoint(slider.width() // 4, handle.center().y())
+        self.app.sendEvent(slider, QMouseEvent(QEvent.MouseMove, QPointF(target),
+                          Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+        QTest.mouseRelease(slider, Qt.LeftButton, pos=target)
+        self.assertFalse(slider.isSliderDown())
+        self.assertLess(window.playback.current_index, 10)
+        self.assertEqual(window.controller.state.completed_index, window.playback.current_index)
+
+    def test_same_index_seek_is_inert_and_buttons_cancel_partial_progress(self):
+        # A short stream has track pixels outside the native handle that still
+        # round to the same integer index; a long stream may have none.
+        w = self.create_window(self.full_size)
+        w.show()
+        self.app.processEvents()
+        w.on_next()
+        w.on_play_pause()
+        self.clock_ns += 50000000
+        w.on_tick()
+        partial = w.controller.state
+        option = QStyleOptionSlider()
+        w.slider.initStyleOption(option)
+        handle = w.slider.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, w.slider)
+        span = w.slider.width() - handle.width()
+        candidates = [QPoint(x, handle.center().y()) for x in range(w.slider.width())
+                      if not handle.contains(QPoint(x, handle.center().y())) and
+                      QStyle.sliderValueFromPosition(0, w.slider.maximum(),
+                          max(0, min(span, x - handle.width() // 2)), span, option.upsideDown) == 1]
+        self.assertTrue(candidates, 'Fixture needs a track pixel mapping to the current index')
+        with patch.object(w.playback, 'go_to', side_effect=AssertionError('same index seek')):
+            QTest.mouseClick(w.slider, Qt.LeftButton, pos=candidates[0])
+            QTest.mouseClick(w.slider, Qt.LeftButton, pos=handle.center())
+        self.assertEqual(w.controller.state, partial)
+        for navigate in (w.on_next, w.on_previous, w.on_last, w.on_first):
+            navigate()
+            self.assertFalse(w.controller.state.running)
+            self.assertFalse(w.presentation_timer.isActive())
+            self.assertEqual(w.controller.state.progress, 0)
+            self.assertEqual(w.controller.state.completed_index, w.playback.current_index)
+        self.assertEqual(w.context_overlay.cursor_center, w.context_overlay.center(w.controller.timing.initial_cursor))
+
+    def test_exact_run_modes_and_control_enablement(self):
+        w = self.window
+        self.assertEqual(len(w.controllers), 3)
+        self.assertEqual(len({id(c) for c in w.controllers.values()}), 3)
+        for run in RUNS:
+            self.select(run)
+            native = 'Replay Time' if run is ComparisonRun.HUMAN else 'Model C Time'
+            self.assertEqual([w.mode_selector.itemText(i) for i in range(w.mode_selector.count())],
+                             ['Index', native])
+            self.assertTrue(w.interval_entry.isEnabled())
+            self.assertFalse(w.speed_entry.isEnabled())
+            w.mode_selector.setCurrentIndex(1)
+            self.assertFalse(w.interval_entry.isEnabled())
+            self.assertTrue(w.speed_entry.isEnabled())
+
+    def test_only_selected_run_advances_and_switch_restores_partial_state(self):
+        w = self.window
+        for run in RUNS:
+            self.select(run)
+            before = self.indices()
+            w.on_play_pause()
+            self.clock_ns += 250000000
+            w.on_tick()
+            self.assertEqual(w.playback.current_index, 1)
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+            for other, index in zip(RUNS, before):
+                if other is not run:
+                    self.assertEqual(w.playback.index_for(other), index)
+            next_run = RUNS[(RUNS.index(run) + 1) % 3]
+            self.select(next_run)
+            self.assertFalse(w.controllers[run].state.running)
+            self.assertFalse(w.presentation_timer.isActive())
+            self.select(run)
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+            self.assertEqual(w.controller.state.completed_index, 1)
+
+    def test_interval_bounds_commit_clamp_arrows_and_active_reanchor(self):
+        w, entry = self.window, self.window.interval_entry
+        w.show()
+        self.app.processEvents()
+        self.assertEqual((entry.minimum(), entry.maximum(), entry.value()), (20, 5000, 200))
+        for text, expected, focus in (('5', 20, False), ('19', 20, True), ('6000', 5000, False)):
+            entry.setValue(200)
+            entry.setFocus()
+            entry.selectAll()
+            QTest.keyClicks(entry, text)
+            if focus:
+                w.play_button.setFocus()
+                self.app.processEvents()
+            else:
+                QTest.keyClick(entry, Qt.Key_Return)
+            self.assertEqual(entry.value(), expected)
+            self.assertEqual(w.controller.interval_ms, expected)
+        entry.setValue(20)
+        self.assertEqual(entry.text(), 'Max (20 ms)')
+        self.assertIn('Index — Max (20 ms/action)', w.playback_label.text())
+        QTest.keyClick(entry, Qt.Key_Up)
+        self.assertEqual(entry.text(), '21 ms')
+        QTest.keyClick(entry, Qt.Key_Down)
+        QTest.keyClick(entry, Qt.Key_Down)
+        self.assertEqual(entry.value(), 20)
+        for interval in (20, 200, 5000):
+            w.on_first()
+            entry.setValue(interval)
+            w.on_play_pause()
+            self.clock_ns += interval * 250000
+            w.on_tick()
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+            entry.setValue(1000)
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+            self.assertTrue(w.controller.state.running)
+            self.clock_ns += 750000000
+            w.on_tick()
+            self.assertEqual(w.playback.current_index, 1)
+            self.assertEqual(w.presentation_timer.interval(), 16)
+
+    def test_interval_style_owned_width_fits_max_and_upper_value_at_larger_font(self):
+        entry = self.window.interval_entry
+        self.window.show()
+        original = entry.font()
+        widths = []
+        for extra in (0, 6):
+            font = entry.font()
+            font.setPointSize(max(8, original.pointSize()) + extra)
+            entry.setFont(font)
+            self.app.sendEvent(entry, QEvent(QEvent.StyleChange))
+            self.app.processEvents()
+            widths.append(entry.width())
+            for value, text in ((20, 'Max (20 ms)'), (5000, '5000 ms')):
+                entry.setValue(value)
+                option = QStyleOptionSpinBox()
+                entry.initStyleOption(option)
+                edit = entry.style().subControlRect(QStyle.CC_SpinBox, option, QStyle.SC_SpinBoxEditField, entry)
+                up = entry.style().subControlRect(QStyle.CC_SpinBox, option, QStyle.SC_SpinBoxUp, entry)
+                self.assertGreaterEqual(edit.width(), entry.fontMetrics().horizontalAdvance(text) +
+                                        entry.fontMetrics().horizontalAdvance(' '))
+                self.assertFalse(edit.intersects(up))
+                self.assertEqual(entry.minimumWidth(), entry.maximumWidth())
+        self.assertGreater(widths[1], widths[0])
+
+    def test_running_boundary_does_not_erase_pending_interval_or_speed_edit(self):
+        w = self.window
+        w.show()
+        self.app.processEvents()
+        for mode, entry, text, expected, elapsed in (
+                (0, w.interval_entry, '5', 20, 200000000),
+                (1, w.speed_entry, '0.75', 0.75, 500000000)):
+            w.mode_selector.setCurrentIndex(mode)
+            w.on_first()
+            w.on_play_pause()
+            entry.setFocus()
+            entry.selectAll()
+            QTest.keyClicks(entry, text)
+            pending = entry.lineEdit().text()
+            self.clock_ns += elapsed
+            w.on_tick()
+            self.assertEqual(w.playback.current_index, 1)
+            self.assertEqual(entry.lineEdit().text(), pending)
+            QTest.keyClick(entry, Qt.Key_Return)
+            self.assertEqual(entry.value(), expected)
+            self.assertTrue(w.controller.state.running)
+            self.assertEqual(w.playback.current_index, 1)
+            w.on_play_pause()
+
+    def test_zero_first_replay_boundary_commits_on_play_without_fabricated_motion(self):
+        w = self.create_window(self.full_size)
+        w.mode_selector.setCurrentIndex(1)
+        start = w.context_overlay.cursor_center
+        w.on_play_pause()
+        self.assertEqual(w.playback.current_index, 1)
+        self.assertEqual(w.controller.state.playhead, 0)
+        self.assertEqual(w.context_overlay.cursor_center, start)
+        self.assertEqual(w.route_overlay.targets, ((1, 1),))
+        self.assertEqual(w.cells[1, 1].logical_state, CellState.FLAGGED)
+
+    def test_time_speeds_reanchor_without_jump_and_do_not_change_source(self):
+        w = self.window
+        original = deepcopy(self.execution)
+        for run in RUNS:
+            self.select(run)
+            w.mode_selector.setCurrentIndex(1)
+            for speed in (0.25, 0.75, 1, 8):
+                w.on_first()
+                w.speed_entry.setValue(speed)
+                w.on_play_pause()
+                self.clock_ns += 10000000
+                w.on_tick()
+                divisor = 1000000000 if run is ComparisonRun.HUMAN else 1000
+                expected = Fraction(10000000, divisor) * Fraction(speed)
+                self.assertEqual(w.controller.state.playhead, expected)
+                before = w.context_overlay.cursor_center
+                w.speed_entry.setValue(1.25)
+                self.assertEqual(w.controller.state.playhead, expected)
+                self.assertEqual(w.context_overlay.cursor_center, before)
+                self.assertTrue(w.controller.state.running)
+                w.on_play_pause()
+        self.assertEqual(self.execution, original)
+
+    def test_smoothstep_literal_quarters_and_stationary_first_repeated_targets(self):
+        overlay = self.window.context_overlay
+        a, b = overlay.center((0, 0)), overlay.center((4, 0))
+        for u, q in ((0, 0), (0.25, 0.15625), (0.5, 0.5), (0.75, 0.84375), (1, 1)):
+            self.assertEqual(overlay.interpolated_center((0, 0), (4, 0), u), a + (b - a) * q)
+            self.assertEqual(overlay.interpolated_center((2, 1), (2, 1), u), overlay.center((2, 1)))
+        w = self.window
+        w.on_play_pause()
+        self.clock_ns += 100000000
+        w.on_tick()
+        self.assertEqual(w.playback.current_index, 0)
+        self.assertEqual(overlay.cursor_center, overlay.center((0, 0)))
+        w.on_first()
+        w.on_slider_changed(2)  # Human FLAG/unflag at the same target.
+        w.on_play_pause()
+        self.clock_ns += 100000000
+        w.on_tick()
+        self.assertTrue(w.controller.state.stationary)
+        self.assertEqual(overlay.cursor_center, overlay.center((4, 0)))
+
+    def test_human_first_cursor_uses_first_target_not_model_origin_or_trace(self):
+        w = self.create_window(self.loss)
+        self.assertEqual(w.controller.timing.initial_cursor, (1, 0))
+        self.assertEqual(w.context_overlay.cursor_center, w.context_overlay.center((1, 0)))
+        w.mode_selector.setCurrentIndex(1)
+        w.on_play_pause()
+        self.assertEqual(w.context_overlay.cursor_center, w.context_overlay.center((1, 0)))
+        self.select(ComparisonRun.STAGE2, w)
+        self.assertEqual(w.context_overlay.cursor_center, w.context_overlay.center(
+            self.loss.model_c_evaluation.initial_cursor))
+
+    def test_pause_resume_keeps_partial_cursor_manual_seek_and_mode_change_cancel_it(self):
+        w = self.window
+        for mode in (0, 1):
+            w.mode_selector.setCurrentIndex(mode)
+            w.on_slider_changed(1)
+            w.on_play_pause()
+            self.clock_ns += 50000000
+            w.on_tick()
+            w.on_play_pause()
+            paused = w.controller.state
+            point = w.context_overlay.cursor_center
+            self.clock_ns += 1000000000
+            w.on_tick()
+            self.assertEqual(w.controller.state, paused)
+            w.on_play_pause()
+            self.assertEqual(w.context_overlay.cursor_center, point)
+            self.assertEqual(w.controller.state.progress, paused.progress)
+            w.on_slider_changed(3)
+            self.assertFalse(w.controller.state.running)
+            self.assertEqual(w.controller.state.progress, 0)
+            self.assertEqual(w.context_overlay.cursor_center, w.context_overlay.center((4, 0)))
+        w.on_play_pause()
+        self.clock_ns += 100000000
+        w.on_tick()
+        index = w.playback.current_index
+        w.mode_selector.setCurrentIndex(0)
+        self.assertEqual(w.playback.current_index, index)
+        self.assertEqual(w.controller.state.progress, 0)
+        self.assertFalse(w.presentation_timer.isActive())
+
+    def test_late_tick_applies_one_final_seek_and_partial_tick_does_not_render_board(self):
+        w = self.window
+        w.on_play_pause()
+        with patch.object(w.playback, 'go_to', wraps=w.playback.go_to) as seek, \
+             patch.object(w, 'refresh', wraps=w.refresh) as refresh:
+            self.clock_ns += 650000000
+            w.on_tick()
+            seek.assert_called_once_with(3)
+            refresh.assert_called_once()
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+        with patch.object(w, 'refresh', side_effect=AssertionError('partial board refresh')), \
+             patch.object(w.playback, 'get_observation', side_effect=AssertionError('partial observation')):
+            self.clock_ns += 10000000
+            w.on_tick()
+            self.assertTrue(w.error_label.isHidden(), w.error_label.text())
+
+    def test_timed_seek_failure_realigns_stops_and_preserves_actual_public_state(self):
+        w = self.window
+        before = self.rendered()
+        w.on_play_pause()
+        with patch.object(w.playback, 'go_to', side_effect=ValueError('timed seek failed')):
+            self.clock_ns += 250000000
+            w.on_tick()
+        self.assertEqual(w.playback.current_index, 0)
+        self.assertEqual(w.controller.state.completed_index, 0)
+        self.assertEqual(w.controller.state.progress, 0)
+        self.assertEqual(self.rendered(), before)
+        self.assertFalse(w.presentation_timer.isActive())
+        self.assertFalse(w.controller.state.running)
+        self.assertIn('timed seek failed', w.error_label.text())
+
+    def test_time_boundary_catch_up_route_and_terminal_stop_for_all_runs(self):
+        w = self.window
+        for run in RUNS:
+            self.select(run)
+            w.mode_selector.setCurrentIndex(1)
+            w.on_first()
+            w.on_play_pause()
+            self.clock_ns += 1000000000000
+            w.on_tick()
+            self.assertEqual(w.playback.current_index, w.playback.action_count())
+            self.assertEqual(w.controller.state.playhead, w.controller.timing.total_time)
+            self.assertEqual(w.route_overlay.targets, w.controller.timing.targets)
+            self.assertFalse(w.presentation_timer.isActive())
+            self.assertFalse(w.play_button.isEnabled())
+            self.assertEqual(w.play_button.text(), 'Play')
+
+    def test_hidden_answers_are_renderer_only_on_public_hidden_cells(self):
+        w = self.window
+        self.assertFalse(w.answer_checkbox.isChecked())
+        self.assertTrue(w.answer_overlay.isHidden())
+        def public():
+            return tuple((c.logical_state, c.text(), c.toolTip(), c.accessibleName(),
+                          c.accessibleDescription()) for c in w.cells.values())
+        for index in (0, 2, w.playback.action_count()):
+            w.on_slider_changed(index)
+            before = public()
+            mask = tuple(tuple(v == CellState.HIDDEN for v in row) for row in self.rendered())
+            self.assertEqual(w.answer_overlay.hidden_mask, mask)
+            for checked in (True, False):
+                w.answer_checkbox.setChecked(checked)
+                self.assertEqual(public(), before)
+        self.assertEqual(w.answer_overlay.answers[0][4], -1)
+        self.assertEqual(w.answer_overlay.answers[0][0], 0)
+        self.assertEqual(w.answer_overlay.answers[0][3], 3)
+        loss = self.create_window(self.full_size)
+        loss.on_last()
+        loss.answer_checkbox.setChecked(True)
+        self.assertFalse(loss.answer_overlay.hidden_mask[0][0])
+        self.assertFalse(loss.answer_overlay.hidden_mask[1][1])
+        self.assertEqual(loss.cells[0, 0].logical_state, CellState.EXPLODED)
+        self.assertEqual(loss.cells[1, 1].logical_state, CellState.FALSE_FLAG)
+
+    def test_answer_pixel_toggle_is_visible_and_off_restores_public_rendering(self):
+        w = self.window
+        w.show()
+        self.app.processEvents()
+        w.context_overlay.hide()  # Isolate reference pixels from context geometry.
+        initial = w.board_container.grab().toImage()
+        w.answer_checkbox.setChecked(True)
+        decorated = w.board_container.grab().toImage()
+        w.answer_checkbox.setChecked(False)
+        restored = w.board_container.grab().toImage()
+        self.assertNotEqual(initial, decorated)
+        self.assertEqual(initial, restored)
+        w.on_slider_changed(2)  # FLAG at (4, 0) must not be replaced by its answer.
+        before = w.cells[4, 0].grab().toImage()
+        w.answer_checkbox.setChecked(True)
+        self.assertFalse(w.answer_overlay.hidden_mask[0][4])
+        self.assertEqual(w.cells[4, 0].grab().toImage(), before)
+
+    def test_route_prefixes_no_origin_no_future_repetitions_and_selected_context(self):
+        w = self.window
+        self.assertFalse(w.route_checkbox.isChecked())
+        self.assertIn('not recorded cursor trajectory', w.route_checkbox.toolTip())
+        self.assertEqual(w.route_overlay.targets, ())
+        w.route_checkbox.setChecked(True)
+        for run in RUNS:
+            self.select(run)
+            targets = w.controller.timing.targets
+            for k in (0, 1, 3, w.playback.action_count()):
+                w.on_slider_changed(k)
+                self.assertEqual(w.route_overlay.targets, targets[:k])
+                self.assertEqual(w.context_overlay.current_target, targets[k - 1] if k else None)
+                self.assertEqual(w.context_overlay.previous_target, targets[k - 2] if k > 1 else None)
+        self.select(ComparisonRun.HUMAN)
+        w.on_slider_changed(3)
+        self.assertEqual(w.route_overlay.targets, ((0, 0), (4, 0), (4, 0)))
+        w.on_first()
+        w.on_next()
+        w.on_play_pause()
+        self.clock_ns += 100000000
+        w.on_tick()
+        self.assertEqual(w.route_overlay.targets, ((0, 0),))
+        self.assertNotEqual(w.context_overlay.cursor_center, w.context_overlay.center((0, 0)))
+        self.clock_ns += 100000000
+        w.on_tick()
+        self.assertEqual(w.route_overlay.targets, ((0, 0), (4, 0)))
+
+    def test_overlays_are_independent_human_trace_stays_entire_and_z_order_explicit(self):
+        w = self.window
+        w.show()
+        trace = w.mouse_trace_overlay
+        geometry = trace._presentation_geometry()
+        before = (trace._trace, trace._events, geometry)
+        w.on_next()
+        w.on_play_pause()
+        for answer in (False, True):
+            for route in (False, True):
+                for human_trace in (False, True):
+                    state = w.controller.state
+                    w.answer_checkbox.setChecked(answer)
+                    w.route_checkbox.setChecked(route)
+                    w.mouse_trace_checkbox.setChecked(human_trace)
+                    self.assertEqual(w.controller.state, state)
+                    self.assertTrue(w.presentation_timer.isActive())
+                    self.assertEqual((trace._trace, trace._events, trace._presentation_geometry()), before)
+                    self.assertEqual(trace.isVisible(), human_trace)
+                    self.assertEqual(w.answer_overlay.isVisible(), answer)
+                    self.assertEqual(w.route_overlay.isVisible(), route)
+                    self.clock_ns += 10000000
+                    w.on_tick()
+        expected = (w.answer_overlay, w.route_overlay, trace, w.context_overlay)
+        self.assertEqual(w.overlay_layers, expected)
+        self.assertEqual(tuple(child for child in w.board_container.children() if child in expected), expected)
+        for layer in expected:
+            self.assertTrue(layer.testAttribute(Qt.WA_TransparentForMouseEvents))
+        self.select(ComparisonRun.STAGE2)
+        self.assertTrue(trace.isHidden())
+        self.assertIs(trace._presentation_geometry(), geometry)
+
+    def test_partial_refresh_and_toggles_do_no_domain_or_board_work(self):
+        w = self.window
+        w.on_next()
+        w.on_play_pause()
+        forbidden = (
+            'same_board_runner.run_same_board_comparison', 'simple_runner.run_simple',
+            'stage3_runner.run_stage3', 'stage3_planner.plan_position', 'simple_decision.analyze_position',
+            'benchmark_board.generate_board', 'benchmark_modeled_time.authenticate_model_c',
+            'benchmark_modeled_time.evaluate_ordered_actions', 'stage3_physical.action_cost',
+            'stage3_physical.load_timing_table', 'same_board_timed_playback.project_stage2_timing',
+            'same_board_comparison_ui.project_same_board_timings',
+            'same_board_execution_job.SameBoardExecutionJob.start', 'subprocess.Popen',
+            'core_engine.MinesweeperEngine.__init__', 'core_engine.MinesweeperEngine.step',
+            'core_engine.MinesweeperEngine.reset_with_mines',
+        )
+        with ExitStack() as stack:
+            guards = [stack.enter_context(patch(name, side_effect=AssertionError(name))) for name in forbidden]
+            guards += [stack.enter_context(patch.object(w.playback, name, side_effect=AssertionError(name)))
+                       for name in ('get_observation', 'go_to', 'next', 'previous')]
+            render = stack.enter_context(patch.object(Stage3VisualizerCell, 'render_state',
+                                                      side_effect=AssertionError('cell refresh')))
+            self.clock_ns += 50000000
+            w.on_tick()
+            w.answer_checkbox.setChecked(True)
+            w.route_checkbox.setChecked(True)
+            w.mouse_trace_checkbox.setChecked(True)
+            self.assertTrue(w.error_label.isHidden(), w.error_label.text())
+            self.assertEqual(w.controller.state.progress, Fraction(1, 4))
+            for guard in guards:
+                guard.assert_not_called()
+            render.assert_not_called()
+
+    def test_retained_table_is_read_once_per_stage2_action_then_never_for_ui_work(self):
+        from dataclasses import replace
+        from types import SimpleNamespace
+
+        original = self.execution.model_c_evaluation
+
+        class GuardedTable:
+            reads = 0
+            enabled = True
+
+            def __getitem__(table, dx):
+                class Row:
+                    def __getitem__(row, dy):
+                        if not table.enabled:
+                            raise AssertionError('Timing-table lookup after construction')
+                        table.reads += 1
+                        return original.table[dx][dy]
+                return Row()
+
+        table = GuardedTable()
+        fixture = replace(self.execution, model_c_evaluation=SimpleNamespace(
+            table=table, initial_cursor=original.initial_cursor))
+        w = self.create_window(fixture)
+        self.assertEqual(table.reads, len(self.execution.stage2_result.moves))
+        table.enabled = False
+        for run in RUNS:
+            self.select(run, w)
+            for mode in (0, 1):
+                w.mode_selector.setCurrentIndex(mode)
+                w.on_first()
+                w.on_play_pause()
+                self.clock_ns += 10000000
+                w.on_tick()
+                w.answer_checkbox.setChecked(not w.answer_checkbox.isChecked())
+                w.route_checkbox.setChecked(not w.route_checkbox.isChecked())
+                w.on_last()
+                self.assertTrue(w.error_label.isHidden(), w.error_label.text())
+
+    def test_close_while_playing_stops_all_controllers_and_late_callbacks(self):
+        w = self.window
+        w.on_play_pause()
+        self.clock_ns += 50000000
+        w.on_tick()
+        w.close()
+        before = self.indices()
+        self.assertFalse(w.presentation_timer.isActive())
+        self.assertTrue(all(not c.state.running for c in w.controllers.values()))
+        self.clock_ns += 100000000000
+        for callback in (w.on_tick, w.on_play_pause, lambda: w.on_interval_changed(500),
+                         lambda: w.on_speed_changed(8), lambda: w.on_mode_changed(1)):
+            callback()
+        self.assertEqual(self.indices(), before)
+        reopened = self.create_window(self.execution)
+        self.assertEqual(self.indices(reopened), (0, 0, 0))
+        self.assertFalse(reopened.presentation_timer.isActive())
+
+    def test_desktop_and_small_windows_keep_controls_reachable_and_board_scrollable(self):
+        w = self.create_window(self.full_size)
+        w.show()
+        for width, height in ((1120, 800), (800, 600), (640, 480)):
+            w.resize(width, height)
+            self.app.processEvents()
+            self.assertEqual((w.width(), w.height()), (width, height))
+            for control in (w.run_selector, w.play_button, w.mode_selector, w.interval_entry,
+                            w.speed_entry, w.slider, w.first_button, w.last_button,
+                            w.answer_checkbox, w.route_checkbox, w.mouse_trace_checkbox):
+                rect = control.rect()
+                rect.moveTopLeft(control.mapTo(w, rect.topLeft()))
+                self.assertTrue(w.rect().contains(rect), (width, height, control, rect))
+            if width == 1120:
+                self.assertEqual(w.scroll_area.horizontalScrollBar().maximum(), 0)
+                self.assertEqual(w.scroll_area.verticalScrollBar().maximum(), 0)
+            else:
+                self.assertGreater(w.scroll_area.horizontalScrollBar().maximum(), 0)
+                self.assertGreater(w.scroll_area.verticalScrollBar().maximum(), 0)
+                for bar in (w.scroll_area.horizontalScrollBar(), w.scroll_area.verticalScrollBar()):
+                    bar.setValue(bar.maximum())
+                    self.assertEqual(bar.value(), bar.maximum())
+        self.assertEqual([w.tabs.tabText(i) for i in range(w.tabs.count())],
+                         ['Board', 'Summary', 'Recorded opening'])
 
     def test_recreated_viewer_has_fresh_indices_and_overlay_preference(self):
         old = self.window
