@@ -1,32 +1,32 @@
 # Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer — Contract
 
-Status: **ACTIVE — Slices 0–3 FINAL PASS — COMPLETE / ACCEPTED by ChatGPT final review.**
-Each slice: **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Date: **2026-10-18 (Asia/Seoul)**.
-**CURRENT / AUTHORIZED — Slice 4: Acceptance / Closeout.**
-Independent pre-closeout audit is complete and the required production
-correction has been accepted. Final Slice-4 acceptance gates remain pending.
-The preceding read-only discovery is **COMPLETE / ACCEPTED** by ChatGPT:
-**STAGE-3 EXTENDED — SELECTED EXEMPLAR BOARD-STATE VIEWER DISCOVERY PASS;
-BLOCKER 0 / REQUIRED 0**. Discovery and contract acceptance remain distinct from
-the separately accepted Slice-1, Slice-2 and Slice-3 implementations below. This
-refresh records accepted audit/correction status only and does not perform final
-Slice-4 acceptance.
+Status: **FINAL ACCEPTANCE PASS / CLOSED — Slices 0–4 COMPLETE / ACCEPTED.**
+**BLOCKER 0 / REQUIRED 0. Date: 2026-10-18 (Asia/Seoul).**
+ChatGPT accepted final qualification at
+`ff6358ae62b6f343bda36069d7164bda9aebee74` —
+`test: preserve frozen E/L pilot source provenance`.
+Production usability commit: `29af53b15d1fff144df5873b62fcec4af91adaaa` —
+`feat: improve exemplar viewer inspection usability`.
 
-Live Git verified on 2026-10-18 (Asia/Seoul), before this documentation refresh:
-branch `feature/stage3-exemplar-board-viewer`, HEAD
-`2c9ba42fb394ee528a035a85c3a2c8146b86a7f9` — `fix: prevent exemplar viewer focus-loss navigation`.
-The worktree was clean, nothing staged, and HEAD matched the local
-`origin/feature/stage3-exemplar-board-viewer` ref (ahead 0 / behind 0);
-no remote fetch was performed. Main baseline remains
-`50a8fee544ed6779dbcd7dd2fbb422c07cce59de`.
-This correction commit is the current live implementation candidate, **not a
-final qualified SHA**. Qualification requires final Slice-4 verification at the
-chosen committed SHA. Live Git overrides these dated recovery facts.
+Live Git before this documentation closeout: branch
+`feature/stage3-exemplar-board-viewer`; HEAD and local origin tracking ref both
+matched the qualified SHA, with clean worktree/index. No fetch was performed.
+`ff6358a` changed only the reviewed historical E/L provenance/test boundary;
+Viewer/application production bytes remain unchanged from `29af53b`.
+Later documentation commits do not replace the qualified source identity.
 
-Stage-3 Extended remains **ACTIVE**. [Timeline Analytics](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
-remains **FINAL ACCEPTANCE PASS / CLOSED**, with its qualified implementation
-identity `4c488e033dd045f1c203ff500d824cfaffb7cc67` unchanged. This is a separate
-interpretation-viewer scope, not a reopening of the closed Timeline contract.
+Final PASS evidence: `results/stage3-exemplar-board-viewer-final-acceptance/20261018T094900066913Z/`.
+Preserve first qualification `20261018T091846923796Z/` in that parent as **HOLD**;
+repair evidence remains `results/stage3-e-l-source-compatibility-repair/20261018T093614465991Z/`.
+**R-2 CLOSED; O-5 CLOSED.** The [final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)
+records source/evidence lineage, fresh verification, package and user-native attribution.
+
+This consolidated final contract supersedes the initial manual-only/final-counter
+UI dispositions through the explicitly accepted usability revision. Historical
+slice evidence below remains dated evidence, not a replacement for final qualification.
+Stage-3 Extended remains **ACTIVE**; Timeline Analytics and prior milestones remain
+CLOSED. Next mandatory work is Visualization Usability Polish, then fixed-exemplar
+human interpretation before separately scoped algorithm research.
 
 ## 1. Purpose and fixed admission
 
@@ -63,7 +63,7 @@ necessary/unnecessary, avoidable backtracking or causal FLAG-to-CHORD payoff.
 their paths explicitly; authenticate the role and exact bytes before opening.
 Do not silently substitute another source. The fixed identities/memberships in
 this tracked contract and the [closed Timeline record](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
-are the exemplar admission authority; the future loader must preserve them.
+are the exemplar admission authority; the accepted loader preserves them.
 
 | Required source | SHA-256 |
 | --- | --- |
@@ -157,7 +157,7 @@ target in exact order. No Stage-2/Stage-3 decision analysis, planner, solver, wo
 The Engine necessarily holds the layout internally for execution; its existing
 static `board_analyzer` setup for 3BV/Ops is not solver decision recomputation.
 Finalized-board reference metrics are allowed under their separate answer-derived
-label. Reconstructed final counters are also allowed under current Engine
+label. Reconstructed displayed-frame counters are also allowed under current Engine
 semantics, never as persisted historical solver evidence or automatic judgments.
 The separate optional ZiNi reference calculation described below is not part of
 action reconstruction and never chooses or changes a recorded action.
@@ -211,10 +211,10 @@ Answer Overlay. For pre-loss reasoning inspect frame `N-1`. Automatic WIN flags
 are also retained as Engine effects, separately from executed FLAG counts.
 
 No board click executes any game action. Reconstructed active/wasted counters may
-appear in the separately labeled final summary below; their mechanical names are
-not strategic judgments. Reconstructed Engine elapsed time and rewards are not
-historical solver measurements. No reconstruction timing fills historical Time,
-Est Time, 3BV/s or CPS rows.
+appear in separately labeled displayed-frame Counters; their mechanical names
+are not strategic judgments. Engine reconstruction elapsed time/rewards are not
+historical solver measurements and supply no time/rate value. The final Viewer
+labels time rows explicitly as Model C; it claims no historical elapsed clock.
 
 ## 6. Answer Overlay
 
@@ -238,36 +238,48 @@ Do not merge the tools.
 Keep static answer information separate from public frame data; `BoardSnapshot`
 is hidden static truth, not a public observation.
 
-## 7. UI ownership and navigation
+## 7. UI ownership, navigation and playback
 
-First version: ONE board, fixed exemplar selector and Stage 2 / Stage 3 selector.
-Keep an independent remembered position for every `(game, solver)` pair; switching
-restores that pair without seeking or clamping another pair. No shared playhead,
-index mapping, normalized progress or synchronized side-by-side display.
+ONE board, fixed exemplar and Stage-2/Stage-3 selectors. Each of the eight pairs
+remembers its own `_Position` and exact modeled playhead. No common playhead,
+normalized progress, index mapping or synchronized side-by-side display.
 
-Keep First / Previous / Next / Last, integer action-index slider, direct integer
-ordinal/index entry, explicit Before / After inspection and Answer Overlay
-checkbox. Reject bool/noninteger/out-of-range entry. Independent side-by-side
-panels and autoplay are deferred; no playback timer or modeled-time animation in V1.
+Keep First / Previous / Play-Pause / Next / Last, Before / After, direct-seek
+slider and ONE Action ordinal entry + Go action. There is no editable Frame box;
+displayed frame is a read-only fact. Return/Enter or Go explicitly commits action
+`j` in `1..N` and starts AFTER. Focus loss/Tab never commits the action entry.
+Initial = frame 0 / no selected action; AFTER j = frame j; BEFORE j = frame j-1.
+Frame navigation to k>0 selects action k AFTER. Selected action metadata remains
+inspection context, not evidence that the action has already been applied.
 
-Navigation must explicitly distinguish selected action ordinal `j` from displayed
-frame `k`. Ordinary frame navigation selects `k` in `0..N`, shows After and, for
-`k>0`, selects action `j=k`. First selects initial frame 0 with no selected action.
-Before/After for selected `j` displays frame `j-1` / `j` without applying any input;
-labels show both numbers. Direct action selection admits `j` in `1..N` and starts
-in After. Buttons/slider follow completed-frame indices, never a percentage axis.
-Remember the selected action/view side (or initial mode); derive the displayed
-frame from that state rather than maintaining a second mutable index authority.
+Track click seeks directly; native handle dragging remains. Index slider range
+is `0..N`; Model C Time slider is `0..total_modeled_us`, validated against Qt's
+integer range. Time seeks retain the exact playhead and use an immutable
+cumulative tuple/bisect to show the last completed frame, including exact boundaries.
 
-At frame 0 there is no applied action/decision/risk/compute metadata. If Before
-action 1 is selected, its original action metadata may appear only as explicitly
-labeled **selected recorded action 1 (not yet applied)**; it must not be attributed
-to frame 0. Initial mode has no selected-action metadata. Cumulative cost follows
-the displayed frame; selected action cost is separately labeled. Navigation and
-overlay toggles are pure presentation/lookups, with no Engine or DB execution.
-Static board references and the explicitly labeled FINAL run summary may remain
-visible while inspecting any frame, including 0; they are not facts about actions
-already applied at that frame. They do not change when navigation/overlay changes.
+Index interval: **20..5000 ms/action, default 200**, minimum `Max (20 ms)` and
+status `Index — Max (20 ms/action)`. Committed below/above-range text clamps;
+Up from minimum gives 21 ms. Font/style-owned sizing fits Max and 5000 ms labels
+without an oversized generic sizeHint floor or stretching with the row.
+Index playback completes one action per interval; BEFORE j completes j next.
+Partial progress pauses/resumes and active interval changes re-anchor coherently.
+
+**Model C Time** uses authenticated integer cumulative action microseconds,
+0.25x..8x presentation speed and a monotonic wall anchor. It never recomputes
+Model C, uses compute/Replay/reconstruction time, or creates intermediate board
+states. BEFORE j begins at completion j-1 and waits action j's modeled duration.
+Pause preserves exact between-action time; speed change re-anchors without a
+jump. Late ticks catch up all due boundaries; terminal time stops playback.
+Mode switches preserve the accepted completed-frame position; Model C-to-Index
+aligns to the last completed frame and discards incompatible partial animation.
+
+Approximately **16 ms presentation refresh** supports smooth cursor motion, not
+Index duration authority, Model C cost authority or a guaranteed FPS claim.
+Manual navigation and pair switching stop playback; mode/interval/speed changes
+may continue it. Answer Overlay and route toggles leave playback/position alone.
+Navigation, partial refresh and toggles are immutable lookup/presentation only:
+no DB, Engine, reconstruction, solver/planner, Model C authentication or ZiNi
+restart. Board selection alone manages the separate board-reference job.
 
 ## 8. Factual context and time authorities
 
@@ -295,11 +307,10 @@ termination, not time-to-win; no generic winner or causal good/bad judgment.
 
 ### 8.1 Source-checked board reference metrics
 
-These semantics were checked by source inspection on 2026-10-18, without running
-application code, tests, Discovery, board generation or official-evidence reads. Authority is
-current source before tests, executable evidence, accepted specifications/records,
-documentation and AI interpretation. No formula conflict was found; the public
-raw-counter API limit below is an explicit implementation boundary.
+Initial Slice-0 source inspection checked these board semantics without executing
+application code. Final qualification separately verified them at ff6358a. The
+accepted additive public completed-Ops seam is specified in section 8.3; no
+private counter access or shadow classification is authorized.
 
 **Board Reference Metrics — answer-derived, not solver-visible.** After layout
 authentication, reuse [`board_analyzer.analyze_board()`](../../board_analyzer.py)
@@ -331,69 +342,48 @@ routing and board structure are questions for human interpretation.
 
 ### 8.3 Classic Counters and final reconstructed summary
 
-KEEP the full familiar row set from [`ui_manager.STAT_ROWS`](../../ui_manager.py):
-**Time, Est Time, 3BV, 3BV/s, Clicks, Left, Right, Chord, CPS, Efficiency, IOE,
-Ops, Thrp, Corr, ZiNi, ZNE, ZNT.** A row's existence does not grant a value.
+The final 17-row structure is **Time (Model C), Est Time (Model C), 3BV,
+3BV/s (Model C), Clicks, Left, Right, Chord, CPS (Model C), Efficiency, IOE,
+Ops, Thrp, Corr, ZiNi, ZNE, ZNT**. Label:
+**Reconstructed Counters — displayed frame; current Engine semantics**.
+The initial final-run-only panel is superseded by the accepted usability revision.
 
-Label the nonhistorical execution summary **Reconstructed Counters — current
-Engine semantics; FINAL RUN SUMMARY**. Capture it once after complete validated
-replay. These values are not persisted benchmark telemetry fields. They stay fixed
-while browsing earlier frames; no new per-frame interpretation of final Counters
-is introduced. Mechanical active/wasted classification is not a claim that an
-action was strategically good/bad. Some classification uses the known answer
-(for example, a FLAG on an actual mine), so it is reconstruction/reference evidence,
-not solver-visible information.
+A frozen counter entry is captured for every frame during the existing single
+replay: status, raw total active/wasted clicks, completed 3BV and Ops, and
+Clicks/Left/Right/Chord strings. `get_counter_snapshot()` exposes the additive
+`completed_ops` field; existing keys retain their meanings. Public `get_stats()`
+supplies PLAYING cumulative integer counts and terminal active+wasted formatting.
+No private counter dictionaries or raw per-button classification are duplicated.
+All elapsed-time/rate values from reconstruction are discarded.
+`FinalCounterSummary` is retained unchanged as terminal compatibility surface;
+last-frame entries reconcile with it. No mutable Engine escapes.
 
-Reuse [`MinesweeperEngine`](../../core_engine.py)'s public seams:
+For displayed-frame `A=active`, `W=wasted`, `T=A+W`, `B=completed_3bv`:
 
-- `get_counter_snapshot()` supplies status, raw total active clicks, raw total
-  wasted clicks and completed/effective 3BV.
-- Terminal `get_stats()` supplies exact final Clicks/Left/Right/Chord formatting:
-  `active + wasted`, omitting `+ wasted` when wasted is zero. It also supplies
-  completed/total 3BV and completed/total Ops. Preserve those final-state strings.
-- The public snapshot currently does **not** expose raw per-button active/wasted
-  breakdowns or raw completed Ops. Static totals are available from BoardAnalysis;
-  final Ops and per-button presentation are available from `get_stats()`. Do not
-  read private Engine attributes, recreate counter classification, or parse
-  formatted strings into a replacement raw-counter authority. If implementation
-  truly needs additional raw values, report the need for a narrow public seam
-  before widening source scope. Slice 0 authorizes no such API change.
-- Read only the non-time fields needed from `get_stats()`; its replay-generated
-  elapsed-time/rate values must not escape into the viewer's historical rows.
-
-Engine handlers classify each valid input once. A mine-hit OPEN is active; CHORD
-classification uses the Engine's actual reveal-change rule, not a newly invented
-productivity rule. Automatic flags are not extra clicks. Preserve current Engine
-definitions, including completed 3BV/Ops accounting, without shadow logic.
-
-Let `A = active_clicks`, `W = wasted_clicks`, `T = A + W`,
-`B = completed_3bv`, and `Z = available board ZiNi`. The verified current
-`_counter_metric_values()` / formatting semantics are:
-
-| Row | Exact ratio/source | Existing presentation and availability |
+| Row | Source | Presentation |
 | --- | --- | --- |
-| Clicks / Left / Right / Chord | Engine final statistics | Active + wasted, zero wasted omitted |
-| 3BV / Ops | Engine completed/effective over total | Completed/total, including LOSS partial completion |
-| Efficiency | B / T | Percentage, 0 decimal places |
-| IOE | B / T | Decimal, 4 places |
-| Thrp | B / A | Decimal, 4 places |
-| Corr | A / T | Decimal, 4 places |
-| ZiNi | Z from existing bounded reference path | Integer when available, WON or LOST |
-| ZNE | Z / T | Decimal, 4 places; WON with available Z only |
-| ZNT | Z / A | Decimal, 4 places; WON with available Z only |
+| Clicks / Left / Right / Chord | Public Engine strings at this frame | PLAYING integer counts; terminal active+wasted with zero wasted omitted |
+| 3BV / Ops | Completed over static total | Prefix progression, including partial LOSS |
+| Efficiency | B/T | Integer percent |
+| IOE | B/T | 4 decimals |
+| Thrp | B/A | 4 decimals |
+| Corr | A/T | 4 decimals |
+| ZiNi | Successful bounded board reference Z | Numeric for either recorded final outcome |
+| ZNE / ZNT | Z/T and Z/A | 4 decimals, recorded final WIN only |
 
-Ratio denominator zero displays `-`, not zero or infinity. The current application
-masks the seven Efficiency/IOE/Thrp/Corr/ZiNi/ZNE/ZNT metrics during PLAYING; here
-the panel explicitly describes the already-completed run, independently of the
-displayed historical frame. On LOSS, Efficiency/IOE/Thrp/Corr and available ZiNi
-remain defined by the rules above, but **ZNE and ZNT remain unavailable**. A missing,
-pending or failed ZiNi result remains unavailable. Match the existing formatting
-without instantiating a main-app window or duplicating Engine counter logic.
+Zero denominators and pending/failed references show `-`. A completed WIN stream
+may show prefix ZNE/ZNT while its displayed frame is PLAYING; LOSS keeps both
+unavailable. These are post-hoc mechanical/reference metrics, not strategy grades.
+Automatic flags are not extra inputs. Active/wasted definitions and completed
+3BV/Ops accounting remain the Engine's authority.
 
-**Historical elapsed time unavailable:** Time, Est Time, 3BV/s and CPS retain
-unavailable markers (`—` or the existing `-`). ActionEvents provide no authoritative
-historical gameplay clock. Engine `perf_counter` during reconstruction is not that
-clock. Neither Model C nor decision compute may fill those ordinary rows.
+For prefix `C` Model C us, board total `TOTAL_B`, frame index `K`:
+Time (Model C) = C/1000000 (3 decimals, Initial 0.000);
+Est Time (Model C) = TOTAL_B*C/(B*1000000) (3 decimals, `-` if C or B is zero);
+3BV/s (Model C) = B*1000000/C and CPS (Model C) = K*1000000/C (4 decimals,
+`-` if C is zero). For C>0/B=0, modeled 3BV/s is 0.0000.
+One pure prefix calculation supplies both Counters and Model C detail rows.
+No historical elapsed clock is claimed or fabricated.
 
 ### 8.4 Model C physical-time authority and explicitly modeled rates
 
@@ -433,24 +423,30 @@ of persisted targets, because reduced official Stage-3 events do not retain nati
 per-action costs/cursor fields. Preserve historical model use versus displayed
 reconstruction as distinct provenance.
 
-KEEP a separate **Model C** group with these explicit names:
+KEEP a separate **Model C** tab:
 
 | Field | Authority |
 | --- | --- |
-| Selected Action Model C Cost | Exact table cost of the selected recorded action; unavailable in initial mode |
-| Cumulative Model C Time | Exact prefix sum through the displayed completed frame; 0 at frame 0 |
-| Final Model C Time | Exact full persisted-stream total |
-| Modeled 3BV/s | Final reconstructed completed_3bv / final Model C seconds |
-| Modeled CPS | Persisted semantic action count / final Model C seconds |
+| Selected Action Model C Cost | Selected recorded action's exact authenticated cost; unavailable in Initial |
+| Cumulative Model C Time | Prefix sum through the completed displayed frame; 0 initially |
+| Current Modeled Est Time | Total 3BV extrapolated at the displayed prefix's modeled 3BV/s |
+| Current Modeled 3BV/s / Current Modeled CPS | Completed 3BV / completed-frame Model C seconds; completed actions / those seconds |
+| Final Model C Time | Full persisted-stream total |
+| Final Modeled 3BV/s / Final Modeled CPS | Final completed 3BV / final modeled seconds; total actions / those seconds |
+| Initial Model C cursor | Authenticated `(0,0)`, not a previous recorded action |
 
-Retain integer microseconds and exact ratio inputs; decimal rendering is
-presentation only. For example, `30,355,982 us = 30.355982 s`. The rates can be
-represented as `B * 1000000 / final_us` and `N * 1000000 / final_us`; never use
-reconstruction runtime as denominator. Final rates/total remain constant during
-navigation. They are not measured Human rates, Minesweeper Online elapsed-time
-statistics, Replay elapsed time or CPU decision speed. Do not invent a modeled
-Est Time. On LOSS, final modeled time and these descriptive rates cover only the
-terminated prefix, never time-to-win or an extrapolated winning result.
+**displayed Model C seconds = integer microseconds / 1,000,000**.
+Exact us remain authority. Detailed cumulative/final fields use integer
+quotient/remainder conversion, e.g. `30355982 us (30.355982 s)`; no binary-floating
+timing authority is introduced. Current estimates use six decimal seconds;
+rates use four decimals. Formula inputs/availability are those in section 8.3.
+
+The continuous playback playhead can lie between actions; it is separate from
+completed-frame cumulative/Counter time. Final totals/rates remain constant on
+navigation. WIN final estimate reconciles with final modeled total. On LOSS,
+final cost is through termination; current estimate extrapolates from the prefix.
+Neither is historical gameplay elapsed time, a predicted finish or time-to-win.
+Decision compute, Replay time and reconstruction runtime remain separate.
 
 ### 8.5 ZiNi reference boundary
 
@@ -458,19 +454,27 @@ KEEP **answer-derived efficiency references** ZiNi/ZNE/ZNT, with the availabilit
 rules above. Reuse the project's current Counters computation, not a new ZiNi
 variant or Speff score. Current [`zini_metric_worker.calculate_counter_zini()`](../../zini_metric_worker.py)
 uses [`calculate_g_zini_neighborhood_beam_bounded()`](../../zini_calculator.py).
-The UI's current `ZINI_COUNTER_CONFIG` uses `standard_seeded_chain_v1`, 1000 maximum
+The shared job's `ZINI_COUNTER_CONFIG` uses `standard_seeded_chain_v1`, 1000 maximum
 evaluations, 500 standard-phase evaluations, seed 0 and no elapsed/stall cutoff,
 with the existing remaining configuration defaults. This is a bounded heuristic
 best-so-far reference, **not a proven minimum/optimum**. Preserve that semantics
 and configuration; do not silently substitute another calculator or policy.
 
-ZiNi is not a Slice-1 reconstruction dependency. A later UI/reference owner may
-use the existing bounded worker/calculator seam on the authenticated immutable
-board, retaining one board reference for both solvers. No Explorer model/controller/
-trace dependency is needed. Reference-job lifecycle is separate from replay and
-navigation; slider/Before/After/overlay changes do not start calculation. A worker
-completion poll, if needed, is not a playback timer or autoplay. Missing/failing
-calculation leaves unavailable rows and does not change accepted replay facts.
+ZiNi is not a reconstruction dependency. Shared PyQt-independent
+[`ZiniMetricJob`](../../zini_metric_job.py) owns the single Counter configuration,
+source/frozen subprocess transport, token validation, nonblocking polling,
+cancellation/termination/reaping and private-file cleanup. `ui_manager` and the
+Viewer each own their own timer/presentation/eligibility policy; the worker owns
+calculation. Source uses the worker script; frozen main dispatches
+`--zini-metric-worker`. No algorithm/config semantics changed.
+
+The Viewer starts one asynchronous job for the selected immutable board and
+caches successful results in memory by board fingerprint/identity. Same-board
+solver switches reuse the job/result. A different board cancels pending work
+and starts its job or reuses a completed cache. Frame/playback/route/overlay changes
+never manage that lifecycle. Close stops polling, cancels/reaps and cleans files.
+Pending: `ZiNi: calculating...`; ready: bounded best-so-far board reference;
+failure: unavailable. No Explorer or persistent/precomputed JSON artifact is added.
 
 Stage-2/Stage-3 comparison is speed-focused; frozen Stage-3's objective is modeled
 physical play time. Click efficiency can be a means toward speed, not the objective.
@@ -496,8 +500,28 @@ without inventing a visible travel path. Geometry is unaffected by Before/After.
 
 The arrow establishes consecutive-target geometry only, not an actual straight-line
 cursor path, velocity, acceleration, pauses, overshoot or OS pointer movement.
-Full-run paths, recent trails and heat maps are deferred to avoid clutter; numerical
-cursor velocity/easing/acceleration cannot be recovered from these events.
+The accepted cumulative **Action-target route — not recorded cursor trajectory**
+is a separate default-OFF polyline through `actions[:displayed_frame]`. Initial
+has no point; AFTER 1 has one point and no segment; BEFORE j excludes j. Repeated
+same-target points are retained without invented detours or origin segments.
+Main alpha 165/width 2.0 and white under-stroke alpha 100/width 3.5 keep it below
+selected markers/transition and the synthetic cursor. Toggle is renderer-only.
+Heat maps remain deferred; actual motion cannot be recovered from these events.
+
+**Synthetic action-target cursor** is visible by default. It uses the accepted
+Stage-3 Visualizer's straight cell-center geometry and smoothstep
+`q=u*u*(3-2*u)`: quarter values 0.15625/0.84375, midpoint 0.5, exact endpoints.
+Initial/BEFORE 1 uses the declared Model C cursor; AFTER j uses target j;
+BEFORE j uses target j-1. The selected pending-target preview stays independent.
+Index uses its configured interval as segment duration; Model C Time uses the
+pending action's exact cost interval. Same-target actions remain stationary.
+Partial motion never commits an action early or exposes it in the historical
+route. Approximately 16 ms refresh updates cursor/slider/status only until a
+boundary changes the completed frame. Pause/resume preserves partial progress.
+This is synthetic smooth interpolation, not recorded mouse motion, OS trajectory,
+Human Mouse Trace or calibrated physical acceleration. Traversing the whole
+modeled action duration is presentation, not a measurement of movement-only time.
+Model C costs remain unchanged.
 
 External Minesweeper Online Replay/video may inform a HUMAN qualitative impression
 of apparent speed or smoothness, efficient-looking progression or conspicuous
@@ -507,36 +531,38 @@ route-quality labels or add annotation persistence for this purpose. Board state
 target geometry and modeled cost enable human interpretation without turning it
 into an automated benchmark fact.
 
-### 8.7 First-version information grouping
+### 8.7 Final information grouping
 
 | Area | Required contents and authority |
 | --- | --- |
-| Board / Solver Reference | Game/category, solver, answer-derived total 3BV/Ops/isolated count, static action-space note and available ZiNi reference |
-| Classic Counters / Final Run Summary | All 17 familiar rows; reconstructed final counters labeled; historical Time/Est Time/3BV/s/CPS unavailable; ZiNi availability preserved |
-| Model C | Selected action cost, cumulative and final modeled time, Modeled 3BV/s and Modeled CPS, explicitly distinct from historical time |
-| Action Context | Displayed frame/selected ordinal, current status/final outcome, action/target/previous target, dx/dy/d², stored inference/probabilities/candidate count, reveal/explicit flag deltas and reconstructed new-safe count |
-| Board Presentation | Public Before/After, target markers/transition, new-safe highlight, optional HIDDEN-only Answer Overlay and genuine terminal feedback |
+| Reference tab | Game/category, solver, static answer-derived 3BV/Ops/isolated totals and action-space note |
+| Counters tab | 17 displayed-frame rows, explicit Model C time labels, async ZiNi status/reference |
+| Model C tab | Selected/cumulative/current/final modeled facts; continuous playback status remains separate |
+| Action tab | Displayed frame/selected ordinal, status/outcome, exact original event metadata and target geometry |
+| Main board presentation | Public Before/After, terminal feedback, new-safe AFTER highlight, independent answer/route overlays, selected context and synthetic cursor |
 
-Keep these authorities separate; never collapse them into a generic performance
-score. Answer-derived references remain separately labeled even while overlay is
-OFF; OFF removes hidden-cell decorations, not the explicitly identified reference
-panel. The Public View board itself remains exactly the public observation.
+Concise notes belong visibly to their group; detailed provenance is in tooltips.
+The initial window is bounded by available screen geometry. Fact tabs prevent
+unnecessary desktop global scrolling; per-area scroll fallback supports small
+screens. Board cells remain public observations; overlays never change their
+text, tooltip/accessibility or logical state. No generic performance score.
 
 ## 9. Minimum architecture
 
 | Owner | Responsibility |
 | --- | --- |
 | Narrow authenticated evidence loader | DB/source/run/config admission, selected-only exact decoding, board generation/fingerprint gate and stability/provenance |
-| Qt-independent immutable reconstruction model | Original validated GameRecord/events/TimelineAnalytics, authenticated board identity, N+1 immutable public frames, new-safe sets, static board references and final counter snapshot/presentation from existing public Engine seams; no ZiNi dependency |
-| Thin standalone Qt viewer | One public board, separated reference/counter/Model C/action areas, independent remembered positions, target transition and answer decoration; separate existing ZiNi reference-job lifecycle if used |
-| Thin standalone launch entry point, if required | Explicit evidence paths, load/validate before presentation, window lifetime; no main-app/package integration implied |
+| Qt-independent immutable reconstruction model | Original validated GameRecord/events/TimelineAnalytics, authenticated board identity, N+1 immutable public frames and aligned frame counters, new-safe sets, static board references and retained final counter snapshot/presentation from existing public Engine seams; no ZiNi dependency |
+| Thin standalone Qt viewer | One public board, separated reference/counter/Model C/action areas, independent positions/playheads, presentation playback/cursor/route, answer decoration and board-keyed shared ZiNi-job policy |
+| Thin standalone launch entry point | Explicit evidence paths, load/validate before presentation, window lifetime; no dedicated packaged Viewer launcher |
+| Shared PyQt-independent ZiNi job / calculation worker | One Counter config and subprocess/token/temp lifecycle reused by main and Viewer; worker computes, each UI owns its policy |
 
 Retain enough immutable static answer information for the renderer-only overlay,
 separate from normal public-frame access. Retain original models rather than
 copying their metadata into a universal event hierarchy. Keep answer-derived board
-references and reconstructed final counters outside public observations and original
-action metadata. Reconstruct once, capture the final non-time summary through
-public APIs and discard the mutable Engine before presentation. All eight streams total
+references and reconstructed frame counters outside public observations and original
+action metadata. Reconstruct once, capture aligned non-time counter entries and
+the final compatibility summary through public APIs, then discard the Engine. All eight streams total
 1516 frames including initial states, so bounded eager observations are sufficient.
 
 No fake ReplayData, native Stage-3 trace/result wrapper or Replay clock. Existing
@@ -558,9 +584,12 @@ modules are not refactoring targets merely to make this viewer more generic.
 | 1 | Qt-independent Pure Reconstruction | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
 | 2 | Accepted-Evidence Loader | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
 | 3 | Standalone Inspection UI | COMPLETE / ACCEPTED by ChatGPT final review; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
-| 4 | Acceptance / Closeout | CURRENT / AUTHORIZED; pre-closeout independent audit complete; R-1 correction ACCEPTED; final acceptance gates pending |
+| 4 | Acceptance / Closeout | COMPLETE / ACCEPTED; qualified ff6358a; final PASS; R-2/O-5 CLOSED |
 
 ### Accepted Slice-1 implementation and verification
+
+Historical initial-slice record: the later accepted additive frame-counter revision
+extends this surface; final semantics are sections 8.3–9.
 
 [`exemplar_board_reconstruction.py`](../../exemplar_board_reconstruction.py) and
 [`tests/test_exemplar_board_reconstruction.py`](../../tests/test_exemplar_board_reconstruction.py)
@@ -578,7 +607,8 @@ and a final public Engine counter summary only. Original `TimelineAnalytics`
 remains the Model C / geometry / metadata authority; no Engine is retained.
 Slice 1 used bounded synthetic fixtures only: no DB/official exemplar inputs,
 benchmark-board generation, Qt/UI, ZiNi, solver/planner execution or algorithm
-research. These accepted implementation and contract semantics remain unchanged.
+research. Original authority boundaries remain; the final revision adds aligned
+immutable counter entries without removing the final compatibility summary.
 
 ### Accepted Slice-2 implementation and verification
 
@@ -613,6 +643,10 @@ Slice-2 implementation evidence, **not final viewer closeout**.
 
 ### Accepted Slice-3 implementation and verification
 
+**Historical first-version acceptance.** Its direct Frame entry, final-only Counters,
+ZiNi defer and manual-only presentation below were **SUPERSEDED BY ACCEPTED USABILITY
+REVISION** at 29af53b. Current behavior is specified in sections 7–9 and 11.
+
 **Slice 3 — Standalone Inspection UI COMPLETE / ACCEPTED by ChatGPT final review;
 BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.** Accepted implementation:
 [`exemplar_board_viewer_ui.py`](../../exemplar_board_viewer_ui.py),
@@ -646,16 +680,19 @@ Default-OFF HIDDEN-only Answer Overlay, exact terminal Engine feedback, new-safe
 AFTER-only highlighting and recorded previous/current target geometry remain
 separate; there is no fabricated first-action origin path.
 
-The full 17-row classic Counters panel retains unavailable historical Time /
-Est Time / 3BV/s / CPS, with Efficiency / IOE / Thrp / Corr from accepted final
-facts. **ZiNi / ZNE / ZNT rows are retained; calculation is explicitly DEFERRED**:
-no narrow public reusable job owner exists, and copying the private main-UI
-lifecycle is outside this optional reference scope. Only immediate reference
-numbers are omitted. Model C has its own group; Action Context preserves exact
-persisted facts. No DB/Engine/reconstruction work during navigation, autoplay,
-timer, modeled animation, shared/common playhead, normalized progress,
-solver/planner/selection/ranking, algorithm research or main-app integration.
-Slices 0–3 technical semantics remain frozen.
+In this historical first version, the 17-row Counters panel left historical
+Time / Est Time / 3BV/s / CPS unavailable and used final-run ratio facts. ZiNi /
+ZNE / ZNT rows were retained with calculation DEFERRED because no public shared
+job owner existed then. These dispositions are superseded by the accepted
+frame-counter/Model C/shared-ZiNi revision described above. Only immediate reference
+numbers were omitted then. Model C had its own group; Action Context preserved
+exact persisted facts. That initial slice included no autoplay/timer/modeled animation or shared
+main-app job extraction. Its no-domain-work-on-navigation boundary remains;
+playback and shared ZiNi ownership were added by the accepted usability revision.
+Common playheads, normalized progress, selection/ranking and algorithm research
+remain excluded.
+The original evidence/reconstruction authority boundaries remain preserved; UI
+and counter presentation were subsequently extended under explicit user approval.
 
 ### Independent pre-closeout audit and accepted R-1 correction
 
@@ -665,7 +702,7 @@ Verdict: **INDEPENDENT AUDIT CONDITIONAL — BLOCKER 0 / REQUIRED 2**.
 
 **R-1 SATISFIED — ChatGPT final correction review PASS / ACCEPTED.** The
 `QSpinBox.editingFinished` focus-loss signal could reinterpret a mirrored entry
-value as navigation. Current correction commit `2c9ba42fb394ee528a035a85c3a2c8146b86a7f9`
+value as navigation. Historical correction commit `2c9ba42fb394ee528a035a85c3a2c8146b86a7f9`
 (`fix: prevent exemplar viewer focus-loss navigation`) changed only
 `exemplar_board_viewer_ui.py` and `tests/test_exemplar_board_viewer_ui.py`.
 Ordinary focus loss and Tab no longer navigate; initial mode and BEFORE positions
@@ -677,17 +714,14 @@ Reported correction verification: **45 tests.test_exemplar_board_viewer_ui +
 = 111 PASS; 0 failures / 0 errors / 0 skips**. No full suite is claimed or rerun
 by this documentation refresh. **No REQUIRED production correction remains.**
 
-**R-2 OPEN — Slice-4 documentation / provenance closeout task**, not a remaining
-production defect. Closeout must identify the final qualified committed SHA and
-run final Slice-4 verification at that SHA. The earlier Slice-3 verification and
-offscreen evidence were gathered before its commit; they remain accepted slice
-evidence, not retroactively commit-qualified final acceptance evidence.
-
-Audit dispositions: **O-1 label-test hardening, O-2 literal ratio-oracle hardening
-and O-6 neutral ZiNi wording SATISFIED**; **O-3 / O-4 DEFER**; **O-5 DEFER TO
-CLOSEOUT** (define/display Model C seconds as exact microseconds / 1_000_000 in
-the final record); **O-7 / O-8 NO CHANGE**. No Claude re-audit after R-1 is required
-or claimed. Final Slice-4 acceptance gates have not yet been run.
+**R-2 CLOSED** by fresh qualification at
+`ff6358ae62b6f343bda36069d7164bda9aebee74` and this closeout's exact lineage.
+Earlier precommit Slice-3 evidence remains historical, not retroactively qualified.
+Audit O-1/O-2/O-6 SATISFIED; O-3/O-4 DEFER; **O-5 CLOSED**:
+displayed Model C seconds = integer microseconds / 1,000,000.
+O-7/O-8 NO CHANGE. No Claude re-audit after R-1 is required or claimed.
+Final Slice-4 verification and user-native attribution are recorded in the
+[closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md).
 
 ### Pure tests
 
@@ -719,58 +753,37 @@ Check exact authenticated Model C lookup, consecutive target chain and separatel
 labeled first origin `(0,0)`, positive same-cell cost, exact prefix/final totals,
 and exact dx/dy/d². No cursor trajectory object or previous action at ordinal zero.
 
-### Qt tests
+### Qt tests and final acceptance
 
-Offscreen Qt tests cover independent remembered positions for all game/solver
-pairs, Before/After/frame labels, direct navigation and boundaries, default-OFF
-overlay, HIDDEN-only decoration, OFF exact public rendering and unchanged flags,
-revealed/terminal cells. Check no click-to-play, unavailable labels and no playback
-timer/autoplay. Navigation/toggle must perform no Engine, DB, solver or planner work;
-answer content must never enter public observation or recorded decision metadata.
+Final qualification covered complete Viewer tests plus real immutable-bundle
+offscreen checks: independent positions/playheads, explicit Action entry,
+Before/After, direct slider seek/drag, overlay/terminal feedback, completed-route
+membership, smoothstep endpoints/quarter points, same-target motion, both playback
+modes, pause/resume/re-anchor/catch-up, Max interval clamp/width and desktop/small
+layout. Partial cursor progress performs no board/counter refresh or domain work.
+ZiNi lifecycle/cache/zero-denominator/WIN-only ratio policies use bounded fakes
+in UI tests and separate real tiny-board worker tests. No Expert ZiNi result is
+claimed by the real-bundle fake-receipt policy probe.
 
-Verify the full Counters row set, FINAL RUN SUMMARY labeling and exact existing
-Efficiency/IOE/Thrp/Corr formulas, rounding and denominator-zero behavior. Current
-ZiNi semantics/configuration and WON/LOSS availability must be unchanged: available
-ZiNi for either terminal outcome, ZNE/ZNT only on WON; unavailable values never
-become zero. Use bounded synthetic/stub reference results for UI tests; no official
-board computation is an ordinary unit-test fixture. ZiNi never enters reconstruction,
-solver evidence or speed-winner labels; job completion cannot change replay frames.
+**Final Slice 4 COMPLETE / ACCEPTED at ff6358a.** Fresh 892/892 focused and
+2390/2390 full source PASS, zero failures/errors/skips; real 4-board/8-stream/
+1508-action proof with all mismatch categories zero; exact source preservation;
+package regression and USER native source-GUI acceptance all passed. The package
+gate was required by the accepted main/shared-worker changes, superseding the
+initial no-package assumption. Build environment: 2365 PASS + 25 individually
+documented optional image/video skips, zero failures/errors; build 77.012 s.
+No official 100k/selection/report rerun or final holdout use occurred.
 
-Test navigation/overlay invariance of board references, final summary, static
-OPEN/FLAG-only Stage-2 policy note and final modeled rates. No UI quality conclusion
-follows CHORD absence or mechanical wasted counts. Verify Model C seconds/rates
-derive only from exact integer time and final numerator facts: no reconstruction
-elapsed time in either historical or modeled fields, no modeled Est Time, LOSS
-through-termination wording, selected-versus-cumulative/frame labels, and optional
-distance conversion as presentation only. Arrow/markers must match original targets,
-change no model state and never be labeled actual cursor trajectory.
-
-### Final acceptance
-
-After implementation is separately authorized, repeat a bounded real proof for
-ONLY the four fixed cases: exact fingerprints, all 1508 actions, zero status/
-safe-reveal/explicit-FLAG mismatches, terminal exactly at the final event and exact
-outcomes/counts/selected modeled totals. Preserve source hashes/sizes/mtimes and
-sidecar absence. No official 100k rerun, solver evidence generation or Timeline
-report regeneration. Focused regression is required for affected boundaries;
-final source regression scope is determined at closeout without substituting
-discovery results for implementation tests.
-
-Record static total 3BV, total Ops and isolated-number count for each fixed board,
-and ZiNi if the existing reference path is available in V1. For each solver/run
-record action count; final Left/Right/Chord presentation; raw total active/wasted
-counts; completed/total 3BV and Ops; Efficiency, IOE, Thrp, Corr; ZNE/ZNT where
-defined; exact final Model C us and displayed seconds; Modeled 3BV/s and Modeled
-CPS. Respect the public raw-breakdown boundary in section 8.3. No new numerical
-board/counter/ZiNi results are claimed by this documentation correction. This future
-table is not an algorithm-winner adjudication; human interpretation follows acceptance.
-
-Offscreen Qt is sufficient for functional implementation-slice checks. A bounded
-presentation inspection should assess glyph readability, opacity and clipping.
-No package/native GUI gate is assumed unless later integration changes the
-packaged/main-app surface; such integration requires separate scope approval.
+See [final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md) for exact commands,
+SHA-256 identities, eight-run reconciliation, historical HOLD/repair lineage,
+package versus user-native attribution and remaining work. This documentation
+closeout itself reruns no tests, DB proof, package build or search.
 
 ## 11. KEEP / DEFER / REJECT
+
+Final dispositions below supersede the initial first-version manual-only design.
+Autoplay/full route/model-time animation deferrals or rejection are historical,
+**SUPERSEDED BY ACCEPTED USABILITY REVISION**; they are not current prohibitions.
 
 | Element | Disposition | Reason and loss if omitted |
 | --- | --- | --- |
@@ -781,36 +794,35 @@ packaged/main-app surface; such integration requires separate scope approval.
 | Immutable frames | KEEP | Reconstruction once makes inspection deterministic; omission loses stable lookup-only navigation |
 | Static 3BV/Ops/isolated reference | KEEP | Human board-structure context; omission loses aggregate reference facts |
 | Stage-2 OPEN/FLAG-only action-space note | KEEP | Explains the structural CHORD boundary without judging it |
-| Full classic Counters rows; final reconstructed counters | KEEP | Familiar reference context with provenance; unknown historical time rows remain unavailable |
+| Full 17 Counters; immutable displayed-frame values | KEEP | Prefix 3BV/Ops/clicks/ratios, explicit Model C time labels and board ZiNi; final summary compatibility retained |
 | Explicit Model C fields and modeled rates | KEEP | Separates physical-model cost from historical elapsed time; omission loses labeled time/rate context |
 | ZiNi as efficiency reference when available | KEEP | Existing answer-derived reference, outside pure reconstruction; omission loses click-efficiency context, not a speed verdict |
 | Selected action-target transition; dx/dy/d² | KEEP | Exact target geometry helps human inspection without inventing a cursor trace |
 | Independent side-by-side panels | DEFER | One board needs less ownership/UI; omission loses simultaneous comparison convenience |
-| Autoplay | DEFER | Manual inspection suffices; loses passive sequential viewing |
+| Index and Model C Time playback | KEEP — supersedes Autoplay DEFER | Independent presentation only; explicit interval/speed, exact boundaries and partial pause/resume |
 | Annotations/bookmarks | DEFER | No persistence framework needed; loses saved commentary/positions |
 | Jump-to-range framework | DEFER | Direct ordinal entry suffices; loses one-click named-range navigation |
 | Export/screenshots | DEFER | No output/sharing contract needed; loses integrated capture/export |
 | Opening IDs, OPENING/BORDER/ISOLATED colors, 3BV-region overlays | DEFER | Aggregates suffice initially; loses local structural visualization convenience, not board reference totals |
-| Recent target trails | DEFER | One exact transition suffices initially; loses immediate multi-action route context |
-| Full-run path rendering | DEFER | Avoids path clutter and extra controls; loses simultaneous whole-chain visualization |
+| Cumulative completed action-target route | KEEP — supersedes recent/full-run route DEFER | Default OFF; no future targets, invented origin or recorded-mouse claim |
 | Movement heat maps | DEFER | No aggregation/rendering policy needed now; loses a spatial frequency overview |
 | Exact external replay cursor-speed measurement; velocity/acceleration/easing reconstruction | DEFER | Current inputs lack an authoritative motion trace; loses numerical external-motion comparison, requiring separately scoped new evidence |
 | Full probability maps | DEFER | Not persisted; omission loses spatial risk inspection, not available evidence |
 | Stage-3 chosen-plan display | DEFER | Not persisted; omission loses plan inspection; never fabricate historical plans |
 | Stage-3 candidate geometry/count | DEFER | Not persisted; omission loses alternative-pool inspection; no reconstruction authorized |
-| Synchronized side-by-side, common playhead/index mapping | REJECT FOR FIRST VERSION | No state-alignment authority; omission loses only synchronized navigation convenience |
-| Normalized progress | REJECT FOR FIRST VERSION | Would imply unsupported progress equivalence; loses percentage-based cross-run navigation |
-| Modeled-time animation | REJECT FOR FIRST VERSION | Adds clock/animation ownership; loses animated modeled pacing, not exact cost facts |
-| Fabricated actual cursor trajectory | REJECT FOR FIRST VERSION | Targets are not sampled motion; loses only an unsupported path reconstruction |
-| Fabricated historical elapsed time | REJECT FOR FIRST VERSION | No historical clock exists in these events; ordinary time/rate rows cannot truthfully be populated |
-| Human trace overlay | REJECT FOR FIRST VERSION | No Human input authority here; loses unrelated Human comparison |
-| Counterfactual nearest-risk visualization | REJECT FOR FIRST VERSION | Requires other evidence/experiment scope; loses hypothetical alternative comparison |
-| Causal good/bad labels | REJECT FOR FIRST VERSION | Unsupported by replay; omission leaves interpretation to the human |
-| Automatic route-quality judgment | REJECT FOR FIRST VERSION | Geometry alone proves no optimality/avoidability; omission leaves qualitative route assessment to the human |
-| ZiNi-as-speed-winner judgment | REJECT FOR FIRST VERSION | Click efficiency is not physical time; omission loses an unsupported automatic verdict |
-| Fake Replay/native trace wrappers | REJECT FOR FIRST VERSION | Would invent authority; loses existing wrapper/control convenience only |
-| Generic cache/checkpoint framework | REJECT FOR FIRST VERSION | Bounded immutable frames suffice; loses scaling optimization for unadmitted long runs |
-| Reconstruction runtime as historical timing evidence | REJECT FOR FIRST VERSION | Engine perf_counter measures reconstruction, not solver play; loses misleading time/rate reuse |
+| Synchronized side-by-side, common playhead/index mapping | REJECT | No state-alignment authority; omission loses only synchronized navigation convenience |
+| Normalized progress | REJECT | Would imply unsupported progress equivalence; loses percentage-based cross-run navigation |
+| Model C Time and synthetic smooth cursor | KEEP — supersedes first-version animation REJECT | Integer-us timing unchanged; smoothstep is presentation only, not actual trajectory |
+| Fabricated actual cursor trajectory | REJECT | Targets are not sampled motion; loses only an unsupported path reconstruction |
+| Fabricated historical elapsed time | REJECT | No historical clock exists; populated time/rate rows explicitly say Model C |
+| Human trace overlay | REJECT | No Human input authority here; loses unrelated Human comparison |
+| Counterfactual nearest-risk visualization | REJECT | Requires other evidence/experiment scope; loses hypothetical alternative comparison |
+| Causal good/bad labels | REJECT | Unsupported by replay; omission leaves interpretation to the human |
+| Automatic route-quality judgment | REJECT | Geometry alone proves no optimality/avoidability; omission leaves qualitative route assessment to the human |
+| ZiNi-as-speed-winner judgment | REJECT | Click efficiency is not physical time; omission loses an unsupported automatic verdict |
+| Fake Replay/native trace wrappers | REJECT | Would invent authority; loses existing wrapper/control convenience only |
+| Generic cache/checkpoint framework | REJECT | Bounded immutable frames suffice; loses scaling optimization for unadmitted long runs |
+| Reconstruction runtime as historical timing evidence | REJECT | Engine perf_counter measures reconstruction, not solver play; loses misleading time/rate reuse |
 
 Deferred unavailable evidence needs a separate acquisition/specification decision,
 not merely UI work. None of these dispositions authorizes algorithm research.
@@ -829,7 +841,7 @@ matched both persisted sources before replay:
 | 1 | `007b8d203106dd32d1b5b6c46052bbeeeb9fde2be89c81023b01519fba1bee9e` |
 
 Values below are Stage 2 / Stage 3; modeled totals are accepted Timeline reference
-facts also reconciled by discovery, not fresh G4 acceptance in the future viewer.
+facts also reconciled by discovery, not fresh G4 acceptance by a Viewer session.
 
 | Game | Actions | Safe reveals | Explicit FLAG sum | Outcome | Model C us |
 | ---: | --- | --- | --- | --- | --- |
@@ -847,32 +859,23 @@ performed as part of Slice 0 drafting.
 
 ## 13. Preservation and next boundary
 
-Preserve Stage-3 V1 / Model C CLOSED/FROZEN, official 100k evidence, Timeline
-Analytics CLOSED and both local report runs, Same-board CLOSED, ZiNi Improvement
-CLOSED and its unopened final holdout. Keep Human Replay / Mouse Trace / solver
-trace / post-hoc Model C / presentation authorities separate. No new telemetry,
-schema, physical model, algorithm/profile selection, main-app integration or
-release/package work is authorized here.
+Viewer **FINAL ACCEPTANCE PASS / CLOSED; Slices 0–4 COMPLETE / ACCEPTED**.
+Preserve exact qualified source/evidence identities in the
+[closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md), frozen Stage-3 V1 / Model C,
+official 100k, Timeline/Same-board closeouts, ZiNi Improvement and unopened holdout.
+No DB reads outside the accepted loader; no regeneration/reconstruction or search
+on navigation. No selection/ranking, arbitrary browsing, synchronized common
+playhead, normalized progress, fabricated historical time/trajectory or automatic
+strategy judgment. No algorithm policy was adopted.
 
-**NEXT / CURRENT / AUTHORIZED:** Slice 4 — Acceptance / Closeout.
-Independent pre-closeout audit is complete and the required production
-correction has been accepted. Final Slice-4 acceptance gates remain pending.
-Slices 0–3 remain COMPLETE / ACCEPTED. Remaining gates are focused/frozen
-verification, final source/full regression, bounded real four-case proof, source
-preservation checks, bounded native/manual presentation inspection, final
-closeout documentation (including R-2 provenance) and closure adjudication.
-This refresh runs none of those gates and adds no viewer features. The milestone
-remains ACTIVE pending closeout.
-
-The accepted viewer must not read DBs outside the accepted loader or regenerate/reconstruct
-on navigation. No solver/planner or selection/ranking rerun, arbitrary browsing,
-shared/common playhead, normalized progress, synchronized side-by-side, autoplay
-or modeled-time animation. Do not fabricate historical elapsed time or cursor
-trajectory/speed, make automatic route/quality/causal judgments, alter frozen
-Model C/V1 or perform algorithm research. Slices 0–3 technical semantics remain
-frozen; this status transition changes no accepted contract requirement.
-The viewer supports human/domain interpretation; choosing/specifying any actual
-Extended algorithm research direction remains a separate explicit decision.
+**NEXT REQUIRED: Visualization Usability Polish**, as detailed in the
+[closeout queue](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md#limitations-and-mandatory-next-work).
+Same-board selected-run direct seek/playback, route and synthetic cursor preserve
+actual Human Replay/Mouse Trace versus Model C authority. Stage-3 Visualizer gains
+completed-target cumulative route while retaining its existing direct seek.
+These are separate maintenance tasks on closed surfaces. After polish comes
+fixed-exemplar human/domain interpretation, then a separately scoped algorithm
+research decision. Stage-3 Extended remains ACTIVE.
 
 See the [current handoff](../CURRENT_HANDOFF.md#4-current-milestone) and
 [Extended roadmap](README.md#roadmap). Historical closeouts retain their own dated

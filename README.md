@@ -149,9 +149,14 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
 4. **CLOSED** — Human Mouse Trace / Path Visualization.
 5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison.
 6. **CLOSED** — Representative-board Demonstrations / Timeline Analytics (Slices 0–4 COMPLETE / ACCEPTED).
-7. **NEXT** — Evidence-guided interpretation leading to first actual Extended algorithm research.
-   고정 exemplar/report의 human/domain 해석으로 연구 방향을 선택·명세합니다.
-   실제 알고리즘 변경/연구 구현은 별도의 명시적 scope/specification 결정이 필요합니다.
+7. **CLOSED** — Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer.
+   Slices 0–4 COMPLETE / ACCEPTED; qualified `ff6358ae62b6f343bda36069d7164bda9aebee74`.
+   [Viewer closeout](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md).
+8. **NEXT REQUIRED** — Visualization Usability Polish: Same-board selected-run
+   seek/playback/route/synthetic cursor and Stage-3 Visualizer cumulative route
+   (existing direct seek retained). [Required queue](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md#limitations-and-mandatory-next-work).
+   이후 고정 exemplar human/domain 해석과 별도 algorithm-research 방향/specification 결정을 진행합니다.
+   새 알고리즘 정책은 채택하지 않았습니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에

@@ -553,12 +553,20 @@ ReplayData
 Live에서는 첫 OPEN/FLAG로 mine layout이 확정된 직후 불변 snapshot으로 worker를 시작한다. 배치 전에는 실행하지 않고, 같은 보드의 후속 행동은 실행 중이거나 결과 polling을 기다리는 작업을 재시작하지 않는다. 완료 결과는 controller에 저장하되 PLAYING 중에는 ZiNi와 Explorer를 공개하지 않는다. 종료 시 저장된 결과가 있으면 즉시 표시하며, 아직 계산 중이면 placeholder를 유지한다. Replay의 worker 시작과 표시 조건은 기존처럼 완료 기록에 한정된다.
 
 ```text
-UI: snapshot + config + job token → 임시 payload
-→ Python subprocess: ZiNi 계산 → token + clicks + final moves + error 결과 파일
-→ UI polling: 현재 token과 일치하면 반영 → process·임시 파일 정리
+UI policy → ZiniMetricJob: snapshot + shared config + token → private payload
+→ Python subprocess worker: ZiNi 계산 → token + clicks + final moves + error
+→ ZiniMetricJob: nonblocking poll / token validation / reap / temp cleanup
+→ UI policy: 현재 board/mode 결과이면 Counters 반영
 ```
 
-현재 Counters 설정은 `standard_seeded_chain_v1`, 총 1000 evaluations, standard phase 500, seed 0이며 시간 제한은 없다. 계산 완료 전이나 실패 시 ZiNi는 `-`다. 보드 변경과 창 닫기는 기존 process를 정리한다. **오래된 token을 거르는 책임은 UI**에 있고 worker는 token을 결과에 돌려준다.
+단일 Counter 설정과 process lifecycle은 PyQt-independent `zini_metric_job.py`가
+소유한다. `standard_seeded_chain_v1`, 총 1000 evaluations, standard phase 500,
+seed 0, elapsed/stall cutoff 없음이며 bounded best-so-far 값이다. Job이 token을
+검증하고 UI는 현재 board/mode 소유권을 확인한다. Worker는 계산과 결과 envelope를
+담당한다. `ui_manager`와 standalone Exemplar Viewer가 같은 job owner를 사용하되
+각자의 QTimer/시작·표시 정책은 분리한다. Pending/failure는 `-`; board 변경/close는
+취소·reap·private-file cleanup을 수행한다. Viewer는 성공 결과를 board fingerprint로
+cache하며 같은 board solver 전환이나 navigation/playback은 계산을 재시작하지 않는다.
 
 ### 4.7 ZiNi Trace / Explorer
 
@@ -725,9 +733,9 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Representative-board Demonstrations / Timeline Analytics는 FINAL ACCEPTANCE PASS / CLOSED다. 다음은 수용된 고정 Timeline exemplars/report의 human/domain 해석으로 첫 실제 Extended algorithm research 방향을 선택·명세하는 단계다. 실제 알고리즘 연구/구현은 별도의 명시적 scope/specification 결정이 필요하다. Incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Checkpoint/cache, time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Representative-board Demonstrations / Timeline Analytics는 FINAL ACCEPTANCE PASS / CLOSED다. Selected Exemplar Viewer도 Slices 0–4 FINAL ACCEPTANCE PASS / CLOSED (`ff6358a`)다. 다음 필수 작업은 Visualization Usability Polish이며, 그 후 고정 exemplar human/domain 해석과 별도 algorithm-research 방향/specification 결정을 진행한다. 실제 알고리즘 연구/구현은 별도의 명시적 scope/specification 결정이 필요하다. Stage-3 Visualizer의 incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
-- **UI 책임 집중:** 파생 Live Counters 계산, Replay 시간·slider·button 제어, Live Auto, ZiNi process 생명주기가 한 UI 클래스에 남아 있다.
+- **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
 - **내부 결합:** `zini_calculator.py`가 내부 helper도 재노출하고 전략 모듈이 일부 결과 타입을 지연 import한다. 공개 API와 내부 구현의 경계는 더 정리할 수 있다.
 
@@ -737,15 +745,16 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 
 Same-board Comparison과 **Representative-board Demonstrations / Timeline Analytics**는
 **FINAL ACCEPTANCE PASS / CLOSED**다. Stage-3 Extended 자체는 **ACTIVE**다.
-다음은 수용된 고정 Timeline exemplars/report의 human/domain 해석으로 첫 실제
-Extended algorithm research 방향을 선택·명세하는 단계다. Closeout만으로 새로운
-알고리즘 구현이나 solver 정책은 승인되지 않으며, 실제 알고리즘 연구/구현은 별도의
-명시적 scope/specification 결정이 필요하다. Human Mouse Trace는
-[수용된 계약](#human-mouse-trace)을 유지한다. Model C refit, Comparison solver cursor
-overlay나 provenance schema 확장도 승인된 것이 아니다. 기존 Stage-3 synthetic cursor는
-계속 별도 presentation이다.
+Selected Exemplar Viewer도 [FINAL ACCEPTANCE PASS / CLOSED](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)다.
+다음 필수 작업은 [Visualization Usability Polish](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md#limitations-and-mandatory-next-work):
+Same-board selected-run seek/playback/route/synthetic cursor와 Stage-3 Visualizer
+completed-target route이며, Visualizer의 기존 direct seek를 유지한다.
+그 후 고정 exemplar human/domain 해석, 별도 algorithm-research 방향/specification
+결정을 진행한다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제 samples로
+유지하고 synthetic route/cursor나 공통 clock과 합치지 않는다. Model C refit,
+새 solver 정책 또는 provenance schema 확장은 승인되지 않았다.
 
-- Live 파생 통계 계산기, Replay controller와 ZiNi worker 관리 서비스를 분리한다.
+- Live 파생 통계 계산기와 Replay controller의 추가 분리를 검토한다. ZiNi process/job owner 추출은 Viewer 공유 seam으로 완료됐다.
 - UI 표시 formatter와 계산 모델의 경계를 정리하고, exact analysis의 비동기 실행·취소 방식을 검토한다.
 - Replay의 시작 상태/segment metadata와 event 출처 표현을 검토하고 checkpoint 또는 lazy timeline으로 긴 기록의 이동 비용을 줄인다.
 - 실제 subprocess 실패·취소·종료 테스트와 QTest 기반 입력 통합 검증을 늘린다.
