@@ -3,6 +3,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from itertools import permutations
+import hashlib
 import json
 from pathlib import Path
 from random import Random
@@ -29,6 +30,45 @@ class ProfileTests(unittest.TestCase):
     def test_frozen_profile_and_reference_sources(self):
         self.assertEqual(p.load_table()[0][0], 126005)
         h.verify_sources()
+
+    def test_current_engine_diff_is_only_the_observational_completed_ops_field(self):
+        historical = "1a6ad25ef80ca30c3bb0ecbe80fd5ca7e09b60e1ae086e5c65de3703dea52e08"
+        current = "8a624ef322ca8fc2a9b3ec39774263eaaa310a4fc85c4252f7c4391d0369249d"
+        self.assertEqual(h.FROZEN_PILOT_SOURCE_SHA256["core_engine.py"], historical)
+        self.assertEqual(h.CURRENT_COMPATIBLE_SOURCE_SHA256, {"core_engine.py": current})
+        source = (h.ROOT / "core_engine.py").read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(hashlib.sha256(source).hexdigest(), current)
+        addition = b'            "completed_ops": self._effective_ops,\n'
+        self.assertEqual(source.count(addition), 1)
+        # Authenticate the ENTIRE historical file after undoing the sole allowed
+        # addition; no Git dependency, method-only hashing, or new golden source.
+        self.assertEqual(hashlib.sha256(source.replace(addition, b"", 1)).hexdigest(), historical)
+
+    def test_exact_historical_sources_are_still_accepted(self):
+        with patch.object(h, "source_hash", side_effect=lambda path:
+                          h.FROZEN_PILOT_SOURCE_SHA256[path.name]):
+            h.verify_sources()
+
+    def test_compatibility_is_file_specific_and_unknown_drift_fails_closed(self):
+        for name in h.FROZEN_PILOT_SOURCE_SHA256:
+            with self.subTest(name=name):
+                sources = dict(h.FROZEN_PILOT_SOURCE_SHA256)
+                sources[name] = ("0" * 64 if name == "core_engine.py" else
+                                 h.CURRENT_COMPATIBLE_SOURCE_SHA256["core_engine.py"])
+                with patch.object(h, "source_hash", side_effect=lambda path: sources[path.name]):
+                    with self.assertRaisesRegex(p.PilotInvalid, f"source mismatch: {name}"):
+                        h.verify_sources()
+
+    def test_manifest_distinguishes_historical_compatible_and_actual_sources(self):
+        manifest = h.manifest("smoke100")  # Metadata only; no pilot execution/output.
+        self.assertEqual(manifest["stage2_qualified_commit"],
+                         "30b50575b7f8a807cb9f8573f8068f5294b75219")
+        self.assertEqual(manifest["historical_frozen_source_sha256"], h.FROZEN_PILOT_SOURCE_SHA256)
+        self.assertEqual(manifest["current_compatible_source_sha256"], h.CURRENT_COMPATIBLE_SOURCE_SHA256)
+        self.assertEqual(manifest["source_sha256"]["core_engine.py"],
+                         h.CURRENT_COMPATIBLE_SOURCE_SHA256["core_engine.py"])
+        self.assertNotEqual(manifest["source_sha256"]["core_engine.py"],
+                            manifest["historical_frozen_source_sha256"]["core_engine.py"])
 
     def test_profile_byte_tampering_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

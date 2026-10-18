@@ -29,15 +29,23 @@ START, STOP = 100000, 110000
 PHASES = {"smoke100": 100, "invariants1000": 1000, "evidence10000": 10000}
 OUTPUT_ROOT = ROOT / "results/stage3_e_l_policy_pilot"
 QUALIFIED_STAGE2_COMMIT = "30b50575b7f8a807cb9f8573f8068f5294b75219"
-# Qualified Stage-2 files verified unchanged at implementation time. Normalize
-# checkout CRLF to LF only; never allow semantic drift under a reference label.
-FROZEN_SOURCES = {
+# Historical pilot provenance at QUALIFIED_STAGE2_COMMIT, also recorded in the
+# accepted evidence10000 manifest. Normalize checkout CRLF to LF only.
+FROZEN_PILOT_SOURCE_SHA256 = {
     "core_engine.py": "1a6ad25ef80ca30c3bb0ecbe80fd5ca7e09b60e1ae086e5c65de3703dea52e08",
     "benchmark_board.py": "a02d0626e2d9086b498335cefbfb8d58813b456637d2e8d5b9fccc211460543f",
     "simple_algorithm.py": "12aa2190945c504353ee8f0177557e7eaae03e7d16422e8c5b3ee4fff1c81001",
     "simple_probability.py": "de3b42c4cfc50de4cb8f6a1fbe90016f3ec590f4193d86f4677d7e8ed50ab9be",
     "simple_decision.py": "3d740ee0520cfabb8d4126dcb5d3554a1ec3adeb3d9194ace5150f87a7d37047",
     "simple_runner.py": "fd30beaa9328ec63e804c9bec267feb9641c3475b23cf9f5e3300b6d85b4d561",
+}
+# Separately reviewed working-tree compatibility, NOT historical pilot source.
+# 29af53b15d1fff144df5873b62fcec4af91adaaa adds only the observational return
+# field completed_ops -> existing _effective_ops in get_counter_snapshot().
+# The whole-file inverse-delta test and frozen semantic/golden regressions guard
+# this allowance. No future source hash or other file is implicitly compatible.
+CURRENT_COMPATIBLE_SOURCE_SHA256 = {
+    "core_engine.py": "8a624ef322ca8fc2a9b3ec39774263eaaa310a4fc85c4252f7c4391d0369249d",
 }
 
 
@@ -51,8 +59,10 @@ def source_hash(path):
 
 
 def verify_sources():
-    for name, expected in FROZEN_SOURCES.items():
-        require(source_hash(ROOT / name) == expected, f"frozen Stage-2 source mismatch: {name}")
+    for name, historical in FROZEN_PILOT_SOURCE_SHA256.items():
+        compatible = CURRENT_COMPATIBLE_SOURCE_SHA256.get(name, historical)
+        require(source_hash(ROOT / name) in (historical, compatible),
+                f"frozen Stage-2 source mismatch: {name}")
 
 
 def rational(numerator, denominator=1):
@@ -312,7 +322,7 @@ class Diagnostics:
 
 
 def manifest(phase):
-    names = list(FROZEN_SOURCES) + [
+    names = list(FROZEN_PILOT_SOURCE_SHA256) + [
         "board_analyzer.py", "board_snapshot.py", "replay_model.py", "replay_recorder.py",
         "experiments/__init__.py", "experiments/stage3_policy_planner.py",
         "experiments/stage3_e_l_policy_pilot.py", "experiments/STAGE3_E_L_POLICY_PILOT.md",
@@ -326,6 +336,8 @@ def manifest(phase):
             "whole_development_corpus": [START, STOP], "e_tolerance": 0,
             "profile_sha256": PROFILE_SHA256, "table_sha256": TABLE_SHA256,
             "stage2_qualified_commit": QUALIFIED_STAGE2_COMMIT,
+            "historical_frozen_source_sha256": dict(FROZEN_PILOT_SOURCE_SHA256),
+            "current_compatible_source_sha256": dict(CURRENT_COMPATIBLE_SOURCE_SHA256),
             "stage2_cross_check_games": min(1000, PHASES[phase]) if PHASES[phase] >= 1000 else 0,
             "python_implementation": platform.python_implementation(),
             "python_version": platform.python_version(), "source_hash_encoding": "UTF-8 bytes; CRLF to LF",
