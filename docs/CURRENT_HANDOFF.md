@@ -2,7 +2,7 @@
 
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
-> Purpose: Durable recovery state for a new chat or context-loss event.  
+> Purpose: Durable recovery state for a new chat or context-loss event.
 > Updated: 2026-10-18 (Asia/Seoul)
 
 ---
@@ -198,10 +198,8 @@ their historical acceptance.
 
 ### 6.1 Same-board Comparison — do first
 
-Required:
-
-- direct logical-index slider track seek
-- preserve native slider handle drag
+**Same-board usability ACCEPTED; Stage-3 Visualizer reference overlays ACCEPTED.**
+**BLOCKER 0 / REQUIRED 0. ChatGPT final review PASS (2026-10-18).**
 - playback applies to selected run only
 - Human timing modes:
   - `Index`

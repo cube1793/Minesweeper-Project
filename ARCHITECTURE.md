@@ -152,7 +152,7 @@ Stage-3 Extended 전체는 **ACTIVE**이며 Stage-3 V1 / Model C는 frozen이다
 | `stage3_visualizer_launcher.py` | job과 viewer 소유, index/Run/Cancel, 완료 시 자동 열기, 마지막 완료 결과 다시 열기 |
 | `stage3_trace_player.py` | fixed layout의 정수 index 재구성; incremental `next()`, arbitrary seek는 index 0부터 재구성; planner 호출 없음 |
 | `stage3_modeled_playback.py` | Qt 독립 modeled timeline; monotonic clock, 정확한 부분 시간, 배속·pause·boundary catch-up |
-| `stage3_visualizer_ui.py` | execution만 입력받는 읽기 전용 보드·controls·Qt frame 요청·smoothstep synthetic cursor |
+| `stage3_visualizer_ui.py` | execution만 입력받는 읽기 전용 보드·controls·modeled Qt frame 요청·smoothstep cursor; retained truth의 HIDDEN-only 참조와 committed trace-target route |
 
 ```text
 main.py / MinesweeperUI
@@ -277,6 +277,10 @@ slider 동기화는 취소하지 않는다. Mode 전환은 committed index를 �
 [contract](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) preserves
 the engineering semantics; the [closeout](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)
 records automated/package/native acceptance. Stage-3 Extended remains ACTIVE.
+The later [Visualization Usability Polish closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)
+qualifies selected-run playback and reference rendering at
+`31630dd6ffa2301c41534fca3b003838d865f313`; the original execution/transport
+contract and historical acceptance remain preserved.
 
 | Module | Durable responsibility |
 | --- | --- |
@@ -285,8 +289,10 @@ records automated/package/native acceptance. Stage-3 Extended remains ACTIVE.
 | `same_board_execution_worker.py` | Trusted-local token + `ReplayBoard` request only; one execution; atomic solver-only result/error |
 | `same_board_execution_job.py` | One parent-owned child/private directory, token binding, poll/cancel, terminate → kill, reap before cleanup; original Human context stays in parent |
 | `same_board_playback.py` | Human and Stage-2 `ReplayPlayer`s plus fixed-layout Stage-3 trace player; three independent remembered indices |
+| `same_board_timed_playback.py` | Qt-independent immutable run timing projections and per-run presentation progress; exact Human Replay timestamps / solver Model C boundaries, pause/re-anchor/catch-up; no Engine execution |
 | `same_board_comparison_launcher.py` | One captured context, job, retained completed execution and at most one result viewer |
-| `same_board_comparison_ui.py` | One public-observation board, run selector, factual summary/manual navigation and optional Human-only full Mouse Trace; no worker or timer |
+| `same_board_comparison_ui.py` | One public-observation board; selected-run controls and one presentation QTimer; three timed states, full Human Mouse Trace, separate reference layers/context/synthetic cursor; no worker ownership |
+| `visualization_reference_overlays.py` | Neutral immutable clue derivation and answer/route painters; caller supplies truth, public HIDDEN mask and route points; no acquisition, prefix selection, clocks/playback, Engine, solver, Model C or jobs |
 
 Main Tools **Compare as full-game Human Replay…** declares caller intent and
 captures either the completed Live recording or the entire original retained
@@ -323,8 +329,40 @@ Model C cost through termination **microseconds**, each solver's decision comput
 **nanoseconds**, and presentation timing remain separate authorities. No common
 timeline, normalized progress, generic speed winner/ranking/ratio or controlled
 experiment claim is introduced. Full Human Mouse Trace is independent of action
-index. Comparison has no solver cursor overlay; the separate Stage-3 Visualizer
-retains its explicitly synthetic/model-based cursor. Neither is solver input.
+index. Comparison's synthetic action-target cursor and completed action-target
+route are separate from that actual recorded trace. None is solver input.
+
+Same-board UI creates one independent timed controller per run and advances only
+the selected one. Human offers Index / Replay Time; solvers offer Index / Model C
+Time. Human boundaries preserve stored Replay floats exactly. Stage-2 prefixes
+are projected once from retained targets/authenticated table and reconciled to
+the retained total; Stage 3 uses recorded action costs. SameBoardPlayback remains
+the committed-board authority. Manual seek aligns/cancels partial state; pause
+preserves partial progress, and late ticks apply the final due prefix once.
+
+Index is 20..5000 ms/action, default 200, with `Max (20 ms)` and committed input
+clamping. Time speed uses exact 0.25 steps from 0.25x to 8x. A 16 ms presentation
+request uses raw controller progress for cell-center straight smoothstep
+`q = u²(3 - 2u)` in the UI. Human's initial synthetic anchor is its first action
+target, not a borrowed Mouse Trace sample or invented origin. Partial ticks and
+reference toggles do no domain execution; committed seeks may retain existing
+Engine reconstruction. This is not an Engine-free navigation claim.
+
+Both Comparison and Visualizer default `Show hidden answers` / `Show action-target
+route` OFF. Answer clues derive once from retained finalized truth, then only the
+current public HIDDEN mask is decorated (mine/nonzero clue, zero blank, opacity
+0.35). Cell text/accessibility and flags/terminal feedback remain unchanged.
+Route membership is caller-owned completed targets only, including repeats,
+excluding future targets and any initial-cursor incoming segment. Shared painting
+uses purple alpha 165 / width 2.0 and white under-stroke alpha 100 / width 3.5.
+Layers are board → answers → route → actual Human trace where present → selected
+context → synthetic cursor; all overlays are mouse-transparent.
+
+Visualizer retains direct seek, Index timing and existing modeled smooth cursor
+with six speeds (0.25x, 0.5x, 1x, 2x, 4x, 8x). **No Index smooth interpolation
+was added.** Its partial modeled refresh leaves public observation/answer mask/
+route at the committed prefix. Reference truth never enters planner/admissibility
+or executed choice. The neutral helper creates no feature-to-feature UI dependency.
 
 ### Replay
 
@@ -718,7 +756,8 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | Stage-3 Extended | `test_stage3_identity.py`, `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_modeled_playback.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·incremental 재생·fake-clock exact timeline·synthetic cursor·worker transport·취소·종료·cleanup |
 | Same-board domain / execution | `test_same_board_comparison.py`, `test_same_board_runner.py`, `test_benchmark_modeled_actions.py` | Human full-stream admission·exact layout·safe/mined origin·native evidence·분리된 metrics |
 | Same-board transport / lifecycle | `test_same_board_execution_worker.py`, `test_same_board_execution_job.py`, `test_same_board_solver_transport.py`, `test_same_board_worker_dispatch.py` | board-only transport·token·parent validation·cancel/reap/cleanup·source/frozen dispatch |
-| Same-board playback / UI | `test_same_board_playback.py`, `test_same_board_comparison_ui.py`, `test_same_board_comparison_launcher.py`, `test_same_board_main_ui.py` | 독립 index·public observation·Human overlay·captured source·result reopen·main close |
+| Same-board playback / UI | `test_same_board_timed_playback.py`, `test_same_board_playback.py`, `test_same_board_comparison_ui.py`, `test_same_board_comparison_launcher.py`, `test_same_board_main_ui.py` | 독립 timing/index·partial pause/catch-up·public observation·Human overlay 분리·captured source·result reopen·main close |
+| Neutral reference overlays | `test_visualization_reference_overlays.py`, Same-board/Visualizer UI modules | immutable clues·HIDDEN mask·completed prefix·opacity/z-order·public glyph 보존·partial/toggle no-domain guards |
 | Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
 | ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
@@ -733,7 +772,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Representative-board Demonstrations / Timeline Analytics는 FINAL ACCEPTANCE PASS / CLOSED다. Selected Exemplar Viewer도 Slices 0–4 FINAL ACCEPTANCE PASS / CLOSED (`ff6358a`)다. 다음 필수 작업은 Visualization Usability Polish이며, 그 후 고정 exemplar human/domain 해석과 별도 algorithm-research 방향/specification 결정을 진행한다. 실제 알고리즘 연구/구현은 별도의 명시적 scope/specification 결정이 필요하다. Stage-3 Visualizer의 incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Timeline Analytics, Selected Exemplar Viewer (`ff6358a`), Visualization Usability Polish (`31630dd`)도 CLOSED다. 다음은 새 work unit의 고정 exemplar human/domain 해석이며 이후 별도 algorithm-research 방향/specification 결정이 필요하다. 이 closeout은 해석/연구를 시작하지 않는다. Stage-3 Visualizer의 incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -746,11 +785,11 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 Same-board Comparison과 **Representative-board Demonstrations / Timeline Analytics**는
 **FINAL ACCEPTANCE PASS / CLOSED**다. Stage-3 Extended 자체는 **ACTIVE**다.
 Selected Exemplar Viewer도 [FINAL ACCEPTANCE PASS / CLOSED](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)다.
-다음 필수 작업은 [Visualization Usability Polish](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md#limitations-and-mandatory-next-work):
-Same-board selected-run seek/playback/route/synthetic cursor와 Stage-3 Visualizer
-completed-target route이며, Visualizer의 기존 direct seek를 유지한다.
-그 후 고정 exemplar human/domain 해석, 별도 algorithm-research 방향/specification
-결정을 진행한다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제 samples로
+[Visualization Usability Polish](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)도
+FINAL ACCEPTANCE PASS / CLOSED다. 다음은 새 ChatGPT/Codex work unit의 고정 exemplar
+human/domain 해석, 그 후 별도 algorithm-research 방향/specification 결정이다.
+Nearest exact-minimum-risk guessing using movement cost는 backlog 후보일 뿐 채택된
+정책이 아니다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제 samples로
 유지하고 synthetic route/cursor나 공통 clock과 합치지 않는다. Model C refit,
 새 solver 정책 또는 provenance schema 확장은 승인되지 않았다.
 

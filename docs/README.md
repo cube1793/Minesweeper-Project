@@ -73,23 +73,18 @@ Closed milestones / durable closeouts:
 - [Timeline Analytics closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
 - [Selected Exemplar Viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
 - [Selected Exemplar Viewer closeout](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)
+- [Visualization Usability Polish closeout](stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)
+  — CLOSED; Same-board usability and Visualizer reference overlays accepted at
+  `31630dd6ffa2301c41534fca3b003838d865f313`.
 
 ### Current next work
 
-**Visualization Usability Polish — MUST COMPLETE BEFORE ALGORITHM RESEARCH**
-
-First:
-- Same-board Comparison direct seek / selected-run playback / cumulative action-target route /
-  accepted smooth synthetic cursor, while keeping actual Human Mouse Trace distinct.
-
-Then:
-- Stage-3 Visualizer cumulative completed-target route; retain its existing direct seek.
-
-After that:
-- fixed-exemplar human/domain interpretation
-- separate decision/specification for actual Extended algorithm research
-
-No new algorithm policy is currently adopted.
+**NEXT: fixed-exemplar human/domain interpretation, in a NEW ChatGPT/Codex work unit.**
+Visualization Usability Polish is CLOSED; this closeout does not begin interpretation.
+After interpretation comes a separate decision/specification for Extended algorithm
+research. Actual algorithm work requires that decision and explicit authorization.
+Nearest exact-minimum-risk guessing using movement cost remains a backlog candidate;
+no new algorithm policy is currently adopted. Stage-3 Extended remains ACTIVE.
 
 ## Experiments
 

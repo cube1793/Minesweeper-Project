@@ -9,7 +9,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Simple Algorithm:** 확정 수와 최소 지뢰 확률 후보 표시, 확정 수 자동 진행, 선택적인 추측 실행
 - **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 추천과 실제 다음 수 비교
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
-- **Same-board Comparison:** 완료 Human Replay의 정확한 고정 배치에서 Human / Stage 2 / Stage 3 결과와 독립 action-index 재생 비교
+- **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
 ## Simple Algorithm
 
@@ -99,10 +99,15 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
   **Playback: Modeled-Time · 1× (presentation)**처럼 현재 배속을 표시하며,
   0.25× / 0.5× / 1× / 2× / 4× / 8× 중 선택합니다. 기본은 1×입니다.
   배속은 presentation만 바꾸며 기록된 시간·total·planner·물리 모델은 바꾸지 않습니다.
-- Synthetic cursor는 현재 pending action의 칸 중심 사이를 직선 smoothstep
+- Modeled-Time의 synthetic cursor는 현재 pending action의 칸 중심 사이를 직선 smoothstep
   (`q = u²(3 − 2u)`)으로 표시합니다. 부분 구간에는 적용 전 보드를 유지하고
   modeled 경계에서 action을 적용합니다. 같은 칸 action은 이동하지 않습니다.
   별도 dwell 모델은 없으며 실제 OS 마우스 궤적이나 물리적 가속도 모델이 아닙니다.
+- **Show hidden answers**와 **Show action-target route**는 기본 OFF입니다.
+  정답 참조는 현재 HIDDEN 셀의 지뢰/0이 아닌 숫자만 희미하게 표시하며 공개·terminal
+  상태를 덮어쓰지 않습니다. Route는 완료된 실행 target만 포함하고 pending/future
+  target 및 가상의 initial-cursor 진입선은 제외합니다. 선택 segment/cursor와 별개입니다.
+  기존 direct slider track seek와 handle drag를 유지하며 **Index smooth interpolation은 추가하지 않았습니다**.
 - Pause/Resume은 부분 진행을 보존합니다. 수동 navigation과 모드 전환은 부분 진행을
   취소하고 정수 index 상태로 돌아가며, 모드 전환은 자동 시작하지 않습니다.
   설정은 저장하지 않으며 다시 열면 Index / 200 ms / modeled 1×로 돌아갑니다.
@@ -152,11 +157,15 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
 7. **CLOSED** — Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer.
    Slices 0–4 COMPLETE / ACCEPTED; qualified `ff6358ae62b6f343bda36069d7164bda9aebee74`.
    [Viewer closeout](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md).
-8. **NEXT REQUIRED** — Visualization Usability Polish: Same-board selected-run
-   seek/playback/route/synthetic cursor and Stage-3 Visualizer cumulative route
-   (existing direct seek retained). [Required queue](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md#limitations-and-mandatory-next-work).
-   이후 고정 exemplar human/domain 해석과 별도 algorithm-research 방향/specification 결정을 진행합니다.
-   새 알고리즘 정책은 채택하지 않았습니다.
+8. **CLOSED** — Visualization Usability Polish: Same-board selected-run timed
+   playback/synthetic cursor 및 두 UI의 hidden-answer/completed-route 참조.
+   Qualified `31630dd6ffa2301c41534fca3b003838d865f313`.
+   [Closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
+
+다음은 **새 ChatGPT/Codex work unit에서 고정 exemplar human/domain 해석**입니다.
+그 후 별도의 algorithm-research 방향/specification 결정을 거쳐야 실제 연구/구현을
+시작할 수 있습니다. 이 closeout은 해석·연구를 시작하지 않으며 movement-cost 기반
+nearest exact-minimum-risk guess는 backlog 후보일 뿐 채택된 정책이 아닙니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
@@ -169,6 +178,10 @@ Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 SHA는 `a59d0d963bdf1544a03968163b884342e2797ee0`입니다.
 [Closeout 기록](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)과
 [기술 계약](docs/stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md)을 참고하세요.
+이후 **Visualization Usability Polish (2026-10-18) CLOSED**에서 아래 재생/참조 UX를
+수용했습니다. 새 qualified implementation은 `31630dd6ffa2301c41534fca3b003838d865f313`이며
+[polish closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)에
+자동/package 회귀와 **사용자 source-GUI A–M / V-A..V-I** 수용을 구분해 기록했습니다.
 
 - 완료된 Live 판 또는 Human-labeled Replay에서 **도구 → Compare as full-game Human Replay…**를
   선택합니다. 이 명시적 동작은 전체 Human 기록으로 제출한다는 의도이며 역사적 출처의 증명이 아닙니다.
@@ -177,9 +190,20 @@ SHA는 `a59d0d963bdf1544a03968163b884342e2797ee0`입니다.
 - 실행 창은 한 번 capture한 context를 유지합니다. Main의 새 게임·Replay 교체로 대상이 바뀌지
   않으며 **Open Comparison…**은 기존 창을 엽니다. **Run / Cancel / Open Result**로 실행·취소·
   완료 결과 재열기를 제어하며 결과 창 재열기는 solver를 다시 실행하지 않습니다.
-- 결과 창은 한 보드와 Human / Stage 2 / Stage 3 선택, First / Previous / Next / Last 및
-  선택 run의 slider를 제공합니다. 각 run의 index를 독립적으로 기억하며 autoplay나 공통 timeline은 없습니다.
-  현재 재구성 status와 최종 outcome은 별개입니다. 전체 Human Mouse Trace는 Human에서만 표시합니다.
+- 결과 창은 한 보드와 Human / Stage 2 / Stage 3 선택, First / Previous / Next / Last,
+  direct-track-seek slider와 native handle drag를 제공합니다. 세 run의 상태를 독립적으로
+  기억하고 선택 run만 재생합니다. Human은 **Index / Replay Time**, solver는 **Index / Model C Time**입니다.
+  공통 synchronized clock/playhead는 없습니다. 현재 재구성 status와 최종 outcome은 별개입니다.
+- Index는 20..5000 ms/action, 기본 200, 최소 **Max (20 ms)**이며 범위 밖 입력은 commit 시
+  보정합니다. Time 배속은 0.25x..8x의 정확한 0.25 단위입니다. 약 16 ms refresh는
+  표시 요청일 뿐 timing authority나 보장 FPS가 아닙니다.
+- Smooth synthetic action-target cursor는 칸 중심 직선/smoothstep을 사용합니다.
+  Human의 첫 anchor는 첫 action target이며 가상의 첫 이동이나 실제 Mouse Trace 좌표를
+  빌리지 않습니다. 부분 pause/resume을 보존하고 수동 이동은 부분 진행을 취소합니다.
+- **Show hidden answers / Show action-target route**는 기본 OFF이며 retained fixed truth와
+  완료 action targets만 표시합니다. Pending target은 commit 전 route에 들어가지 않습니다.
+  실제 Human Mouse Trace는 Human에서 전체 기록을 그대로 표시하며 route/synthetic cursor와
+  별개입니다. 정답 참조는 HIDDEN-only이며 공개/terminal glyph와 solver 판단을 바꾸지 않습니다.
 - Human Replay elapsed **s**, 각 solver의 Model C cost through termination **µs**, 각 solver의
   decision compute **ns**를 구분합니다. 일반 speed winner/ranking/ratio는 없습니다.
 - 이미 확정된 배치를 그대로 쓰므로 `(0,0)` 지뢰에 대한 solver 첫 OPEN 패배도 정상 결과입니다.

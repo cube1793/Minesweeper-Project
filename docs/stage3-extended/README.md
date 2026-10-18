@@ -18,8 +18,12 @@ FINAL ACCEPTANCE PASS / CLOSED** (2026-10-18), **Slices 0–4 COMPLETE / ACCEPTE
 BLOCKER 0 / REQUIRED 0**. Qualified source `ff6358ae62b6f343bda36069d7164bda9aebee74`.
 See the [final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md) and
 [final contract](STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md).
-**NEXT REQUIRED: Visualization Usability Polish**, then fixed-exemplar
-human/domain interpretation before a separately scoped algorithm-research decision.
+**Visualization Usability Polish — FINAL ACCEPTANCE PASS / CLOSED** (2026-10-18).
+Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
+[closeout](STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
+**NEXT: fixed-exemplar human/domain interpretation in a NEW ChatGPT/Codex work unit**,
+then a separate algorithm-research direction/specification decision. Neither
+interpretation nor algorithm research begins in this closeout.
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -155,9 +159,12 @@ results retain their original identity and meaning.
    Slice 4 — Acceptance / Closeout COMPLETE / ACCEPTED.
 7. **CLOSED** — Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer;
    Slices 0–4 COMPLETE / ACCEPTED; final qualified source `ff6358a`; R-2/O-5 CLOSED.
-8. **NEXT REQUIRED** — Visualization Usability Polish on Same-board Comparison and
-   Stage-3 Visualizer, followed by fixed-exemplar human/domain interpretation.
-   Actual algorithm research requires a separate scope/specification decision.
+8. **CLOSED** — Visualization Usability Polish on Same-board Comparison and
+   Stage-3 Visualizer; qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`.
+
+Next work belongs to a **NEW work unit**: fixed-exemplar human/domain interpretation,
+then a separate algorithm-research direction/specification decision. Actual algorithm
+research/implementation requires that decision and explicit authorization.
 
 For later algorithm research, nearest exact-minimum-risk guess selection among equal-risk
 candidates using movement cost remains a candidate, not an adopted policy or
@@ -215,33 +222,58 @@ No common clock, normalized progress or actual mouse-trajectory claim.
 
 Frozen V1/Model C, G4 and both Timeline reports remain preserved.
 **final holdout accessed = NO** (ZiNi 2,010,000 .. 2,010,099).
-This documentation update reruns no technical verification.
+The historical Viewer documentation closeout reran no technical verification.
 
 [Final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md) retains exact authorities,
 commands/counts, E/L HOLD→repair→PASS lineage and package/user-native attribution.
 [Contract](STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md) retains historical initial-slice
 records, marked superseded where the accepted usability revision changed UI policy.
 
-## Visualization Usability Polish — NEXT REQUIRED
+## Visualization Usability Polish — CLOSED
 
-**Visualization Usability Polish — QUEUED / MUST COMPLETE BEFORE ALGORITHM RESEARCH.**
-This is follow-up maintenance on accepted CLOSED surfaces, not a reopening or
-invalidation of historical acceptance.
+**FINAL ACCEPTANCE PASS / CLOSED — BLOCKER 0 / REQUIRED 0** (2026-10-18).
+Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`
+(`feat: add visualizer reference overlays`), on
+`feature/stage3-visualization-usability-polish`. Foundation `a33c504` and Same-board
+usability `866ea28` are ancestors. No prior closed milestone is invalidated.
 
-- **Same-board Comparison:** direct logical-index slider track seek; selected-run
-  playback only. Human: Index + actual Replay Time. Stage2/Stage3: Index + Model C
-  Time. Speed 0.25x..8x; Index 20..5000 ms, default 200, `Max (20 ms)`.
-  Add cumulative action-target route and the accepted Viewer/Stage-3 Visualizer
-  synthetic smooth cursor. Keep actual Human Mouse Trace distinct from synthetic
-  route/cursor. **No common synchronized Human/S2/S3 clock or playhead.**
-- **Stage-3 Visualizer:** cumulative recorded action-target route through the
-  current completed step, future targets hidden by default. Retain its **existing
-  direct slider seek** and selected-segment/synthetic-cursor distinction.
+Fresh evidence:
+`results/stage3-visualization-usability-polish-final-acceptance/20261018T1306330178987Z/`.
+Full **2484/2484 PASS** (141.629 s unittest / 144.042 s process); 13 complete focused
+modules **453/453 PASS** (20.236 / 21.211 s); zero failures/errors/skips in both.
+Fresh BUILDING-policy package **59.085 s**, AMD64 / PE32+ GUI, required helper/resources
+present, 12 worker/job checks PASS, normal packaged startup/close exit 0.
+Build prerequisite **2459 PASS / 25 documented optional image/video skips**,
+zero failures/errors; skips are not PASS. EXE SHA-256:
+`26cfb55bbbe75bad29bb0461bf39eed6a2b3b203512b9144751dcd770530a08f`.
 
-After polish: human/domain interpretation of fixed exemplars, then a separate
-algorithm-research direction/specification decision. Nearest exact-minimum-risk
-guessing with movement cost remains a candidate/backlog direction, not an adopted
-policy. No algorithm research is authorized by this closeout.
+**USER source-GUI native:** Same-board **A–M ALL PASS**, Visualizer **V-A..V-I ALL PASS**.
+This is not Codex feature-native or packaged feature-native acceptance. The
+[new closeout](STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md) passed ChatGPT
+final review on 2026-10-18 and retains exact commands, attribution, preservation and limitations.
+
+- **Same-board:** three independent selected-run timing states; Human Index +
+  Replay Time, solvers Index + Model C Time; exact quarter-step 0.25x..8x time speed;
+  Index 20..5000 ms, default 200, `Max (20 ms)` and committed text clamping.
+  Direct track seek/native drag, smooth synthetic action-target cursor and partial
+  pause/resume/catch-up are accepted. Human has no fabricated pre-first cursor origin.
+  **No common synchronized Human/S2/S3 clock/playhead.** Entire actual Human
+  Mouse Trace stays distinct from the completed route and synthetic cursor.
+- **Visualizer:** existing direct seek, Index timing and modeled smooth cursor
+  with six speeds (0.25x / 0.5x / 1x / 2x / 4x / 8x) are preserved.
+  **No Index smooth interpolation was added.**
+- **Both:** default-OFF HIDDEN-only answer reference and completed action-target
+  route; pending/future points excluded, repeated targets retained, no fabricated
+  initial-cursor route segment. Selected context/cursor remain separate. Fixed
+  truth is reference-only. Partial refresh/toggles do no domain work; accepted
+  committed seek/reconstruction paths retain their existing ownership.
+- **Neutral helper:** `visualization_reference_overlays.py` derives immutable clues
+  and paints caller-supplied masks/points; no truth acquisition, prefix selection,
+  playback/clock, Engine, solver/planner, Model C or process lifecycle.
+
+Next: fixed-exemplar human/domain interpretation in a new work unit, then a
+separate research direction/specification decision. Movement-cost nearest
+exact-minimum-risk guessing remains a backlog candidate, not an adopted policy.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -413,6 +445,11 @@ candidate: `a59d0d963bdf1544a03968163b884342e2797ee0`. The
 [final closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md) records automated and
 user packaged native/manual acceptance, chronology and nonblocking dispositions.
 
+The dated slices below record the original Comparison milestone. Its no-autoplay/
+no-timer UI dispositions are historical and superseded by the accepted
+[Visualization Usability Polish](#visualization-usability-polish--closed) above;
+execution/transport and committed-index ownership remain unchanged.
+
 **Slice 0 — contract documentation COMPLETE / ACCEPTED.** The accepted
 [comparison contract](STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md) governs exact
 same-layout execution, first-open qualification, admission, identity, metric
@@ -465,7 +502,7 @@ reaping and cleanup; success attaches evidence to the exact original Human conte
 Source/frozen dispatch is separate, with `--same-board-execution-worker` before Qt.
 Parent validation rechecks comparison/outcome-bearing facts without recursively
 walking nested decision evidence; native evidence remains retained unchanged.
-See the [current handoff](../CURRENT_HANDOFF.md#4-current-milestone) for the accepted
+See the [historical closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md) for the accepted
 lifecycle/validation boundary, corrected audit finding and qualified responsiveness
 measurements (not zero GUI-thread blocking or frozen algorithm-performance evidence).
 
@@ -491,7 +528,7 @@ Mouse Trace attachment and metrics remain unchanged. No common timeline, clampin
 index mapping, normalized progress, lockstep, synchronized three-board playback,
 generic time/speed/progress authority or universal player/registry was introduced.
 Slice 3 includes no Mouse Trace playback/transformation, autoplay, Qt timer,
-interpolation or UI. See the [handoff](../CURRENT_HANDOFF.md#4-current-milestone)
+interpolation or UI. See the [historical closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)
 for the accepted playback boundary.
 
 Reported Slice 3 verification: **29 focused; 84 Slice 2B; 31 Slice 2A; 29 Slice 1;
@@ -558,11 +595,11 @@ clean SHA; raw evidence remains unchanged. Full identity/hashes and manual gates
 are in the [closeout](STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md).
 
 At the historical Same-board closeout, slider track page-step behavior was
-**OPTIONAL / DEFER** and normal drag/seek was correct. The new mandatory usability
-queue above now supersedes that deferral; the original acceptance remains valid.
-Separate Human recorded trace versus Stage-3 Visualizer synthetic cursor
-authorities are **KEEP**; Comparison adds no solver
-cursor overlay. No general Human-versus-solver speed winner is established.
+**OPTIONAL / DEFER** and normal drag/seek was correct. Accepted usability polish
+now supplies direct track seek and independent synthetic cursors; the original
+acceptance remains valid. Actual Human recorded trace versus synthetic cursor/
+action-target route authorities remain separate. No general Human-versus-solver
+speed winner is established.
 
 Stage-3 Extended remains ACTIVE; frozen V1 / Model C remain unchanged.
 **Representative-board Demonstrations / Timeline Analytics is FINAL ACCEPTANCE
@@ -573,10 +610,10 @@ exemplars and both report runs. No visual/manual substitution, official
 100k/solver rerun or frozen-evidence modification. Final source regression and
 source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
-The next mandatory work is Visualization Usability Polish, then human/domain
-interpretation before a separate algorithm-research decision. The Same-board
-historical closeout itself did not implement the new queued playback/route/cursor
-maintenance. No historical acceptance is reopened by that queue.
+Visualization Usability Polish is also CLOSED. Next is human/domain interpretation
+in a new work unit, before a separate algorithm-research decision. The historical
+Same-board closeout did not implement the later playback/route/cursor maintenance;
+its dated record remains unchanged. No historical acceptance is reopened.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe
@@ -585,7 +622,7 @@ the current state.
 ## Deferred / evidence-triggered
 
 - Arbitrary-seek checkpoint/cache optimization.
-- Stage-3 Visualizer modeled-time slider / sub-action scrubbing (Viewer time seeking is already accepted; this is not the mandatory Comparison playback queue).
+- Stage-3 Visualizer modeled-time slider / sub-action scrubbing (Viewer time seeking is already accepted; Comparison's accepted slider remains logical-index based).
 - 120-fps UI target, easing selector and click pulse.
 - Persistent Stage-3 presentation settings; settings dataclass until an external consumer exists.
 - Runtime application/release display or version constant.
