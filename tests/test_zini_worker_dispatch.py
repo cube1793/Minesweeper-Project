@@ -155,6 +155,11 @@ else:
 
 @unittest.skipIf(QApplication is None, "PyQt5 unavailable")
 class WorkerLaunchTests(unittest.TestCase):
+    def test_main_counter_config_is_shared_authority_alias(self):
+        import ui_manager
+        import zini_metric_job
+        self.assertIs(ui_manager.ZINI_COUNTER_CONFIG, zini_metric_job.ZINI_COUNTER_CONFIG)
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -177,7 +182,7 @@ class WorkerLaunchTests(unittest.TestCase):
         process.poll.return_value = None
         with (
             patch.object(sys, "frozen", frozen, create=True),
-            patch("ui_manager.subprocess.Popen", return_value=process) as popen,
+            patch("zini_metric_job.subprocess.Popen", return_value=process) as popen,
         ):
             self.ui._ensure_zini_metric_job()
         payload_path = self.ui._zini_payload_path
@@ -198,7 +203,7 @@ class WorkerLaunchTests(unittest.TestCase):
 
     def test_unplaced_live_board_does_not_launch_worker(self):
         self.ui.on_reset()
-        with patch("ui_manager.subprocess.Popen") as popen:
+        with patch("zini_metric_job.subprocess.Popen") as popen:
             self.ui._ensure_zini_metric_job()
             self.ui.on_both_click(0, 0)  # CHORD does not fix an unplaced board.
             self.ui._update_statistics_panel(self.engine.get_stats())
@@ -213,7 +218,7 @@ class WorkerLaunchTests(unittest.TestCase):
                 process = Mock()
                 process.poll.return_value = None
                 with (patch("core_engine.random.sample", return_value=[(1, 1)]),
-                      patch("ui_manager.subprocess.Popen", return_value=process) as popen):
+                      patch("zini_metric_job.subprocess.Popen", return_value=process) as popen):
                     action(0, 0)
                     popen.assert_called_once()
                     self.assertEqual(self.engine.status, GameStatus.PLAYING)
@@ -238,7 +243,7 @@ class WorkerLaunchTests(unittest.TestCase):
                 process = Mock()
                 process.poll.return_value = None
                 with (patch("core_engine.random.sample", return_value=[(1, 1)]),
-                      patch("ui_manager.subprocess.Popen", return_value=process) as popen,
+                      patch("zini_metric_job.subprocess.Popen", return_value=process) as popen,
                       patch("zini_explorer.build_zini_trace") as build):
                     self.ui.on_left_click(0, 0)
                     popen.assert_called_once()
@@ -270,7 +275,7 @@ class WorkerLaunchTests(unittest.TestCase):
         process = Mock()
         process.poll.return_value = None
         with (patch("core_engine.random.sample", return_value=[(1, 1)]),
-              patch("ui_manager.subprocess.Popen", return_value=process)):
+              patch("zini_metric_job.subprocess.Popen", return_value=process)):
             self.ui.on_left_click(0, 0)
         self.assertIs(self.ui._zini_process, process)
         old_token = self.ui._zini_job_token
@@ -282,7 +287,7 @@ class WorkerLaunchTests(unittest.TestCase):
         new_process = Mock()
         new_process.poll.return_value = None
         with (patch("core_engine.random.sample", return_value=[(1, 1)]),
-              patch("ui_manager.subprocess.Popen", return_value=new_process)):
+              patch("zini_metric_job.subprocess.Popen", return_value=new_process)):
             self.ui.on_right_click(0, 0)
         self.assertGreater(self.ui._zini_job_token, old_token)
         stale = {"token": old_token, "clicks": 999, "moves": self.result.moves, "error": None}
@@ -297,7 +302,7 @@ class WorkerLaunchTests(unittest.TestCase):
         process = Mock()
         process.poll.return_value = None
         with (patch("core_engine.random.sample", return_value=[(1, 1)]),
-              patch("ui_manager.subprocess.Popen", return_value=process) as popen):
+              patch("zini_metric_job.subprocess.Popen", return_value=process) as popen):
             self.ui.on_left_click(0, 0)
             popen.assert_called_once()
             payload_path, result_path = self.ui._zini_payload_path, self.ui._zini_result_path
@@ -326,7 +331,7 @@ class WorkerLaunchTests(unittest.TestCase):
         self.assertEqual(payload["snapshot"], self.engine.get_board_snapshot())
         self.assertEqual(self.ui._zini_explorer.snapshot, payload["snapshot"])
         # An unfinished child is neither restarted nor reaped by polling.
-        with patch("ui_manager.subprocess.Popen") as popen:
+        with patch("zini_metric_job.subprocess.Popen") as popen:
             self.ui._ensure_zini_metric_job()
             self.ui._poll_zini_metric_job()
         popen.assert_not_called()
@@ -372,7 +377,7 @@ class WorkerLaunchTests(unittest.TestCase):
     def test_failed_frozen_launch_cleans_files_and_stops_retrying(self):
         with (
             patch.object(sys, "frozen", True, create=True),
-            patch("ui_manager.subprocess.Popen", side_effect=OSError("launch failed")) as popen,
+            patch("zini_metric_job.subprocess.Popen", side_effect=OSError("launch failed")) as popen,
             patch("builtins.print"),
         ):
             self.ui._ensure_zini_metric_job()
@@ -425,7 +430,7 @@ class WorkerLaunchTests(unittest.TestCase):
         with (
             patch("zini_explorer.build_zini_trace", side_effect=RuntimeError("trace failed")) as builder,
             patch("zini_calculator.calculate_g_zini_neighborhood_beam_bounded") as search,
-            patch("ui_manager.subprocess.Popen") as popen,
+            patch("zini_metric_job.subprocess.Popen") as popen,
         ):
             self.finish_result()
             self.ui._update_statistics_panel(self.engine.get_stats())
@@ -468,7 +473,7 @@ class WorkerLaunchTests(unittest.TestCase):
                 payload = ({"token": self.ui._zini_job_token, **case}
                            if type(case) is dict else case)
                 Path(result_path).write_bytes(pickle.dumps(payload))
-                with patch("builtins.print"), patch("ui_manager.subprocess.Popen") as popen:
+                with patch("builtins.print"), patch("zini_metric_job.subprocess.Popen") as popen:
                     self.ui._poll_zini_metric_job()
                     self.ui._ensure_zini_metric_job()
                 popen.assert_not_called()
@@ -499,7 +504,7 @@ class WorkerLaunchTests(unittest.TestCase):
                 else:
                     process.poll.return_value = 3
                     process.returncode = 3
-                with patch("builtins.print"), patch("ui_manager.subprocess.Popen") as popen:
+                with patch("builtins.print"), patch("zini_metric_job.subprocess.Popen") as popen:
                     self.ui._poll_zini_metric_job()
                     self.ui._ensure_zini_metric_job()
                 popen.assert_not_called()
@@ -569,7 +574,7 @@ class WorkerLaunchTests(unittest.TestCase):
                 player = self.replay(outcome)
                 process = Mock()
                 process.poll.return_value = None
-                with patch("ui_manager.subprocess.Popen", return_value=process):
+                with patch("zini_metric_job.subprocess.Popen", return_value=process):
                     self.ui._enter_replay_mode(player)
                 self.assertTrue(self.ui._replay_counter_timeline.is_completed)
                 with patch("zini_explorer.build_zini_trace", wraps=build_zini_trace) as builder:

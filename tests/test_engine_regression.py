@@ -80,6 +80,34 @@ class MinesweeperEngineRegressionTests(unittest.TestCase):
         self.assertEqual(
             counter_snapshot["completed_3bv"], engine._effective_3bv
         )
+        self.assertEqual(counter_snapshot["completed_ops"], engine._effective_ops)
+
+    def test_counter_snapshot_adds_completed_ops_without_time_or_mutable_state(self):
+        engine = self._engine_with_mines(4, 3, {(1, 0)})
+        expected = {
+            "status": GameStatus.PLAYING,
+            "active_clicks": 0,
+            "wasted_clicks": 0,
+            "completed_3bv": 0,
+            "completed_ops": 0,
+        }
+        with patch.object(engine, "get_elapsed_time", side_effect=AssertionError("no time authority")):
+            self.assertEqual(engine.get_counter_snapshot(), expected)
+
+        engine.step(0, 0, Action.OPEN)
+        expected.update(active_clicks=1, completed_3bv=1)
+        self.assertEqual(engine.get_counter_snapshot(), expected)
+        engine.step(3, 2, Action.FLAG)
+        expected.update(wasted_clicks=1)
+        self.assertEqual(engine.get_counter_snapshot(), expected)
+        engine.step(3, 1, Action.OPEN)
+        expected.update(status=GameStatus.WON, active_clicks=2, completed_3bv=2, completed_ops=1)
+        snapshot = engine.get_counter_snapshot()
+        self.assertEqual(snapshot, expected)
+        self.assertTrue(all(isinstance(value, (GameStatus, int)) for value in snapshot.values()))
+        snapshot["completed_ops"] = 99
+        snapshot["active_clicks"] = 99
+        self.assertEqual(engine.get_counter_snapshot(), expected)
 
     def assert_fresh_runtime_state(self, engine):
         self.assertEqual(engine.status, GameStatus.PLAYING)

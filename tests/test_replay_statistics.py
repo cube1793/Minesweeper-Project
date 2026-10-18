@@ -522,17 +522,11 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         return player
 
     def _zini_snapshot_requested_by(self, ui):
-        create_files = Mock(side_effect=RuntimeError("stop before worker launch"))
-        ui._create_zini_worker_files = create_files
-        ui._cleanup_zini_worker_files = Mock()
         ui._zini_explorer.invalidate()
-        ui._zini_process = None
-        ui._zini_process_token = None
-
-        with patch("builtins.print"):
+        ui._zini_job.close()
+        with patch.object(ui._zini_job, "start") as start:
             ui._ensure_zini_metric_job()
-
-        return create_files.call_args.args[1]
+        return start.call_args.args[0]
 
     def test_constructor_keeps_injected_live_engine_identity(self):
         live_engine = self._live_engine()

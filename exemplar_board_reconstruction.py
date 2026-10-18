@@ -32,6 +32,25 @@ class ReconstructedFrame:
 
 
 @dataclass(frozen=True)
+class FrameCounterSummary:
+    """Current-Engine prefix facts, without reconstruction time or rates.
+
+    Click strings preserve the public Engine's PLAYING/terminal presentation.
+    Raw progress is separate from the Engine's masked PLAYING stats strings.
+    """
+
+    status: GameStatus
+    active_clicks: int
+    wasted_clicks: int
+    completed_3bv: int
+    completed_ops: int
+    clicks_text: str
+    left_text: str
+    right_text: str
+    chord_text: str
+
+
+@dataclass(frozen=True)
 class FinalCounterSummary:
     """Final current-Engine reference facts, not historical solver telemetry.
 
@@ -64,6 +83,7 @@ class ExemplarBoardReconstruction:
     timeline: TimelineAnalytics
     board_reference: BoardReferenceMetrics
     frames: tuple[ReconstructedFrame, ...]
+    frame_counters: tuple[FrameCounterSummary, ...]
     newly_revealed_safe_by_action: tuple[frozenset[tuple[int, int]], ...]
     final_counters: FinalCounterSummary
 
@@ -72,6 +92,17 @@ def _frame(engine: MinesweeperEngine) -> ReconstructedFrame:
     return ReconstructedFrame(
         observation=tuple(tuple(row) for row in engine.get_observation()),
         status=engine.status,
+    )
+
+
+def _frame_counters(engine: MinesweeperEngine) -> FrameCounterSummary:
+    counters = engine.get_counter_snapshot()
+    stats = engine.get_stats()
+    return FrameCounterSummary(
+        status=counters["status"], active_clicks=counters["active_clicks"],
+        wasted_clicks=counters["wasted_clicks"], completed_3bv=counters["completed_3bv"],
+        completed_ops=counters["completed_ops"], clicks_text=stats["clicks"],
+        left_text=stats["left"], right_text=stats["right"], chord_text=stats["chord"],
     )
 
 
@@ -118,6 +149,7 @@ def reconstruct_board(
     )
 
     frames = [_frame(engine)]
+    frame_counters = [_frame_counters(engine)]
     new_safe_sets = []
     for index, item in enumerate(timeline.actions):
         if not isinstance(item, TimelineAction) or not isinstance(item.event, ActionEvent):
@@ -155,6 +187,7 @@ def reconstruct_board(
         if len(new_safe) != event.safe_cells_opened_delta:
             raise ValueError(f"Action {index + 1} reconstructed safe reveal delta disagrees with telemetry.")
         frames.append(after)
+        frame_counters.append(_frame_counters(engine))
         new_safe_sets.append(new_safe)
 
     expected_status = {"WIN": GameStatus.WON, "LOSS": GameStatus.LOST}[timeline.record.result]
@@ -171,6 +204,7 @@ def reconstruct_board(
     )
     return ExemplarBoardReconstruction(
         board_snapshot=board_snapshot, timeline=timeline, board_reference=reference,
-        frames=tuple(frames), newly_revealed_safe_by_action=tuple(new_safe_sets),
+        frames=tuple(frames), frame_counters=tuple(frame_counters),
+        newly_revealed_safe_by_action=tuple(new_safe_sets),
         final_counters=final,
     )

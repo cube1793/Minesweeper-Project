@@ -212,6 +212,81 @@ class ExemplarBoardReconstructionTests(unittest.TestCase):
                 self.assertEqual(snapshot["active_clicks"] + snapshot["wasted_clicks"],
                                  timeline.record.total_actions)
 
+    def test_frame_counters_match_public_engine_at_every_prefix(self):
+        for fixture in (self.win, self.loss, self.flood_clear):
+            with self.subTest(fixture=fixture.__name__):
+                board, timeline = fixture()
+                result = reconstruction.reconstruct_board(board, timeline)
+                self.assertEqual(len(result.frame_counters), len(timeline.actions) + 1)
+                self.assertEqual(result.frame_counters[0], reconstruction.FrameCounterSummary(
+                    GameStatus.PLAYING, 0, 0, 0, 0, "0", "0", "0", "0"))
+                engine = MinesweeperEngine()
+                engine.reset_with_mines(board.width, board.height, board.num_mines, board.mines)
+                for index, captured in enumerate(result.frame_counters):
+                    if index:
+                        event = timeline.actions[index - 1].event
+                        engine.step(event.x, event.y, event.action_type)
+                    raw, stats = engine.get_counter_snapshot(), engine.get_stats()
+                    for name in ("status", "active_clicks", "wasted_clicks", "completed_3bv", "completed_ops"):
+                        self.assertEqual(getattr(captured, name), raw[name])
+                    for name in ("clicks", "left", "right", "chord"):
+                        self.assertEqual(getattr(captured, name + "_text"), stats[name])
+                    self.assertEqual(captured.status, result.frames[index].status)
+                    self.assertEqual(captured.active_clicks + captured.wasted_clicks, index)
+
+    def test_prefix_open_flag_chord_clicks_and_3bv_progress(self):
+        result = reconstruction.reconstruct_board(*self.win())
+        self.assertEqual(tuple(item.completed_3bv for item in result.frame_counters),
+                         (0, 1, 1, 3, 4, 5, 6, 7, 8))
+        self.assertEqual(tuple(item.completed_ops for item in result.frame_counters), (0,) * 9)
+        for index, item in enumerate(result.frame_counters):
+            self.assertEqual(item.clicks_text, str(index))
+        self.assertEqual(tuple((item.left_text, item.right_text, item.chord_text)
+                               for item in result.frame_counters), (
+            ("0", "0", "0"), ("1", "0", "0"), ("1", "1", "0"),
+            ("1", "1", "1"), ("2", "1", "1"), ("2", "1", "2"),
+            ("3", "1", "2"), ("3", "1", "3"), ("4", "1", "3"),
+        ))
+
+    def test_prefix_ops_and_wasted_clicks_keep_terminal_formatting(self):
+        result = reconstruction.reconstruct_board(*self.flood_clear())
+        self.assertEqual(tuple(item.completed_3bv for item in result.frame_counters), (0, 1, 1, 2))
+        self.assertEqual(tuple(item.completed_ops for item in result.frame_counters), (0, 0, 0, 1))
+        self.assertEqual(tuple((item.active_clicks, item.wasted_clicks)
+                               for item in result.frame_counters), ((0, 0), (1, 0), (1, 1), (2, 1)))
+        self.assertEqual(result.frame_counters[2].clicks_text, "2")
+        self.assertEqual(result.frame_counters[2].right_text, "1")
+        self.assertEqual(result.frame_counters[-1].clicks_text, "2 + 1")
+        self.assertEqual(result.frame_counters[-1].right_text, "0 + 1")
+
+    def test_terminal_frame_counter_reconciles_with_final_compatibility_summary(self):
+        for fixture in (self.win, self.loss, self.flood_clear):
+            with self.subTest(fixture=fixture.__name__):
+                result = reconstruction.reconstruct_board(*fixture())
+                current, final = result.frame_counters[-1], result.final_counters
+                for name in ("status", "active_clicks", "wasted_clicks", "completed_3bv",
+                             "clicks_text", "left_text", "right_text", "chord_text"):
+                    self.assertEqual(getattr(current, name), getattr(final, name))
+                self.assertEqual(final.bbbv_text,
+                                 f"{current.completed_3bv}/{result.board_reference.total_3bv}")
+                self.assertEqual(final.ops_text,
+                                 f"{current.completed_ops}/{result.board_reference.total_ops}")
+
+    def test_counter_timeline_captured_in_single_replay_without_extra_inputs(self):
+        board, timeline = self.win()
+        step = MinesweeperEngine.step
+        inputs = []
+
+        def record_step(engine, x, y, action):
+            inputs.append((x, y, action))
+            return step(engine, x, y, action)
+
+        with patch.object(MinesweeperEngine, "step", new=record_step):
+            result = reconstruction.reconstruct_board(board, timeline)
+        self.assertEqual(inputs, [(item.event.x, item.event.y, item.event.action_type)
+                                  for item in timeline.actions])
+        self.assertEqual(len(result.frame_counters), len(inputs) + 1)
+
     def test_summary_retains_no_time_rates_extra_raw_breakdowns_or_zini(self):
         board, timeline = self.loss()
         result = reconstruction.reconstruct_board(board, timeline)
@@ -222,6 +297,10 @@ class ExemplarBoardReconstructionTests(unittest.TestCase):
         self.assertEqual(result.final_counters.clicks_text, "3 + 1")
         self.assertEqual(result.final_counters.left_text, "2")
         self.assertEqual(result.final_counters.right_text, "1 + 1")
+        self.assertEqual({f.name for f in fields(result.frame_counters[0])}, {
+            "status", "active_clicks", "wasted_clicks", "completed_3bv", "completed_ops",
+            "clicks_text", "left_text", "right_text", "chord_text",
+        })
 
     def test_reconstruction_clock_does_not_change_published_values(self):
         board, timeline = self.win()
@@ -395,13 +474,16 @@ class ExemplarBoardReconstructionTests(unittest.TestCase):
 
     def test_outputs_and_nested_storage_are_immutable_with_no_engine(self):
         result = reconstruction.reconstruct_board(*self.win())
-        for value in (result, result.frames[0], result.board_reference, result.final_counters):
+        for value in (result, result.frames[0], result.frame_counters[0],
+                      result.board_reference, result.final_counters):
             with self.subTest(type=type(value)), self.assertRaises(FrozenInstanceError):
                 setattr(value, fields(value)[0].name, None)
         with self.assertRaises(TypeError):
             result.frames[0].observation[0][0] = 9
         with self.assertRaises(TypeError):
             result.frames[0] = result.frames[-1]
+        with self.assertRaises(TypeError):
+            result.frame_counters[0] = result.frame_counters[-1]
         with self.assertRaises(AttributeError):
             result.newly_revealed_safe_by_action[0].add((2, 2))
 

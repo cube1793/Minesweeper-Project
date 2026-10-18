@@ -422,6 +422,7 @@ class MinesweeperEngine:
             "active_clicks": self._active_clicks["total"],
             "wasted_clicks": self._wasted_clicks["total"],
             "completed_3bv": self._effective_3bv,
+            "completed_ops": self._effective_ops,
         }
 
     def count_flags(self):

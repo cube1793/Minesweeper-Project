@@ -82,7 +82,7 @@ def forbid_search(stack):
         "zini_calculator.calculate_g_zini_neighborhood_beam_bounded",
         "zini_min_ties._MinTieSearch.find_best_moves",
         "zini_advanced._NeighborhoodBeamSearch.run",
-        "ui_manager.subprocess.Popen",
+        "zini_metric_job.subprocess.Popen",
     ):
         stack.enter_context(patch(target, side_effect=AssertionError(target)))
 
@@ -959,7 +959,7 @@ class ExplorerMainUITests(unittest.TestCase):
     def launch(self):
         process = Mock()
         process.poll.return_value = None
-        with patch("ui_manager.subprocess.Popen", return_value=process) as popen:
+        with patch("zini_metric_job.subprocess.Popen", return_value=process) as popen:
             self.ui._ensure_zini_metric_job()
         popen.assert_called_once()
         return process
@@ -996,7 +996,7 @@ class ExplorerMainUITests(unittest.TestCase):
         player = self.replay(outcome)
         process = Mock()
         process.poll.return_value = None
-        with patch("ui_manager.subprocess.Popen", return_value=process):
+        with patch("zini_metric_job.subprocess.Popen", return_value=process):
             self.ui._enter_replay_mode(player)
         return player
 
@@ -1006,7 +1006,7 @@ class ExplorerMainUITests(unittest.TestCase):
         controller = self.ui._zini_explorer
         for field in ("token", "snapshot", "moves", "trace", "current_index"):
             self.assertIsNone(getattr(controller, field), field)
-        with patch("ui_manager.subprocess.Popen", side_effect=AssertionError("stale search")):
+        with patch("zini_metric_job.subprocess.Popen", side_effect=AssertionError("stale search")):
             self.ui.on_open_zini_explorer()
         self.assertIsNone(self.ui._zini_explorer_window)
 

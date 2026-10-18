@@ -39,10 +39,6 @@ engine.get_observation() 결과로 보드를 렌더링하며, Replay 재생 상�
 """
 
 import os
-import pickle
-import subprocess
-import sys
-import tempfile
 import time
 from bisect import bisect_right
 from dataclasses import replace
@@ -74,7 +70,10 @@ from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
 from mouse_trace import MouseTraceRecorder
 from mouse_trace_ui import MouseTraceOverlay
-from zini_calculator import ZiniNeighborhoodBeamConfig
+from zini_metric_job import (
+    ZiniMetricJob, ZINI_COUNTER_CONFIG, ZINI_WORKER_SCRIPT,
+    ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS,
+)
 from zini_explorer import ZiniExplorerController
 
 
@@ -107,11 +106,6 @@ REPLAY_MODE_INDEX = "Index"
 REPLAY_MODE_TIME = "Time"
 REPLAY_ICON_SIZE = QSize(24, 24)
 STATS_PANEL_WIDTH = 170
-ZINI_WORKER_SCRIPT = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "zini_metric_worker.py",
-)
-ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS = 1.0
 
 
 class ChordMode(IntEnum):
@@ -165,14 +159,6 @@ COUNTER_METRIC_KEYS = (
     "zini",
     "zne",
     "znt",
-)
-ZINI_COUNTER_CONFIG = ZiniNeighborhoodBeamConfig(
-    ranking_policy="standard_seeded_chain_v1",
-    max_evaluations=1000,
-    standard_phase_evaluations=500,
-    max_seconds=None,
-    stall_seconds=None,
-    seed=0,
 )
 
 
@@ -420,10 +406,7 @@ class MinesweeperUI(QWidget):
         self._zini_job_token = 0
         self._zini_explorer = ZiniExplorerController()
         self._zini_explorer_window = None
-        self._zini_process = None
-        self._zini_process_token = None
-        self._zini_payload_path = None
-        self._zini_result_path = None
+        self._zini_job = ZiniMetricJob()
         self._zini_poll_timer = QTimer(self)
         self._zini_poll_timer.setInterval(100)
         self._zini_poll_timer.timeout.connect(self._poll_zini_metric_job)
@@ -1266,210 +1249,79 @@ class MinesweeperUI(QWidget):
         self._update_zini_explorer_button()
         return trace
 
-    def _ensure_zini_metric_job(self):
-        """Low-level job orchestration, also callable directly by existing tests.
+    # Compatibility views for existing UI integration diagnostics. Ownership is
+    # exclusively in the shared job; these do not implement a second lifecycle.
+    @property
+    def _zini_process(self):
+        return self._zini_job.process
 
-        Live actions can precompute once the layout is fixed. Counters and
-        Explorer still require completion; Replay callers remain completion-gated.
-        """
+    @_zini_process.setter
+    def _zini_process(self, process):
+        self._zini_job.process = process
+
+    @property
+    def _zini_process_token(self):
+        return self._zini_job.token
+
+    @property
+    def _zini_payload_path(self):
+        return self._zini_job.payload_path
+
+    @property
+    def _zini_result_path(self):
+        return self._zini_job.result_path
+
+    def _ensure_zini_metric_job(self):
+        """Precompute fixed boards; Counter/Explorer completion policy stays here."""
         self._sync_zini_explorer_eligibility()
-        if (
-            self._zini_explorer.token == self._zini_job_token
-            and self._zini_explorer.completed
-        ):
+        if (self._zini_explorer.token == self._zini_job_token
+                and self._zini_explorer.completed):
             return
-        if self._zini_process is not None:
-            if self._zini_process_token == self._zini_job_token:
-                # Even an exited child belongs to this job until polling consumes
-                # its result/error. A live action must not discard it and restart.
-                if not self._zini_poll_timer.isActive():
-                    self._zini_poll_timer.start()
+        if self._zini_job.active:
+            if self._zini_job.token == self._zini_job_token:
+                self._zini_poll_timer.start()
                 return
             self._terminate_zini_metric_process()
-
         snapshot = self._engine_for_current_mode().get_board_snapshot()
         if not snapshot.mines_placed:
             return
         token = self._zini_job_token
-        # This exact immutable snapshot is both retained and serialized below.
         self._zini_explorer.begin(
             token, snapshot, eligible=self._zini_explorer_is_eligible(),
         )
         self._update_zini_explorer_button()
-        try:
-            payload_path, result_path = self._create_zini_worker_files(
-                token,
-                snapshot,
-            )
-            process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "--zini-metric-worker" if getattr(sys, "frozen", False)
-                    else ZINI_WORKER_SCRIPT,
-                    payload_path,
-                    result_path,
-                ],
-                cwd=os.path.dirname(ZINI_WORKER_SCRIPT),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:
-            print(f"[ZiNi warning] counter ZiNi worker start failed: {exc}")
-            self._cleanup_zini_worker_files(
-                locals().get("payload_path"),
-                locals().get("result_path"),
-            )
-            self._zini_explorer.receive({
-                "token": token, "clicks": None, "moves": None, "error": repr(exc),
-            }, expected_token=token)
-            self._update_zini_explorer_button()
-            return
-
-        self._zini_process = process
-        self._zini_process_token = token
-        self._zini_payload_path = payload_path
-        self._zini_result_path = result_path
-        if not self._zini_poll_timer.isActive():
-            self._zini_poll_timer.start()
-
-    def _create_zini_worker_files(self, token: int, snapshot) -> tuple[str, str]:
-        """Write one subprocess payload and reserve one atomic result path."""
-        payload_fd, payload_path = tempfile.mkstemp(
-            prefix="minesweeper_zini_payload_",
-            suffix=".pkl",
-        )
-        result_fd, result_path = tempfile.mkstemp(
-            prefix="minesweeper_zini_result_",
-            suffix=".pkl",
-        )
-        os.close(result_fd)
-        os.remove(result_path)
-        try:
-            with os.fdopen(payload_fd, "wb") as payload_file:
-                pickle.dump(
-                    {
-                        "token": token,
-                        "snapshot": snapshot,
-                        "config": ZINI_COUNTER_CONFIG,
-                    },
-                    payload_file,
-                    protocol=pickle.HIGHEST_PROTOCOL,
-                )
-        except Exception:
-            self._cleanup_zini_worker_files(payload_path, result_path)
-            raise
-        return payload_path, result_path
+        self._zini_job.start(snapshot, token)
+        self._zini_poll_timer.start()
+        if self._zini_job.process is None:
+            # A launch failure is delivered once, just like a worker failure.
+            self._poll_zini_metric_job()
 
     def _terminate_zini_metric_process(self):
-        """Terminate the active ZiNi subprocess and remove its temp files."""
-        process = self._zini_process
-        if process is not None:
-            try:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
-                else:
-                    process.wait(timeout=0)
-            except Exception as exc:
-                print(f"[ZiNi warning] counter ZiNi worker cleanup failed: {exc}")
-        self._clear_zini_metric_process()
-
-    def _clear_zini_metric_process(self):
-        """Clear process/files only; retain the controller's completed session."""
-        self._cleanup_zini_worker_files(
-            self._zini_payload_path,
-            self._zini_result_path,
-        )
-        self._zini_process = None
-        self._zini_process_token = None
-        self._zini_payload_path = None
-        self._zini_result_path = None
-
-    def _cleanup_zini_worker_files(self, *paths):
-        """Remove worker temp files, ignoring already-cleaned paths."""
-        for path in paths:
-            if not path:
-                continue
-            try:
-                os.remove(path)
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                print(f"[ZiNi warning] temp file cleanup failed: {exc}")
-
-    def _read_zini_worker_result(self) -> object | None:
-        """Read the completed subprocess result if it has been written."""
-        if not self._zini_result_path or not os.path.exists(self._zini_result_path):
-            return None
-        try:
-            with open(self._zini_result_path, "rb") as result_file:
-                result = pickle.load(result_file)
-            if result is None:
-                # None is reserved here for an absent, still-pending result file.
-                raise ValueError("ZiNi worker wrote a null result.")
-            return result
-        except Exception as exc:
-            print(f"[ZiNi warning] counter ZiNi result read failed: {exc}")
-            return {
-                "token": self._zini_process_token,
-                "clicks": None,
-                "moves": None,
-                "error": repr(exc),
-            }
+        error = self._zini_job.close()
+        if error:
+            print(f"[ZiNi warning] counter ZiNi worker cleanup failed: {error}")
 
     def _finish_zini_metric_process(self):
-        """Reap a worker that already produced a result, then clear its files."""
-        process = self._zini_process
-        try:
-            if process is not None and process.poll() is None:
-                try:
-                    process.wait(timeout=0.1)
-                except subprocess.TimeoutExpired:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=ZINI_WORKER_TERMINATE_TIMEOUT_SECONDS)
-        except Exception as exc:
-            print(f"[ZiNi warning] counter ZiNi worker cleanup failed: {exc}")
-        self._clear_zini_metric_process()
+        """Leave completed Explorer/Counter policy state intact."""
+        self._terminate_zini_metric_process()
 
     def _poll_zini_metric_job(self):
-        """Apply completed ZiNi subprocess results on the UI thread."""
-        if self._zini_process is None:
-            self._zini_poll_timer.stop()
-            return
-
-        result = self._read_zini_worker_result()
+        token = self._zini_job.token
+        result = self._zini_job.poll()
         if result is None:
-            if self._zini_process.poll() is None:
-                return
-            result = {
-                "token": self._zini_process_token,
-                "clicks": None,
-                "moves": None,
-                "error": f"worker exited with code {self._zini_process.returncode}",
-            }
-
+            if not self._zini_job.active:
+                self._zini_poll_timer.stop()
+            return
         self._sync_zini_explorer_eligibility()
-        if self._zini_explorer.receive(
-            result, expected_token=self._zini_process_token,
-        ):
+        if self._zini_explorer.receive(result, expected_token=token):
             if self._zini_explorer.error:
                 print(f"[ZiNi warning] {self._zini_explorer.error}")
             if self._replay_mode:
                 self._update_replay_statistics_panel()
             else:
                 self._update_statistics_panel(self.engine.get_stats())
-
         self._finish_zini_metric_process()
-        if self._zini_process is None:
+        if not self._zini_job.active:
             self._zini_poll_timer.stop()
 
     def _current_zini_clicks(self) -> int | None:
