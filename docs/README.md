@@ -1,123 +1,109 @@
 # Project Documentation Index
 
-기존 문서를 이동하지 않고 현재 위치에서 찾을 수 있도록 정리한 문서 지도다. Stage 1의 앱·Replay·ZiNi와 Stage 2의 실행 구조는 공통 문서에서, Stage-3 V1의 현재 수용 상태는 Closeout에서 확인한다. 과거 문서의 상태·경로·판정은 당시 기록으로 읽는다.
+현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
+provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-## Project-wide documents
+## Current recovery / navigation
 
-- [Project README](../README.md): 실행 방법, 기능 범위와 프로젝트 개요.
-- [Architecture](../ARCHITECTURE.md): 앱·분석·알고리즘·Replay의 구조와 책임 경계.
-- [Building](../BUILDING.md): Windows 배포본 빌드 절차와 release 검증 안내.
-- [Current handoff](CURRENT_HANDOFF.md): 현재 완료된 기준선, 진행 중인 milestone, 다음 작업과 새 채팅 복구 지침.
+- [Current project handoff](CURRENT_HANDOFF.md): 현재 milestone, 닫힌 기준선, 다음 필수 작업.
+- [Project README](../README.md): 실행 방법, 주요 기능과 프로젝트 개요.
+- [Architecture](../ARCHITECTURE.md): Engine/UI/Replay/analysis/worker 책임 경계.
+- [Building](../BUILDING.md): Windows PyInstaller 빌드와 package 검증 절차.
+- [Stage-3 Extended index](stage3-extended/README.md): Extended roadmap와 각 milestone 상태.
 
-## Stage 2 / Pre-Stage3
+## Stage 1 / Stage 2 / Pre-Stage3
 
-Stage-2 baseline, telemetry 및 benchmark 기반 문서다. Historical provenance를 위해 현재 경로를 유지한다.
+공통 앱/Replay/ZiNi/Stage-2 실행 구조와 telemetry/benchmark 기반은 root 문서와
+아래 Pre-Stage3 명세에서 확인한다.
 
 - [Pre-Stage3 telemetry specification v2](../PRE_STAGE3_TELEMETRY_SPEC_v2.md)
 - [Pre-Stage3 telemetry specification v2 — 한국어](../PRE_STAGE3_TELEMETRY_SPEC_KO_v2.md)
 
-## Stage 3 V1 — Frozen specification and design
+## Stage-3 V1 — CLOSED / FROZEN
 
+**FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**
+
+- [Stage-3 V1 record / preservation guide](stage3-v1/README.md)
+- [Stage-3 V1 final adjudication](stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
 - [Frozen algorithm specification v1](../STAGE3_ALGORITHM_SPEC_v1.md)
-- [Frozen telemetry and benchmark specification v1](../STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md)
-- [Stage-3 handoff](../STAGE3_HANDOFF.md): Pre-Stage3 완료에서 Stage 3 설계로 넘어간 당시 인수인계 기록.
+- [Frozen telemetry / benchmark specification v1](../STAGE3_TELEMETRY_BENCHMARK_SPEC_v1.md)
+- [Stage-3 historical handoff](../STAGE3_HANDOFF.md)
 
-### Historical design / implementation records
+Historical design / implementation:
 
-- [Algorithm specification draft v1.1](../STAGE3_ALGORITHM_SPEC_DRAFT_v1.1.md): 동결 전 설계 기록.
+- [Algorithm specification draft v1.1](../STAGE3_ALGORITHM_SPEC_DRAFT_v1.1.md)
 - [Implementation Slice A](../STAGE3_IMPLEMENTATION_SLICE_A.md)
 - [Specification freeze adjudication](../STAGE3_SPEC_FREEZE_ADJUDICATION.md)
 - [Replay validation protocol v1.1 amendment](../STAGE3_REPLAY_VALIDATION_PROTOCOL_V1_1_AMENDMENT.md)
 
-## Stage 3 V1 — Validation and audit
-
-아래 문서는 각 검증·감사 단계의 기록이며, 공식 100k 최종 수용 판정은 Closeout에서 확인한다.
+Validation / audit:
 
 - [B7 pilot report](../STAGE3_B7_PILOT_REPORT.md)
 - [B7-C compute diagnostics](../STAGE3_B7C_COMPUTE_DIAGNOSTICS.md)
 - [B9 independent Claude audit](../STAGE3_B9_CLAUDE_INDEPENDENT_AUDIT.md)
+- [Archived Slice-B B8 adjudication](archive/stage3-v1/STAGE3_SLICE_B_B8_ADJUDICATION.md)
+- [Archived Slice-B final adjudication](archive/stage3-v1/STAGE3_SLICE_B_FINAL_ADJUDICATION.md)
 
-## Stage 3 V1 — Closeout
+## ZiNi Improvement — CLOSED
 
-**FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**
+- [ZiNi Improvement index](zini-improvement/README.md)
+- [ZiNi Improvement final adjudication](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)
 
-- [V1 기록·보존 위치 안내](stage3-v1/README.md): 공식 결과의 해석 한계와 외부 closeout·official evidence 보존 위치.
-- [V1 최종 판정문](stage3-v1/STAGE3_V1_FINAL_ADJUDICATION.md)
+The final quality holdout `2,010,000 .. 2,010,099` remains unopened unless a future
+explicit protocol authorizes its use.
 
-Release/evidence 자료는 기존 위치를 유지한다. 배포 절차는 위 Building 문서에서, 공식 100k artifact 탐색은 V1 기록·보존 위치 안내에서 시작한다.
+## Stage-3 Extended — ACTIVE
 
-## Stage 3 V1 — Archived adjudication records
+Start from:
 
-- [Slice B — B8 adjudication](archive/stage3-v1/STAGE3_SLICE_B_B8_ADJUDICATION.md)
-- [Slice B — final adjudication](archive/stage3-v1/STAGE3_SLICE_B_FINAL_ADJUDICATION.md)
+- [Stage-3 Extended README](stage3-extended/README.md)
+- [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
+  not an implementation priority list.
 
-## ZiNi Improvement — Closed
+Closed milestones / durable closeouts:
 
-현재 구현의 TYPE S 최적화와 Trace backend/controller/Explorer UI를 수용했다. 품질 기준은 **V1 유지**, **V2 연구 종료·미채택**이며 최종 holdout은 의도적으로 미개봉 상태다.
+- [Visualizer Foundation acceptance](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)
+- [Visualizer Foundation final adjudication](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)
+- [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md)
+- [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md)
+- [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md)
+- [Same-board Comparison contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md)
+- [Same-board Comparison closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md)
+- [Timeline Analytics contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)
+- [Timeline Analytics closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)
+- [Selected Exemplar Viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md)
+- [Selected Exemplar Viewer closeout](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)
 
-- [ZiNi 개선 기록 안내](zini-improvement/README.md)
-- [최종 판정](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md): 수용 범위, 정확한 개발 결과, Family A NO-GO와 해석 한계.
+### Current next work
 
-## Stage 3 Extended — Current roadmap
+**Visualization Usability Polish — MUST COMPLETE BEFORE ALGORITHM RESEARCH**
 
-Stage-3 Extended 전체는 **ACTIVE**이고 V1 / Model C는 frozen이다.
+First:
+- Same-board Comparison direct seek / selected-run playback / cumulative action-target route /
+  accepted smooth synthetic cursor, while keeping actual Human Mouse Trace distinct.
 
-1. **CLOSED** — Execution / Playback / Visualizer Foundation (2026-10-14).
-2. **CLOSED** — Version / Settings Identity Separation (2026-10-15).
-3. **CLOSED** — Modeled-Time Playback / Synthetic Smooth Cursor Presentation (2026-10-15).
-4. **CLOSED** — Human Mouse Trace / Path Visualization (2026-10-16).
-5. **CLOSED** — Same-board Human / Stage-2 / Stage-3 Comparison (2026-10-17).
-6. **CLOSED** — Representative-board Demonstrations / Timeline Analytics (Slices 0–4 COMPLETE / ACCEPTED).
-7. **CLOSED** — Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer.
-   Slices 0–4 COMPLETE / ACCEPTED; qualified `ff6358ae62b6f343bda36069d7164bda9aebee74`;
-   R-2 / O-5 CLOSED, BLOCKER 0 / REQUIRED 0.
-8. **NEXT REQUIRED** — Visualization Usability Polish (Same-board selected-run
-   seek/playback/route/synthetic cursor; Stage-3 Visualizer cumulative route with
-   existing direct seek retained). Must precede algorithm research.
-   이후 고정 exemplar human/domain 해석과 별도 연구 방향/specification 결정을 진행한다.
+Then:
+- Stage-3 Visualizer cumulative completed-target route; retain its existing direct seek.
 
-Human Mouse Trace는 Live 보드의 실제 event-driven pointer samples와 action markers를
-기록하고 종료 후 또는 Replay에서 선택적으로 표시한다. Board-local Qt logical pixels와
-독립 trace clock을 사용하며 Replay v2가 별도 trace 모델을 attachment로 운반한다.
-v1은 trace-free로 계속 읽을 수 있다. Physical gesture fidelity와 성능 hardening을
-포함한 최종 package 및 사용자 native 수용은 PASS다. Same-board Comparison도 Slice 0–5
-수용을 완료했다. Timeline Analytics도 **FINAL ACCEPTANCE PASS / CLOSED**이며
-Slices 0–4 (internal 3A/3B 포함)를 수용했다. Viewer도 최종 수용/종료했다.
-다음 필수 작업은 Visualization Usability Polish이며 새 알고리즘 연구/구현은 승인되지 않았다.
-OS-global hook, physical-model calibration/refit과 advanced path
-analytics는 이번 수용 범위가 아니다.
-`Replay != Human Mouse Trace != Stage-3 Trace Playback != ZiNi Trace`:
-Human Mouse Trace는 실제 sampled Live-board cursor presentation data이며 Model-C
-calibration evidence가 아니다.
+After that:
+- fixed-exemplar human/domain interpretation
+- separate decision/specification for actual Extended algorithm research
 
-Modeled-Time은 기록된 duration을 사용하는 비영속 presentation이다. Index 기본 모드를
-유지하며 synthetic cursor의 직선 smoothstep은 실제 OS 궤적이나 Model C 변경이 아니다.
-
-- [Selected Exemplar Board-State Viewer closeout](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md): FINAL ACCEPTANCE PASS / CLOSED; ff6358a, 892 focused / 2390 full PASS, package regression and USER native source-GUI acceptance.
-- [Selected Exemplar Board-State Viewer contract](stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md): Slices 0–4 accepted; final usability/counter/playback/route/cursor boundaries, R-2/O-5 CLOSED.
-- [Timeline Analytics closeout](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md): FINAL ACCEPTANCE PASS / CLOSED; qualified source `4c488e0`, 386 focused / 2184 full PASS, 고정 exemplars/report와 해석 한계.
-- [Timeline Analytics contract](stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md): Slices 0–4 COMPLETE / ACCEPTED; 독립 action-count timeline, frozen Model C와 deterministic category selection 경계.
-- [Same-board Comparison closeout](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CLOSEOUT.md): 최종 candidate `a59d0d9`, 916 focused / 2085 full PASS, fresh package·실제 worker lifecycle, 사용자 A–L PASS와 비차단 UX 처분.
-- [Same-board Comparison contract](stage3-extended/STAGE3_SAME_BOARD_COMPARISON_CONTRACT.md): 수용된 layout/admission/실행/metric/playback 경계; FINAL ACCEPTANCE PASS / CLOSED.
-- [Modeled-Time Playback closeout](stage3-extended/STAGE3_MODELED_TIME_PLAYBACK_CLOSEOUT.md): Slice 1–3 commit, 최종 source tests, fresh package/profile/worker, 사용자 native GUI A–K PASS와 보존 경계.
-- [Human Mouse Trace closeout](stage3-extended/STAGE3_HUMAN_MOUSE_TRACE_CLOSEOUT.md): 최종 구현/package SHA, physical gesture·trace·성능 계약, 627 focused / 1825 full PASS와 최종 사용자 native 수용.
-- [Identity Separation closeout](stage3-extended/STAGE3_IDENTITY_SEPARATION_CLOSEOUT.md): 실제 구현 commit, 최종 tests, fresh package/worker, 사용자 native GUI 수용 및 보존 경계.
-- [Foundation 최종 판정](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md): 독립 감사 수치, F-1 문서 정리, F-2 OPTIONAL / DEFER와 후속 범위.
-- [Foundation 수용 증거 / 수동 검증 기록](stage3-extended/STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md): 초안 당시와 통합 이후의 Git 기준선, 자동 검증과 사용자 수동 tester/date·PID·job-directory cleanup 증거, 비차단 UX 후속 관찰.
-- [Stage 3 Extended 문서 시작점](stage3-extended/README.md)
-- [기존 extension backlog](../STAGE3_EXTENSION_BACKLOG.md): V1에서 deferred된 후보와 검토 조건. 최종 구현 우선순위를 확정하는 문서로 취급하지 않는다.
-
-이전 closeout의 “next” 문구는 당시 계획을 보존한 기록이다. 현재 순서는 위 roadmap과
-[Current handoff](CURRENT_HANDOFF.md)를 따른다.
+No new algorithm policy is currently adopted.
 
 ## Experiments
 
-- [E/L policy pilot](../experiments/STAGE3_E_L_POLICY_PILOT.md): 별도 실험 기록.
+- [E/L policy pilot](../experiments/STAGE3_E_L_POLICY_PILOT.md)
 
-## Document-location policy
+The E/L pilot is historical/experimental evidence, not the current production planner.
+Its historical source provenance and the explicitly reviewed compatible Engine identity
+remain distinct.
 
-- 기존 Stage-2 / Pre-Stage3 / Stage-3 V1 문서는 historical provenance를 위해 현재 위치를 유지한다.
-- Frozen spec, audit, evidence 및 qualification 문서를 탐색 편의만을 위해 대규모로 이동하지 않는다.
-- 앞으로 새 Stage-3 Extended 문서는 기본적으로 `docs/stage3-extended/` 아래에 생성한다.
-- Official benchmark/evidence artifact root는 documentation cleanup 대상이 아니다.
-- 기존 `results/`의 release/evidence 문서와 `experiments/` 문서는 해당 위치에서 유지한다.
+## Document-location / evidence policy
+
+- Do not relocate frozen Stage-2 / Pre-Stage3 / Stage-3 V1 records merely for neatness.
+- New Stage-3 Extended documentation normally belongs under `docs/stage3-extended/`.
+- Official benchmark/evidence roots are not documentation-cleanup targets.
+- Large DB/JSONL/result/package trees stay in their established locations.
+- `results/` acceptance roots are evidence, not substitutes for tracked closeout documents.
+- Current Git source/tests outrank stale uploaded snapshots.
