@@ -163,13 +163,21 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
    [Closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
 9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation.
    [Closeout](docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
+10. **Program K selected / research specification FROZEN / ACCEPTED** —
+    Algorithm-research direction/specification decision.
+    [Program K research specification](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md).
 
-**NEXT: separate Extended algorithm-research direction/specification decision.**
-고정 exemplar 해석은 반복된 expert-play 우려와 productive local FLAG/CHORD 강점을
-확인했으며 추가 gameplay 검토는 필요하지 않습니다. 알고리즘은 채택하지 않았고
-구현도 승인하지 않았습니다. Known-Mine / No-Flag는 별도 spec/evaluation 결정이
-필요한 deferred 연구 방향입니다. Nearest Minimum-Risk Guess는 별도 후보이며
-이번 해석은 이를 평가하거나 지지·반박하는 구별 증거를 제공하지 않았습니다.
+Milestones **1–9는 CLOSED 유지**, Stage-3 Extended 전체는 **ACTIVE**입니다.
+Program K — Logical Known-Mine Capability + Selective Physical Materialization의
+연구 명세를 동결/수용했으며 **K는 미구현**입니다. 명세 동결 자체는 구현이나 실험을
+승인하지 않습니다. **P-1..P-8은 필수 protocol-required**, **O-4/O-5/O-7은 OPTIONAL / DEFER**입니다.
+K가 실패하면 **Program L**(기존 V1-admissible certainty 대안 내 local completion / target ordering)이 fallback입니다.
+**NEXT: Gate R preparation — bounded E0/E1 research protocol/harness authorization contract 설계.**
+구현/실행은 별도 Gate R 승인이 필요하며 production integration은 이후 Gate P 범위입니다.
+공식 100k 재실행은 없고 ZiNi final holdout은 미개봉/제외 상태입니다.
+Frozen Stage-3 V1은 historical authority로 유지합니다. 추가 fixed-exemplar gameplay 검토는
+필요하지 않습니다. Nearest Minimum-Risk Guess는 별도 후보이며 기존 해석은 이를
+평가하거나 지지·반박하는 구별 증거를 제공하지 않았습니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에

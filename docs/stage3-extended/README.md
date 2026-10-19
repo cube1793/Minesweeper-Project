@@ -25,8 +25,11 @@ Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
 (2026-10-19), **BLOCKER 0 / REQUIRED 0**; see the
 [closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 Gameplay inspection is COMPLETE; additional gameplay required: NONE.
-**NEXT: separate Extended algorithm-research direction/specification decision.**
-No algorithm direction is selected and no implementation is authorized.
+Milestones **1–9 remain CLOSED**. Milestone **10** selected **Program K**; its
+[research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) is **FROZEN / ACCEPTED**
+(2026-10-20). Program K is **not implemented**; the freeze authorizes no experiment
+or implementation. **NEXT: Gate R preparation — bounded E0/E1 research
+protocol/harness authorization contract design.**
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -166,11 +169,18 @@ results retain their original identity and meaning.
    Stage-3 Visualizer; qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`.
 9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation;
    [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
+10. **Program K selected / research specification FROZEN / ACCEPTED** —
+    Algorithm-research direction/specification decision;
+    [frozen Program K contract](STAGE3_PROGRAM_K_RESEARCH_SPEC.md).
 
-**NEXT: separate Extended algorithm-research direction/specification decision.**
-Compare candidate directions against the accepted interpretation and frozen
-design boundaries; choose/specify first. No algorithm direction is selected yet;
-implementation requires a separate decision/specification and explicit authorization.
+**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
+authorization contract.** Program K is not implemented; specification freeze
+grants no implementation or experiment authorization. **P-1 through P-8 remain
+mandatory protocol-required obligations**; **O-4/O-5/O-7 remain OPTIONAL / DEFER**.
+**Program L** remains fallback if K fails, restricted to existing V1-admissible
+certainty alternatives. Gate R authorization is separate; later production
+integration requires Gate P. No official 100k rerun; the ZiNi final holdout remains
+unopened/excluded. Frozen Stage-3 V1 remains historical authority. Extended remains ACTIVE.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
@@ -182,12 +192,13 @@ These deterministic category exemplars are not a statistically representative sa
 
 The interpretation records recurring expert-play concerns and productive local
 FLAG/CHORD progression as a strength. C's FLAG-destination geometry is a FACT,
-not an independently established routing weakness. P0 Known-Mine / No-Flag now
-has qualitative/domain motivation, but remains **NOT ADOPTED** pending a separate
-direction/specification/evaluation decision. Frozen V1 is not reopened.
+not an independently established routing weakness. At that interpretation closeout,
+P0 Known-Mine / No-Flag had qualitative/domain motivation but was **NOT ADOPTED**.
+The later Program K research-specification freeze above preserves that historical
+boundary and does not authorize implementation. Frozen V1 is not reopened.
 Nearest Minimum-Risk Guess (nearest exact-minimum-risk guess using movement cost)
 remains a separate backlog candidate **neither supported nor refuted by this
-interpretation**. No algorithm policy is adopted and no implementation is authorized.
+interpretation**. That interpretation adopted no algorithm policy or implementation.
 External screen-recording tools remain the default.
 
 ## Selected Exemplar Board-State Viewer — CLOSED
@@ -292,9 +303,9 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
   playback/clock, Engine, solver/planner, Model C or process lifecycle.
 
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
-That interpretation is now CLOSED; current NEXT is the separate Extended
-algorithm-research direction/specification decision recorded above. No policy
-is adopted or implementation authorized.
+That interpretation is now CLOSED; Program K's research specification is now
+FROZEN / ACCEPTED. Current NEXT is Gate R preparation as recorded above;
+no implementation or experiment is authorized by the freeze.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -632,8 +643,9 @@ exemplars and both report runs. No visual/manual substitution, official
 source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
-are also CLOSED. Current NEXT is a separate algorithm-research direction/specification
-decision; no implementation is authorized. The historical Same-board closeout
+are also CLOSED. Program K's research specification is FROZEN / ACCEPTED;
+current NEXT is Gate R preparation, not implementation or experiment execution.
+The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;
 its dated record remains unchanged. No historical acceptance is reopened.
 
@@ -653,7 +665,8 @@ the current state.
 - Action-specific OPEN / FLAG / CHORD timing and physical CHORD variants.
 - CPS / burst / minimum inter-action constraints, anisotropy and human cognitive timing.
 - Built-in screen recording unless later justified.
-- Known-mine / no-flag execution and richer / longer planning.
+- Program K implementation remains unauthorized pending Gate R; broader selective
+  flagging and richer / longer planning remain deferred.
 
 Revisit only with evidence and a separate specification/evaluation contract.
 In the Stage-3 Visualizer, incremental forward is implemented; arbitrary seeks

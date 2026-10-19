@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Durable recovery state for a new chat or context-loss event.
-> Updated: 2026-10-19 (Asia/Seoul)
+> Updated: 2026-10-20 (Asia/Seoul)
 
 ---
 
@@ -35,16 +35,16 @@ Approved Python:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Last verified **PRE-CLOSEOUT baseline** for the interpretation documentation
-closeout (2026-10-19):
+Last verified **PRE-MATERIALIZATION baseline** for the Program K research
+specification freeze (2026-10-20):
 
 - branch: `main`
-- HEAD / local `origin/main`: `69b10f99b6bbfec4f0e39571dac2bf6423c2abff`
-- subject: `docs: start fixed-exemplar interpretation handoff`
+- HEAD / local `origin/main`: `23177852dba59d1e1ce31c2cc19a9dc8aa980f68`
+- subject: `docs: close fixed-exemplar interpretation`
 - ahead/behind: `0 / 0`; worktree/index clean **before documentation edits**
 - remote relationship is locally available evidence; no fetch was performed
 
-This is the pre-closeout baseline, not a claim that the edited worktree is clean.
+This is the pre-materialization baseline, not a claim that the edited worktree is clean.
 A later user-performed documentation commit will legitimately advance HEAD; no
 future SHA is inferred. Always verify live Git at recovery time.
 Documentation-only commits do not replace qualified technical source identities.
@@ -121,6 +121,12 @@ Closed:
 7. Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer
 8. Visualization Usability Polish
 9. Fixed-Exemplar Human/Domain Interpretation — CLOSED
+
+Milestones **1–9 remain CLOSED**. Milestone **10 — algorithm-research
+direction/specification decision** selected **Program K**. The
+[Program K research specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
+is **FROZEN / ACCEPTED**; Program K is not implemented. This freeze does not
+authorize implementation or experiments. See §7.1 for the current Gate R boundary.
 
 Useful accepted identities:
 
@@ -286,7 +292,9 @@ was the user-facing visual target.
 
 **FINAL ACCEPTANCE PASS — FIXED-EXEMPLAR HUMAN/DOMAIN INTERPRETATION CLOSED.**
 **BLOCKER 0 / REQUIRED 0.** Gameplay inspection COMPLETE; additional gameplay NONE.
-No algorithm policy adopted; no implementation authorized. Extended remains ACTIVE.
+That interpretation closeout adopted no algorithm policy and authorized no
+implementation. The later Program K research-specification freeze is recorded
+in §7.1; Extended remains ACTIVE.
 
 [Final closeout](stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md)
 records the accepted corrected synthesis, exact evidence identities/totals,
@@ -322,8 +330,10 @@ Durable findings:
 
 Frozen V1 has no separate logical-known-mine state; local inference uses physical
 FLAGs. Direct OPEN requires a current-certain safe HIDDEN cell. §12 current-certain
-FLAG setup and §22 FLAG-only fallback preserve that boundary. Known-Mine / No-Flag
-is already deferred P0, now qualitatively motivated by B/B2, **NOT ADOPTED**.
+FLAG setup and §22 FLAG-only fallback preserve that boundary. At the interpretation
+closeout, deferred P0 Known-Mine / No-Flag was qualitatively motivated by B/B2 but
+**NOT ADOPTED**. The later Program K research selection/specification freeze (§7.1)
+does not change that historical finding or authorize implementation.
 Timeline ActionEvent retains neither Stage3Decision.plan nor an explicit setup/
 fallback reason. No exact per-action §22 provenance or No-Flag saving is established.
 
@@ -334,13 +344,25 @@ nor refuted by this interpretation**.
 
 ### 7.1 Current NEXT
 
-**Separate Stage-3 Extended algorithm-research direction/specification decision.**
+**Program K research specification — FROZEN / ACCEPTED (2026-10-20).**
 
-Compare candidate directions against the accepted interpretation, frozen V1 spec
-and extension backlog. Choose/specify first. **Do not implement yet**; implementation
-requires a separate decision/specification and explicit authorization. No direction
-has been selected. Do not reopen fixed-exemplar gameplay inspection, regenerate
-accepted reports, rerun official 100k or open the ZiNi final holdout for this next decision.
+Milestone 10 selected **Program K — Logical Known-Mine Capability + Selective
+Physical Materialization**. The [frozen specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
+preserves the accepted K-C/K-P0 boundary and frozen V1 historical authority.
+Final content verdict: **BLOCKER 0 / REQUIRED 0 / CONTENT FREEZE PASS**.
+**P-1 through P-8 remain mandatory protocol-required obligations** before the
+relevant experiment stages/results; **O-4/O-5/O-7 remain OPTIONAL / DEFER**.
+
+**Program K is NOT IMPLEMENTED.** The specification freeze grants no implementation,
+experiment or production-integration authorization. **Program L** remains fallback
+if K fails: local completion / target ordering restricted to existing V1-admissible
+certainty alternatives. Stage-3 Extended remains **ACTIVE**.
+
+**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
+authorization contract.** Implementation and execution require separate Gate R
+authorization; production integration requires later Gate P authorization.
+Do not reopen fixed-exemplar gameplay inspection, regenerate accepted reports or
+rerun the official 100k. The ZiNi final holdout remains **unopened/excluded**.
 
 ---
 
@@ -411,18 +433,20 @@ Disputed findings return to source/tests/evidence.
 At a new chat:
 
 1. verify live Git branch / HEAD / locally available origin relationship / worktree/index;
-   do not assume the pre-closeout SHA above is still current
+   do not assume the pre-materialization SHA above is still current
 2. read `docs/CURRENT_HANDOFF.md`, `docs/README.md` and `docs/stage3-extended/README.md`
 3. read `docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md`
    as the latest closed qualitative boundary
-4. use `STAGE3_ALGORITHM_SPEC_v1.md` and `STAGE3_EXTENSION_BACKLOG.md` as
+4. read `docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md` as the frozen
+   Program K research contract, including P-1..P-8 and deferred O-4/O-5/O-7
+5. use `STAGE3_ALGORITHM_SPEC_v1.md` and `STAGE3_EXTENSION_BACKLOG.md` as
    frozen/deferred design boundaries; neither is authorization to implement
-5. do **not** reopen completed fixed-exemplar gameplay inspection or reselect boards
-6. do **not** rerun the official 100k, regenerate accepted reports or repeat closed
-   Viewer/Polish qualification merely to choose a research direction
-7. do **not** open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
-8. make a separate research-direction/specification decision before implementation;
-   implementation additionally requires explicit authorization
+6. do **not** reopen completed fixed-exemplar gameplay inspection or reselect boards
+7. do **not** rerun the official 100k, regenerate accepted reports or repeat closed
+   Viewer/Polish qualification merely to prepare a research protocol
+8. do **not** open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
+9. prepare the bounded E0/E1 research protocol/harness authorization contract;
+   do **not** implement or execute until separate Gate R authorization
 
 Supporting authorities, only as needed to resolve a concrete meaning:
 

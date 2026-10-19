@@ -57,6 +57,7 @@ explicit protocol authorizes its use.
 Start from:
 
 - [Stage-3 Extended README](stage3-extended/README.md)
+- [Program K research specification — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
 - [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
   not an implementation priority list.
 
@@ -81,11 +82,18 @@ Closed milestones / durable closeouts:
 
 ### Current next work
 
-Fixed-exemplar human/domain interpretation is **CLOSED**.
-**NEXT: separate Stage-3 Extended algorithm-research direction/specification decision.**
-No new policy has been selected, adopted or implemented. Compare candidates and
-choose/specify first; implementation requires explicit authorization.
-Stage-3 Extended remains **ACTIVE**.
+Milestones **1–9 remain CLOSED**. Milestone **10**, the algorithm-research
+direction/specification decision, selected **Program K**; its research specification
+is **FROZEN / ACCEPTED**. Program K is **not implemented**, and the freeze authorizes
+neither implementation nor experiments. **P-1 through P-8 remain protocol-required**;
+**O-4/O-5/O-7 remain OPTIONAL / DEFER**. **Program L** remains fallback if K fails,
+restricted to existing V1-admissible certainty alternatives.
+
+**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
+authorization contract.** Gate R authorization is separate; production integration
+requires later Gate P authorization. No official 100k rerun; the ZiNi final holdout
+remains unopened/excluded. Frozen Stage-3 V1 remains historical authority.
+Stage-3 Extended remains **ACTIVE**; previous closeouts are not reopened.
 
 ## Experiments
 
