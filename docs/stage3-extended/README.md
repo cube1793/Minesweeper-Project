@@ -21,9 +21,12 @@ See the [final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md) and
 **Visualization Usability Polish — FINAL ACCEPTANCE PASS / CLOSED** (2026-10-18).
 Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
 [closeout](STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
-**NEXT: fixed-exemplar human/domain interpretation in a NEW ChatGPT/Codex work unit**,
-then a separate algorithm-research direction/specification decision. Neither
-interpretation nor algorithm research begins in this closeout.
+**Fixed-Exemplar Human/Domain Interpretation — FINAL ACCEPTANCE PASS / CLOSED**
+(2026-10-19), **BLOCKER 0 / REQUIRED 0**; see the
+[closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
+Gameplay inspection is COMPLETE; additional gameplay required: NONE.
+**NEXT: separate Extended algorithm-research direction/specification decision.**
+No algorithm direction is selected and no implementation is authorized.
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -161,14 +164,31 @@ results retain their original identity and meaning.
    Slices 0–4 COMPLETE / ACCEPTED; final qualified source `ff6358a`; R-2/O-5 CLOSED.
 8. **CLOSED** — Visualization Usability Polish on Same-board Comparison and
    Stage-3 Visualizer; qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`.
+9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation;
+   [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 
-Next work belongs to a **NEW work unit**: fixed-exemplar human/domain interpretation,
-then a separate algorithm-research direction/specification decision. Actual algorithm
-research/implementation requires that decision and explicit authorization.
+**NEXT: separate Extended algorithm-research direction/specification decision.**
+Compare candidate directions against the accepted interpretation and frozen
+design boundaries; choose/specify first. No algorithm direction is selected yet;
+implementation requires a separate decision/specification and explicit authorization.
 
-For later algorithm research, nearest exact-minimum-risk guess selection among equal-risk
-candidates using movement cost remains a candidate, not an adopted policy or
-authorization to modify V1. External screen-recording tools remain the default.
+## Fixed-Exemplar Human/Domain Interpretation — CLOSED
+
+**FINAL ACCEPTANCE PASS / CLOSED — BLOCKER 0 / REQUIRED 0** (2026-10-19).
+The [closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md) records the
+corrected findings, USER expert speed-play standard and audit/adjudication lineage.
+Inspection of fixed `73758 / 73024 / 93557 / 1` is COMPLETE; additional gameplay NONE.
+These deterministic category exemplars are not a statistically representative sample.
+
+The interpretation records recurring expert-play concerns and productive local
+FLAG/CHORD progression as a strength. C's FLAG-destination geometry is a FACT,
+not an independently established routing weakness. P0 Known-Mine / No-Flag now
+has qualitative/domain motivation, but remains **NOT ADOPTED** pending a separate
+direction/specification/evaluation decision. Frozen V1 is not reopened.
+Nearest Minimum-Risk Guess (nearest exact-minimum-risk guess using movement cost)
+remains a separate backlog candidate **neither supported nor refuted by this
+interpretation**. No algorithm policy is adopted and no implementation is authorized.
+External screen-recording tools remain the default.
 
 ## Selected Exemplar Board-State Viewer — CLOSED
 
@@ -271,9 +291,10 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
   and paints caller-supplied masks/points; no truth acquisition, prefix selection,
   playback/clock, Engine, solver/planner, Model C or process lifecycle.
 
-Next: fixed-exemplar human/domain interpretation in a new work unit, then a
-separate research direction/specification decision. Movement-cost nearest
-exact-minimum-risk guessing remains a backlog candidate, not an adopted policy.
+At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
+That interpretation is now CLOSED; current NEXT is the separate Extended
+algorithm-research direction/specification decision recorded above. No policy
+is adopted or implementation authorized.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -610,9 +631,10 @@ exemplars and both report runs. No visual/manual substitution, official
 100k/solver rerun or frozen-evidence modification. Final source regression and
 source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
-Visualization Usability Polish is also CLOSED. Next is human/domain interpretation
-in a new work unit, before a separate algorithm-research decision. The historical
-Same-board closeout did not implement the later playback/route/cursor maintenance;
+Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
+are also CLOSED. Current NEXT is a separate algorithm-research direction/specification
+decision; no implementation is authorized. The historical Same-board closeout
+did not implement the later playback/route/cursor maintenance;
 its dated record remains unchanged. No historical acceptance is reopened.
 
 Earlier closeouts retain their dated next-milestone statements as historical

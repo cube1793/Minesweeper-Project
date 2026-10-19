@@ -161,11 +161,15 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
    playback/synthetic cursor 및 두 UI의 hidden-answer/completed-route 참조.
    Qualified `31630dd6ffa2301c41534fca3b003838d865f313`.
    [Closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
+9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation.
+   [Closeout](docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 
-다음은 **새 ChatGPT/Codex work unit에서 고정 exemplar human/domain 해석**입니다.
-그 후 별도의 algorithm-research 방향/specification 결정을 거쳐야 실제 연구/구현을
-시작할 수 있습니다. 이 closeout은 해석·연구를 시작하지 않으며 movement-cost 기반
-nearest exact-minimum-risk guess는 backlog 후보일 뿐 채택된 정책이 아닙니다.
+**NEXT: separate Extended algorithm-research direction/specification decision.**
+고정 exemplar 해석은 반복된 expert-play 우려와 productive local FLAG/CHORD 강점을
+확인했으며 추가 gameplay 검토는 필요하지 않습니다. 알고리즘은 채택하지 않았고
+구현도 승인하지 않았습니다. Known-Mine / No-Flag는 별도 spec/evaluation 결정이
+필요한 deferred 연구 방향입니다. Nearest Minimum-Risk Guess는 별도 후보이며
+이번 해석은 이를 평가하거나 지지·반박하는 구별 증거를 제공하지 않았습니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에

@@ -76,15 +76,16 @@ Closed milestones / durable closeouts:
 - [Visualization Usability Polish closeout](stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)
   — CLOSED; Same-board usability and Visualizer reference overlays accepted at
   `31630dd6ffa2301c41534fca3b003838d865f313`.
+- [Fixed-Exemplar Human/Domain Interpretation closeout](stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md)
+  — FINAL ACCEPTANCE PASS / CLOSED; BLOCKER 0 / REQUIRED 0; additional gameplay NONE.
 
 ### Current next work
 
-**NEXT: fixed-exemplar human/domain interpretation, in a NEW ChatGPT/Codex work unit.**
-Visualization Usability Polish is CLOSED; this closeout does not begin interpretation.
-After interpretation comes a separate decision/specification for Extended algorithm
-research. Actual algorithm work requires that decision and explicit authorization.
-Nearest exact-minimum-risk guessing using movement cost remains a backlog candidate;
-no new algorithm policy is currently adopted. Stage-3 Extended remains ACTIVE.
+Fixed-exemplar human/domain interpretation is **CLOSED**.
+**NEXT: separate Stage-3 Extended algorithm-research direction/specification decision.**
+No new policy has been selected, adopted or implemented. Compare candidates and
+choose/specify first; implementation requires explicit authorization.
+Stage-3 Extended remains **ACTIVE**.
 
 ## Experiments
 

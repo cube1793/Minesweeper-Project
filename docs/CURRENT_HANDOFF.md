@@ -35,14 +35,18 @@ Approved Python:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Last reported integrated Git state after Visualization Usability Polish closeout:
+Last verified **PRE-CLOSEOUT baseline** for the interpretation documentation
+closeout (2026-10-19):
 
 - branch: `main`
-- HEAD / `origin/main`: `22e544a` — `docs: close visualization usability polish`
-- working tree: clean at the reported closeout point
-- obsolete closed feature branches were deleted locally/remotely
+- HEAD / local `origin/main`: `69b10f99b6bbfec4f0e39571dac2bf6423c2abff`
+- subject: `docs: start fixed-exemplar interpretation handoff`
+- ahead/behind: `0 / 0`; worktree/index clean **before documentation edits**
+- remote relationship is locally available evidence; no fetch was performed
 
-Always re-check live Git at recovery time; a later commit may legitimately advance `main`.
+This is the pre-closeout baseline, not a claim that the edited worktree is clean.
+A later user-performed documentation commit will legitimately advance HEAD; no
+future SHA is inferred. Always verify live Git at recovery time.
 Documentation-only commits do not replace qualified technical source identities.
 
 ---
@@ -116,6 +120,7 @@ Closed:
 6. Representative-board Demonstrations / Timeline Analytics
 7. Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer
 8. Visualization Usability Polish
+9. Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
 Useful accepted identities:
 
@@ -277,71 +282,65 @@ was the user-facing visual target.
 
 ---
 
-## 7. Current NEXT — fixed-exemplar human/domain interpretation
+## 7. Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
-This is the active Stage-3 Extended work unit. It is **interpretation, not implementation**.
-Use the accepted Viewer / Timeline evidence to inspect the already-fixed Stage-2 and Stage-3
-executions from the user's Minesweeper/domain perspective.
+**FINAL ACCEPTANCE PASS — FIXED-EXEMPLAR HUMAN/DOMAIN INTERPRETATION CLOSED.**
+**BLOCKER 0 / REQUIRED 0.** Gameplay inspection COMPLETE; additional gameplay NONE.
+No algorithm policy adopted; no implementation authorized. Extended remains ACTIVE.
 
-Fixed exemplars — **do not re-rank, re-select or visually substitute**:
+[Final closeout](stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md)
+records the accepted corrected synthesis, exact evidence identities/totals,
+USER judgments and independent audit/final adjudication lineage.
 
-- `73758` — maximum Stage-3 WW modeled advantage, delta `-27009085 us`
-- `73024` — lower-median WW delta exemplar, delta `-16487355 us`
-- `93557` — closest-to-zero Stage-3 WW advantage, delta `-7877513 us`
-- `1` — LL control; termination cost only, not time-to-win
+Fixed exemplars remain `73758 / 73024 / 93557 / 1`: deterministic category
+exemplars, **not a statistically representative sample**. This is qualitative
+interpretation, not statistical validation or a general causal explanation.
 
-Accepted board references:
+The USER evaluates experienced/high-level Minesweeper speed play, not ordinary
+human plausibility or human imitation. Machine facts and USER judgments remain separate.
 
-- `73758`: 3BV `172` / Ops `16` / isolated `156`
-- `73024`: 3BV `177` / Ops `13` / isolated `164`
-- `93557`: 3BV `140` / Ops `14` / isolated `126`
-- `1`: 3BV `175` / Ops `12` / isolated `163`
+Durable findings:
 
-These are deterministic category exemplars, **not a statistically representative sample**.
+- **A — RECURRING WEAKNESS CANDIDATE / MEDIUM:** USER-identified incomplete local
+  cleanup. Earlier public certainty was not verified for every cell. The 93557
+  115→143 and terminal 200→201–203 revisits are not positive mechanical support.
+- **B — recurring expert-play gap / HIGH:** USER-preferred direct OPEN versus
+  recorded marking/reveal execution. The preferred OPEN may not be V1-admissible;
+  do not claim V1 rejected an available direct OPEN.
+- **B2 — SUB-PATTERN OF B / MEDIUM:** physical flag accumulation, strongest on
+  73024 and 93557; no universal per-action setup/fallback attribution.
+- **C — geometry FACT / HIGH; conditional weakness LOW, not independently
+  established:** all d² >= 100 destinations are FLAG on the three WW exemplars,
+  but several remote moves were rational. Geometry alone does not prove poor routing.
+- **D — STRENGTH / HIGH:** productive local FLAG/CHORD progression. Preserve
+  useful physical flags enabling CHORD as an evaluation constraint, not a policy adoption.
+- **E — RESEARCH QUESTION ONLY / LOW / NOT ADOPTED:** realized-path efficiency
+  versus decision robustness before new clues.
+- **LL control:** game 1 executions match for four actions and both lose on action 4;
+  `720354 us` each is termination cost only, not time-to-win. No meaningful
+  support/refutation of A/B/B2/C/D.
 
-Authoritative Timeline report:
+Frozen V1 has no separate logical-known-mine state; local inference uses physical
+FLAGs. Direct OPEN requires a current-certain safe HIDDEN cell. §12 current-certain
+FLAG setup and §22 FLAG-only fallback preserve that boundary. Known-Mine / No-Flag
+is already deferred P0, now qualitatively motivated by B/B2, **NOT ADOPTED**.
+Timeline ActionEvent retains neither Stage3Decision.plan nor an explicit setup/
+fallback reason. No exact per-action §22 provenance or No-Flag saving is established.
 
-`results/stage3-timeline-analytics/20261017T113748060625Z-99dafa139703/report.html`
+No statistical prevalence, representative behavior, causal WW-delta explanation
+or counterfactual whole-run outcome/cost is established. Nearest exact-minimum-risk
+guess using movement cost remains a **separate backlog candidate, neither supported
+nor refuted by this interpretation**.
 
-SHA-256:
+### 7.1 Current NEXT
 
-`b680e5bdc1e4598bee089a4def67728bb851758f7c4de75a4b9cdc62f57f72d3`
+**Separate Stage-3 Extended algorithm-research direction/specification decision.**
 
-Viewer final evidence root:
-
-`results/stage3-exemplar-board-viewer-final-acceptance/20261018T094900066913Z/`
-
-Interpret each exemplar by separating at least:
-
-- observed Stage-2 behavior
-- observed Stage-3 behavior
-- action-count / route / modeled-time pattern
-- routing / CHORD / FLAG / guess-location / repeated-movement factors that appear relevant
-- the user's expert judgment of what feels strategically natural or unnatural
-- confidence and the exact evidence supporting the interpretation
-- any improvement idea only as a **candidate hypothesis**, never as adopted policy
-
-Do NOT during this work unit:
-
-- modify planner/solver policy
-- adopt a new algorithm policy from one or a few exemplars
-- infer causality from modeled-time difference alone
-- treat Model C as human speed
-- treat ZiNi as the Stage-3 speed objective
-- fabricate Human Replay/mouse behavior where none exists
-- call the action-target route a recorded OS cursor trajectory
-- generalize the four exemplars into a statistically representative sample
-- rerun the official 100k merely to start interpretation
-- open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
-
-After interpretation:
-
-1. synthesize recurring strengths, weaknesses and candidate hypotheses
-2. make a separate Extended algorithm-research direction/specification decision
-3. only after that decision and explicit authorization, implement research
-
-No new Extended algorithm policy is currently adopted.
-`Nearest exact-minimum-risk guess using movement cost` remains a candidate/backlog idea only.
+Compare candidate directions against the accepted interpretation, frozen V1 spec
+and extension backlog. Choose/specify first. **Do not implement yet**; implementation
+requires a separate decision/specification and explicit authorization. No direction
+has been selected. Do not reopen fixed-exemplar gameplay inspection, regenerate
+accepted reports, rerun official 100k or open the ZiNi final holdout for this next decision.
 
 ---
 
@@ -411,28 +410,29 @@ Disputed findings return to source/tests/evidence.
 
 At a new chat:
 
-1. inspect live Git branch / HEAD / origin tracking / worktree
+1. verify live Git branch / HEAD / locally available origin relationship / worktree/index;
+   do not assume the pre-closeout SHA above is still current
 2. read `docs/CURRENT_HANDOFF.md`, `docs/README.md` and `docs/stage3-extended/README.md`
-3. read `STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md` as the just-closed boundary
-4. read Viewer closeout + contract and Timeline closeout + contract before interpreting exemplars
-5. confirm fixed IDs `73758 / 73024 / 93557 / 1`; do not reselect them
-6. start with interpretation/evidence logging, not production edits
-7. inspect exact source/tests only when a concrete interpretation or behavior question requires them
-8. do not rerun closed Viewer/Polish qualification merely to begin interpretation
-9. do not rerun official 100k or open the ZiNi final holdout without a new explicit protocol
-10. after interpretation, stop for a separate research-direction/specification decision before algorithm work
+3. read `docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md`
+   as the latest closed qualitative boundary
+4. use `STAGE3_ALGORITHM_SPEC_v1.md` and `STAGE3_EXTENSION_BACKLOG.md` as
+   frozen/deferred design boundaries; neither is authorization to implement
+5. do **not** reopen completed fixed-exemplar gameplay inspection or reselect boards
+6. do **not** rerun the official 100k, regenerate accepted reports or repeat closed
+   Viewer/Polish qualification merely to choose a research direction
+7. do **not** open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
+8. make a separate research-direction/specification decision before implementation;
+   implementation additionally requires explicit authorization
 
-Recommended immediate document/evidence set:
+Supporting authorities, only as needed to resolve a concrete meaning:
 
 - `docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md`
-- `docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md`
-- `docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md`
-- `docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md`
-- `docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CONTRACT.md`
-- final accepted Timeline report and accepted Viewer evidence only as interpretation needs them
+- `docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md` and its contract
+- `docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md` and its contract
+- accepted Timeline/Viewer evidence in place; exact current source/tests for disputed semantics
 
-If a concrete technical meaning is disputed, then inspect the relevant current source/tests;
-do not preload large source sets merely because they exist.
+Do not treat the external pre-correction synthesis audit target as final authority.
+Do not preload large source sets or rerun gameplay merely because those resources exist.
 
 ---
 
