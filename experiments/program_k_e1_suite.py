@@ -118,7 +118,7 @@ class ScheduleCoverage:
 
 @dataclass(frozen=True, slots=True)
 class SemanticRepetitionProjection:
-    """Tagged immutable field trees; numeric timing noise is replaced explicitly."""
+    """Tagged immutable value DAGs; numeric timing noise is replaced explicitly."""
 
     case_id: str
     variant: str
@@ -320,32 +320,54 @@ _RECORD_TYPES = (
 ) + _audit._AUDIT_RECORD_TYPES
 
 
-def _encoded(value, *, semantic=False):
-    """Lossless type-tagged tree, also used for explicit repetition projection.
+def _semantic_dag(value, *, record_types, semantic=False, work=None):
+    """Intern complete definitions, then assign value-canonical references.
 
-    Every field participates, including compare=False fields. Sets are ordered
-    by their lossless encoding. Float operational limits use exact hexadecimal
-    representation. The E0 codec and its vocabulary are untouched.
+    Object identity only avoids revisiting a live immutable object. Interning
+    keys contain the COMPLETE shallow definition, never a content digest:
+    dictionary hash collisions are resolved by exact bytes equality. Children
+    are interned first, so equal copied and shared subgraphs have the same key.
+    Canonical references are then assigned by height and sorted complete
+    definitions, independent of discovery order or runtime aliasing.
+
+    Storage is O(nodes + references + primitive bytes); each edge is visited
+    once per distinct input object, with sorting for canonical numbering. No
+    step expands a referenced subtree. Optional work counts are diagnostics,
+    never serialized evidence. Only the named repetition projections omit
+    numeric duration noise; every other field, including compare=False, stays.
     """
-    active, memo = set(), {}
+    active, memo, interned, definitions, heights = set(), {}, {}, [], []
+    visits = references = 0
+
+    def intern(node, children=()):
+        nonlocal references
+        references += len(children)
+        key = _json_bytes(node)
+        if key not in interned:
+            interned[key] = len(definitions)
+            definitions.append(node)
+            heights.append(1 + max((heights[c] for c in children), default=-1))
+        return interned[key]
 
     def visit(item):
+        nonlocal visits
+        visits += 1
         cls = type(item)
         if cls in (Action, CellState, GameStatus, DecisionKind):
-            return ("enum", cls.__module__ + "." + cls.__qualname__, item.name)
+            return intern(("enum", cls.__module__ + "." + cls.__qualname__, item.name))
         if cls is type(None):
-            return ("none",)
+            return intern(("none",))
         if cls is bool:
-            return ("bool", item)
+            return intern(("bool", item))
         if cls is int:
-            return ("int", str(item))
+            return intern(("int", hex(item)))
         if cls is str:
-            return ("str", item)
+            return intern(("str", item))
         if cls is Fraction:
-            return ("fraction", str(item.numerator), str(item.denominator))
+            return intern(("fraction", hex(item.numerator), hex(item.denominator)))
         if cls is float:
             _need(isfinite(item), "Nonfinite operational value.")
-            return ("float", item.hex())
+            return intern(("float", item.hex()))
         key = id(item)
         _need(key not in active, "Cyclic evidence graph.")
         if key in memo:
@@ -353,11 +375,12 @@ def _encoded(value, *, semantic=False):
         active.add(key)
         if cls in (tuple, frozenset):
             children = tuple(visit(child) for child in item)
+            # Temporary reference order cannot leak into canonical set order.
             if cls is frozenset:
-                children = tuple(sorted(children, key=_json_bytes))
-            result = (cls.__name__, children)
+                children = tuple(sorted(children))
+            result = intern((cls.__name__, children), children)
         else:
-            _need(cls in _RECORD_TYPES and cls.__dataclass_params__.frozen,
+            _need(cls in record_types and cls.__dataclass_params__.frozen,
                   "Unsupported mutable/live/hidden evidence type.")
             names = tuple(f.name for f in fields(item))
             _need(not hasattr(item, "__dict__") or set(vars(item)) == set(names),
@@ -370,18 +393,61 @@ def _encoded(value, *, semantic=False):
                             or cls is _oracles.OracleCallDiagnostic and name == "duration_ns"
                             or cls is _audit.TimingSpan and name == "duration_ns")
                 if semantic and duration:
-                    projected = ("measurement", "UNMEASURED" if child is None else "MEASURED")
+                    projected = intern(("measurement", "UNMEASURED" if child is None else "MEASURED"))
                 elif semantic and cls is _harness.GuessCheckpointAudit and name == "archive_digest":
-                    projected = ("content_identity", "ABSENT" if child is None else "BOUND")
+                    projected = intern(("content_identity", "ABSENT" if child is None else "BOUND"))
                 else:
                     projected = visit(child)
                 pairs.append((name, projected))
-            result = ("record", cls.__module__ + "." + cls.__qualname__, tuple(pairs))
+            result = intern(("record", cls.__module__ + "." + cls.__qualname__, tuple(pairs)),
+                            tuple(child for _, child in pairs))
         active.remove(key)
         memo[key] = result
         return result
 
-    return visit(value)
+    root = visit(value)
+    by_height = {}
+    for index, height in enumerate(heights):
+        by_height.setdefault(height, []).append(index)
+    canonical, renumbered = [], {}
+
+    def coordinate(index):
+        node = definitions[index]
+        if node[0] == "tuple" and len(node[1]) == 2:
+            children = tuple(definitions[c] for c in node[1])
+            if all(c[0] == "int" for c in children):
+                return tuple(int(c[1], 16) for c in children)
+        return None
+
+    def rewrite(node):
+        tag = node[0]
+        if tag == "record":
+            return (tag, node[1], tuple((name, renumbered[c]) for name, c in node[2]))
+        if tag in ("tuple", "frozenset"):
+            children = node[1]
+            if tag == "frozenset":
+                coordinates = tuple(coordinate(c) for c in children)
+                if all(c is not None for c in coordinates):
+                    children = tuple(c for _, c in sorted(
+                        zip(coordinates, children), key=lambda pair: (pair[0][1], pair[0][0])))
+                else:
+                    children = tuple(sorted(children, key=renumbered.__getitem__))
+            return (tag, tuple(renumbered[c] for c in children))
+        return node
+
+    for height in sorted(by_height):
+        layer = [(rewrite(definitions[index]), index) for index in by_height[height]]
+        for node, index in sorted(layer, key=lambda pair: _json_bytes(pair[0])):
+            renumbered[index] = len(canonical)
+            canonical.append(node)
+    if work is not None:
+        work.update(visits=visits, references=references, nodes=len(canonical))
+    return ("e1-dag-v1", renumbered[root], tuple(canonical))
+
+
+def _encoded(value, *, semantic=False, _work=None):
+    """Closed immutable value-DAG encoding; the E0 vocabulary is untouched."""
+    return _semantic_dag(value, record_types=_RECORD_TYPES, semantic=semantic, work=_work)
 
 
 def _json_bytes(value):
@@ -410,6 +476,8 @@ def _validate_pair(plan, archive, audit):
         _need(audit.execution_source_digest == audit.source_identity.execution_source_digest
               == source.digest, "Audit/execution source binding differs.")
         p3 = audit.p3_audit
+        _need(audit.variant != "K-CONTROL" or p3 is None,
+              "K-CONTROL cannot carry CONTROL/K-P0 P-3 archive bindings.")
         if p3 is not None:
             _need(p3.case_id == archive.case.case_id and p3.variant == audit.variant
                   and p3.num_mines == archive.case.num_mines, "P-3 audit identity differs.")
@@ -484,7 +552,7 @@ def _missing_evidence(binding):
     return tuple(missing)
 
 
-def _run_findings(binding):
+def _run_findings(binding, prerequisite=None):
     """Check retained summaries against their retained inputs, without replay.
 
     Per-run findings remain authoritative even when a caller has manufactured
@@ -505,6 +573,22 @@ def _run_findings(binding):
                  "oracle_b_audits", "oracle_spans"):
         for record in getattr(audit, name):
             status(record.status, name)
+    for action in audit.v1_audits:
+        qualification = action.external_qualification
+        if action.external_flag is None:
+            if qualification is not None:
+                failures.append("External FLAG qualification has no physical provenance.")
+            continue
+        if qualification is None:
+            missing.append("External FLAG E1 qualification absent.")
+            continue
+        try:
+            _need(_encoded(action.external_verification) == _encoded(qualification.raw_verification),
+                  "External FLAG raw independent verification differs.")
+            status(_audit.validate_external_flag_qualification(
+                qualification, action.external_flag, prerequisite), "External FLAG E1 qualification")
+        except (ValueError, TypeError, AttributeError, KeyError, IndexError):
+            failures.append("External FLAG E1 qualification is corrupt or unbound.")
     for record in audit.oracle_a_audits:
         status(record.status, "Oracle A", ("PASS", "NOT_EVALUATED"))
     for record in audit.replay_audits:
@@ -581,21 +665,21 @@ def _run_findings(binding):
     return tuple(failures), tuple(missing)
 
 
-def _projection(binding):
+def _projection(binding, prerequisite=None):
     audit = binding.audit
     # Schedule index/repetition are pairing metadata, not repeated game state.
     # All other audit fields remain, with only the named duration/content-ID
     # substitutions in _encoded. No generic suffix-based semantic exclusions.
     audit_fields = tuple((f.name, _encoded(getattr(audit, f.name), semantic=True))
                          for f in fields(audit) if f.name not in ("schedule_entry", "repetition"))
-    _, missing = _run_findings(binding)
+    _, missing = _run_findings(binding, prerequisite)
     return SemanticRepetitionProjection(binding.case.case_id, binding.schedule_entry.variant,
                                         _encoded(binding.archive.result, semantic=True),
                                         audit_fields, missing)
 
 
-def _repetition(first, second):
-    left, right = _projection(first), _projection(second)
+def _repetition(first, second, prerequisite=None):
+    left, right = _projection(first, prerequisite), _projection(second, prerequisite)
     if left.missing_evidence or right.missing_evidence:
         # Absence is not a reproduced semantic disagreement. Still diagnose a
         # disagreement in the complete physical stream independently of audits.
@@ -697,13 +781,13 @@ def _p3_pair(control, kp0):
                          comparison, a, b, outcome, status)
 
 
-def _mechanism_coverage(bindings, repetitions):
+def _mechanism_coverage(bindings, repetitions, prerequisite=None):
     progressions, invalid, abandoned, nonproductive = [], [], [], []
     for bound in bindings:
         if bound.schedule_entry.variant != "K-P0":
             continue
         audit, traces = bound.audit, bound.archive.result.traces
-        run_failures, run_missing = _run_findings(bound)
+        run_failures, run_missing = _run_findings(bound, prerequisite)
         evidence_pass = (audit.audit_status == "PASS" and not run_failures and not run_missing)
         observations = audit.mechanism_observations
         label = bound.case.case_id + "/" + str(bound.schedule_entry.repetition)
@@ -910,17 +994,18 @@ def aggregate_e1_suite(plan, archives, audits):
             audit, _content_digest(audit), actual.digest, audit.source_identity.digest))
     bindings = tuple(bindings)
     lookup = {(b.case.case_id, b.schedule_entry.repetition, b.schedule_entry.variant): b for b in bindings}
-    repetitions = tuple(_repetition(lookup[case, 1, variant], lookup[case, 2, variant])
+    repetitions = tuple(_repetition(lookup[case, 1, variant], lookup[case, 2, variant],
+                                    plan.prerequisite)
                         for case in _e1.CASE_IDS for variant in _e1.VARIANTS)
     groups = tuple(tuple(lookup[case, rep, variant] for variant in _e1.VARIANTS)
                    for case in _e1.CASE_IDS for rep in _e1.REPETITIONS)
     identity_pairs = tuple(_control_identity(c, k) for c, k, _ in groups)
     p3_pairs = tuple(_p3_pair(c, p) for c, _, p in groups)
-    mechanism = _mechanism_coverage(bindings, repetitions)
+    mechanism = _mechanism_coverage(bindings, repetitions, plan.prerequisite)
     failures, missing = [], []
     for bound in bindings:
         label = str(bound.schedule_entry.schedule_index) + ": "
-        run_failures, run_missing = _run_findings(bound)
+        run_failures, run_missing = _run_findings(bound, plan.prerequisite)
         failures.extend(label + reason for reason in run_failures)
         missing.extend(label + reason for reason in run_missing)
     for label, records in (("Repetition", repetitions), ("CONTROL/K-CONTROL", identity_pairs),

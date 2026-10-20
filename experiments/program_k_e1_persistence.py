@@ -110,63 +110,13 @@ def _json_bytes(value):
                       separators=(",", ":")).encode("ascii")
 
 
-def _ordered_set_members(value):
-    # Frozen protocol coordinates remain (x,y), ordered by (y,x). General
-    # immutable membership uses the exact tagged representation as its key.
-    if all(type(cell) is tuple and len(cell) == 2
-           and all(type(n) is int for n in cell) for cell in value):
-        return tuple(sorted(value, key=lambda cell: (cell[1], cell[0])))
-    return None
-
-
-def _encoded(value):
-    active, memo = set(), {}
-
-    def visit(item):
-        cls = type(item)
-        if cls in _ENUM_TYPES:
-            return ("enum", cls.__module__ + "." + cls.__qualname__, item.name)
-        if cls is type(None):
-            return ("none",)
-        if cls is bool:
-            return ("bool", item)
-        if cls is int:
-            # Hex avoids the interpreter's decimal digit limit without changing
-            # global settings or ever converting authoritative integers to float.
-            return ("int", hex(item))
-        if cls is str:
-            return ("str", item)
-        if cls is Fraction:
-            return ("fraction", hex(item.numerator), hex(item.denominator))
-        if cls is float:
-            _need(math.isfinite(item), "Nonfinite floating-point evidence.")
-            return ("float", item.hex())
-        key = id(item)
-        _need(key not in active, "Cyclic evidence graph.")
-        if key in memo:
-            return memo[key]
-        active.add(key)
-        if cls is tuple:
-            result = ("tuple", tuple(visit(child) for child in item))
-        elif cls is frozenset:
-            ordered = _ordered_set_members(item)
-            children = tuple(visit(child) for child in (item if ordered is None else ordered))
-            if ordered is None:
-                children = tuple(sorted(children, key=_json_bytes))
-            result = ("frozenset", children)
-        else:
-            _need(cls in _RECORD_TYPES and cls.__dataclass_params__.frozen,
-                  "Unsupported mutable, live, hidden, or unregistered evidence type.")
-            names = tuple(field.name for field in fields(cls))
-            _need(not hasattr(item, "__dict__") or set(vars(item)) == set(names),
-                  "Unexpected attachment to a frozen evidence record.")
-            result = ("record", cls.__module__ + "." + cls.__qualname__,
-                      tuple((name, visit(getattr(item, name))) for name in names))
-        active.remove(key)
-        memo[key] = result
-        return result
-
-    return visit(value)
+def _encoded(value, *, _work=None):
+    # One semantic codec owner, with this layer's explicitly wider immutable
+    # vocabulary. No artifact-driven imports, object IDs, or address hashes.
+    try:
+        return _suite._semantic_dag(value, record_types=_RECORD_TYPES, work=_work)
+    except _suite.E1SuiteError as error:
+        raise E1PersistenceError(str(error)) from error
 
 
 def canonical_bytes(value):
@@ -181,7 +131,7 @@ def content_digest(value):
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def _decode(node):
+def _decode(node, prior):
     _need(type(node) is list and bool(node) and type(node[0]) is str,
           "A canonical tagged node is required.")
     tag = node[0]
@@ -214,7 +164,7 @@ def _decode(node):
         return cls.__members__[node[2]]
     if tag in ("tuple", "frozenset"):
         _need(len(node) == 2 and type(node[1]) is list, "Malformed immutable collection.")
-        children = tuple(_decode(child) for child in node[1])
+        children = tuple(_reference(child, prior) for child in node[1])
         if tag == "tuple":
             return children
         result = frozenset(children)
@@ -229,7 +179,7 @@ def _decode(node):
     names = tuple(pair[0] for pair in pairs)
     _need(names == tuple(field.name for field in fields(cls)),
           "Missing, extra, duplicate, or reordered record fields.")
-    values = {name: _decode(child) for name, child in pairs}
+    values = {name: _reference(child, prior) for name, child in pairs}
     if cls in (_operational.E1OperationReceipt, _operational.E1OperationResult):
         # These accepted Slice-5 constructors also check today's machine.
         # Their unchanged checks run in qualification's isolated historical
@@ -239,6 +189,21 @@ def _decode(node):
             object.__setattr__(candidate, name, value)
         return _qualification._historical_checked(candidate, cls)
     return cls(**values)
+
+
+def _reference(index, prior):
+    _need(type(index) is int and 0 <= index < len(prior),
+          "Reference must name an earlier complete node; cycles are forbidden.")
+    return prior[index]
+
+
+def _decode_graph(graph):
+    _need(type(graph) is list and len(graph) == 3 and graph[0] == "e1-dag-v1"
+          and type(graph[2]) is list and bool(graph[2]), "A complete E1 semantic DAG is required.")
+    values = []
+    for definition in graph[2]:
+        values.append(_decode(definition, values))
+    return _reference(graph[1], values)
 
 
 def reconstruct(data, *, expected_digest=None):
@@ -256,8 +221,8 @@ def reconstruct(data, *, expected_digest=None):
 
     try:
         text = data.decode("ascii")
-        decoded = _decode(json.loads(text, object_pairs_hook=reject_object,
-                                    parse_constant=reject_constant))
+        decoded = _decode_graph(json.loads(text, object_pairs_hook=reject_object,
+                                          parse_constant=reject_constant))
         _need(canonical_bytes(decoded) == data, "Noncanonical or lossy E1 encoding.")
         return decoded
     except (ValueError, TypeError, AttributeError, KeyError, IndexError,

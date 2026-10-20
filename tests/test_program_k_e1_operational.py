@@ -279,9 +279,9 @@ class SourceIdentityTests(unittest.TestCase):
         self.assertEqual(identity.suite_source_identity,
                          suite.capture_suite_source_identity(plan, archives[0], audits[0]))
         self.assertEqual(identity.audit_source_identity.digest,
-                         "ac547f94fb15340d3d0e94f13722372d57edf3cda5f73da63191dc596b866df4")
+                         "47ceca0595cacf08f70bd14911a805c5d0358fa3e60e695349a66689b9d994b1")
         self.assertEqual(identity.suite_source_identity.digest,
-                         "3452db034510e8ddb3a275e5afe85e89180d0492600c700df8670409a675f149")
+                         "afbc71a19af9d31944ed9489420b5eb505871ba195b4888bac185301b3d8c328")
 
     def test_evaluator_and_operational_exact_bytes_and_sizes(self):
         identity = operational.capture_operational_source_identity(_data()[0])
@@ -650,6 +650,34 @@ class PublicDispatchTests(unittest.TestCase):
                     job_started_ns=time.monotonic_ns(), archive_used_bytes=0,
                     evaluation_run_id="unit-evaluator")
         supervise.assert_not_called()
+
+
+class PayloadDAGIntegrationTests(unittest.TestCase):
+    def test_long_flag_payload_uses_semantic_dag_bytes_without_dispatch(self):
+        from tests.test_program_k_e1_suite import _enclosing_flag_graph
+        k = 98
+        # Prospective guard: each separately encoded archive/audit is bounded
+        # by the enclosing-graph guard, plus the fixed payload JSON envelope.
+        maximum_bytes = 2 * (1_000_000 + 40_000 * k + 2048 * k * k) + 256
+        with patch.object(execution, "execute_scheduled_entry",
+                          side_effect=AssertionError("No scheduled execution")) as execute, \
+                patch.object(e1_evaluator, "evaluate_scheduled_kp0",
+                             side_effect=AssertionError("No evaluator execution")) as evaluate, \
+                patch.object(core_engine.MinesweeperEngine, "__init__",
+                             side_effect=AssertionError("No Engine")) as engine:
+            archive, checked = _enclosing_flag_graph(k)
+            payload = (archive, checked, None)
+            encoded = operational._payload_bytes(payload)
+            self.assertEqual(encoded, operational._payload_bytes(payload))
+            copied = _enclosing_flag_graph(k, copies=True)
+            self.assertEqual(encoded, operational._payload_bytes((*copied, None)))
+            mutated = _enclosing_flag_graph(k, mutation=True)
+            self.assertNotEqual(hashlib.sha256(encoded).hexdigest(), hashlib.sha256(
+                operational._payload_bytes((*mutated, None))).hexdigest())
+        self.assertLessEqual(len(encoded), maximum_bytes)
+        execute.assert_not_called()
+        evaluate.assert_not_called()
+        engine.assert_not_called()
 
 
 class ProcessSupervisorTests(unittest.TestCase):

@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import benchmark_board
 import core_engine
-from core_engine import Action, GameStatus
+from core_engine import Action, CellState, GameStatus
 from experiments import program_k_e1_audit as audit
 from experiments import program_k_e1_evaluator as e1_evaluator
 from experiments import program_k_e1_execution as execution
@@ -846,10 +846,19 @@ class GateAssessmentTests(QualificationCase):
                 self.assertEqual(assessment.verdict, "INCOMPLETE")
                 self.assertFalse(assessment.progression_allowed)
 
-    def test_no_counterexample_and_not_evaluated_remain_distinct(self):
+    def test_posthoc_evaluator_zero_eligible_not_evaluated_is_separate_public_coverage(self):
         classifications = tuple(result.evaluation.classification for result in self.record.evaluator_results)
         self.assertIn("NOT_EVALUATED", classifications)
         self.assertIn("NO_COUNTEREXAMPLE", classifications)
+        vacuous = tuple(result for result in self.record.evaluator_results
+                        if result.evaluation.classification == "NOT_EVALUATED")
+        self.assertEqual(tuple((result.receipt.case_id, result.receipt.repetition)
+                               for result in vacuous if result.receipt.case_id == "S-WIN"),
+                         (("S-WIN", 1), ("S-WIN", 2)))
+        for result in vacuous:
+            self.assertEqual(result.evaluation.finding.evaluated_coordinate_count, 0)
+            self.assertEqual(result.evaluation.evaluator_calls[0].evaluated_coordinate_count, 0)
+            self.assertIsNone(qualification._operation_stop(result))
         self.assertTrue(all(result.evaluation.proof_upgrade_allowed is False
                             for result in self.record.evaluator_results))
         self.assertEqual(qualification.assess_e1(self.record).verdict, "E1_PASS")
@@ -875,6 +884,101 @@ class GateAssessmentTests(QualificationCase):
                                               "program_k_research_verdict"))
         with self.assertRaises((FrozenInstanceError, AttributeError)):
             assessment.verdict = "RESEARCH_PASS"
+
+
+class ExternalFlagGateTests(QualificationCase):
+    """Gate wiring over real public R-1 evidence, without a scheduled run."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # A public corner 1-of-3 clue plus total 17 forces the 16 other
+        # cells to mines. Nineteen HIDDEN variables exceed bounded Oracle A.
+        observation = ((1,) + (CellState.HIDDEN,) * 9,
+                       (CellState.HIDDEN,) * 10)
+        with _blocked_execution():
+            result = audit_fixtures._public_result(
+                "K-CONTROL", 10, 2, 17, (observation,))
+            trace = result.traces[1]
+            premises = audit._PhysicalFlagPremises(cls.record.plan.prerequisite)
+            findings = audit._Findings()
+            with oracles.collect_oracle_diagnostics() as calls:
+                cls.action = audit._v1_action(
+                    trace, trace.public_effect, 1, "K-CONTROL", 17, (),
+                    findings, premises=premises, calls=calls, spans=[])
+        if cls.action.status != "PASS":
+            raise AssertionError(cls.action.detail)
+
+    def retained(self, action=None, *, status="PASS"):
+        # Only the per-action gate and hard-stop are exercised. This is not a
+        # constructed complete-game audit or a synthetic E1 qualification.
+        checked = replace(
+            self.record.scheduled_results[0].audit,
+            v1_audits=(self.action if action is None else action,),
+            audit_status=status,
+            discrepancies=("Declared FLAG qualification failure",) if status == "FAIL" else (),
+            incomplete_reasons=("Declared FLAG qualification missing",)
+            if status == "INCOMPLETE" else ())
+        return checked
+
+    def test_above16_raw_not_evaluated_with_valid_e1_basis_does_not_stop(self):
+        action = self.action
+        qualified = action.external_qualification
+        self.assertEqual(action.external_verification.status, "NOT_EVALUATED")
+        self.assertEqual(qualified.status, "PASS")
+        self.assertEqual(qualified.shared_kernel_evidence,
+                         "SHARED-KERNEL REPRESENTATION EVIDENCE")
+        self.assertFalse(qualified.independent_bounded_enumeration_ran)
+        checked = self.retained()
+        self.assertEqual(qualification._external_flag_findings(
+            (checked,), self.record.plan.prerequisite), ([], []))
+        self.assertIsNone(qualification._operation_stop(_scheduled_change(
+            self.record.scheduled_results[0], checked=checked)))
+
+    def test_missing_e1_external_flag_qualification_is_incomplete_and_stops(self):
+        checked = self.retained(
+            replace(self.action, external_qualification=None), status="INCOMPLETE")
+        failed, missing = qualification._external_flag_findings(
+            (checked,), self.record.plan.prerequisite)
+        self.assertFalse(failed)
+        self.assertTrue(missing)
+        self.assertEqual(qualification._operation_stop(_scheduled_change(
+            self.record.scheduled_results[0], checked=checked)), "PUBLIC_AUDIT_INCOMPLETE")
+
+    def test_failed_external_flag_qualification_is_failure_and_stops(self):
+        qualified = replace(self.action.external_qualification, status="FAIL",
+                            detail="Declared shared-kernel mismatch")
+        checked = self.retained(
+            replace(self.action, external_qualification=qualified), status="FAIL")
+        failed, missing = qualification._external_flag_findings(
+            (checked,), self.record.plan.prerequisite)
+        self.assertTrue(failed)
+        self.assertFalse(missing)
+        self.assertEqual(qualification._operation_stop(_scheduled_change(
+            self.record.scheduled_results[0], checked=checked)), "PUBLIC_AUDIT_FAIL")
+
+    def test_external_flag_accepted_e0_binding_cannot_be_replaced(self):
+        original = self.action.external_qualification
+        for prerequisite in (
+                None, _corrupt(original.prerequisite, source_digest="0" * 64)):
+            checked = self.retained(replace(
+                self.action, external_qualification=replace(
+                    original, prerequisite=prerequisite)))
+            with self.subTest(prerequisite=prerequisite is None):
+                failed, _ = qualification._external_flag_findings(
+                    (checked,), self.record.plan.prerequisite)
+                self.assertTrue(failed)
+
+    def test_external_flag_action_and_raw_independent_result_bindings_are_exact(self):
+        for action in (
+                replace(self.action, input_index=self.action.input_index + 1),
+                replace(self.action, external_verification=replace(
+                    self.action.external_verification, status="PASS"))):
+            with self.subTest(index=action.input_index,
+                              raw=action.external_verification.status):
+                failed, _ = qualification._external_flag_findings(
+                    (self.retained(action),), self.record.plan.prerequisite)
+                self.assertTrue(failed)
 
 
 class QualificationPurityTests(unittest.TestCase):

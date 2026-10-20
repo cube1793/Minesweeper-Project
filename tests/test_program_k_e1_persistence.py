@@ -29,11 +29,19 @@ from experiments import program_k_e1_suite as suite
 from experiments import program_k_evaluator as evaluator
 from experiments import program_k_harness as harness
 from tests.test_program_k_e1_qualification import _record
+from tests.test_program_k_e1_suite import (
+    _CHAIN_SCALES, _chain_byte_limit, _chain_work_limit, _detached_flag_chain,
+    _enclosing_byte_limit, _enclosing_flag_graph,
+)
 
 
 def _wire(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False,
                       separators=(",", ":")).encode("ascii")
+
+
+def _node_wire(value):
+    return _wire(["e1-dag-v1", 0, [value]])
 
 
 def _corrupt(value, **changes):
@@ -57,7 +65,7 @@ class CodecTests(unittest.TestCase):
         self.assertNotEqual(persistence.canonical_bytes(False), persistence.canonical_bytes(0))
         for malformed in (["bool", 1], ["int", True], ["str", 1]):
             with self.subTest(malformed=malformed), self.assertRaises(persistence.E1PersistenceError):
-                persistence.reconstruct(_wire(malformed))
+                persistence.reconstruct(_node_wire(malformed))
 
     def test_float_hex_preserves_exact_bits_including_negative_zero(self):
         values = (0.0, -0.0, 0.1, math.nextafter(1.0, 2.0),
@@ -87,7 +95,8 @@ class CodecTests(unittest.TestCase):
         raw = persistence.canonical_bytes(first)
         self.assertEqual(raw, persistence.canonical_bytes(second))
         node = json.loads(raw)
-        ordered = tuple(persistence.reconstruct(_wire(child)) for child in node[1])
+        ordered = tuple(persistence._decode_graph(["e1-dag-v1", child, node[2]])
+                        for child in node[2][node[1]][1])
         self.assertEqual(ordered, tuple(sorted(members, key=lambda c: (c[1], c[0]))))
         mixed = frozenset(("one", (2, 3), Fraction(1, 3), None))
         self.assertEqual(persistence.reconstruct(persistence.canonical_bytes(mixed)), mixed)
@@ -97,7 +106,7 @@ class CodecTests(unittest.TestCase):
                       ["enum", "unknown.Action", "OPEN"],
                       ["enum", "core_engine.Action", "UNREGISTERED"]):
             with self.subTest(value=value), self.assertRaises(persistence.E1PersistenceError):
-                persistence.reconstruct(_wire(value))
+                persistence.reconstruct(_node_wire(value))
 
     def test_arbitrary_frozen_dataclass_and_subclasses_are_rejected(self):
         @dataclass(frozen=True)
@@ -127,16 +136,16 @@ class CodecTests(unittest.TestCase):
         original = json.loads(persistence.canonical_bytes(event))
         variants = []
         extra = json.loads(_wire(original))
-        extra[2].append(["unexpected", ["none"]])
+        extra[2][extra[1]][2].append(["unexpected", 0])
         variants.append(extra)
         missing = json.loads(_wire(original))
-        missing[2].pop()
+        missing[2][missing[1]][2].pop()
         variants.append(missing)
         duplicate = json.loads(_wire(original))
-        duplicate[2].append(duplicate[2][0])
+        duplicate[2][duplicate[1]][2].append(duplicate[2][duplicate[1]][2][0])
         variants.append(duplicate)
         reordered = json.loads(_wire(original))
-        reordered[2].reverse()
+        reordered[2][reordered[1]][2].reverse()
         variants.append(reordered)
         for node in variants:
             with self.subTest(node=node), self.assertRaises(persistence.E1PersistenceError):
@@ -176,6 +185,10 @@ class CodecTests(unittest.TestCase):
                     b'["none",false]', b'["str","\xc3\xa9"]'):
             with self.subTest(raw=raw), self.assertRaises(persistence.E1PersistenceError):
                 persistence.reconstruct(raw)
+        for node in (["int", "01"], ["int", "-0x0"], ["fraction", "0x2", "0x4"],
+                     ["float", "0.1"], ["none", False], ["fraction", True, "0x2"]):
+            with self.subTest(node=node), self.assertRaises(persistence.E1PersistenceError):
+                persistence.reconstruct(_node_wire(node))
 
     def test_digest_and_bytes_type_are_checked(self):
         raw = persistence.canonical_bytes(("test", 17))
@@ -199,6 +212,88 @@ class CodecTests(unittest.TestCase):
                 self.assertNotIn(node.module, ("pickle", "importlib"))
         self.assertEqual(len(persistence._RECORD_BY_TAG), len(persistence._RECORD_TYPES))
         self.assertTrue(all(cls.__dataclass_params__.frozen for cls in persistence._RECORD_TYPES))
+
+
+class SemanticDagCodecTests(unittest.TestCase):
+    def test_detached_expert_chains_roundtrip_with_polynomial_size_and_work(self):
+        for k in _CHAIN_SCALES:
+            with self.subTest(k=k):
+                value = _detached_flag_chain(k)
+                work = {}
+                raw = persistence._json_bytes(persistence._encoded(value, _work=work))
+                self.assertLessEqual(len(raw), _chain_byte_limit(k))
+                self.assertLessEqual(work["visits"], _chain_work_limit(k))
+                self.assertLessEqual(work["references"], _chain_work_limit(k))
+                self.assertEqual(raw, persistence.canonical_bytes(value))
+                self.assertEqual(raw, persistence.canonical_bytes(
+                    _detached_flag_chain(k, copies=True)))
+                restored = persistence.reconstruct(raw)
+                self.assertEqual(persistence.canonical_bytes(restored), raw)
+                self.assertEqual(len(restored), k)
+                self.assertEqual(tuple(node.input_index for node in restored), tuple(range(1, k + 1)))
+                self.assertEqual(tuple(len(node.prior_flags) for node in restored), tuple(range(k)))
+                self.assertNotEqual(persistence.content_digest(value), persistence.content_digest(
+                    _detached_flag_chain(k, mutation=True)))
+
+    def test_enclosing_archive_audit_roundtrip_is_exact_and_bounded(self):
+        for k in _CHAIN_SCALES:
+            with self.subTest(k=k):
+                value = _enclosing_flag_graph(k)
+                raw = persistence.canonical_bytes(value)
+                self.assertLessEqual(len(raw), _enclosing_byte_limit(k))
+                self.assertEqual(raw, persistence.canonical_bytes(value))
+                self.assertEqual(raw, persistence.canonical_bytes(_enclosing_flag_graph(k, copies=True)))
+                restored = persistence.reconstruct(raw)
+                self.assertIs(type(restored[0]), execution.E1ScheduledRunArchive)
+                self.assertIs(type(restored[1]), audit.E1RunAudit)
+                self.assertEqual(persistence.canonical_bytes(restored), raw)
+                self.assertNotEqual(persistence.content_digest(value), persistence.content_digest(
+                    _enclosing_flag_graph(k, mutation=True)))
+
+    def test_full_definition_hash_collision_does_not_merge_unequal_evidence(self):
+        class CollidingBytes(bytes):
+            def __hash__(self):
+                return 0
+
+        value = ((1, "left"), (2, "right"), (1, "left"))
+        expected = persistence.canonical_bytes(value)
+        dumps = suite._json_bytes
+        with patch.object(suite, "_json_bytes", side_effect=lambda v: CollidingBytes(dumps(v))):
+            raw = persistence.canonical_bytes(value)
+            self.assertEqual(raw, expected)
+            self.assertEqual(persistence.reconstruct(raw), value)
+            self.assertNotEqual(raw, persistence.canonical_bytes(
+                ((1, "left"), (2, "changed"), (1, "left"))))
+
+    def test_forward_cyclic_missing_boolean_and_duplicate_references_rejected(self):
+        cases = (
+            ["e1-dag-v1", 0, [["tuple", [0]]]],
+            ["e1-dag-v1", 0, [["tuple", [1]], ["tuple", [0]]]],
+            ["e1-dag-v1", 1, [["int", "0x1"], ["tuple", [99]]]],
+            ["e1-dag-v1", 1, [["int", "0x1"], ["tuple", [True]]]],
+            ["e1-dag-v1", True, [["int", "0x1"]]],
+            ["e1-dag-v1", 0, [["int", "0x1"], ["int", "0x2"]]],
+            ["e1-dag-v1", 2, [["int", "0x1"], ["int", "0x1"], ["tuple", [0, 1]]]],
+            ["e1-dag-v1", 2, [["int", "0x2"], ["int", "0x1"], ["tuple", [1, 0]]]],
+            ["e1-dag-v1", 1, [["int", "0x1"], ["frozenset", [0, 0]]]],
+        )
+        for graph in cases:
+            with self.subTest(graph=graph), self.assertRaises(persistence.E1PersistenceError):
+                persistence.reconstruct(_wire(graph))
+
+    def test_mutated_definition_changes_content_and_cycle_encoding_fails(self):
+        value = _detached_flag_chain(16)
+        raw = persistence.canonical_bytes(value)
+        graph = json.loads(raw)
+        # Change a primitive antecedent field while retaining every definition.
+        record = next(n for n in graph[2] if n[0] == "int" and n[1] == "0x63")
+        record[1] = "0x64"
+        with self.assertRaises(persistence.E1PersistenceError):
+            persistence.reconstruct(_wire(graph), expected_digest=hashlib.sha256(raw).hexdigest())
+        cycle = value[0]
+        object.__setattr__(cycle, "prior_flags", (cycle,))
+        with self.assertRaises(persistence.E1PersistenceError):
+            persistence.canonical_bytes(cycle)
 
 
 class CompleteRoundTripTests(unittest.TestCase):

@@ -43,8 +43,8 @@ SAMPLING_MEASUREMENT = (
     "samples; parent case/job deadlines remain independent. Runner DecisionTimings "
     "are authoritative duration spans; shadow threads are excluded."
 )
-ACCEPTED_AUDIT_SOURCE_DIGEST = "ac547f94fb15340d3d0e94f13722372d57edf3cda5f73da63191dc596b866df4"
-ACCEPTED_SUITE_SOURCE_DIGEST = "3452db034510e8ddb3a275e5afe85e89180d0492600c700df8670409a675f149"
+ACCEPTED_AUDIT_SOURCE_DIGEST = "47ceca0595cacf08f70bd14911a805c5d0358fa3e60e695349a66689b9d994b1"
+ACCEPTED_SUITE_SOURCE_DIGEST = "afbc71a19af9d31944ed9489420b5eb505871ba195b4888bac185301b3d8c328"
 OPERATIONAL_SOURCE_PATHS = (
     "experiments/program_k_e1_evaluator.py",
     "experiments/program_k_e1_operational.py",

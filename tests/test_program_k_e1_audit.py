@@ -30,6 +30,7 @@ from experiments import program_k_oracles as oracles
 from experiments import program_k_policy as policy
 from experiments import program_k_runner as runner
 from simple_algorithm import SimpleMove
+from simple_decision import DecisionKind
 import stage3_physical as physical
 from stage3_planner import plan_position
 from stage3_runner import Stage3ActionTrace, Stage3RunResult
@@ -1193,6 +1194,266 @@ class TimingAndPurityTests(AuditCase):
             self.assertEqual(item.safe_cells_opened_delta, trace.public_effect.safe_cells_opened_delta)
             self.assertEqual(item.modeled_action_us, trace.modeled_action_us)
         self.assertNotIn("realized_benefit", repr(result.mechanism_observations))
+
+
+def _above16_public_flag():
+    """Detached 19-variable public certificate; no Engine or hidden layout."""
+    observation = ((1,) + (H,) * 9, (H,) * 10)
+    decision = plan_position(observation, 17, (0, 0), physical.load_timing_table())
+    flag = evidence.make_v1_flag_provenance(observation, decision, num_mines=17, boundary=1)
+    return flag, decision
+
+
+def _s_replan_public_prefixes():
+    """Literal public observations only, independent of a board/Engine."""
+    return (
+        ((0, 1, H, H, H, H), (1, 2, H, H, H, H), (H, H, H, H, H, H), (H, H, H, H, H, H)),
+        ((0, 1, H, H, H, H), (1, 2, H, H, H, H), (H, H, 2, H, H, H), (H, H, H, H, H, H)),
+        ((0, 1, H, H, H, H), (1, 2, H, 4, H, H), (H, H, 2, H, H, H), (H, H, H, H, H, H)),
+        ((0, 1, H, H, H, H), (1, 2, H, 4, H, 3), (H, H, 2, H, H, H), (H, H, H, H, H, H)),
+    )
+
+
+def _qualify_public_flags(flags, prerequisite=None):
+    premises, findings = audit._PhysicalFlagPremises(prerequisite), audit._Findings()
+    records, spans = [], []
+    with oracles.collect_oracle_diagnostics() as calls:
+        for flag in flags:
+            record, span = premises.qualify(flag, calls=calls, findings=findings)
+            records.append(record)
+            if span is not None:
+                spans.append(span)
+            premises.admit(flag, record)
+    return tuple(records), premises, tuple(calls), tuple(spans), findings
+
+
+def _local_public_flag_chain(k):
+    """Direct public all-mines clues, detached from any actual game.
+
+    Before measurement the work guard is fixed: k frozen current-node checks,
+    k one-target support views, exactly k*(k-1)/2 chronological prior references.
+    The 30x16 public declaration has isolated HIDDEN variables, each bounded by
+    public clues whose residual equals its complete unresolved neighborhood.
+    """
+    cells = tuple((x, y) for y in range(1, 16, 2) for x in range(1, 30, 2))[:k]
+    unresolved = frozenset(cells)
+    rows = tuple(tuple(H if (x, y) in unresolved else sum(
+        abs(cx-x) <= 1 and abs(cy-y) <= 1 for cx, cy in unresolved)
+        for x in range(30)) for y in range(16))
+    records = []
+    for index in range(k):
+        constraints = evidence._public_constraints(rows)
+        mines = frozenset(cell for c in constraints
+                          if c.hidden_cells and c.remaining_mines == len(c.hidden_cells)
+                          for cell in c.hidden_cells)
+        safe = frozenset(cell for c in constraints if c.remaining_mines == 0 for cell in c.hidden_cells)
+        target = min(mines, key=lambda c: (c[1], c[0]))
+        move = evidence.MoveProjection(Action.FLAG, *target)
+        projection = evidence.V1DecisionProjection(move, evidence.V1EvidenceProjection(
+            DecisionKind.LOCAL_DETERMINISTIC, move, constraints,
+            evidence.DeterministicProjection(evidence._set_cells(safe), evidence._set_cells(mines)),
+            None), None)
+        record = evidence.ExternalV1FlagProvenance(rows, k, projection, move,
+                                                   index+1, index+1, tuple(records))
+        records.append(record)
+        rows = tuple(tuple(F if (x, y) == target else v for x, v in enumerate(row))
+                     for y, row in enumerate(rows))
+    return tuple(records)
+
+
+class ReadinessPhysicalFlagTests(unittest.TestCase):
+    def test_s_replan_17_variable_public_prefix_qualifies_without_scheduled_execution(self):
+        case = SimpleNamespace(case_id="NON_E1_S_REPLAN_PUBLIC_PREFIX",
+                               width=6, height=4, num_mines=5, first_click=(0, 0))
+        with patch.object(execution, "execute_scheduled_entry",
+                          side_effect=AssertionError("Actual E1 forbidden")) as scheduled:
+            result = _public_result("K-CONTROL", 6, 4, 5, _s_replan_public_prefixes())
+            components = audit._audit_run(result, "K-CONTROL", case,
+                                           prerequisite=_plan().prerequisite)
+        scheduled.assert_not_called()
+        self.assertEqual(components["audit_status"], "PASS",
+                         components["discrepancies"] + components["incomplete_reasons"])
+        action = components["v1_audits"][4]
+        self.assertEqual(action.external_flag.move, evidence.MoveProjection(Action.FLAG, 2, 1))
+        self.assertEqual(action.external_qualification.public_hidden_variables, 17)
+        self.assertEqual(action.external_verification.status, "NOT_EVALUATED")
+        self.assertEqual(action.external_qualification.status, "PASS")
+        self.assertEqual(action.external_qualification.shared_kernel_evidence,
+                         "SHARED-KERNEL REPRESENTATION EVIDENCE")
+        self.assertEqual(action.external_qualification.prerequisite, _plan().prerequisite)
+
+    def test_above16_raw_non_evaluation_and_accepted_e0_shared_route(self):
+        flag, _ = _above16_public_flag()
+        raw = evidence.verify_v1_flag_provenance(flag)
+        records, _, calls, spans, findings = _qualify_public_flags((flag,), _plan().prerequisite)
+        q = records[0]
+        self.assertEqual(raw.status, "NOT_EVALUATED")
+        self.assertEqual(q.raw_verification, raw)
+        self.assertEqual(q.node_verification, raw)
+        self.assertEqual(q.status, "PASS", q.detail)
+        self.assertEqual(q.shared_kernel_evidence, "SHARED-KERNEL REPRESENTATION EVIDENCE")
+        self.assertEqual(q.prerequisite, _plan().prerequisite)
+        self.assertFalse(q.independent_bounded_enumeration_ran)
+        self.assertEqual(q.bounded_status, "NOT_EVALUATED")
+        self.assertEqual(q.shared_kernel_input_digest,
+                         oracles.oracle_b_input_digest(flag.observation, 17, frozenset()))
+        self.assertEqual(tuple(c.oracle for c in calls), ("B",))
+        self.assertEqual((spans[0].start, spans[0].stop, spans[0].status), (0, 1, "PASS"))
+        self.assertFalse(findings.failures)
+
+    def test_missing_or_wrong_e0_binding_cannot_pass(self):
+        flag, _ = _above16_public_flag()
+        for prerequisite, status in (
+                (None, "INCOMPLETE"),
+                (_corrupt(_plan().prerequisite, source_digest="f"*64), "FAIL")):
+            with self.subTest(status=status):
+                records, _, calls, _, _ = _qualify_public_flags((flag,), prerequisite)
+                self.assertEqual(records[0].status, status)
+                self.assertEqual(calls, ())
+
+    def test_shared_count_marginal_partition_certainty_and_target_faults_fail(self):
+        flag, _ = _above16_public_flag()
+        original = oracles._materialized_exact
+        mutations = (
+            lambda r: replace(r, total_worlds=r.total_worlds+1),
+            lambda r: replace(r, mine_worlds=((r.mine_worlds[0][0], 0),) + r.mine_worlds[1:]),
+            lambda r: replace(r, unresolved_cells=tuple(reversed(r.unresolved_cells))),
+            lambda r: replace(r, G1=frozenset()),
+            lambda r: replace(r, shared_kernel_evidence="independent arithmetic"),
+        )
+        for mutation in mutations:
+            def changed(*args, **kwargs):
+                return mutation(original(*args, **kwargs))
+            with self.subTest(mutation=mutations.index(mutation)), patch.object(
+                    oracles, "_materialized_exact", side_effect=changed):
+                records, _, _, _, _ = _qualify_public_flags((flag,), _plan().prerequisite)
+                self.assertEqual(records[0].status, "FAIL")
+        invalid = replace(flag, move=evidence.MoveProjection(Action.FLAG, 1, 0))
+        records, _, _, _, _ = _qualify_public_flags((invalid,), _plan().prerequisite)
+        self.assertEqual(records[0].status, "FAIL")
+
+    def test_unavailable_shared_comparison_is_incomplete(self):
+        flag, _ = _above16_public_flag()
+        for behavior in (None, OSError("Required public comparison unavailable")):
+            options = {"return_value": None} if behavior is None else {"side_effect": behavior}
+            with self.subTest(behavior=type(behavior)), patch.object(
+                    oracles, "_materialized_exact", **options):
+                records, _, _, _, findings = _qualify_public_flags((flag,), _plan().prerequisite)
+                self.assertEqual(records[0].status, "INCOMPLETE")
+                self.assertFalse(findings.failures)
+
+    def test_bounded_exact_after_shared_ancestor_runs_independent_enumeration(self):
+        first, _ = _above16_public_flag()
+        records, rows = [first], first.observation
+        for index in range(2, 5):
+            previous = records[-1]
+            rows = tuple(tuple(F if (x, y) == (previous.move.x, previous.move.y) else v
+                               for x, v in enumerate(row)) for y, row in enumerate(rows))
+            decision = plan_position(rows, 17, (previous.move.x, previous.move.y),
+                                     physical.load_timing_table())
+            records.append(evidence.make_v1_flag_provenance(
+                rows, decision, num_mines=17, boundary=index, prior_flags=tuple(records)))
+        qualified, _, _, _, _ = _qualify_public_flags(tuple(records), _plan().prerequisite)
+        self.assertTrue(all(q.status == "PASS" for q in qualified), tuple(q.detail for q in qualified))
+        q = qualified[-1]
+        self.assertEqual(q.public_hidden_variables, 16)
+        self.assertTrue(q.independent_bounded_enumeration_ran)
+        self.assertEqual(q.node_verification.status, "PASS")
+        self.assertEqual(q.raw_verification.status, "NOT_EVALUATED")
+        self.assertTrue(q.raw_verification.detail.startswith("FLAG antecedent:"))
+        self.assertIsNone(q.shared_kernel_result)
+        self.assertEqual(q.raw_verification, evidence.verify_v1_flag_provenance(records[-1]))
+
+    def test_local_after_shared_ancestor_requires_current_independent_local_pass(self):
+        rows = _s_replan_public_prefixes()[-1]
+        decision = plan_position(rows, 5, (5, 1), physical.load_timing_table())
+        first = evidence.make_v1_flag_provenance(rows, decision, num_mines=5, boundary=4)
+        current = (
+            (0, 1, 1, 3, H, H), (1, 2, F, 4, H, 3),
+            (H, H, 2, H, H, H), (H, H, H, H, H, H))
+        decision = plan_position(current, 5, (3, 0), physical.load_timing_table())
+        self.assertEqual(decision.evidence.kind, DecisionKind.LOCAL_DETERMINISTIC)
+        self.assertEqual(decision.move.action, Action.FLAG)
+        second = evidence.make_v1_flag_provenance(
+            current, decision, num_mines=5, boundary=7, prior_flags=(first,))
+        qualified, _, calls, _, _ = _qualify_public_flags((first, second), _plan().prerequisite)
+        q = qualified[-1]
+        self.assertEqual(q.status, "PASS", q.detail)
+        self.assertEqual(q.raw_verification, evidence.verify_v1_flag_provenance(second))
+        self.assertEqual(q.raw_verification.status, "NOT_EVALUATED")
+        self.assertEqual(q.node_verification.status, "PASS")
+        self.assertEqual(q.node_verification.detail, "PUBLIC_V1_LOCAL_FLAG_EVIDENCE")
+        self.assertFalse(q.independent_bounded_enumeration_ran)
+        self.assertIsNone(q.shared_kernel_result)
+        self.assertEqual(len(calls), 1)  # only the earlier >16 physical FLAG
+        corrupted = replace(second, decision=replace(second.decision, evidence=replace(
+            second.decision.evidence, constraints=())))
+        qualified, _, _, _, _ = _qualify_public_flags((first, corrupted), _plan().prerequisite)
+        self.assertEqual(qualified[-1].status, "FAIL")
+
+    def test_bounded_failure_never_uses_shared_fallback_or_claims_unrun_enumeration(self):
+        rows = ((1, H, H, H, H), (H, H, H, H, H))
+        decision = plan_position(rows, 7, (0, 0), physical.load_timing_table())
+        flag = evidence.make_v1_flag_provenance(rows, decision, num_mines=7, boundary=1)
+        probability = flag.decision.evidence.probability_result
+        corruptions = (
+            replace(flag, decision=replace(flag.decision, evidence=replace(
+                flag.decision.evidence, constraints=()))),
+            replace(flag, decision=replace(flag.decision, evidence=replace(
+                flag.decision.evidence, probability_result=replace(
+                    probability, probabilities=tuple(replace(p, mine_worlds=p.mine_worlds*2,
+                                                            total_worlds=p.total_worlds*2)
+                                                     for p in probability.probabilities),
+                    total_worlds=probability.total_worlds*2)))),
+        )
+        for expected_ran, invalid in zip((False, True), corruptions):
+            with self.subTest(enumerated=expected_ran), patch.object(
+                    oracles, "_materialized_exact", side_effect=AssertionError("No fallback")):
+                qualified, _, _, _, _ = _qualify_public_flags((invalid,), _plan().prerequisite)
+                self.assertEqual(qualified[0].status, "FAIL")
+                self.assertIs(qualified[0].independent_bounded_enumeration_ran, expected_ran)
+
+    def test_small_dag_raw_results_equal_frozen_verifier_exactly(self):
+        flags = _local_public_flag_chain(6)
+        qualified, _, _, _, _ = _qualify_public_flags(flags)
+        self.assertEqual(tuple(q.raw_verification for q in qualified),
+                         tuple(evidence.verify_v1_flag_provenance(f) for f in flags))
+
+    def test_long_valid_chain_admits_unique_nodes_without_recursive_support(self):
+        # Prospective work bounds declared in fixture docstring before counting.
+        for k in (16, 32, 64, 98):
+            with self.subTest(k=k), patch.object(
+                    harness, "_flag_public_support", side_effect=AssertionError("Recursive support forbidden")):
+                qualified, premises, calls, _, findings = _qualify_public_flags(
+                    _local_public_flag_chain(k))
+                self.assertTrue(all(q.status == "PASS" for q in qualified))
+                self.assertEqual(premises.work(), audit.PhysicalFlagWork(k, k, 0, k*(k-1)//2, k))
+                self.assertEqual(calls, ())
+                self.assertFalse(findings.failures)
+                self.assertEqual(len(audit._support_history((), tuple(premises.records), premises)), k)
+
+    def test_false_semantic_pair_never_becomes_true_on_repeated_cache_access(self):
+        left = _local_public_flag_chain(2)
+        right = (left[0], replace(left[1], num_mines=3))
+        memo = {}
+        self.assertFalse(audit._semantic_equal(left, right, memo))
+        self.assertFalse(audit._semantic_equal(left, right, memo))
+
+    def test_changed_duplicate_missing_reordered_and_future_premises_fail(self):
+        flags = _local_public_flag_chain(3)
+        changes = (
+            (),
+            (flags[0], flags[0]),
+            tuple(reversed(flags[:2])),
+            (flags[0], replace(flags[1], input_index=4, boundary=4)),
+            (flags[0], replace(flags[1], num_mines=4)),
+        )
+        for prior in changes:
+            with self.subTest(indices=tuple(f.input_index for f in prior)):
+                premises = _qualify_public_flags(flags[:2])[1]
+                with self.assertRaises(audit.E1AuditError):
+                    premises.qualify(replace(flags[2], prior_flags=prior),
+                                     calls=[], findings=audit._Findings())
 
 
 if __name__ == "__main__":

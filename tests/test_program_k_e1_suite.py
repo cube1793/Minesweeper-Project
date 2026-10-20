@@ -44,6 +44,77 @@ EMPTY = frozenset()
 _DATA = None
 
 
+# Prospective structural guards, fixed before measuring the new codec. A
+# detached 30x16/99 provenance node has at most 480 public glyphs plus k prior
+# references; these deliberately generous quadratic bounds reject tree
+# expansion without a timing threshold or ever allocating the old k=16 tree.
+_CHAIN_SCALES = (16, 32, 64, 98)
+
+
+def _chain_byte_limit(k):
+    return 100_000 + 20_000 * k + 1024 * k * k
+
+
+def _enclosing_byte_limit(k):
+    return 1_000_000 + 40_000 * k + 2048 * k * k
+
+
+def _chain_work_limit(k):
+    return 10_000 + 2000 * k + 100 * k * k
+
+
+def _detached_flag_chain(k, *, copies=False, mutation=False):
+    """Encoding data only: no solver, answer, or claim of valid mine proof.
+
+    Two equal instances per node suffice to vary aliasing throughout the graph
+    without constructing an exponentially unshared tree. Each alternate node
+    mixes earlier original/copy instances; all semantic fields remain equal.
+    """
+    originals, alternatives = [], []
+    for index in range(k):
+        rows = tuple(tuple(F if y * 30 + x < index else H for x in range(30))
+                     for y in range(16))
+        target = (index % 30, index // 30)
+        move = evidence.MoveProjection(Action.FLAG, *target)
+        decision = evidence.V1DecisionProjection(
+            move, evidence.V1EvidenceProjection(
+                DecisionKind.LOCAL_DETERMINISTIC, move, (),
+                evidence.DeterministicProjection((), (target,)), None), None)
+        # A deep antecedent alteration remains constructor-valid but is not
+        # falsely presented as a sound proof. Every downstream digest must see it.
+        boundary = index + 1 + (1000 if mutation and index == 0 else 0)
+        original = evidence.ExternalV1FlagProvenance(
+            rows, 99, decision, move, boundary, boundary, tuple(originals))
+        if copies:
+            prior = tuple(originals[j] if j % 2 else alternatives[j]
+                          for j in range(index))
+            alternate = replace(original, prior_flags=prior)
+            alternatives.append(alternate)
+        originals.append(original)
+    return tuple(alternatives if copies else originals)
+
+
+def _enclosing_flag_graph(k, *, copies=False, mutation=False):
+    """Archive/audit-shaped NON-E1 fixture with detached Expert-size payload.
+
+    The outer metadata uses an existing synthetic manual fixture only. The
+    attached graph is intentionally not a replay of that case and carries an
+    INCOMPLETE finding, so codec scale cannot be confused with qualification.
+    """
+    chain = _detached_flag_chain(k, copies=copies, mutation=mutation)
+    _, archives, audits = _data()
+    index = _index(variant="K-CONTROL")
+    archive = _trace(archives[index], 1, external_flag=chain[-1],
+                     external_flag_antecedents=chain[:-1])
+    record = audit.V1ActionAudit(
+        1, "INCOMPLETE", "Detached codec scale graph; not executed or proof-checked.",
+        chain[-1], evidence.EvidenceComparison("NOT_EVALUATED", k,
+                                              detail="Detached codec graph only."))
+    checked = replace(audits[index], v1_audits=(record,), audit_status="INCOMPLETE",
+                      incomplete_reasons=("Detached codec scale graph; no research result.",))
+    return archive, checked
+
+
 def _semantic_k(rows, mines, owned, safes):
     """Declare detached fields directly, without capability/planner calls."""
     flags = frozenset((x, y) for y, row in enumerate(rows)
@@ -291,11 +362,96 @@ class SuiteCase(unittest.TestCase):
         return next(r for r in result.repetitions if r.case_id == case and r.variant == variant)
 
 
+class SemanticDagTests(unittest.TestCase):
+    def test_detached_expert_chains_have_quadratic_size_and_work(self):
+        for k in _CHAIN_SCALES:
+            with self.subTest(k=k):
+                value = _detached_flag_chain(k)
+                work = {}
+                encoded = suite._encoded(value, _work=work)
+                raw = suite._json_bytes(encoded)
+                self.assertLessEqual(len(raw), _chain_byte_limit(k))
+                self.assertLessEqual(work["visits"], _chain_work_limit(k))
+                self.assertLessEqual(work["references"], _chain_work_limit(k))
+                self.assertLessEqual(work["nodes"], 1000 + 100 * k)
+                self.assertEqual(raw, suite._json_bytes(suite._encoded(value)))
+                copied = _detached_flag_chain(k, copies=True)
+                self.assertIsNot(copied[-1].prior_flags[1], copied[1])
+                self.assertEqual(raw, suite._json_bytes(suite._encoded(copied)))
+                self.assertNotEqual(suite._content_digest(value),
+                                    suite._content_digest(_detached_flag_chain(k, mutation=True)))
+
+    def test_enclosing_archive_and_audit_scale_without_recursive_expansion(self):
+        for k in _CHAIN_SCALES:
+            with self.subTest(k=k):
+                value = _enclosing_flag_graph(k)
+                work = {}
+                raw = suite._json_bytes(suite._encoded(value, _work=work))
+                self.assertLessEqual(len(raw), _enclosing_byte_limit(k))
+                self.assertLessEqual(work["visits"], _chain_work_limit(k))
+                self.assertEqual(raw, suite._json_bytes(suite._encoded(value)))
+                self.assertEqual(raw, suite._json_bytes(suite._encoded(
+                    _enclosing_flag_graph(k, copies=True))))
+                self.assertNotEqual(suite._content_digest(value), suite._content_digest(
+                    _enclosing_flag_graph(k, mutation=True)))
+
+    def test_complete_node_definitions_resolve_intern_key_hash_collisions(self):
+        class CollidingBytes(bytes):
+            def __hash__(self):
+                return 0
+
+        value = ((1, "left"), (2, "right"), (1, "left"))
+        expected = suite._encoded(value)
+        dumps = suite._json_bytes
+        with patch.object(suite, "_json_bytes", side_effect=lambda v: CollidingBytes(dumps(v))):
+            actual = suite._encoded(value)
+        self.assertEqual(actual, expected)
+        self.assertNotEqual(expected, suite._encoded(((1, "left"), (2, "changed"), (1, "left"))))
+
+    def test_general_set_order_and_aliasing_are_value_canonical(self):
+        first = evidence.MoveProjection(Action.FLAG, 2, 1)
+        second = evidence.MoveProjection(Action.OPEN, 1, 2)
+        left = (frozenset((first, second)), first, second)
+        right = (frozenset((replace(second), replace(first))), replace(first), replace(second))
+        self.assertEqual(suite._encoded(left), suite._encoded(right))
+        self.assertNotEqual(suite._encoded((first, second)), suite._encoded((second, first)))
+
+    def test_exact_types_all_fields_and_cycle_rejection(self):
+        values = (None, False, True, 0, 1, -(2 ** 20000), Fraction(2 ** 20000, 3),
+                  0.0, -0.0, Action.OPEN)
+        self.assertEqual(suite._encoded(values), suite._encoded(values))
+        self.assertNotEqual(suite._encoded(True), suite._encoded(1))
+        self.assertNotEqual(suite._encoded(0.0), suite._encoded(-0.0))
+        before = evidence.DecisionTimings(evidence_ns=1)
+        after = replace(before, evidence_ns=2)
+        self.assertNotEqual(suite._encoded(before), suite._encoded(after))
+        self.assertEqual(suite._encoded(before, semantic=True),
+                         suite._encoded(after, semantic=True))
+        cycle = _detached_flag_chain(1)[0]
+        object.__setattr__(cycle, "prior_flags", (cycle,))
+        for value in (cycle, [], {}, set(), object(), float("inf"), float("nan")):
+            with self.subTest(kind=type(value).__name__), self.assertRaises(suite.E1SuiteError):
+                suite._encoded(value)
+
+    def test_k_control_bogus_p3_rejected_before_e0_tree_codec(self):
+        archive, checked = _enclosing_flag_graph(98)
+        # A malformed but closed record must not route recursive external
+        # provenance through the frozen CONTROL/K-P0 P-3 content codec.
+        p3 = _corrupt(_data()[2][_index(variant="CONTROL")].p3_audit,
+                      variant="K-CONTROL")
+        checked = replace(checked, p3_audit=p3)
+        with patch.object(harness, "content_digest",
+                          side_effect=AssertionError("E0 recursive codec must not run")) as digest:
+            with self.assertRaisesRegex(suite.E1SuiteError, "K-CONTROL cannot carry"):
+                suite._validate_pair(_plan(), archive, checked)
+        digest.assert_not_called()
+
+
 class SourceIdentityTests(SuiteCase):
     def test_current_committed_slice3_identity(self):
         plan, archives, audits = _data()
         current = audit.capture_audit_source_identity(plan, archives[0])
-        self.assertEqual(current.digest, "ac547f94fb15340d3d0e94f13722372d57edf3cda5f73da63191dc596b866df4")
+        self.assertEqual(current.digest, "47ceca0595cacf08f70bd14911a805c5d0358fa3e60e695349a66689b9d994b1")
         identity = suite.capture_suite_source_identity(plan, archives[0], audits[0])
         self.assertEqual(identity.audit_source_digest, current.digest)
 

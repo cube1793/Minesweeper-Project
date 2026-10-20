@@ -34,7 +34,7 @@ QUALIFICATION_SOURCE_PATHS = (
     "experiments/program_k_e1_persistence.py",
 )
 # Recomputed from the clean committed post-Slice-5 baseline, not prompt text.
-ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "e60d340b78b08dcfa26f736e93138b68c0d12dc967690fd0de7db3b4c11ac97e"
+ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "b724e22dd10a70880533430b906c7723b3150e09c250a2580eba78a6bfa0c828"
 _AUTHORITIES = _execution._AUTHORITY_FIELDS
 _ERRORS = (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError)
 # Fixed reconciliation bodies, distinct from the live orchestration entrypoints.
@@ -533,6 +533,34 @@ class E1QualificationAssessment:
         return self.verdict == "E1_PASS"
 
 
+def _external_flag_findings(audits, prerequisite):
+    """Reconcile retained E1 FLAG qualification separately from raw coverage."""
+    failures, missing = [], []
+    for audit in audits:
+        for action in audit.v1_audits:
+            if action.external_flag is None:
+                continue
+            qualified = action.external_qualification
+            if qualified is None:
+                missing.append("External V1 FLAG qualification missing.")
+                continue
+            try:
+                _audit.validate_external_flag_qualification(
+                    qualified, action.external_flag, prerequisite)
+                _need(qualified.input_index == qualified.boundary == action.input_index
+                      and _suite._encoded(qualified.raw_verification)
+                      == _suite._encoded(action.external_verification),
+                      "External V1 FLAG qualification action/raw binding differs.")
+            except _ERRORS as error:
+                failures.append("External V1 FLAG qualification invalid: " + str(error))
+            else:
+                if qualified.status == "FAIL":
+                    failures.append("External V1 FLAG qualification failed.")
+                elif qualified.status != "PASS":
+                    missing.append("External V1 FLAG qualification incomplete.")
+    return failures, missing
+
+
 def assess_e1(record):
     """Pure implementation assessment; historical identities are not live admission."""
     _checked(record, E1QualificationRecord)
@@ -554,7 +582,7 @@ def assess_e1(record):
                 archive.schedule_entry, archive.case, archive, _suite._content_digest(archive),
                 audit, _suite._content_digest(audit), archive.execution_source_identity.digest,
                 audit.source_identity.digest)
-            failed, missing = _suite._run_findings(bound)
+            failed, missing = _suite._run_findings(bound, record.plan.prerequisite)
             public_failures.extend(failed)
             public_missing.extend(missing)
     falsified = any(r.evaluation is not None and r.evaluation.classification == "G1_FALSIFICATION"
@@ -575,7 +603,7 @@ def assess_e1(record):
     gate(1, failed=bool(failures) or falsified or missing_payload,
          incomplete=public_incomplete,
          details=failures + (("G1_FALSIFICATION: no public proof upgrade.",) if falsified else ()))
-    equivalence_fail, equivalence_missing = [], []
+    equivalence_fail, equivalence_missing = _external_flag_findings(audits, record.plan.prerequisite)
     for audit in audits:
         for item in audit.acquisition_audits + audit.oracle_b_audits:
             if item.status == "FAIL":

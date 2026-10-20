@@ -195,6 +195,45 @@ class V1ActionAudit:
     detail: str
     external_flag: _evidence.ExternalV1FlagProvenance | None
     external_verification: _evidence.EvidenceComparison | None
+    external_qualification: "ExternalV1FlagQualification | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalV1FlagQualification:
+    """Original raw coverage and E1 premise-conditioned coverage are distinct.
+
+    ``node_verification`` uses the unchanged independent frozen checker after
+    earlier physical premises have been admitted chronologically. It never
+    upgrades ``raw_verification``, including an unevaluated exact ancestor.
+    """
+
+    input_index: int
+    boundary: int
+    raw_verification: _evidence.EvidenceComparison
+    node_verification: _evidence.EvidenceComparison
+    decision_kind: DecisionKind
+    public_hidden_variables: int
+    target: tuple[int, int]
+    independent_bounded_enumeration_ran: bool
+    bounded_status: str
+    bounded_reason: str | None
+    prior_input_indices: tuple[int, ...]
+    shared_kernel_input_digest: str | None
+    shared_kernel_result: _oracles.OracleBResult | None
+    shared_kernel_expected_flag: _evidence.MoveProjection | None
+    shared_kernel_evidence: str | None
+    prerequisite: _e1.AcceptedE0Prerequisite | None
+    status: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalFlagWork:
+    admitted_nodes: int
+    raw_node_checks: int
+    conditioned_node_checks: int
+    prior_reference_checks: int
+    support_views: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +344,7 @@ class E1RunAudit:
     discrepancies: tuple[str, ...]
     incomplete_reasons: tuple[str, ...]
     audit_status: str
+    physical_flag_work: PhysicalFlagWork = PhysicalFlagWork(0, 0, 0, 0, 0)
 
     def __post_init__(self):
         _need(self.audit_status in ("PASS", "FAIL", "INCOMPLETE"), "Invalid per-run audit status.")
@@ -561,9 +601,311 @@ def _timing_coverage(result, variant, findings):
     return tuple(records)
 
 
-def _v1_action(trace, effect, index, variant, num_mines, executed_flags, findings):
+def _semantic_equal(left, right, checked=None):
+    """All fields participate; object identity is only a pair-work cache."""
+    if type(left) is not type(right):
+        return False
+    if type(left) in (str, int, bool, type(None), Fraction, Action, CellState,
+                      GameStatus, DecisionKind, frozenset):
+        return left == right
+    checked = {} if checked is None else checked
+    pair = (id(left), id(right))
+    if pair in checked:
+        return checked[pair][2]
+    if type(left) is tuple:
+        result = len(left) == len(right) and all(
+            _semantic_equal(a, b, checked) for a, b in zip(left, right))
+    else:
+        result = all(_semantic_equal(getattr(left, f.name), getattr(right, f.name), checked)
+                     for f in fields(left))
+    # Retaining both values also prevents id reuse for temporary tuple views.
+    checked[pair] = (left, right, result)
+    return result
+
+
+_FLAG_BOUNDED_REASON = "Independent exact FLAG check exceeds 16 public variables."
+
+
+class _MissingFlagReference(Exception):
+    """A required public comparison was unavailable, with no semantic result."""
+
+
+def _flag_reference_differences(flag, result):
+    if type(result) is not _oracles.OracleBResult:
+        return ("Missing Oracle-B exact semantics.",)
+    probability = flag.decision.evidence.probability_result
+    if probability is None:
+        return ("Missing archived exact evidence.",)
+    counts = tuple((p.coordinate, p.mine_worlds) for p in probability.probabilities)
+    minimum = min((n for _, n in counts), default=None)
+    expected = (
+        flag.observation, tuple(c for c, _ in counts), probability.frontier_cells,
+        probability.unconstrained_cells, probability.total_worlds, counts,
+        frozenset(c for c, n in counts if n == 0),
+        frozenset(c for c, n in counts if n == probability.total_worlds),
+        None if minimum is None else Fraction(minimum, probability.total_worlds),
+        frozenset(c for c, n in counts if n == minimum),
+        _oracles.SHARED_KERNEL_EVIDENCE, _oracles.FROZEN_EXACT_KERNEL,
+    )
+    actual = tuple(getattr(result, field.name) for field in fields(result))
+    differences = []
+    if _harness.canonical_bytes(actual) != _harness.canonical_bytes(expected):
+        differences.append("Oracle-B domain/order/counts/marginals/certainty differ.")
+    target = (flag.move.x, flag.move.y)
+    if target not in result.G1 or not result.G1 or flag.decision.evidence.move != (
+            _evidence.MoveProjection(Action.FLAG, *min(result.G1, key=lambda c: (c[1], c[0])))
+            if result.G1 else None):
+        differences.append("Oracle-B expected FLAG/selected target differs.")
+    return tuple(differences)
+
+
+def validate_external_flag_qualification(qualification, flag, prerequisite):
+    """Reconstruct retained E1 qualification assertions, without new arithmetic.
+
+    Raises on malformed or contradictory evidence, returns the retained status.
+    Full original provenance and chronological admission remain in the audit;
+    suite/final gates use this to reject a manufactured status-only PASS.
+    """
+    _need(type(qualification) is ExternalV1FlagQualification
+          and type(flag) is _evidence.ExternalV1FlagProvenance,
+          "Missing typed external V1 FLAG qualification.")
+    q = qualification
+    _checked(flag, _evidence.ExternalV1FlagProvenance)
+    projection = _evidence._checked_projection(flag.decision)
+    _checked(q.raw_verification, _evidence.EvidenceComparison)
+    _checked(q.node_verification, _evidence.EvidenceComparison)
+    count = len(_cells(flag.observation, CellState.HIDDEN))
+    _need(type(q.input_index) is int and type(q.boundary) is int
+          and q.input_index == q.boundary == flag.input_index == flag.boundary
+          == q.raw_verification.boundary == q.node_verification.boundary
+          and q.decision_kind is flag.decision.evidence.kind
+          and q.decision_kind in (DecisionKind.LOCAL_DETERMINISTIC, DecisionKind.GLOBAL_CERTAINTY)
+          and type(q.public_hidden_variables) is int and q.public_hidden_variables == count
+          and type(q.target) is tuple and len(q.target) == 2
+          and all(type(v) is int for v in q.target)
+          and q.target == (flag.move.x, flag.move.y)
+          and projection.move == flag.move and flag.move.action is Action.FLAG
+          and flag.observation[flag.move.y][flag.move.x] == CellState.HIDDEN
+          and type(q.prior_input_indices) is tuple
+          and all(type(v) is int for v in q.prior_input_indices)
+          and q.prior_input_indices == tuple(f.input_index for f in flag.prior_flags)
+          and type(q.status) is str and q.status in ("PASS", "FAIL", "INCOMPLETE"),
+          "External qualification public binding differs.")
+    if q.status != "PASS":
+        return q.status
+    _need(q.raw_verification.status != "FAIL" and q.node_verification.status != "FAIL",
+          "Failed independent provenance cannot qualify.")
+    exact = q.decision_kind is DecisionKind.GLOBAL_CERTAINTY
+    _need(type(q.independent_bounded_enumeration_ran) is bool
+          and q.independent_bounded_enumeration_ran == (exact and count <= 16)
+          and q.bounded_status == ("PASS" if exact and count <= 16 else
+                                   "NOT_EVALUATED" if exact else "NOT_APPLICABLE"),
+          "Independent bounded execution/coverage differs.")
+    if not exact or count <= 16:
+        _need(q.node_verification.status == "PASS",
+              "Independent local/bounded proof must PASS; shared evidence cannot replace it.")
+        _need(q.node_verification.detail == (
+            "INDEPENDENT_BOUNDED_PUBLIC_V1_EXACT_FLAG" if exact else "PUBLIC_V1_LOCAL_FLAG_EVIDENCE"),
+            "Independent current-node evidence label differs.")
+        _need(q.raw_verification.status == "PASS" or (
+            q.raw_verification.status == "NOT_EVALUATED"
+            and q.raw_verification.detail.startswith("FLAG antecedent:")),
+            "Raw independent coverage cannot be relabeled.")
+        _need(q.bounded_reason is None and q.shared_kernel_result is None
+              and q.shared_kernel_input_digest is None and q.shared_kernel_evidence is None
+              and q.shared_kernel_expected_flag is None and q.prerequisite is None,
+              "Local/bounded qualification carries an unauthorized shared fallback.")
+    else:
+        raw_reason = q.raw_verification.detail
+        while raw_reason.startswith("FLAG antecedent: "):
+            raw_reason = raw_reason[len("FLAG antecedent: "):]
+        _need(q.node_verification.status == "NOT_EVALUATED"
+              and q.node_verification.detail == _FLAG_BOUNDED_REASON
+              and q.raw_verification.status == "NOT_EVALUATED"
+              and raw_reason == _FLAG_BOUNDED_REASON
+              and q.bounded_reason == _FLAG_BOUNDED_REASON
+              and q.shared_kernel_evidence == _oracles.SHARED_KERNEL_EVIDENCE,
+              "Above-envelope raw/node coverage or shared-kernel disclosure differs.")
+        _checked(q.prerequisite, _e1.AcceptedE0Prerequisite)
+        _checked(prerequisite, _e1.AcceptedE0Prerequisite)
+        _need(q.prerequisite == prerequisite,
+              "External shared-kernel qualification is not bound to accepted E0.")
+        _need(q.shared_kernel_input_digest == _oracles.oracle_b_input_digest(
+            flag.observation, flag.num_mines, frozenset()),
+            "External Oracle-B input identity differs.")
+        _need(not _flag_reference_differences(flag, q.shared_kernel_result),
+              "External Oracle-B exact semantics differ.")
+        _need(q.shared_kernel_expected_flag == flag.decision.evidence.move,
+              "External Oracle-B expected FLAG differs.")
+    return q.status
+
+
+class _PhysicalFlagPremises:
+    """Admit each physical node once; retained support is a flat chronological DAG.
+
+    Frozen verifier work views have shallow prior records. Their memo entries
+    refer to already checked originals, so neither _immutable nor public-support
+    construction traverses a recursively duplicated ancestry tree. No work-view
+    record or Python identity is serialized as semantic evidence.
+    """
+
+    def __init__(self, prerequisite=None):
+        self.prerequisite = prerequisite
+        self.records, self.qualifications, self.views, self.shallow = [], [], [], []
+        self.qualified_k = []
+        self.raw_checks = self.conditioned_checks = self.reference_checks = 0
+        self.equal_checked, self.graph_checked = {}, {}
+
+    def work(self):
+        return PhysicalFlagWork(len(self.records), self.raw_checks,
+                                self.conditioned_checks, self.reference_checks, len(self.views))
+
+    def matches(self, supplied, expected):
+        _require_audit_graph(supplied, checked=self.graph_checked)
+        return _semantic_equal(supplied, expected, self.equal_checked)
+
+    def active(self, external, observation, boundary):
+        _need(self.matches(external, tuple(self.records)),
+              "Physical FLAG provenance differs from admitted chronological nodes.")
+        flags = _cells(observation, CellState.FLAGGED)
+        _need(flags == frozenset((f.move.x, f.move.y) for f in external),
+              "Every current physical FLAG needs exactly one qualified earlier provenance.")
+        for flag, qualification in zip(self.records, self.qualifications):
+            _need(flag.input_index < boundary and qualification.status == "PASS",
+                  "Physical premise is not an earlier E1-qualified FLAG.")
+            _oracles._public_extension(flag.observation, observation,
+                                       {(flag.move.x, flag.move.y)})
+        return tuple(self.views)
+
+    def public_domains(self, observation, num_mines, logical, proofs, boundary):
+        grid = _oracles._public_grid(observation, num_mines, GameStatus.PLAYING)
+        _need(all(any(_semantic_equal(p, known) for known in self.qualified_k + self.views)
+                  for p in proofs), "Public premise has not passed its chronological admission.")
+        supported = frozenset(p.target for p in proofs)
+        for proof in proofs:
+            _need(proof.num_mines == num_mines, "Public premise mine total differs.")
+            _oracles._public_extension(proof.observation, grid, supported)
+        return _oracles._supported_domains(grid, num_mines, logical, supported)
+
+    def qualify(self, flag, *, calls, findings):
+        _require_audit_graph(flag, checked=self.graph_checked)
+        _checked(flag, _evidence.ExternalV1FlagProvenance)
+        _need(self.matches(flag.prior_flags, tuple(self.records)),
+              "FLAG prior DAG differs from unique chronological executed provenance.")
+        self.reference_checks += len(flag.prior_flags)
+        _need(not self.records or flag.input_index > self.records[-1].input_index,
+              "Physical FLAG admissions must have increasing input indices.")
+        count = len(_cells(flag.observation, CellState.HIDDEN))
+        flat = replace(flag, prior_flags=tuple(self.shallow))
+        raw_cache = {id(p): q.raw_verification for p, q in zip(self.shallow, self.qualifications)}
+        self.raw_checks += 1
+        raw = (_evidence.verify_v1_flag_provenance(flat) if not self.records
+               else _evidence._check_v1_flag_provenance(flat, raw_cache))
+        node = raw
+        if raw.status == "NOT_EVALUATED" and raw.detail.startswith("FLAG antecedent:"):
+            self.conditioned_checks += 1
+            conditioned = {id(p): _evidence.EvidenceComparison(
+                "PASS", p.boundary, detail="CHRONOLOGICALLY_ADMITTED_PHYSICAL_PREMISE")
+                for p in self.shallow}
+            node = _evidence._check_v1_flag_provenance(flat, conditioned)
+        _checked(raw, _evidence.EvidenceComparison)
+        _checked(node, _evidence.EvidenceComparison)
+        status, detail = "PASS", "Independent current-node public evidence with qualified chronological premises."
+        result = digest = expected_flag = label = binding = None
+        span = None
+        exact = flag.decision.evidence.kind is DecisionKind.GLOBAL_CERTAINTY
+        # The frozen checker has one post-enumeration failure and one success
+        # label. Shape/provenance failures occur before combinations is entered.
+        bounded_ran = exact and count <= 16 and node.detail in (
+            "INDEPENDENT_BOUNDED_PUBLIC_V1_EXACT_FLAG",
+            "Exact FLAG counts disagree with public complete worlds.")
+        bounded_status = (node.status if bounded_ran else
+                          "NOT_EVALUATED" if exact else "NOT_APPLICABLE")
+        reason = (_FLAG_BOUNDED_REASON if exact and count > 16 else
+                  "Independent check stopped before bounded enumeration: " + node.detail
+                  if exact and not bounded_ran else None)
+        if raw.status == "FAIL" or node.status == "FAIL":
+            status, detail = "FAIL", "Independent public FLAG contradiction: " + (
+                raw.detail if raw.status == "FAIL" else node.detail)
+        elif any(q.status != "PASS" for q in self.qualifications):
+            status, detail = ("FAIL" if any(q.status == "FAIL" for q in self.qualifications)
+                              else "INCOMPLETE"), "An earlier physical premise did not qualify."
+        elif exact and count > 16:
+            if node.status != "NOT_EVALUATED" or node.detail != _FLAG_BOUNDED_REASON:
+                status, detail = "FAIL", "Unexpected independent exact coverage above the envelope."
+            elif self.prerequisite is None:
+                status, detail = "INCOMPLETE", "Accepted E0 prerequisite binding is absent."
+            else:
+                try:
+                    binding = _checked(self.prerequisite, _e1.AcceptedE0Prerequisite)
+                    self.active(tuple(self.records), flag.observation, flag.input_index)
+                    _oracles._supported_domains(flag.observation, flag.num_mines, frozenset(),
+                                                frozenset(v.target for v in self.views))
+                    digest = _oracles.oracle_b_input_digest(flag.observation, flag.num_mines, frozenset())
+                    label = _oracles.SHARED_KERNEL_EVIDENCE
+                    start = len(calls)
+                    result = _oracles._materialized_exact(flag.observation, flag.num_mines, frozenset())
+                    differences = _flag_reference_differences(flag, result)
+                    if result is None:
+                        status, detail = "INCOMPLETE", "Required Oracle-B comparison unavailable."
+                        raise _MissingFlagReference(detail)
+                    expected_flag = (_evidence.MoveProjection(
+                        Action.FLAG, *min(result.G1, key=lambda c: (c[1], c[0]))) if result.G1 else None)
+                    span = _diagnostic_span(calls, start, (_call_expectation(
+                        "B", flag.observation, flag.num_mines, frozenset(), result),),
+                        True, flag.input_index, "EXTERNAL_V1_FLAG_B", findings)
+                    if differences or span.status != "PASS":
+                        status, detail = "FAIL", "; ".join(differences) or "Oracle-B diagnostic mismatch."
+                    else:
+                        detail = ("Frozen V1 execution and exact certainty; " + label
+                                  + "; accepted E0 arithmetic qualification. Independent enumeration NOT_EVALUATED.")
+                except (_MissingFlagReference, OSError, TimeoutError) as error:
+                    status, detail = "INCOMPLETE", str(error)
+                    if digest is not None and span is None:
+                        span = _diagnostic_span(calls, start, (_call_expectation(
+                            "B", flag.observation, flag.num_mines, frozenset()),),
+                            False, flag.input_index, "EXTERNAL_V1_FLAG_B", findings)
+                except _PUBLIC_ERRORS as error:
+                    status, detail = "FAIL", str(error)
+                    if digest is not None and span is None:
+                        span = _diagnostic_span(calls, start, (_call_expectation(
+                            "B", flag.observation, flag.num_mines, frozenset()),),
+                            False, flag.input_index, "EXTERNAL_V1_FLAG_B", findings)
+        elif node.status != "PASS":
+            status, detail = "INCOMPLETE", "Independent local/bounded current-node proof did not PASS."
+        qualification = ExternalV1FlagQualification(
+            flag.input_index, flag.boundary, raw, node, flag.decision.evidence.kind,
+            count, (flag.move.x, flag.move.y), bounded_ran, bounded_status, reason,
+            tuple(f.input_index for f in flag.prior_flags), digest, result, expected_flag,
+            label, binding, status, detail)
+        if status == "PASS":
+            validate_external_flag_qualification(qualification, flag, self.prerequisite)
+        return qualification, span
+
+    def admit(self, flag, qualification):
+        self.records.append(flag)
+        self.qualifications.append(qualification)
+        self.shallow.append(replace(flag, prior_flags=()))
+        if qualification.status == "PASS":
+            target, v1 = (flag.move.x, flag.move.y), flag.decision.evidence
+            if v1.kind is DecisionKind.LOCAL_DETERMINISTIC:
+                clue = next(c.source for c in v1.constraints if target in c.hidden_cells
+                            and c.remaining_mines == len(c.hidden_cells))
+                view = _oracles.LocalMineCertificate(
+                    flag.observation, flag.num_mines, clue, target, frozenset(), GameStatus.PLAYING)
+            else:
+                probability = v1.probability_result
+                view = _oracles.ExactGlobalMineCertificate(
+                    flag.observation, flag.num_mines, target, frozenset(), GameStatus.PLAYING,
+                    probability.total_worlds,
+                    tuple((p.coordinate, p.mine_worlds) for p in probability.probabilities))
+            self.views.append(view)
+
+
+def _v1_action(trace, effect, index, variant, num_mines, executed_flags, findings,
+               premises=None, calls=None, spans=None):
     """Validate archived authority only; never invoke a V1 planner."""
-    status, detail, verification = "PASS", "", None
+    status, detail, verification, qualification = "PASS", "", None, None
     flag = trace.external_flag if variant == "K-CONTROL" else None
     try:
         if index and trace.decision is None:
@@ -576,7 +918,7 @@ def _v1_action(trace, effect, index, variant, num_mines, executed_flags, finding
         if variant == "K-CONTROL":
             flags = _cells(effect.before_observation, CellState.FLAGGED)
             active = tuple(f for f in executed_flags if (f.move.x, f.move.y) in flags)
-            _need(trace.external_flag_antecedents == active,
+            _need(premises.matches(trace.external_flag_antecedents, active),
                   "External FLAG antecedents differ from chronological executed flags.")
             if trace.move.action is Action.FLAG:
                 if flag is None:
@@ -588,20 +930,21 @@ def _v1_action(trace, effect, index, variant, num_mines, executed_flags, finding
                           and flag.move == effect.move
                           and flag.decision == _evidence.project_v1_decision(trace.decision)
                           and flag.boundary == flag.input_index == index
-                          and flag.prior_flags == executed_flags,
+                          and premises.matches(flag.prior_flags, executed_flags),
                           "Executed V1 FLAG provenance binding differs.")
-                    verification = _evidence.verify_v1_flag_provenance(flag)
+                    qualification, span = premises.qualify(flag, calls=calls, findings=findings)
+                    if span is not None:
+                        spans.append(span)
+                    verification = qualification.raw_verification
                     _checked(verification, _evidence.EvidenceComparison)
                     _need(verification.boundary == index, "FLAG verifier boundary differs.")
-                    if verification.status != "PASS":
-                        status = "FAIL" if verification.status == "FAIL" else "INCOMPLETE"
-                        detail = "External V1 FLAG provenance: " + verification.status + " " + verification.detail
+                    status, detail = qualification.status, qualification.detail
             else:
                 _need(flag is None, "Non-FLAG input carries external FLAG provenance.")
     except _PUBLIC_ERRORS as error:
         status, detail = "FAIL", str(error)
     findings.record(status, "V1 input " + str(index) + ": " + detail)
-    return V1ActionAudit(index, status, detail, flag, verification)
+    return V1ActionAudit(index, status, detail, flag, verification, qualification)
 
 
 def _replay(trace, effect, index, variant, case, table, session, external, findings):
@@ -730,11 +1073,15 @@ def _mechanisms(result, effects, findings):
     return tuple(observations)
 
 
-def _support_history(proofs, external):
-    """The accepted acquisition checker's merge, for Oracle premises only."""
+def _support_history(proofs, external, premises=None):
+    """Unique checker views only; never recursively expand physical ancestry."""
     combined = list(proofs)
-    for flag in external:
-        combined.extend(_harness._flag_public_support(flag))
+    if external:
+        _need(premises is not None and premises.matches(external, tuple(premises.records)),
+              "External proof history needs its chronological E1 admission registry.")
+        _need(all(q.status == "PASS" for q in premises.qualifications),
+              "External proof history contains an unqualified physical FLAG.")
+        combined.extend(premises.views)
     unique = []
     for proof in combined:
         if proof not in unique:
@@ -804,14 +1151,40 @@ def _diagnostic_span(calls, start, expected, complete, index, operation, finding
     return span
 
 
-def _audit_certificate(certificate, index, proofs, external, calls, findings):
+def _audit_certificate(certificate, index, proofs, external, calls, findings, premises=None):
     start = len(calls)
-    audit = _harness.audit_acquisition(certificate, boundary=index,
-                                      prior_certificates=proofs, external_flags=external)
+    if premises is None and not external:
+        audit = _harness.audit_acquisition(certificate, boundary=index,
+                                          prior_certificates=proofs, external_flags=external)
+    else:
+        # K-CONTROL's physical premises were independently admitted once at
+        # their executed inputs. Existing low-level certificate checks preserve
+        # direct local/exact strength without re-proving that DAG at each use.
+        external_audits, check = [], None
+        try:
+            _need(premises is not None, "Missing chronological physical premise qualification.")
+            views = premises.active(external, certificate.observation, index)
+            external_audits = [
+                _harness.ExternalFlagAudit(record, q.raw_verification, (view,))
+                for record, q, view in zip(premises.records, premises.qualifications, views)]
+            history = _support_history(proofs, external, premises)
+            premises.public_domains(certificate.observation, certificate.num_mines,
+                                    certificate.retained_mines, history, index)
+            supported = frozenset(p.target for p in history)
+            check = (_oracles._check_local(certificate, supported)
+                     if type(certificate) is _oracles.LocalMineCertificate
+                     else _oracles._check_exact(certificate, supported))
+            status, detail = "PASS", "Public physical premises admitted once; current K certificate independently checked."
+        except _PUBLIC_ERRORS as error:
+            status, detail = "FAIL", str(error)
+        audit = _harness.AcquisitionAudit(
+            certificate, index, proofs, tuple(external_audits), check, status, detail,
+            certificate.retained_mines, certificate.retained_mines | {certificate.target})
     _need(type(audit) is _harness.AcquisitionAudit, "Acquisition verifier returned the wrong class.")
     bound = (audit.certificate == certificate and audit.boundary == index
              and audit.prior_certificates == proofs
-             and tuple(f.record for f in audit.external_flags) == external
+             and (premises.matches(tuple(f.record for f in audit.external_flags), external)
+                  if premises is not None else tuple(f.record for f in audit.external_flags) == external)
              and audit.owned_M_before == certificate.retained_mines
              and audit.owned_M_after == certificate.retained_mines | {certificate.target})
     findings.check(bound, "Acquisition audit is not bound to the requested certificate/history.")
@@ -830,10 +1203,16 @@ def _audit_certificate(certificate, index, proofs, external, calls, findings):
     unique.sort(key=lambda p: sum(v != CellState.HIDDEN for row in p.observation for v in row))
     history = tuple(unique) + (
         (certificate,) if type(certificate) is _oracles.ExactGlobalMineCertificate else ())
+    if premises is not None:
+        history = ((certificate,) if type(certificate) is _oracles.ExactGlobalMineCertificate
+                   and audit.status == "PASS" else ())
     expected, _ = _history_expectations(history)
     span = _diagnostic_span(calls, start, expected, audit.status == "PASS", index,
                             "ACQUISITION", findings)
-    return audit, span, bound and audit.status == "PASS" and span.status == "PASS"
+    passed = bound and audit.status == "PASS" and span.status == "PASS"
+    if passed and premises is not None:
+        premises.qualified_k.append(certificate)
+    return audit, span, passed
 
 
 def _exact_differences(expected, actual):
@@ -850,18 +1229,23 @@ def _exact_differences(expected, actual):
     return differences
 
 
-def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, calls, findings):
+def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, calls, findings,
+              premises=None):
     start = len(calls)
     actual = None
     differences = ()
     complete = False
-    predicted, _ = _history_expectations(proofs)
+    predicted, _ = _history_expectations(proofs) if premises is None else ((), None)
     # The leaf key exists even if the Oracle fails before producing a result.
     leaf = _call_expectation("B", observation, num_mines, logical)
     try:
-        actual = _oracles.materialized_exact_reference(
-            observation, num_mines, status=GameStatus.PLAYING,
-            logical_mines=logical, proofs=proofs)
+        if premises is None:
+            actual = _oracles.materialized_exact_reference(
+                observation, num_mines, status=GameStatus.PLAYING,
+                logical_mines=logical, proofs=proofs)
+        else:
+            premises.public_domains(observation, num_mines, logical, proofs, index)
+            actual = _oracles._materialized_exact(observation, num_mines, logical)
         _need(type(actual) is _oracles.OracleBResult, "Oracle B returned the wrong class.")
         leaf = _call_expectation("B", observation, num_mines, logical, actual)
         complete = True
@@ -881,17 +1265,27 @@ def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, c
     return OracleBAudit(index, phase, logical, proofs, expected, actual, status, differences, interpretation), span
 
 
-def _oracle_a(index, observation, num_mines, logical, proofs, exact, oracle_b, calls, findings):
+def _oracle_a(index, observation, num_mines, logical, proofs, exact, oracle_b, calls, findings,
+              premises=None):
     start = len(calls)
     predicted, blocked_ancestor = _history_expectations(proofs, independent=True)
+    if premises is not None:
+        predicted = ()
     variables = len(_cells(observation, CellState.HIDDEN) - logical)
     actual = coverage = None
     differences = ()
     status, complete = "FAIL", False
     expected = predicted
     try:
-        actual = _oracles.enumerate_public_worlds(
-            observation, num_mines, status=GameStatus.PLAYING, logical_mines=logical, proofs=proofs)
+        if premises is None:
+            actual = _oracles.enumerate_public_worlds(
+                observation, num_mines, status=GameStatus.PLAYING, logical_mines=logical, proofs=proofs)
+        else:
+            _, _, fixed, unresolved, remaining = premises.public_domains(
+                observation, num_mines, logical, proofs, index)
+            if blocked_ancestor is not None:
+                raise _oracles.OracleANotEvaluated(blocked_ancestor)
+            actual = _oracles._enumerate_supported(observation, fixed, unresolved, remaining)
         _need(type(actual) is _oracles.OracleAResult, "Oracle A returned the wrong class.")
         _need(blocked_ancestor is None and variables <= 16,
               "Oracle A claimed evaluation outside its qualified envelope.")
@@ -1022,7 +1416,7 @@ def _shadow_lifecycle(trace, index, previous, findings):
         label + "implicated boundary differs.")
 
 
-def _audit_run(result, variant, case):
+def _audit_run(result, variant, case, *, prerequisite=None):
     """Pure component assembly; private seam for detached non-E1 unit fixtures.
 
     The public entry below is the only plan/archive API and always authenticates
@@ -1037,6 +1431,7 @@ def _audit_run(result, variant, case):
     mechanisms = ()
     proofs, previous_m, executed_flags = (), frozenset(), ()
     proofs_valid, flags_valid = True, True
+    premises = _PhysicalFlagPremises(prerequisite) if variant == "K-CONTROL" else None
     previous_shadow = None
     with _oracles.collect_oracle_diagnostics() as calls:
         if stream_sound:
@@ -1048,7 +1443,7 @@ def _audit_run(result, variant, case):
                 active_flags_valid = flags_valid
                 if variant in ("CONTROL", "K-CONTROL"):
                     flag_check = _v1_action(trace, effect, index, variant, case.num_mines,
-                                            executed_flags, findings)
+                                            executed_flags, findings, premises, calls, spans)
                     v1_audits.append(flag_check)
                 if variant == "CONTROL":
                     continue
@@ -1060,7 +1455,7 @@ def _audit_run(result, variant, case):
                     external = trace.external_flag_antecedents
                     active = tuple(f for f in executed_flags
                                    if (f.move.x, f.move.y) in _cells(effect.before_observation, CellState.FLAGGED))
-                    active_flags_valid &= external == active
+                    active_flags_valid &= premises.matches(external, active)
                     _shadow_lifecycle(trace, index, previous_shadow, findings)
                     previous_shadow = trace.shadow
                 try:
@@ -1076,12 +1471,12 @@ def _audit_run(result, variant, case):
                         # never gain authority for subsequent D/E Oracle work.
                         for certificate in decision.local.certificates:
                             audit, span, passed = _audit_certificate(
-                                certificate, index, proofs, external, calls, findings)
+                                certificate, index, proofs, external, calls, findings, premises)
                             acquisitions.append(audit)
                             spans.append(span)
                             proofs += (certificate,)
                             proofs_valid &= passed
-                        d_history = (_support_history(proofs, external)
+                        d_history = (_support_history(proofs, external, premises)
                                      if proofs_valid and active_flags_valid else ())
                         d_ready = (local_bound and proofs_valid and active_flags_valid
                                    and decision.observation == effect.before_observation
@@ -1092,12 +1487,13 @@ def _audit_run(result, variant, case):
                             if d_ready:
                                 d_b, span = _oracle_b(
                                     index, "D", effect.before_observation, case.num_mines,
-                                    decision.local.after.M, d_history, decision.phase_d, calls, findings)
+                                    decision.local.after.M, d_history, decision.phase_d, calls, findings, premises)
                                 b_audits.append(d_b)
                                 spans.append(span)
                                 a, span = _oracle_a(
                                     index, effect.before_observation, case.num_mines,
-                                    decision.local.after.M, d_history, decision.phase_d, d_b.result, calls, findings)
+                                    decision.local.after.M, d_history, decision.phase_d, d_b.result, calls, findings,
+                                    premises)
                                 a_audits.append(a)
                                 spans.append(span)
                             else:
@@ -1112,7 +1508,7 @@ def _audit_run(result, variant, case):
                                     "INCOMPLETE", (reason,)))
                         for certificate in decision.exact_certificates:
                             audit, span, passed = _audit_certificate(
-                                certificate, index, proofs, external, calls, findings)
+                                certificate, index, proofs, external, calls, findings, premises)
                             acquisitions.append(audit)
                             spans.append(span)
                             proofs += (certificate,)
@@ -1120,10 +1516,10 @@ def _audit_run(result, variant, case):
                         if decision.phase_e is not None:
                             if (d_ready and exact_bound and proofs_valid
                                     and d_b is not None and d_b.status == "PASS"):
-                                e_history = _support_history(proofs, external)
+                                e_history = _support_history(proofs, external, premises)
                                 e, span = _oracle_b(
                                     index, "E", effect.before_observation, case.num_mines,
-                                    decision.after.M, e_history, decision.phase_e, calls, findings)
+                                    decision.after.M, e_history, decision.phase_e, calls, findings, premises)
                                 b_audits.append(e)
                                 spans.append(span)
                             else:
@@ -1139,9 +1535,11 @@ def _audit_run(result, variant, case):
                 if variant == "K-CONTROL" and trace.move.action is Action.FLAG:
                     if trace.external_flag is not None:
                         executed_flags += (trace.external_flag,)
+                        if flag_check.external_qualification is not None:
+                            premises.admit(trace.external_flag, flag_check.external_qualification)
                     flags_valid &= (flag_check.status == "PASS"
-                                    and flag_check.external_verification is not None
-                                    and flag_check.external_verification.status == "PASS")
+                                    and flag_check.external_qualification is not None
+                                    and flag_check.external_qualification.status == "PASS")
             if variant != "CONTROL":
                 findings.check(result.final_M == previous_m, "Terminal archive changed last legitimate M.")
             if variant == "K-CONTROL":
@@ -1184,6 +1582,7 @@ def _audit_run(result, variant, case):
         timings=timings, timing_context=TIMING_CONTEXT,
         discrepancies=tuple(findings.failures), incomplete_reasons=tuple(findings.missing),
         audit_status=status,
+        physical_flag_work=PhysicalFlagWork(0, 0, 0, 0, 0) if premises is None else premises.work(),
     )
 
 
@@ -1191,6 +1590,7 @@ _AUDIT_RECORD_TYPES = (
     E1AuditSourceFile, E1AuditSourceIdentity, ModelCCostAudit, V1ActionAudit, KReplayAudit,
     OracleBAudit, OracleAAudit, OracleDiagnosticSpan, MechanismObservation, TimingSpan, TimingCoverage,
     E1RunAudit, _e1.ScheduleEntry, _e1.SealedCaseRegistration, _e1.RuntimeIdentity,
+    ExternalV1FlagQualification, PhysicalFlagWork, _e1.AcceptedE0Prerequisite,
     _harness.AcquisitionAudit, _harness.ExternalFlagAudit, _harness.OracleCoverage,
     _harness.GuessCheckpointAudit, _harness.GuessCheckpoint,
     _oracles.OracleAResult, _oracles.OracleBResult, _oracles.OracleCallDiagnostic,
@@ -1221,13 +1621,17 @@ def _require_audit_graph(value, active=None, checked=None):
     for child in children:
         _require_audit_graph(child, active, checked)
     active.remove(key)
-    checked.add(key)
+    if type(checked) is dict:
+        checked[key] = value  # retain work-cache referents; never serialize IDs
+    else:
+        checked.add(key)
 
 
 def audit_scheduled_run(plan, archive):
     """Audit one completed detached run, with current source checks on both sides."""
     source = capture_audit_source_identity(plan, archive)
-    evidence = _audit_run(archive.result, archive.schedule_entry.variant, archive.case)
+    evidence = _audit_run(archive.result, archive.schedule_entry.variant, archive.case,
+                          prerequisite=plan.prerequisite)
     _need(capture_audit_source_identity(plan, archive) == source, "Source changed during public audit.")
     return E1RunAudit(
         source, archive.execution_source_identity.digest, archive.schedule_entry, archive.case,
