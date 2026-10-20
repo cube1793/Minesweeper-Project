@@ -1,4 +1,4 @@
-"""Slice-4/5/6 implementation/unit integration only; no E0/E1 or P-8 claim.
+"""Slice-4/5/6/7 implementation/unit integration only; no E0/E1 or P-8 claim.
 
 Tiny explicit layouts are confined to Engine construction below. Solver-facing
 fixtures are raw public observations; no answer, fingerprint, evaluator or ZiNi
@@ -23,6 +23,7 @@ from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 from experiments import program_k_runner as runner
 from experiments import program_k_evidence as evidence_records
 from experiments import program_k_oracles as public_oracles
+from experiments import program_k_evaluator as evaluator
 from experiments.program_k_capability import KIntegrityError, KLocalSession
 from experiments.program_k_policy import KCandidate, select_policy
 from simple_algorithm import Constraint, InferenceResult, SimpleMove
@@ -2276,6 +2277,1326 @@ class ProgramKSlice6TimingAndContainmentTests(unittest.TestCase):
             self.assertEqual(len(late_results), 1)
             self.assertEqual(result.final_M, frozenset())
             self.assertFalse(result.shadow.enabled)
+
+
+class ProgramKSlice7EvaluatorTests(unittest.TestCase):
+    """Post-hoc synthetic falsification only; never execution or public proof."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = load_timing_table()
+
+    def sealed(self, *assertions, width=4, height=2):
+        # Explicit synthetic archive identity, not a real research artifact.
+        return evaluator.SealedEvaluatorInput(
+            "unit-evaluator-case", "unit-evaluator-run", width, height,
+            tuple(assertions), "a" * 64,
+        )
+
+    def answer(self, mines, *, width=4, height=2):
+        return evaluator.HiddenAnswer(
+            "unit-evaluator-case", "unit-evaluator-run", width, height,
+            frozenset(mines),
+        )
+
+    def check_one(self, kind, cells, mines):
+        assertion = evaluator.ArchivedAssertion(kind, 2, tuple(cells))
+        sealed = self.sealed(assertion)
+        return evaluator.evaluate_falsification(sealed, self.answer(mines))
+
+    def test_j_correct_m_is_no_counterexample_only_and_never_a_proof_upgrade(self):
+        owner, decision = public_decision(HISTORICAL, 1)
+        assertion = evaluator.ArchivedAssertion("LOGICAL_M", 1, owner.M)
+        sealed = self.sealed(assertion, height=1)
+        result = evaluator.evaluate_falsification(sealed, self.answer({(1, 0)}, height=1))
+        self.assertEqual(result.classification, "NO_COUNTEREXAMPLE")
+        self.assertFalse(result.proof_upgrade_allowed)
+        self.assertFalse(result.research_progression_must_stop)
+        self.assertEqual(result.findings[0].counterexamples, ())
+        self.assertEqual(result.evaluated_coordinate_count, 1)
+        self.assertEqual(owner.M, {(1, 0)})
+        self.assertEqual(result.sealed_input, sealed)
+        self.assertNotIsInstance(result, public_oracles.LocalMineCertificate)
+        self.assertEqual(public_oracles.verify_local_certificate(decision.local.certificates[0]).target,
+                         (1, 0))
+
+    def test_k_false_m_is_one_way_g1_falsification_with_exact_boundary_and_coordinates(self):
+        result = self.check_one("LOGICAL_M", ((1, 0), (0, 1)), {(1, 0)})
+        finding, = result.findings
+        self.assertEqual(result.classification, "G1_FALSIFICATION")
+        self.assertTrue(result.research_progression_must_stop)
+        self.assertFalse(result.proof_upgrade_allowed)
+        self.assertEqual(result.case_id, "unit-evaluator-case")
+        self.assertEqual(result.run_id, "unit-evaluator-run")
+        self.assertEqual(finding.assertion.physical_input_boundary, 2)
+        self.assertEqual(finding.counterexamples, ((0, 1),))
+        self.assertEqual(tuple((c.coordinate, c.asserted_mine, c.hidden_mine)
+                               for c in finding.comparisons),
+                         (((1, 0), True, True), ((0, 1), True, False)))
+
+    def test_j_k_correct_and_false_certainty_open_are_compared_as_safe_assertions(self):
+        for mines, expected in (({(1, 0)}, "NO_COUNTEREXAMPLE"),
+                                ({(3, 0)}, "G1_FALSIFICATION")):
+            with self.subTest(mines=mines):
+                result = self.check_one("CERTAINTY_OPEN", ((3, 0),), mines)
+                self.assertEqual(result.classification, expected)
+                self.assertFalse(result.proof_upgrade_allowed)
+                comparison, = result.findings[0].comparisons
+                self.assertIs(comparison.asserted_mine, False)
+                self.assertEqual(comparison.coordinate, (3, 0))
+                self.assertEqual(result.findings[0].counterexamples,
+                                 () if expected == "NO_COUNTEREXAMPLE" else ((3, 0),))
+
+    def test_j_k_productive_chord_opened_safe_set_and_one_mine_falsification(self):
+        for mines, expected in (({(1, 0)}, "NO_COUNTEREXAMPLE"),
+                                ({(1, 0), (3, 1)}, "G1_FALSIFICATION")):
+            with self.subTest(mines=mines):
+                result = self.check_one("CERTAINTY_CHORD_OPENED", ((3, 1), (3, 0)), mines)
+                finding, = result.findings
+                self.assertEqual(result.classification, expected)
+                self.assertEqual(finding.assertion.coordinates, ((3, 0), (3, 1)))
+                self.assertEqual(result.evaluated_coordinate_count, 2)
+                self.assertTrue(all(c.asserted_mine is False for c in finding.comparisons))
+                self.assertEqual(finding.counterexamples,
+                                 () if expected == "NO_COUNTEREXAMPLE" else ((3, 1),))
+
+    def test_initial_open_and_uncertain_exact_guess_are_excluded_even_when_they_hit_mines(self):
+        sealed = self.sealed(
+            evaluator.ArchivedAssertion("POLICY_INITIAL_OPEN", 0, ((0, 0),)),
+            evaluator.ArchivedAssertion("EXACT_MINIMUM_RISK_GUESS", 3, ((2, 0),)),
+        )
+        result = evaluator.evaluate_falsification(sealed, self.answer({(0, 0), (2, 0)}))
+        self.assertEqual(result.classification, "NOT_EVALUATED")
+        self.assertEqual(result.excluded_assertion_count, 2)
+        self.assertEqual(result.evaluated_coordinate_count, 0)
+        self.assertFalse(result.research_progression_must_stop)
+        self.assertFalse(result.proof_upgrade_allowed)
+        for finding in result.findings:
+            self.assertEqual(finding.classification, "EXCLUDED_NONCERTAINTY")
+            self.assertEqual(finding.comparisons, ())
+            self.assertEqual(finding.counterexamples, ())
+
+    def test_empty_m_is_explicitly_not_evaluated_and_initial_input_cannot_be_certainty(self):
+        result = evaluator.evaluate_falsification(
+            self.sealed(evaluator.ArchivedAssertion("LOGICAL_M", 0, ())), self.answer({(1, 0)}))
+        self.assertEqual(result.classification, "NOT_EVALUATED")
+        self.assertEqual(result.findings[0].classification, "NOT_EVALUATED")
+        for kind in ("LOGICAL_M", "CERTAINTY_OPEN", "CERTAINTY_CHORD_OPENED",
+                     "EXACT_MINIMUM_RISK_GUESS"):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                evaluator.ArchivedAssertion(kind, 0, ((0, 0),))
+        with self.assertRaises(ValueError):
+            evaluator.ArchivedAssertion("POLICY_INITIAL_OPEN", 1, ((0, 0),))
+
+    def test_l_result_answer_and_seal_are_rejected_by_capability_oracles_and_public_proof_apis(self):
+        result = self.check_one("LOGICAL_M", ((1, 0),), {(1, 0)})
+        owner, decision = public_decision(HISTORICAL, 1)
+        proof = decision.local.certificates[0]
+        forbidden = (result, result.sealed_input, self.answer({(1, 0)}))
+        for value in forbidden:
+            with self.subTest(type=type(value).__name__):
+                with self.assertRaises(KIntegrityError):
+                    owner.analyze_decision(value, status=PLAYING)
+                with self.assertRaises(KIntegrityError):
+                    select_policy(value, (0, 0), self.table)
+                with self.assertRaises(public_oracles.PublicProofError):
+                    public_oracles.enumerate_public_worlds(value, 1, status=PLAYING)
+                with self.assertRaises(public_oracles.PublicProofError):
+                    public_oracles.materialized_exact_reference(value, 1, status=PLAYING)
+                with self.assertRaises(public_oracles.PublicProofError):
+                    public_oracles.verify_local_certificate(value)
+                with self.assertRaises(public_oracles.PublicProofError):
+                    public_oracles.verify_exact_global_certificate(value)
+                with self.assertRaises(public_oracles.PublicProofError):
+                    public_oracles.verify_local_certificate(proof, prior_certificates=(value,))
+                self.assertEqual(evidence_records.compare_v1_decisions(value, value, boundary=1).status,
+                                 "INCOMPLETE")
+        self.assertEqual(owner.M, {(1, 0)})
+
+    def test_l_evaluator_keywords_cannot_be_attached_to_solver_or_public_proof_inputs(self):
+        result = self.check_one("LOGICAL_M", ((1, 0),), {(1, 0)})
+        owner, decision = public_decision(HISTORICAL, 1)
+        proof = decision.local.certificates[0]
+        for keyword in ("evaluator", "evaluator_result", "hidden_answer", "answer"):
+            for function, args, kwargs in (
+                (owner.analyze_decision, (HISTORICAL,), {"status": PLAYING}),
+                (select_policy, (decision, (0, 0), self.table), {}),
+                (public_oracles.enumerate_public_worlds, (HISTORICAL, 1), {"status": PLAYING}),
+                (public_oracles.materialized_exact_reference, (HISTORICAL, 1), {"status": PLAYING}),
+                (public_oracles.verify_local_certificate, (proof,), {}),
+            ):
+                with self.subTest(keyword=keyword, function=function.__name__), self.assertRaises(TypeError):
+                    function(*args, **kwargs, **{keyword: result})
+
+    def test_l_changing_truth_cannot_change_already_produced_or_next_public_decision(self):
+        owner, decision = public_decision(HISTORICAL, 1)
+        selected = select_policy(decision, (0, 0), self.table)
+        before = pickle.dumps((decision, selected, owner.M))
+        sealed = self.sealed(evaluator.ArchivedAssertion("LOGICAL_M", 1, owner.M), height=1)
+        correct = evaluator.evaluate_falsification(sealed, self.answer({(1, 0)}, height=1))
+        false = evaluator.evaluate_falsification(sealed, self.answer({(3, 0)}, height=1))
+        self.assertEqual(correct.classification, "NO_COUNTEREXAMPLE")
+        self.assertEqual(false.classification, "G1_FALSIFICATION")
+        self.assertNotEqual(correct.answer_digest, false.answer_digest)
+        self.assertEqual(pickle.dumps((decision, selected, owner.M)), before)
+        # A repeated public-prefix call is a pure unit check, not a resumed run.
+        fresh = owner.analyze_decision(HISTORICAL, status=PLAYING)
+        control_owner, _ = public_decision(HISTORICAL, 1)
+        control = control_owner.analyze_decision(HISTORICAL, status=PLAYING)
+        self.assertEqual(fresh, control)
+        self.assertEqual(select_policy(fresh, (0, 0), self.table),
+                         select_policy(control, (0, 0), self.table))
+        self.assertEqual(owner.M, {(1, 0)})
+
+    def test_l_two_public_consistent_answers_do_not_change_exact_guess_or_proofs(self):
+        # Both one-mine layouts satisfy the same single public clue.
+        public = ((H, 1, H),)
+        owner, decision = public_decision(public, 1)
+        selected = select_policy(decision, (0, 0), self.table)
+        sealed = self.sealed(evaluator.ArchivedAssertion(
+            "EXACT_MINIMUM_RISK_GUESS", 1, ((selected.move.x, selected.move.y),)), width=3, height=1)
+        prior = deepcopy((decision, selected))
+        for mines in ({(0, 0)}, {(2, 0)}):
+            result = evaluator.evaluate_falsification(sealed, self.answer(mines, width=3, height=1))
+            self.assertEqual(result.classification, "NOT_EVALUATED")
+            fresh = KLocalSession(3, 1, 1).analyze_decision(public, status=PLAYING)
+            self.assertEqual((decision, selected), prior)
+            self.assertEqual(fresh, decision)
+            self.assertEqual(select_policy(fresh, (0, 0), self.table), selected)
+            self.assertEqual(public_oracles.enumerate_public_worlds(public, 1, status=PLAYING).total_worlds, 2)
+        self.assertEqual(owner.M, frozenset())
+
+    def test_l_falsification_cannot_mutate_or_archive_repair_m_or_a_completed_unit_result(self):
+        produced = runner.run_k_p0(PublicPort(fixed_engine()), table=self.table)
+        archived_before = pickle.dumps(produced)
+        sealed = self.sealed(evaluator.ArchivedAssertion(
+            "LOGICAL_M", len(produced.traces) - 1, produced.final_M), height=1)
+        for mines, classification in (({(1, 0)}, "NO_COUNTEREXAMPLE"),
+                                      ({(3, 0)}, "G1_FALSIFICATION")):
+            result = evaluator.evaluate_falsification(sealed, self.answer(mines, height=1))
+            self.assertEqual(result.classification, classification)
+            self.assertEqual(pickle.dumps(produced), archived_before)
+            self.assertEqual(produced.final_M, {(1, 0)})
+            self.assertFalse(result.proof_upgrade_allowed)
+            with self.assertRaises((FrozenInstanceError, AttributeError, TypeError)):
+                result.sealed_input.assertions[0].coordinates = ()
+
+    def test_evaluator_requires_matching_case_run_dimensions_and_separate_answer_type(self):
+        sealed = self.sealed(evaluator.ArchivedAssertion("LOGICAL_M", 1, ((1, 0),)))
+        answer = self.answer({(1, 0)})
+        for changes in ({"case_id": "other-case"}, {"run_id": "other-run"},
+                        {"width": 5}, {"height": 3}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                evaluator.evaluate_falsification(sealed, replace(answer, **changes))
+        for value in (fixed_engine(), Untouchable(), {}, None, sealed):
+            with self.subTest(value=type(value).__name__), self.assertRaises(ValueError):
+                evaluator.evaluate_falsification(sealed, value)
+        for value in (fixed_engine(), Untouchable(), answer, (), None):
+            with self.subTest(value=type(value).__name__), self.assertRaises(ValueError):
+                evaluator.evaluate_falsification(value, answer)
+
+    def test_sealed_coordinates_are_true_integer_xy_and_have_deterministic_screen_order(self):
+        first = evaluator.ArchivedAssertion("LOGICAL_M", 2, ((0, 1), (3, 0), (1, 0)))
+        second = evaluator.ArchivedAssertion("LOGICAL_M", 2, frozenset({(1, 0), (0, 1), (3, 0)}))
+        self.assertEqual(first, second)
+        self.assertEqual(first.coordinates, ((1, 0), (3, 0), (0, 1)))
+        self.assertEqual(self.sealed(first).assertions_digest, self.sealed(second).assertions_digest)
+        for cells in ([(1, 0)], ((True, 0),), ((1.0, 0),), ((-1, 0),),
+                      ((30, 0),), ((1, 16),), ((1, 0), (1, 0)), Untouchable()):
+            with self.subTest(cells=type(cells).__name__), self.assertRaises(ValueError):
+                evaluator.ArchivedAssertion("LOGICAL_M", 1, cells)
+        with self.assertRaises(ValueError):
+            self.sealed(first, width=3)
+        for bad in (True, 1.0, -1, "1"):
+            with self.subTest(boundary=bad), self.assertRaises(ValueError):
+                evaluator.ArchivedAssertion("LOGICAL_M", bad, ())
+
+    def test_malformed_missing_or_reordered_sealed_evidence_is_rejected(self):
+        a = evaluator.ArchivedAssertion("LOGICAL_M", 1, ((1, 0),))
+        b = evaluator.ArchivedAssertion("CERTAINTY_OPEN", 2, ((3, 0),))
+        sealed = self.sealed(a, b)
+        for changes in ({"assertions": [a]}, {"assertions": (b, a)}, {"assertions": (a, a)},
+                        {"archive_digest": ""}, {"archive_digest": "g" * 64},
+                        {"case_id": " "}, {"width": True}, {"height": float("inf")}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(sealed, **changes)
+        corrupted = deepcopy(sealed)
+        object.__setattr__(corrupted.assertions[0], "coordinates", ((False, 0),))
+        with self.assertRaises(ValueError):
+            evaluator.evaluate_falsification(corrupted, self.answer({(1, 0)}))
+        result = evaluator.evaluate_falsification(sealed, self.answer({(1, 0)}))
+        with self.assertRaises(ValueError):
+            replace(result, findings=result.findings[:-1])
+        with self.assertRaises(ValueError):
+            replace(result, findings=result.findings[::-1])
+
+    def test_evaluator_records_are_recursively_immutable_detached_and_reconstructable(self):
+        sealed = self.sealed(evaluator.ArchivedAssertion("LOGICAL_M", 1, ((1, 0),)))
+        answer = self.answer({(1, 0)})
+        result = evaluator.evaluate_falsification(sealed, answer)
+
+        def inspect_record(value):
+            self.assertNotIsInstance(value, (MinesweeperEngine, KLocalSession, PublicPort))
+            self.assertFalse(callable(value))
+            if is_dataclass(value):
+                self.assertTrue(type(value).__dataclass_params__.frozen)
+                self.assertFalse(hasattr(value, "__dict__"))
+                for field in fields(value):
+                    inspect_record(getattr(value, field.name))
+            elif type(value) in (tuple, frozenset):
+                for child in value:
+                    inspect_record(child)
+            else:
+                self.assertIn(type(value), (str, int, bool))
+
+        for record in (sealed, answer, result):
+            inspect_record(record)
+            self.assertEqual(pickle.loads(pickle.dumps(record)), record)
+        self.assertEqual(result.answer_digest, answer.answer_digest)
+        self.assertEqual(len(sealed.assertions_digest), 64)
+        self.assertEqual(replace(sealed).assertions_digest, sealed.assertions_digest)
+        with self.assertRaises(FrozenInstanceError):
+            result.findings[0].comparisons[0].hidden_mine = False
+        self.assertNotIn("mines", {field.name for field in fields(result)})
+
+    def test_y_evaluator_imports_no_engine_solver_or_oracle_and_no_production_imports_it(self):
+        import runpy
+        blocked = {name: None for name in (
+            "core_engine", "simple_algorithm", "simple_probability", "simple_decision",
+            "stage3_planner", "stage3_runner", "experiments.program_k_capability",
+            "experiments.program_k_policy", "experiments.program_k_runner",
+            "experiments.program_k_oracles", "experiments.program_k_evidence",
+        )}
+        with patch.dict(sys.modules, blocked):
+            isolated = runpy.run_path(evaluator.__file__)
+            assertion = isolated["ArchivedAssertion"]("LOGICAL_M", 1, ((1, 0),))
+            sealed = isolated["SealedEvaluatorInput"]("unit", "unit", 4, 1, (assertion,), "b" * 64)
+            answer = isolated["HiddenAnswer"]("unit", "unit", 4, 1, frozenset({(1, 0)}))
+            result = isolated["evaluate_falsification"](sealed, answer)
+        self.assertEqual(result.classification, "NO_COUNTEREXAMPLE")
+        root = Path(__file__).resolve().parents[1]
+        paths = tuple(root.glob("*.py")) + tuple((root / "scripts").rglob("*.py"))
+        paths += tuple(root / "experiments" / ("program_k_" + name + ".py")
+                       for name in ("capability", "policy", "runner", "oracles", "evidence"))
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported = tuple(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    imported = (node.module or "",) + tuple(alias.name for alias in node.names)
+                else:
+                    continue
+                with self.subTest(source=str(path)):
+                    self.assertFalse(any("program_k_evaluator" in name for name in imported))
+
+
+class ProgramKSlice7ManifestTests(unittest.TestCase):
+    """Literal A-E4 implementation checks; no E0 dispatcher or P-8 scan."""
+
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_harness
+
+        cls.harness = program_k_harness
+        cls.manifest = program_k_harness.MANIFEST
+        cls.results = tuple(program_k_harness.verify_fixture(f) for f in cls.manifest)
+        cls.by_id = {r.fixture.fixture_id: r for r in cls.results}
+
+    def test_a_manifest_and_all_nested_evidence_are_immutable_deterministic(self):
+        harness = self.harness
+        self.assertIs(type(self.manifest), tuple)
+        before = harness.canonical_bytes(self.manifest)
+        digest = harness.content_digest(self.manifest)
+        for _ in range(3):
+            self.assertEqual(harness.canonical_bytes(self.manifest), before)
+            self.assertEqual(harness.content_digest(self.manifest), digest)
+            self.assertEqual(harness.reconstruct(before, expected_digest=digest), self.manifest)
+        self.assertEqual(len(digest), 64)
+
+        def check_immutable(value):
+            if is_dataclass(value):
+                self.assertTrue(type(value).__dataclass_params__.frozen)
+                for field in fields(value):
+                    check_immutable(getattr(value, field.name))
+            elif type(value) is tuple:
+                for child in value:
+                    check_immutable(child)
+            else:
+                self.assertIn(type(value), (str, int, type(None)))
+
+        check_immutable(self.manifest)
+        with self.assertRaises(FrozenInstanceError):
+            self.manifest[0].num_mines = 2
+        with self.assertRaises(FrozenInstanceError):
+            self.manifest[0].expectations[0].Z = 7
+        with self.assertRaises(TypeError):
+            self.manifest[0].observation[0][0] = 0
+        with self.assertRaises(TypeError):
+            self.manifest[0].expectations[0].mine_worlds[0] = ((0, 0), 99)
+
+    def test_b_required_fixture_identities_exist_exactly_once(self):
+        names = tuple(f.fixture_id for f in self.manifest)
+        self.assertEqual(names, self.harness.REQUIRED_FIXTURE_IDS)
+        self.assertEqual(len(names), 30)
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue({
+            "no-new-m", "historical-normalized-safe", "simultaneous-local-acquisition",
+            "public-fixed-mine-basis", "frontier-only", "floating-only",
+            "frontier-floating", "multiple-components-floating", "g0-only", "g1-only",
+            "simultaneous-g1-g0", "g1-restriction", "empty-g1", "exact-equal-risk-tie",
+            "empty-u-entry", "empty-u-local", "empty-u-global", "zero-world",
+            "physical-logical-overlap", "arithmetic-extreme",
+        } <= set(names))
+        for fixture in self.manifest:
+            self.assertEqual((len(fixture.observation[0]), len(fixture.observation)),
+                             (fixture.width, fixture.height))
+            self.assertEqual(len(fixture.expectations),
+                             len({e.phase for e in fixture.expectations}))
+            self.assertTrue(fixture.intended_check)
+            self.assertTrue(fixture.rationale)
+
+    def test_c_import_preregisters_literals_without_any_solver_or_oracle_call(self):
+        from contextlib import ExitStack
+        from dataclasses import asdict
+        import runpy
+
+        blocked = (
+            "experiments.program_k_capability.KLocalSession.analyze_local",
+            "experiments.program_k_capability.KLocalSession.analyze_decision",
+            "experiments.program_k_oracles.enumerate_public_worlds",
+            "experiments.program_k_oracles.materialized_exact_reference",
+            "experiments.program_k_oracles.verify_local_certificate",
+            "experiments.program_k_oracles.verify_exact_global_certificate",
+            "simple_algorithm.build_constraints", "simple_algorithm.infer_deterministic",
+            "simple_probability.calculate_probabilities", "simple_decision.analyze_position",
+        )
+        with ExitStack() as stack:
+            sentinels = tuple(stack.enter_context(patch(name, side_effect=AssertionError(name)))
+                              for name in blocked)
+            imported = runpy.run_path(self.harness.__file__)
+        for sentinel in sentinels:
+            sentinel.assert_not_called()
+        self.assertEqual(tuple(asdict(f) for f in imported["MANIFEST"]),
+                         tuple(asdict(f) for f in self.manifest))
+        self.assertIn("independent stdlib-only", imported["MANIFEST_DERIVATION"])
+        # The import operation itself produces only declarations, never a
+        # qualification result or a populated set of computed expectations.
+        self.assertFalse(any(type(value) is self.harness.FixtureVerification
+                             for value in imported.values()))
+
+    def test_d_every_bounded_phase_matches_literal_complete_oracle_a_evidence(self):
+        checked = 0
+        for result in self.results:
+            with self.subTest(fixture=result.fixture.fixture_id):
+                self.assertEqual(result.status, "PASS", (result.discrepancies,
+                                 tuple(p.discrepancies for p in result.phases)))
+                self.assertEqual(tuple(p.expectation for p in result.phases),
+                                 result.fixture.expectations)
+                for phase in result.phases:
+                    expectation = phase.expectation
+                    self.assertEqual(phase.oracle_a_coverage.status, expectation.oracle_a_status)
+                    if expectation.oracle_a_status == "ORACLE_A_NOT_EVALUATED":
+                        self.assertIsNone(phase.oracle_a)
+                        self.assertGreater(phase.oracle_a_coverage.variable_count, 16)
+                        self.assertTrue(phase.oracle_a_coverage.reason)
+                        continue
+                    checked += 1
+                    self.assertLessEqual(phase.oracle_a_coverage.variable_count, 16)
+                    self.assertEqual(phase.oracle_a.total_worlds, expectation.Z)
+                    self.assertEqual(phase.oracle_a.mine_worlds, expectation.mine_worlds)
+                    self.assertEqual(phase.oracle_a.G0, frozenset(expectation.G0))
+                    self.assertEqual(phase.oracle_a.G1, frozenset(expectation.G1))
+                    self.assertEqual(phase.oracle_a_coverage.envelope, 16)
+                    self.assertIsNone(phase.oracle_a_coverage.reason)
+        self.assertEqual(checked, 71)
+
+    def test_e_k_and_shared_kernel_b_compare_only_at_reached_exact_phases(self):
+        for result in self.results:
+            with self.subTest(fixture=result.fixture.fixture_id):
+                for phase in result.phases:
+                    expectation = phase.expectation
+                    if expectation.phase in ("D", "E"):
+                        self.assertIsNotNone(result.decision)
+                        exact = (result.decision.phase_d if expectation.phase == "D"
+                                 else result.decision.phase_e)
+                        self.assertEqual(exact.total_worlds, expectation.Z)
+                        self.assertEqual(exact.mine_worlds, expectation.mine_worlds)
+                        self.assertEqual(exact.frontier_cells, expectation.frontier)
+                        self.assertEqual(exact.unconstrained_cells, expectation.floating)
+                        self.assertEqual(phase.oracle_b.total_worlds, expectation.Z)
+                        self.assertEqual(phase.oracle_b.mine_worlds, expectation.mine_worlds)
+                        self.assertEqual(phase.oracle_b_status, "SHARED-KERNEL REPRESENTATION EVIDENCE")
+                        self.assertEqual(phase.oracle_b.kernel, "simple_probability.calculate_probabilities")
+                    else:
+                        self.assertIsNone(phase.oracle_b)
+                        self.assertEqual(phase.oracle_b_status, "NOT_REACHED")
+                if result.decision is not None and result.fixture.continuation == "LOCAL_SAFE":
+                    self.assertIsNone(result.decision.phase_d)
+                    self.assertIsNone(result.decision.phase_e)
+                    self.assertEqual(result.decision.phase_e_status, "NOT_REACHED")
+                self.assertTrue(all(a.status == "PASS" for a in result.acquisition_audits))
+        with patch("simple_decision.analyze_position", side_effect=AssertionError("fresh scheduler")):
+            self.assertEqual(self.harness.verify_fixture(
+                self.by_id["g1-restriction"].fixture).status, "PASS")
+
+    def test_f_transforms_freshly_pin_dimensions_order_winner_cursor_cost_and_route(self):
+        expected = {
+            "reflect-historical": ((4, 1), ((0, 0), (2, 0)), (0, 0), (0, 0, 126005),
+                                   (("OPEN", (0, 0)),), 126005),
+            "transpose-historical": ((1, 4), ((0, 1), (0, 3)), (0, 3), (0, 3, 227896),
+                                     (("OPEN", (0, 3)),), 227896),
+            "reflect-tie": ((3, 2), ((0, 0), (1, 0), (2, 0), (1, 1), (2, 1)),
+                            (0, 0), (0, 0, 126005), None, None),
+            "transpose-tie": ((2, 3), ((1, 0), (0, 1), (1, 1), (0, 2), (1, 2)),
+                              (1, 0), (1, 0, 126005), None, None),
+        }
+        for name, (dimensions, order, target, lookup, route, latency) in expected.items():
+            result = self.by_id[name]
+            fixture = result.fixture
+            with self.subTest(fixture=name):
+                self.assertEqual((fixture.width, fixture.height), dimensions)
+                self.assertEqual(fixture.screen_order, order)
+                self.assertEqual(fixture.cursor, (0, 0))
+                self.assertEqual(fixture.expected_target, target)
+                self.assertEqual(fixture.model_c_lookup, lookup)
+                self.assertEqual(fixture.expected_route, route)
+                self.assertEqual(fixture.expected_latency_us, latency)
+                self.assertEqual((result.selection.move.x, result.selection.move.y), target)
+                if route is None:
+                    self.assertIsNone(result.selection.plan)
+                else:
+                    self.assertEqual(tuple((m.action.name, (m.x, m.y))
+                                           for m in result.selection.plan.actions), route)
+                    self.assertEqual(result.selection.plan.latency_us, latency)
+        # Both mapped old winners are explicitly wrong, despite valid geometry.
+        for name, blindly_mapped in (("transpose-tie", (0, 1)), ("reflect-tie", (1, 1))):
+            fixture = self.by_id[name].fixture
+            self.assertNotEqual(fixture.tie_target, blindly_mapped)
+            corrupted = replace(fixture, tie_target=blindly_mapped, expected_target=blindly_mapped)
+            checked = self.harness.verify_fixture(corrupted)
+            self.assertEqual(checked.status, "FAIL")
+            self.assertTrue(any("tie" in d or "target" in d for d in checked.discrepancies))
+
+    def test_g_variable_component_and_floating_weighting_pin_every_marginal(self):
+        single = self.by_id["frontier-floating"].decision.phase_d
+        self.assertEqual(single.total_worlds, 3)
+        self.assertEqual(single.mine_worlds, (
+            ((0, 0), 1), ((2, 0), 2), ((4, 0), 1), ((5, 0), 1), ((6, 0), 1)))
+        self.assertEqual(single.frontier_cells, ((0, 0), (2, 0), (4, 0)))
+        self.assertEqual(single.unconstrained_cells, ((5, 0), (6, 0)))
+        multi = self.by_id["multiple-components-floating"].decision.phase_d
+        self.assertEqual(multi.total_worlds, 10)
+        self.assertEqual(multi.mine_worlds, (
+            ((0, 0), 4), ((2, 0), 6), ((4, 0), 4), ((5, 0), 4), ((6, 0), 4),
+            ((7, 0), 4), ((8, 0), 4), ((10, 0), 6), ((12, 0), 4)))
+        self.assertEqual(multi.frontier_cells, ((0, 0), (2, 0), (4, 0), (8, 0), (10, 0), (12, 0)))
+        self.assertEqual(multi.unconstrained_cells, ((5, 0), (6, 0), (7, 0)))
+        # Sum of all mine indicators equals global mine total in every world.
+        self.assertEqual(sum(n for _, n in single.mine_worlds), 2 * single.total_worlds)
+        self.assertEqual(sum(n for _, n in multi.mine_worlds), 4 * multi.total_worlds)
+
+    def test_h_arithmetic_extreme_preserves_unrepresentable_integer_counts(self):
+        result = self.by_id["arithmetic-extreme"]
+        expected_z, expected_m = 88004802264174740, 39602161018878633
+        self.assertEqual((result.fixture.width, result.fixture.height, result.fixture.num_mines),
+                         (30, 2, 27))
+        for phase in result.phases:
+            self.assertEqual(phase.expectation.Z, expected_z)
+            self.assertEqual(len(phase.expectation.mine_worlds), 60)
+            self.assertTrue(all(type(n) is int and n == expected_m
+                                for _, n in phase.expectation.mine_worlds))
+            self.assertEqual(phase.oracle_a_coverage.status, "ORACLE_A_NOT_EVALUATED")
+            self.assertEqual(phase.oracle_a_coverage.variable_count, 60)
+            self.assertIsNone(phase.oracle_a)
+        exact = result.decision.phase_d
+        self.assertIs(type(exact.total_worlds), int)
+        self.assertEqual(exact.total_worlds, expected_z)
+        self.assertEqual(exact.minimum_risk, Fraction(9, 20))
+        self.assertNotEqual(int(float(expected_z)), expected_z)
+        self.assertNotEqual(int(float(expected_m)), expected_m)
+        self.assertEqual(exact.G0, frozenset())
+        self.assertEqual(exact.G1, frozenset())
+        self.assertEqual(result.decision.guess_target, (0, 0))
+
+    def test_i_zero_world_and_each_empty_u_failure_are_registered_rejections(self):
+        for name, code in (("zero-world", "ZERO_WORLDS"),
+                           ("empty-u-entry", "EMPTY_U_PLAYING"),
+                           ("empty-u-local", "EMPTY_U_PLAYING"),
+                           ("empty-u-global", "EMPTY_U_PLAYING")):
+            result = self.by_id[name]
+            with self.subTest(fixture=name):
+                self.assertEqual(result.status, "PASS")  # Detection test only.
+                self.assertEqual(result.failure_code, code)
+                self.assertIsNone(result.decision)
+                self.assertIsNone(result.selection)
+                self.assertEqual(result.final_M, frozenset())
+                self.assertEqual(tuple(p.expectation.phase for p in result.phases), ("A",))
+        zero = self.by_id["zero-world"].phases[0].oracle_a
+        self.assertEqual(zero.total_worlds, 0)
+        self.assertEqual(zero.mine_worlds, (((0, 0), 0), ((2, 0), 0)))
+        self.assertEqual((zero.G0, zero.G1), (frozenset(), frozenset()))
+
+    def test_j_changed_manifest_expectation_is_detected_and_original_not_modified(self):
+        fixture = self.by_id["frontier-floating"].fixture
+        before = self.harness.canonical_bytes(self.manifest)
+        expected = fixture.expectations[0]
+        changed = replace(expected, mine_worlds=(((0, 0), 2),) + expected.mine_worlds[1:])
+        corrupted = replace(fixture, expectations=(changed,) + fixture.expectations[1:])
+        checked = self.harness.verify_fixture(corrupted)
+        self.assertEqual(checked.status, "FAIL")
+        self.assertTrue(any("numerators" in d for p in checked.phases for d in p.discrepancies))
+        changed_z = replace(expected, Z=4)
+        checked = self.harness.verify_fixture(replace(
+            fixture, expectations=(changed_z,) + fixture.expectations[1:]))
+        self.assertEqual(checked.status, "FAIL")
+        self.assertEqual(self.harness.canonical_bytes(self.manifest), before)
+        self.assertEqual(self.harness.verify_fixture(fixture).status, "PASS")
+
+    def test_k_public_provenance_and_overlap_preserve_owned_m_without_double_counting(self):
+        for name in ("logical-fixed-mine", "physical-logical-overlap",
+                     "local-physical-logical-overlap"):
+            result = self.by_id[name]
+            with self.subTest(fixture=name):
+                self.assertTrue(result.fixture.public_prefix)
+                self.assertTrue(result.fixture.provenance)
+                self.assertTrue(result.prefix_decisions)
+                self.assertEqual(result.prefix_decisions[-1].after.M,
+                                 frozenset(result.fixture.pre_acquisition_M))
+                self.assertEqual(result.final_M, frozenset({(1, 0)}))
+                self.assertTrue(all(a.status == "PASS" for a in result.acquisition_audits))
+        logical = self.by_id["logical-fixed-mine"].decision
+        overlap = self.by_id["physical-logical-overlap"].decision
+        self.assertEqual(overlap.after.P & overlap.after.M, frozenset({(1, 0)}))
+        self.assertEqual(overlap.after.J, frozenset({(1, 0)}))
+        self.assertEqual(overlap.after.b, 1)
+        self.assertEqual(overlap.phase_d, logical.phase_d)
+
+
+
+class ProgramKSlice7QualificationTests(unittest.TestCase):
+    """Synthetic implementation readiness; never execute the E0 dispatcher."""
+
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_harness as h
+        cls.h = h
+        cls.env = h.OperatingEnvelope(
+            "synthetic-runtime", "synthetic-machine", "synthetic-python",
+            10000, 30000, 120000, 1000, 1000, 1000000000, 100000000, 100,
+            "UNIT_ONLY", "Explicit synthetic containment for unit verification.")
+        public = h.collect_unit_readiness(run_id="slice7-unit", envelope=cls.env)
+        findings = []
+        for archive in public.execution_evidence.archives:
+            if archive.variant in ("K-P0", "K-CONTROL"):
+                sealed = h.seal_execution_archive(archive, run_id=public.run_id)
+                # Tiny test construction's answer is confined to evaluator input.
+                mines = (frozenset({(1, 0)}) if sealed.width == 4 else
+                         frozenset({(1, 0), (2, 0)}) if sealed.height == 1 else
+                         frozenset({(1, 2), (3, 2)}))
+                answer = evaluator.HiddenAnswer(sealed.case_id, public.run_id,
+                                                 sealed.width, sealed.height, mines)
+                findings.append(evaluator.evaluate_falsification(sealed, answer))
+        cls.record = replace(public, evaluator_findings=tuple(findings))
+
+    def test_ready_except_execution_is_not_e0_pass(self):
+        outcome = self.h.assess_qualification(self.record)
+        self.assertEqual(outcome.verdict, "INCOMPLETE")
+        self.assertEqual(outcome.readiness, "READY_EXCEPT_EXECUTION")
+        self.assertFalse(outcome.progression_allowed)
+        self.assertEqual(outcome.p8_gate.classification, "MISSING_P8")
+        self.assertTrue(all(g.status == "PASS" for g in outcome.gates if g.gate_id != "P-8"))
+        self.assertEqual(self.record.purpose, "IMPLEMENTATION_UNIT_READINESS")
+        self.assertEqual(self.record.operational_receipts, ())
+
+    def test_required_envelope_and_all_limits_are_exact_positive(self):
+        h = self.h
+        with self.assertRaises(h.QualificationError):
+            h.collect_unit_readiness(run_id="unit", envelope=None)
+        with self.assertRaises(h.QualificationError):
+            h.preflight_e0(envelope=None, source_identity=self.record.source_identity, p8=None)
+        numeric = tuple(f.name for f in fields(self.env)
+                        if type(getattr(self.env, f.name)) is int)
+        for name in numeric:
+            for invalid in (0, -1, True, 1.0, float("inf"), float("nan"), "10", None):
+                with self.subTest(name=name, invalid=invalid), self.assertRaises(ValueError):
+                    replace(self.env, **{name: invalid})
+        for name in ("machine_identity", "runtime_identity", "python_identity",
+                     "monitoring_policy", "rationale"):
+            with self.assertRaises(ValueError):
+                replace(self.env, **{name: " "})
+        with self.assertRaises(FrozenInstanceError):
+            self.env.max_case_wall_ms = 100
+
+    def test_operational_system_abort_and_shadow_timeout_are_separate(self):
+        h = self.h
+        sample = h.ResourceSample(0, 0, 0, 0, 0, 0, 0)
+        self.assertEqual(h.check_operating_limits(self.env, sample), "WITHIN_ENVELOPE")
+        checks = (
+            ("case_elapsed_ns", self.env.max_case_wall_ms*1000000, "SYSTEM_CASE_TIMEOUT"),
+            ("job_elapsed_ns", self.env.max_job_wall_ms*1000000, "SYSTEM_JOB_TIMEOUT"),
+            ("decision_elapsed_ns", self.env.max_decision_wall_ms*1000000, "SYSTEM_DECISION_TIMEOUT"),
+            ("physical_inputs", self.env.max_physical_inputs_per_case+1, "SYSTEM_INPUT_CAP"),
+            ("memory_bytes", self.env.memory_cap_bytes+1, "SYSTEM_MEMORY_CAP"),
+            ("archive_bytes", self.env.archive_cap_bytes+1, "SYSTEM_ARCHIVE_CAP"),
+            ("shadow_elapsed_ns", self.env.shadow_timeout_ms*1000000, "SHADOW_ONLY_TIMEOUT_P5"),
+        )
+        for name, value, expected in checks:
+            with self.subTest(reason=expected):
+                self.assertEqual(h.check_operating_limits(self.env, replace(sample, **{name:value})), expected)
+        self.assertEqual(h.check_operating_limits(self.env, replace(sample,
+            shadow_elapsed_ns=1000000000, case_elapsed_ns=30000000000)), "SYSTEM_CASE_TIMEOUT")
+
+    def test_preflight_refuses_without_machine_identity_or_full_p8(self):
+        p = self.h.preflight_e0(envelope=self.env, source_identity=self.record.source_identity, p8=None)
+        self.assertEqual(p.status, "INCOMPLETE")
+        self.assertIn("MISSING_P8", p.reasons)
+        self.assertIn("MACHINE_RUNTIME_IDENTITY_NOT_PINNED", p.reasons)
+        self.assertIn("ENFORCEABLE_MONITOR_UNAVAILABLE", p.reasons)
+
+    def test_p8_missing_interrupted_private_never_satisfy_research_gate(self):
+        h = self.h
+        # Authenticates only, interrupted BEFORE the first triple. No full scan.
+        interrupted = public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+        self.assertEqual(interrupted.visited_triple_count, 0)
+        self.assertEqual(interrupted.expected_triple_count, 110361600)
+        private = public_oracles._check_p8_table(((7, 7), (7, 7)))
+        self.assertEqual(private.status, "PASS")  # PRIVATE status, never research.
+        private_bad = public_oracles._check_p8_table(((1,), (1,), (3,)))
+        for result, classification in ((None, "MISSING_P8"), (interrupted, "INTERRUPTED_P8"),
+                (private, "PRIVATE_CHECK_NOT_RESEARCH_EVIDENCE"),
+                (private_bad, "PRIVATE_CHECK_NOT_RESEARCH_EVIDENCE")):
+            with self.subTest(classification=classification):
+                gate = h.check_p8_gate(result)
+                self.assertEqual((gate.status, gate.classification), ("INCOMPLETE", classification))
+                assessment = h.assess_qualification(replace(self.record, p8_reference=result))
+                self.assertEqual(assessment.verdict, "INCOMPLETE")
+                self.assertFalse(assessment.progression_allowed)
+        with patch.object(public_oracles, "check_frozen_p8", side_effect=AssertionError("no scan")):
+            self.assertEqual(h.check_p8_gate(interrupted).status, "INCOMPLETE")
+        corrupt = deepcopy(interrupted)
+        object.__setattr__(corrupt, "checker_source_sha256", "0"*64)
+        self.assertEqual(h.check_p8_gate(corrupt).classification, "IMPLEMENTATION_IDENTITY_FAIL")
+        self.assertEqual(h.check_p8_gate(object()).status, "FAIL")
+
+    def test_external_flag_checked_before_k_local_certificate_without_entering_m(self):
+        h = self.h
+        prefix = ((1, H, H, H, H),)
+        v1 = plan_position(prefix, 2, (0, 0), load_timing_table())
+        flag = evidence_records.make_v1_flag_provenance(prefix, v1, num_mines=2, boundary=1)
+        observation = ((1, F, 2, H, H),)
+        inputs = runner._shadow_input(observation, 5, 1, 2, (1, 0),
+                                       frozenset(), frozenset({(1, 0)}))
+        decision = runner._analyze_shadow(inputs)
+        certificate = decision.local.certificates[0]
+        audit = h.audit_acquisition(certificate, boundary=3, external_flags=(flag,))
+        self.assertEqual(audit.status, "PASS")
+        self.assertEqual(audit.external_flags[0].verification.status, "PASS")
+        self.assertIs(audit.external_flags[0].record, flag)
+        self.assertEqual(audit.certificate, certificate)
+        self.assertEqual(audit.owned_M_before, frozenset())
+        self.assertEqual(audit.owned_M_after, frozenset({(3, 0)}))
+        self.assertNotIn((1, 0), decision.after.M)
+        self.assertFalse(flag.enters_M)
+        self.assertEqual(h.audit_acquisition(certificate, boundary=3).status, "INCOMPLETE")
+        self.assertEqual(h.audit_acquisition(certificate, boundary=3, external_flags=(object(),)).status, "FAIL")
+        self.assertEqual(h.audit_acquisition(certificate, boundary=1, external_flags=(flag,)).status, "FAIL")
+
+    def test_unbounded_external_exact_flag_is_not_evaluated(self):
+        h = self.h
+        observation = ((H, 1, H) + (H,)*15,)
+        v1 = plan_position(observation, 16, (0, 0), load_timing_table())
+        flag = evidence_records.make_v1_flag_provenance(observation, v1, num_mines=16, boundary=1)
+        row = list(observation[0])
+        row[flag.move.x] = F
+        certificate = public_oracles.LocalMineCertificate(
+            (tuple(row),), 16, (1, 0), (0, 0), frozenset(), PLAYING)
+        audit = h.audit_acquisition(certificate, boundary=2, external_flags=(flag,))
+        self.assertEqual(audit.status, "NOT_EVALUATED")
+        self.assertIsNone(audit.certificate_check)
+        self.assertEqual(audit.external_flags[0].public_support, ())
+
+    def test_all_mandatory_fields_reconstruct_losslessly(self):
+        h = self.h
+        data = h.canonical_bytes(self.record)
+        restored = h.reconstruct(data, expected_digest=h.content_digest(self.record))
+        self.assertEqual(data, h.canonical_bytes(restored))
+        self.assertEqual(restored, self.record)
+        self.assertEqual(len(restored.fixture_results), 30)
+        self.assertEqual(len(restored.probe_results), len(h.PROBES))
+        self.assertEqual(len(restored.execution_evidence.archives), 6)
+        self.assertEqual(len(restored.execution_evidence.guess_comparisons), 1)
+        self.assertEqual(restored.execution_evidence.guess_comparisons[0].status, "PASS")
+        self.assertTrue(restored.execution_evidence.o4_comparisons)
+        self.assertTrue(restored.execution_evidence.acquisition_audits)
+        self.assertTrue(restored.execution_evidence.timing_coverage)
+        self.assertTrue(restored.evaluator_findings)
+        self.assertIsNone(restored.p8_reference)
+        self.assertEqual(h.assess_qualification(restored).verdict, "INCOMPLETE")
+        with self.assertRaises(FrozenInstanceError):
+            restored.fixture_results = ()
+
+    def test_missing_mandatory_evidence_never_passes(self):
+        h = self.h
+        samples = (
+            replace(self.record, fixture_results=self.record.fixture_results[:-1]),
+            replace(self.record, probe_results=self.record.probe_results[:-1]),
+            replace(self.record, evaluator_findings=()),
+            replace(self.record, interruptions=("SYSTEM_CASE_TIMEOUT: incomplete physical stream",)),
+            replace(self.record, fixture_results=(replace(self.record.fixture_results[0], phases=()),)
+                    + self.record.fixture_results[1:]),
+            replace(self.record, probe_results=(replace(self.record.probe_results[0],
+                executed_tests=self.record.probe_results[0].executed_tests[:-1]),)+self.record.probe_results[1:]),
+        )
+        for record in samples:
+            with self.subTest(kind=h.content_digest(record)):
+                outcome = h.assess_qualification(record)
+                self.assertFalse(outcome.progression_allowed)
+                self.assertNotEqual(outcome.readiness, "READY_EXCEPT_EXECUTION")
+
+    def test_corrupt_literal_source_receipt_and_same_id_fixture_are_detected(self):
+        h = self.h
+        first = self.record.fixture_results[0]
+        altered_fixture = replace(first.fixture, rationale="Unregistered same-ID substitute")
+        altered_result = h.verify_fixture(altered_fixture)
+        samples = (
+            replace(self.record, fixture_results=(altered_result,)+self.record.fixture_results[1:]),
+            replace(self.record, manifest_digest="0"*64),
+            replace(self.record, probe_results=(replace(self.record.probe_results[0],
+                source_digest="0"*64),)+self.record.probe_results[1:]),
+            replace(self.record, diagnosed_implementation_defects=("Diagnosed corrupted evidence",)),
+        )
+        for record in samples:
+            self.assertEqual(h.assess_qualification(record).verdict, "IMPLEMENTATION_IDENTITY_FAIL")
+
+    def test_execution_evidence_omission_and_relabeling_are_detected(self):
+        h = self.h
+        original = self.record.execution_evidence.archives
+        treatments = [i for i,a in enumerate(original) if a.variant == "K-P0"]
+        controls = [i for i,a in enumerate(original) if a.variant == "K-CONTROL"]
+        def changed_archive(index, mapper):
+            a = original[index]
+            changed = replace(a, result=replace(a.result, traces=tuple(mapper(t) for t in a.result.traces)))
+            return original[:index]+(changed,)+original[index+1:]
+        for index in controls:
+            archives = changed_archive(index, lambda t: replace(t, shadow=replace(t.shadow, decision=None)))
+            self.assertNotEqual(h.verify_execution_archives(archives).status, "PASS")
+        for index in treatments:
+            def strip(t):
+                if t.selection is None:
+                    return t
+                d = t.selection.evidence
+                d = replace(d, local=replace(d.local, certificates=()), exact_certificates=())
+                return replace(t, selection=replace(t.selection, evidence=d))
+            self.assertNotEqual(h.verify_execution_archives(changed_archive(index, strip)).status, "PASS")
+            if any(t.input_index and t.category != "EXACT_MINIMUM_RISK_GUESS"
+                   for t in original[index].result.traces):
+                self.assertNotEqual(h.verify_execution_archives(changed_archive(index,
+                    lambda t: replace(t, category="EXACT_MINIMUM_RISK_GUESS") if t.input_index else t)).status, "PASS")
+        flagged = next(i for i in controls if any(t.external_flag for t in original[i].result.traces))
+        self.assertNotEqual(h.verify_execution_archives(changed_archive(flagged,
+            lambda t: replace(t, external_flag=None))).status, "PASS")
+        self.assertNotEqual(h.verify_execution_archives(original[:-1]).status, "PASS")
+
+    def test_falsification_is_g1_fail_with_unresolved_overall_diagnosis(self):
+        h = self.h
+        original = next(f for f in self.record.evaluator_findings if f.sealed_input.case_id.endswith(":K-P0"))
+        sealed = original.sealed_input
+        false_answer = evaluator.HiddenAnswer(sealed.case_id, sealed.run_id, 4, 1,
+                                               frozenset({(3, 0)}))
+        finding = evaluator.evaluate_falsification(sealed, false_answer)
+        self.assertEqual(finding.classification, "G1_FALSIFICATION")
+        altered = replace(self.record, evaluator_findings=tuple(
+            finding if f is original else f for f in self.record.evaluator_findings))
+        result = h.assess_qualification(altered)
+        self.assertEqual(result.verdict, "INCOMPLETE")
+        self.assertEqual(next(g.status for g in result.gates if g.gate_id == "EVALUATOR-FALSIFICATION"), "FAIL")
+        self.assertFalse(result.progression_allowed)
+        self.assertEqual(altered.fixture_results, self.record.fixture_results)
+        self.assertEqual(altered.execution_evidence, self.record.execution_evidence)
+
+    def test_canonical_digest_strict_order_exact_ints_and_truth_exclusion(self):
+        h = self.h
+        value = (frozenset({(3, 0), (0, 1), (1, 0)}), Fraction(9, 20), 88004802264174740)
+        self.assertEqual(h.canonical_bytes(value), h.canonical_bytes(
+            (frozenset({(0, 1), (1, 0), (3, 0)}), Fraction(9, 20), 88004802264174740)))
+        self.assertNotEqual(h.canonical_bytes(((1,0),(3,0))), h.canonical_bytes(((3,0),(1,0))))
+        self.assertEqual(h.reconstruct(h.canonical_bytes(value)), value)
+        with self.assertRaises(ValueError):
+            h.reconstruct(h.canonical_bytes(value), expected_digest="0"*64)
+        with self.assertRaises(ValueError):
+            h.reconstruct(b'{"x":1,"x":2}')
+        with self.assertRaises(ValueError):
+            h.canonical_bytes(1.0)
+        with self.assertRaises(ValueError):
+            h.canonical_bytes(evaluator.HiddenAnswer("case", "run", 2, 1, frozenset({(1,0)})))
+
+    def test_artifact_complete_write_no_overwrite_and_corruption_detection(self):
+        from tempfile import TemporaryDirectory
+        h = self.h
+        with TemporaryDirectory() as tmp:
+            receipt = h.persist_qualification(self.record, repository_root=tmp)
+            folder = Path(tmp)/"results"/"program_k_research"/self.record.run_id
+            restored, recovered, assessment = h.read_qualification_artifact(folder)
+            self.assertEqual(h.canonical_bytes(restored), h.canonical_bytes(self.record))
+            self.assertEqual(receipt, recovered)
+            self.assertEqual(receipt.completion_marker, "COMPLETE")
+            self.assertEqual(assessment.verdict, "INCOMPLETE")
+            with self.assertRaises(FileExistsError):
+                h.persist_qualification(self.record, repository_root=tmp)
+            data = (folder/"qualification.json").read_bytes()
+            (folder/"qualification.json").write_bytes(data+b" ")
+            with self.assertRaises(ValueError):
+                h.read_qualification_artifact(folder)
+        with TemporaryDirectory() as tmp:
+            small = replace(self.record, operating_envelope=replace(self.env, archive_cap_bytes=1))
+            with self.assertRaises(ValueError):
+                h.persist_qualification(small, repository_root=tmp)
+            self.assertFalse((Path(tmp)/"results").exists())
+
+
+
+    def test_p3_retained_comparator_and_registered_probe_are_mandatory(self):
+        h = self.h
+        self.assertIn("P-3", tuple(p.gate_id for p in h.PROBES))
+        comparison = self.record.execution_evidence.guess_comparisons[0]
+        self.assertEqual(comparison.status, "PASS")
+        for evidence in ((), ("malformed",), (replace(comparison, control=None),)):
+            with self.subTest(evidence=type(evidence[0]).__name__ if evidence else "absent"):
+                execution = replace(self.record.execution_evidence, guess_comparisons=evidence)
+                self.assertEqual(h.verify_retained_guess_comparisons(execution).status, "INCOMPLETE")
+                outcome = h.assess_qualification(replace(self.record, execution_evidence=execution))
+                self.assertFalse(outcome.progression_allowed)
+                self.assertNotEqual(outcome.readiness, "READY_EXCEPT_EXECUTION")
+        altered = replace(comparison, status="FAIL", differences=("fabricated divergence",))
+        execution = replace(self.record.execution_evidence, guess_comparisons=(altered,))
+        self.assertEqual(h.verify_retained_guess_comparisons(execution).status, "FAIL")
+        record = replace(self.record, probe_results=tuple(
+            p for p in self.record.probe_results if p.gate_id != "P-3"))
+        self.assertFalse(h.assess_qualification(record).progression_allowed)
+
+
+    def test_missing_physical_effect_is_incomplete_and_cannot_seal(self):
+        h = self.h
+        def omit(archive):
+            if archive.variant != "K-P0":
+                return archive
+            result = archive.result
+            traces = (replace(result.traces[0], public_effect=None),) + result.traces[1:]
+            return replace(archive, result=replace(result, traces=traces))
+        probes = tuple(replace(p, execution_archives=tuple(omit(a) for a in p.execution_archives))
+                       for p in self.record.probe_results)
+        execution = h.verify_execution_archives(tuple(a for p in probes for a in p.execution_archives))
+        self.assertEqual(execution.status, "INCOMPLETE")
+        altered = replace(self.record, probe_results=probes, execution_evidence=execution)
+        assessment = h.assess_qualification(altered)
+        self.assertEqual(assessment.verdict, "INCOMPLETE")
+        self.assertNotEqual(assessment.readiness, "READY_EXCEPT_EXECUTION")
+
+    def test_research_receipt_assessment_never_dispatches_unmonitored_solver_replay(self):
+        # A synthetic malformed research-labeled RECORD, not execution of E0.
+        # No authorization, machine identity, operating receipts or P-8 exists.
+        h = self.h
+        record = replace(self.record, purpose="E0_QUALIFICATION")
+        with patch.object(h, "verify_fixture", side_effect=AssertionError("unmonitored solver")), \
+             patch.object(h, "verify_execution_archives", side_effect=AssertionError("unmonitored audit")):
+            assessment = h.assess_qualification(record)
+        self.assertEqual(assessment.verdict, "INCOMPLETE")
+        self.assertFalse(assessment.progression_allowed)
+        operating = next(g for g in assessment.gates if g.gate_id == "OPERATING-EXECUTION")
+        self.assertEqual(operating.status, "INCOMPLETE")
+
+
+    def test_failed_and_incomplete_attempts_are_preserved(self):
+        from tempfile import TemporaryDirectory
+        h = self.h
+        failed = replace(self.record, run_id="unit-failed",
+                         diagnosed_implementation_defects=("Synthetic diagnosed implementation fault",))
+        with TemporaryDirectory() as tmp:
+            receipt = h.persist_qualification(failed, repository_root=tmp)
+            self.assertEqual(receipt.verdict, "IMPLEMENTATION_IDENTITY_FAIL")
+            restored, _, _ = h.read_qualification_artifact(
+                Path(tmp)/"results"/"program_k_research"/failed.run_id)
+            self.assertEqual(restored.diagnosed_implementation_defects,
+                             failed.diagnosed_implementation_defects)
+
+
+class ProgramKSlice7SupervisorTests(unittest.TestCase):
+    """Private fixed-operation unit verification; never dispatch actual E0."""
+
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_harness as h
+        cls.h = h
+        cls.env = h.OperatingEnvelope(
+            "synthetic-worker-runtime", "synthetic-worker-machine", "synthetic-worker-python",
+            10000, 30000, 120000, 1000, 1000, 1000000000, 100000000, 10,
+            h.OPERATIONAL_MONITOR_ID, "Explicit single-operation unit containment only.")
+
+    def supervise(self, kind, identity, envelope=None):
+        import time
+        h = self.h
+        return h._supervise_operation(kind, identity, envelope or self.env,
+            h.capture_source_identity(), job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
+    def test_private_single_fixture_worker_completion_and_reconstruction(self):
+        h = self.h
+        receipt, result, received = self.supervise("FIXTURE", "no-new-m")
+        self.assertEqual(receipt.status, "COMPLETE", receipt.reason)
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(receipt.result_digest, h.content_digest(result))
+        self.assertGreater(received, receipt.result_size_bytes)
+        self.assertEqual(receipt.physical_inputs, 0)
+        self.assertIn("DECISION_START", tuple(e.event for e in receipt.events))
+        self.assertEqual(h.reconstruct(h.canonical_bytes(receipt)), receipt)
+        self.assertFalse(hasattr(receipt, "research_pass"))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
+    def test_private_tiny_case_deadline_aborts_without_fallback(self):
+        env = replace(self.env, max_decision_wall_ms=1, max_case_wall_ms=1,
+                      shadow_timeout_ms=1, monitor_interval_ms=1)
+        receipt, result, _ = self.supervise("FIXTURE", "no-new-m", env)
+        self.assertEqual(receipt.status, "INCOMPLETE")
+        self.assertEqual(receipt.reason, "SYSTEM_CASE_TIMEOUT")
+        self.assertIsNone(result)
+        self.assertEqual(receipt.physical_inputs, 0)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
+    def test_private_probe_input_cap_stops_before_second_admission(self):
+        receipt, result, _ = self.supervise("PROBE", "A-E1/A-E2",
+            replace(self.env, max_physical_inputs_per_case=1))
+        self.assertEqual(receipt.status, "INCOMPLETE", receipt.reason)
+        self.assertEqual(receipt.reason, "SYSTEM_INPUT_CAP")
+        self.assertEqual(receipt.physical_inputs, 1)
+        self.assertEqual(sum(e.event == "BEFORE_INPUT" for e in receipt.events), 1)
+        self.assertIsNone(result)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
+    def test_private_timing_probe_preserves_boundary_monitor(self):
+        receipt, result, _ = self.supervise("PROBE", "A-E3")
+        self.assertEqual(receipt.status, "COMPLETE", receipt.reason)
+        self.assertEqual(result.status, "PASS", result.failures)
+        self.assertGreater(receipt.physical_inputs, 0)
+        events = tuple(e.event for e in receipt.events)
+        self.assertEqual(events.count("DECISION_START"), events.count("DECISION_END"))
+        self.assertGreater(events.count("DECISION_START"), 0)
+
+    def test_receipt_rejects_missing_completion_and_corrupt_nested_counters(self):
+        h = self.h
+        start = h.OperationalEvent(0, "STARTED", 0, 0)
+        end = h.OperationalEvent(1, "FINISHED", 1, 0)
+        receipt = h.OperationReceipt("FIXTURE", "no-new-m", "a"*64, "b"*64,
+            "COMPLETE", None, (start, end), 2, 0, "c"*64, 1, 0)
+        for changes in ({"exit_code": 1}, {"result_digest": None},
+                        {"events": (start,)}, {"physical_inputs": 1},
+                        {"operation_id": "unregistered"}, {"elapsed_ns": True}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(receipt, **changes)
+        corrupted = deepcopy(start)
+        object.__setattr__(corrupted, "elapsed_ns", False)
+        with self.assertRaises(ValueError):
+            replace(receipt, events=(corrupted, end))
+
+
+class ProgramKSlice7ReadinessMappingTests(unittest.TestCase):
+    """Pure result-label tests; no P-8 result or research qualification exists."""
+
+    def mapping(self, verdict, purpose="IMPLEMENTATION_UNIT_READINESS", complete=True):
+        from experiments.program_k_harness import _readiness_for_verdict
+        return _readiness_for_verdict(verdict, purpose=purpose, nonexecution_complete=complete)
+
+    def test_ready_except_execution_requires_clean_nonexecution_incomplete(self):
+        self.assertEqual(self.mapping("INCOMPLETE"), "READY_EXCEPT_EXECUTION")
+        self.assertEqual(self.mapping("INCOMPLETE", complete=False), "NEEDS_CORRECTION")
+        for complete in (False, True):
+            with self.subTest(complete=complete):
+                self.assertEqual(self.mapping("INCOMPLETE", "E0_QUALIFICATION", complete),
+                                 "NEEDS_CORRECTION")
+
+    def test_fail_verdicts_never_receive_a_ready_label(self):
+        for verdict in ("IMPLEMENTATION_IDENTITY_FAIL", "PROGRAM_K_RESEARCH_FAIL"):
+            for purpose in ("IMPLEMENTATION_UNIT_READINESS", "E0_QUALIFICATION"):
+                for complete in (False, True):
+                    with self.subTest(verdict=verdict, purpose=purpose, complete=complete):
+                        self.assertEqual(self.mapping(verdict, purpose, complete), "NEEDS_CORRECTION")
+
+    def test_e0_verdict_label_is_distinct_without_constructing_pass_evidence(self):
+        # This exercises string mapping only. No E0 result, P8Result, Engine,
+        # authorization, dispatcher or qualification evidence is constructed.
+        self.assertEqual(self.mapping("E0_PASS", "E0_QUALIFICATION"), "E0_QUALIFIED")
+        self.assertNotEqual(self.mapping("E0_PASS", "E0_QUALIFICATION"), "READY_EXCEPT_EXECUTION")
+
+    def test_unknown_verdict_or_malformed_context_fails_closed(self):
+        for verdict in ("PASS", "READY_EXCEPT_EXECUTION", None):
+            with self.subTest(verdict=verdict), self.assertRaises(ValueError):
+                self.mapping(verdict)
+        with self.assertRaises(ValueError):
+            self.mapping("INCOMPLETE", "E1")
+        for complete in (0, 1, None, "True"):
+            with self.subTest(complete=complete), self.assertRaises(ValueError):
+                self.mapping("INCOMPLETE", complete=complete)
+
+
+class ProgramKSlice7GuessCheckpointTests(unittest.TestCase):
+    """P-3 archive projection/comparison only; no research qualification run."""
+
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_harness as h
+        cls.h = h
+        cls.table = load_timing_table()
+        cls.case_id = (__name__ + ".ProgramKSlice7GuessCheckpointTests.test_fixed_guess_pair")
+        cls.control_archive, cls.kp0_archive = cls.capture_pair()
+        cls.control = h.extract_guess_checkpoints(cls.control_archive, num_mines=2)
+        cls.kp0 = h.extract_guess_checkpoints(cls.kp0_archive, num_mines=2)
+
+    @classmethod
+    def capture_pair(cls):
+        # A declared tiny unit layout. CONTROL materializes the mine at (1,0)
+        # before its guess; K retains that public fact in M and guesses earlier.
+        layout = frozenset({(1, 0), (2, 0)})
+        control = runner.run_control_capture(fixed_engine(5, 1, layout), table=cls.table)
+        kp0 = runner.run_k_p0(fixed_engine(5, 1, layout), table=cls.table,
+                             capture_effects=True)
+        return (cls.h.ExecutionArchive(cls.case_id, "CONTROL", control),
+                cls.h.ExecutionArchive(cls.case_id, "K-P0", kp0))
+
+    def test_fixed_guess_pair(self):
+        # Keep both actual captures in this exact test method: the fixed probe
+        # recorder archives these returned public streams for the P-3 gate.
+        control_archive, kp0_archive = self.capture_pair()
+        h = self.h
+        control = h.extract_guess_checkpoints(control_archive, num_mines=2)
+        kp0 = h.extract_guess_checkpoints(kp0_archive, num_mines=2)
+        self.assertEqual((control.status, kp0.status), ("COMPLETE", "COMPLETE"))
+        self.assertEqual(len(control.checkpoints), 1)
+        self.assertEqual(control.checkpoints, kp0.checkpoints)
+        expected = control.checkpoints[0]
+        self.assertEqual(expected.guess_ordinal, 1)
+        self.assertEqual(expected.revealed_clues, (((0, 0), 1),))
+        self.assertEqual(expected.fixed_mines, frozenset({(1, 0)}))
+        self.assertEqual(expected.unresolved, frozenset({(2, 0), (3, 0), (4, 0)}))
+        self.assertEqual(expected.remaining_mines, 1)
+        self.assertEqual(expected.total_worlds, 3)
+        self.assertEqual(expected.mine_worlds, (((2, 0), 1), ((3, 0), 1), ((4, 0), 1)))
+        self.assertEqual(expected.probabilities, tuple(
+            ((x, 0), Fraction(1, 3)) for x in (2, 3, 4)))
+        self.assertEqual(expected.minimum_risk, Fraction(1, 3))
+        self.assertEqual(expected.minimum_risk_cells, expected.unresolved)
+        self.assertEqual(expected.target, (2, 0))
+        self.assertIs(expected.terminal_outcome, GameStatus.LOST)
+        control_index = next(i for i, t in enumerate(control_archive.result.traces)
+            if t.decision is not None and t.decision.evidence.kind is DecisionKind.PROBABILITY_GUESS)
+        kp0_index = next(t.input_index for t in kp0_archive.result.traces
+                        if t.category == "EXACT_MINIMUM_RISK_GUESS")
+        self.assertEqual((control_index, kp0_index), (2, 1))
+        self.assertNotEqual(control_archive.result.effects[control_index].before_observation,
+                            kp0_archive.result.traces[kp0_index].public_effect.before_observation)
+        comparison = h.compare_guess_checkpoints(control, kp0)
+        self.assertEqual(comparison.status, "PASS", comparison.differences)
+        self.assertFalse(hasattr(expected, "action_index"))
+
+    def test_initial_and_certainty_opens_are_excluded(self):
+        h = self.h
+        control = runner.run_control_capture(fixed_engine(), table=self.table)
+        kp0 = runner.run_k_p0(fixed_engine(), table=self.table, capture_effects=True)
+        audits = tuple(h.extract_guess_checkpoints(h.ExecutionArchive("certainty-only-unit", variant, run),
+                                                   num_mines=1)
+                       for variant, run in (("CONTROL", control), ("K-P0", kp0)))
+        self.assertGreater(sum(t.move.action is Action.OPEN for t in kp0.traces), 1)
+        for audit in audits:
+            self.assertEqual(audit.status, "COMPLETE", audit.incomplete)
+            self.assertEqual(audit.checkpoints, ())
+        self.assertEqual(h.compare_guess_checkpoints(*audits).status, "PASS")
+
+    def _different(self, changes, field):
+        checkpoint = replace(self.kp0.checkpoints[0], **changes)
+        audit = replace(self.kp0, checkpoints=(checkpoint,),
+                        num_mines=checkpoint.remaining_mines + len(checkpoint.fixed_mines))
+        comparison = self.h.compare_guess_checkpoints(self.control, audit)
+        self.assertEqual(comparison.status, "FAIL", (field, comparison.differences))
+        self.assertTrue(any(field in text for text in comparison.differences),
+                        (field, comparison.differences))
+
+    def test_every_required_semantic_field_detects_divergence(self):
+        cells = ((2, 0), (3, 0), (4, 0))
+        # Coupled exact fields remain internally coherent. Their disagreement
+        # is a P-3 divergence, not malformed evidence accepted as a comparison.
+        cases = (
+            ("revealed_clues", {"revealed_clues": (((0, 0), 2),)}),
+            ("fixed_mines", {"fixed_mines": frozenset({(1, 1)})}),
+            ("unresolved", {"unresolved": frozenset({(2, 0), (3, 0), (5, 0)}),
+                "mine_worlds": (((2, 0), 1), ((3, 0), 1), ((5, 0), 1)),
+                "probabilities": tuple((c, Fraction(1, 3)) for c in ((2, 0), (3, 0), (5, 0))),
+                "minimum_risk_cells": frozenset({(2, 0), (3, 0), (5, 0)})}),
+            ("remaining_mines", {"remaining_mines": 2,
+                "mine_worlds": tuple((c, 2) for c in cells),
+                "probabilities": tuple((c, Fraction(2, 3)) for c in cells),
+                "minimum_risk": Fraction(2, 3)}),
+            ("total_worlds", {"total_worlds": 6, "mine_worlds": tuple((c, 2) for c in cells)}),
+            ("mine_worlds", {"total_worlds": 4,
+                "mine_worlds": (((2, 0), 1), ((3, 0), 1), ((4, 0), 2)),
+                "probabilities": (((2, 0), Fraction(1, 4)), ((3, 0), Fraction(1, 4)), ((4, 0), Fraction(1, 2))),
+                "minimum_risk": Fraction(1, 4), "minimum_risk_cells": frozenset({(2, 0), (3, 0)})}),
+            ("probabilities", {"total_worlds": 4,
+                "mine_worlds": (((2, 0), 1), ((3, 0), 1), ((4, 0), 2)),
+                "probabilities": (((2, 0), Fraction(1, 4)), ((3, 0), Fraction(1, 4)), ((4, 0), Fraction(1, 2))),
+                "minimum_risk": Fraction(1, 4), "minimum_risk_cells": frozenset({(2, 0), (3, 0)})}),
+            ("minimum_risk", {"remaining_mines": 2,
+                "mine_worlds": tuple((c, 2) for c in cells),
+                "probabilities": tuple((c, Fraction(2, 3)) for c in cells),
+                "minimum_risk": Fraction(2, 3)}),
+            ("minimum_risk_cells", {"total_worlds": 5,
+                "mine_worlds": (((2, 0), 2), ((3, 0), 2), ((4, 0), 1)),
+                "probabilities": (((2, 0), Fraction(2, 5)), ((3, 0), Fraction(2, 5)), ((4, 0), Fraction(1, 5))),
+                "minimum_risk": Fraction(1, 5), "minimum_risk_cells": frozenset({(4, 0)}), "target": (4, 0)}),
+            ("target", {"total_worlds": 5,
+                "mine_worlds": (((2, 0), 2), ((3, 0), 2), ((4, 0), 1)),
+                "probabilities": (((2, 0), Fraction(2, 5)), ((3, 0), Fraction(2, 5)), ((4, 0), Fraction(1, 5))),
+                "minimum_risk": Fraction(1, 5), "minimum_risk_cells": frozenset({(4, 0)}), "target": (4, 0)}),
+            ("terminal_outcome", {"terminal_outcome": GameStatus.WON}),
+        )
+        for field, changes in cases:
+            with self.subTest(field=field):
+                self._different(changes, field)
+
+    def test_ordinal_fault_is_detected_and_not_replaced_by_action_index(self):
+        checkpoint = deepcopy(self.kp0.checkpoints[0])
+        object.__setattr__(checkpoint, "guess_ordinal", 2)
+        audit = deepcopy(self.kp0)
+        object.__setattr__(audit, "checkpoints", (checkpoint,))
+        self.assertIn(self.h.compare_guess_checkpoints(self.control, audit).status,
+                      ("FAIL", "INCOMPLETE"))
+
+    def test_missing_or_extra_actual_guess_is_divergence(self):
+        for checkpoints in ((), (self.kp0.checkpoints[0],
+                                  replace(self.kp0.checkpoints[0], guess_ordinal=2))):
+            with self.subTest(count=len(checkpoints)):
+                audit = replace(self.kp0, checkpoints=checkpoints)
+                self.assertEqual(audit.status, "COMPLETE")
+                self.assertEqual(self.h.compare_guess_checkpoints(self.control, audit).status, "FAIL")
+
+    def test_missing_or_malformed_checkpoint_evidence_is_incomplete(self):
+        h = self.h
+        for value in (None, object(), self.kp0_archive, self.kp0.checkpoints[0]):
+            with self.subTest(value=type(value).__name__):
+                self.assertEqual(h.compare_guess_checkpoints(self.control, value).status, "INCOMPLETE")
+        self.assertEqual(h.compare_guess_checkpoints(self.control,
+            replace(self.kp0, incomplete=("Missing exact count evidence.",))).status, "INCOMPLETE")
+        for field, value in (("mine_worlds", (((2, 0), 1),)),
+                             ("probabilities", (((2, 0), Fraction(1, 3)),)),
+                             ("total_worlds", True), ("minimum_risk", 1/3),
+                             ("minimum_risk_cells", frozenset({(2, 0)})),
+                             ("target", (3, 0)), ("terminal_outcome", GameStatus.PLAYING)):
+            with self.subTest(field=field):
+                checkpoint = deepcopy(self.kp0.checkpoints[0])
+                object.__setattr__(checkpoint, field, value)
+                audit = deepcopy(self.kp0)
+                object.__setattr__(audit, "checkpoints", (checkpoint,))
+                self.assertEqual(h.compare_guess_checkpoints(self.control, audit).status, "INCOMPLETE")
+
+    def test_missing_public_effect_or_exact_evidence_does_not_hide_actual_guess(self):
+        h = self.h
+        trace = self.kp0_archive.result.traces[-1]
+        without_effect = replace(trace, public_effect=None)
+        without_selection = replace(trace, selection=None)
+        without_exact = replace(trace, selection=replace(trace.selection,
+            evidence=replace(trace.selection.evidence, phase_e=None)))
+        for bad in (without_effect, without_selection, without_exact):
+            with self.subTest(fault=repr(bad)[:100]):
+                result = replace(self.kp0_archive.result,
+                                 traces=self.kp0_archive.result.traces[:-1] + (bad,))
+                audit = h.extract_guess_checkpoints(replace(self.kp0_archive, result=result), num_mines=2)
+                self.assertEqual(audit.status, "INCOMPLETE", audit)
+                self.assertEqual(h.compare_guess_checkpoints(self.control, audit).status, "INCOMPLETE")
+        control_trace = self.control_archive.result.traces[-1]
+        bad_control = replace(self.control_archive.result.control,
+            traces=self.control_archive.result.traces[:-1] + (replace(control_trace, decision=None),))
+        archive = replace(self.control_archive,
+                          result=replace(self.control_archive.result, control=bad_control))
+        audit = h.extract_guess_checkpoints(archive, num_mines=2)
+        self.assertEqual(audit.status, "INCOMPLETE")
+        self.assertEqual(h.compare_guess_checkpoints(audit, self.kp0).status, "INCOMPLETE")
+
+    def test_extraction_uses_only_archived_public_evidence(self):
+        h = self.h
+        forbidden = AssertionError("P-3 must not manufacture a fresh decision or oracle result")
+        with patch.object(KLocalSession, "analyze_decision", side_effect=forbidden), \
+                patch("simple_decision.analyze_position", side_effect=forbidden), \
+                patch("simple_probability.calculate_probabilities", side_effect=forbidden), \
+                patch.object(public_oracles, "enumerate_public_worlds", side_effect=forbidden), \
+                patch.object(public_oracles, "materialized_exact_reference", side_effect=forbidden), \
+                patch.object(runner, "plan_position", side_effect=forbidden):
+            control = h.extract_guess_checkpoints(self.control_archive, num_mines=2)
+            kp0 = h.extract_guess_checkpoints(self.kp0_archive, num_mines=2)
+            self.assertEqual(h.compare_guess_checkpoints(control, kp0).status, "PASS")
+        self.assertEqual(control.archive_digest, h.content_digest(self.control_archive))
+        self.assertEqual(kp0.archive_digest, h.content_digest(self.kp0_archive))
+
+    def test_relabeling_both_uncertain_opens_cannot_hide_actual_guesses(self):
+        h = self.h
+        control_trace = self.control_archive.result.traces[-1]
+        fake_control_evidence = replace(control_trace.decision.evidence,
+            kind=DecisionKind.LOCAL_DETERMINISTIC, probability_result=None)
+        fake_control_trace = replace(control_trace,
+            decision=replace(control_trace.decision, evidence=fake_control_evidence))
+        fake_control_run = replace(self.control_archive.result.control,
+            traces=self.control_archive.result.traces[:-1] + (fake_control_trace,))
+        fake_control = replace(self.control_archive,
+            result=replace(self.control_archive.result, control=fake_control_run))
+        kp0_trace = self.kp0_archive.result.traces[-1]
+        fake_kp0_evidence = replace(kp0_trace.selection.evidence, continuation="LOCAL_REVEAL")
+        fake_kp0_trace = replace(kp0_trace, category="DIRECT_OPEN",
+            selection=replace(kp0_trace.selection, category="DIRECT_OPEN", evidence=fake_kp0_evidence))
+        fake_kp0 = replace(self.kp0_archive, result=replace(self.kp0_archive.result,
+            traces=self.kp0_archive.result.traces[:-1] + (fake_kp0_trace,)))
+        control = h.extract_guess_checkpoints(fake_control, num_mines=2)
+        kp0 = h.extract_guess_checkpoints(fake_kp0, num_mines=2)
+        self.assertEqual(control.status, "INCOMPLETE")
+        self.assertEqual(kp0.status, "INCOMPLETE")
+        self.assertEqual(h.compare_guess_checkpoints(control, kp0).status, "INCOMPLETE")
+
+        # Retaining probability data under a LOCAL label raises the frozen
+        # planner's own malformed-evidence error; projection must contain it.
+        mismatched = replace(control_trace.decision.evidence, kind=DecisionKind.LOCAL_DETERMINISTIC)
+        malformed_trace = replace(control_trace, decision=replace(control_trace.decision, evidence=mismatched))
+        malformed_run = replace(self.control_archive.result.control,
+            traces=self.control_archive.result.traces[:-1] + (malformed_trace,))
+        malformed_archive = replace(self.control_archive,
+            result=replace(self.control_archive.result, control=malformed_run))
+        self.assertEqual(h.extract_guess_checkpoints(malformed_archive, num_mines=2).status, "INCOMPLETE")
+
+    def test_public_mine_total_and_case_identity_are_required(self):
+        h = self.h
+        for total in (True, -1, None, 2.0):
+            with self.subTest(total=total), self.assertRaises(ValueError):
+                h.extract_guess_checkpoints(self.kp0_archive, num_mines=total)
+        for total in (0, 3):
+            with self.subTest(total=total):
+                audit = h.extract_guess_checkpoints(self.kp0_archive, num_mines=total)
+                self.assertEqual(audit.status, "INCOMPLETE")
+        other = replace(self.kp0, case_id="another-case",
+                        checkpoints=(replace(self.kp0.checkpoints[0], case_id="another-case"),))
+        self.assertNotEqual(h.compare_guess_checkpoints(self.control, other).status, "PASS")
+
+    def test_records_are_immutable_exact_and_deterministically_reconstructable(self):
+        h = self.h
+        comparison = h.compare_guess_checkpoints(self.control, self.kp0)
+        for value in (self.control, self.kp0, self.control.checkpoints[0], comparison):
+            with self.subTest(kind=type(value).__name__):
+                self.assertTrue(is_dataclass(value))
+                self.assertTrue(value.__dataclass_params__.frozen)
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(value, fields(value)[0].name, None)
+                raw = h.canonical_bytes(value)
+                self.assertEqual(h.reconstruct(raw, expected_digest=h.content_digest(value)), value)
+                self.assertEqual(h.canonical_bytes(pickle.loads(pickle.dumps(value))), raw)
+        for _, numerator in self.control.checkpoints[0].mine_worlds:
+            self.assertIs(type(numerator), int)
+        for _, probability in self.control.checkpoints[0].probabilities:
+            self.assertIs(type(probability), Fraction)
+        self.assertNotIn(b"E0_PASS", h.canonical_bytes(comparison))
 
 
 if __name__ == "__main__":
