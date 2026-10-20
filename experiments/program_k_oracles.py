@@ -1,12 +1,15 @@
-"""Independent public-only local certificates and finite Program-K Oracle A.
+"""Public-only certificates, bounded Oracle A, and materialized Oracle B.
 
-These experimental checks do not import K accounting or Stage-2 inference/counting
-code. Certificates are detached public evidence, not additional retained K state.
+Oracle A and direct local-rule checks do not import K or Stage-2 counting/accounting.
+Oracle B lazily calls frozen Stage-2 exact counting on its own Q(M) construction;
+agreement with K is SHARED-KERNEL REPRESENTATION EVIDENCE. Certificates are
+detached public evidence, not additional retained K state.
 Coordinates remain (x, y); ordered outputs use the reading-order key (y, x).
 This module supplies unit-verification foundations, not an E0 qualification run.
 """
 
 from dataclasses import dataclass
+from fractions import Fraction
 from itertools import combinations
 
 from core_engine import CellState, GameStatus
@@ -15,6 +18,8 @@ from core_engine import CellState, GameStatus
 Coordinate = tuple[int, int]
 PublicObservation = tuple[tuple[int, ...], ...]
 ORACLE_A_MAX_VARIABLES = 16
+SHARED_KERNEL_EVIDENCE = "SHARED-KERNEL REPRESENTATION EVIDENCE"
+FROZEN_EXACT_KERNEL = "simple_probability.calculate_probabilities"
 
 
 class PublicProofError(ValueError):
@@ -120,6 +125,61 @@ class LocalMineCertificate:
 
 
 @dataclass(frozen=True)
+class ExactGlobalMineCertificate:
+    """Detached Phase-D evidence, before any member of the G1 batch is acquired.
+
+    The full raw observation, public mine total and pre-acquisition M identify
+    the premises without an answer-derived fingerprint. Claimed counts/reached
+    status are checked, not trusted. This is a distinct origin from local proof.
+    """
+
+    observation: PublicObservation
+    num_mines: int
+    target: Coordinate
+    retained_mines: frozenset[Coordinate]
+    status: GameStatus
+    total_worlds: int
+    mine_worlds: tuple[tuple[Coordinate, int], ...]
+    exact_reached: bool = True
+
+    def __post_init__(self):
+        grid = _public_grid(self.observation, self.num_mines, self.status)
+        object.__setattr__(self, "observation", grid)
+        object.__setattr__(self, "target", _coordinate(self.target, len(grid[0]), len(grid)))
+        object.__setattr__(self, "retained_mines", _mine_set(self.retained_mines, grid))
+        if type(self.total_worlds) is not int or type(self.exact_reached) is not bool:
+            raise PublicProofError("Exact evidence requires integer Z and a boolean reached marker.")
+        if type(self.mine_worlds) not in (tuple, list):
+            raise PublicProofError("Exact marginals must be an ordered list/tuple.")
+        counts = []
+        for entry in self.mine_worlds:
+            if type(entry) not in (tuple, list) or len(entry) != 2:
+                raise PublicProofError("Each exact marginal needs a coordinate and numerator.")
+            cell, numerator = entry
+            cell = _coordinate(cell, len(grid[0]), len(grid))
+            if type(numerator) is not int:
+                raise PublicProofError("Exact numerators must be integers, never floats.")
+            counts.append((cell, numerator))
+        object.__setattr__(self, "mine_worlds", tuple(counts))
+
+
+MineCertificate = LocalMineCertificate | ExactGlobalMineCertificate
+
+
+@dataclass(frozen=True)
+class ExactGlobalCertificateCheck:
+    target: Coordinate
+    total_worlds: int
+    mine_worlds: int
+    antecedents: tuple[Coordinate, ...]
+    oracle_a_status: str
+    oracle_a_variable_count: int
+    oracle_a_envelope: int
+    oracle_a_reason: str | None
+    arithmetic_evidence: str
+
+
+@dataclass(frozen=True)
 class LocalCertificateCheck:
     """Independently reconstructed facts for the certificate's clue only."""
 
@@ -139,6 +199,50 @@ class OracleAResult:
 
     total_worlds: int
     mine_worlds: tuple[tuple[Coordinate, int], ...]
+
+    @property
+    def unresolved_cells(self) -> tuple[Coordinate, ...]:
+        return tuple(cell for cell, _ in self.mine_worlds)
+
+    @property
+    def G0(self) -> frozenset[Coordinate]:
+        return frozenset(cell for cell, count in self.mine_worlds
+                         if self.total_worlds > 0 and count == 0)
+
+    @property
+    def G1(self) -> frozenset[Coordinate]:
+        return frozenset(cell for cell, count in self.mine_worlds
+                         if self.total_worlds > 0 and count == self.total_worlds)
+
+    @property
+    def minimum_risk(self) -> Fraction | None:
+        if self.total_worlds <= 0 or not self.mine_worlds:
+            return None
+        return Fraction(min(count for _, count in self.mine_worlds), self.total_worlds)
+
+    @property
+    def minimum_risk_cells(self) -> frozenset[Coordinate]:
+        risk = self.minimum_risk
+        return frozenset(cell for cell, count in self.mine_worlds
+                         if risk is not None and Fraction(count, self.total_worlds) == risk)
+
+
+@dataclass(frozen=True)
+class OracleBResult:
+    """Informational Q(M) and exact semantics; never actual physical state."""
+
+    materialized_observation: PublicObservation
+    unresolved_cells: tuple[Coordinate, ...]
+    frontier_cells: tuple[Coordinate, ...]
+    unconstrained_cells: tuple[Coordinate, ...]
+    total_worlds: int
+    mine_worlds: tuple[tuple[Coordinate, int], ...]
+    G0: frozenset[Coordinate]
+    G1: frozenset[Coordinate]
+    minimum_risk: Fraction | None
+    minimum_risk_cells: frozenset[Coordinate]
+    shared_kernel_evidence: str = SHARED_KERNEL_EVIDENCE
+    kernel: str = FROZEN_EXACT_KERNEL
 
 
 def _supported_domains(grid, num_mines, retained_mines, supported):
@@ -219,20 +323,75 @@ def _check_local(certificate, supported) -> LocalCertificateCheck:
     )
 
 
-def _verify_history(certificates):
+def _check_exact(certificate, supported, *, independent_only=False):
+    grid = certificate.observation
+    _, _, fixed, unresolved, remaining = _supported_domains(
+        grid, certificate.num_mines, certificate.retained_mines, supported
+    )
+    if not certificate.exact_reached or certificate.total_worlds <= 0:
+        raise PublicProofError("Exact acquisition needs reached, positive-world evidence.")
+    if certificate.target not in unresolved:
+        raise PublicProofError("Exact target must be unresolved before acquisition.")
+    # Reconstruct the normalized direct rules independently. At legitimate D,
+    # every first-pass mine is already accounted for and C has no local safe.
+    for y, row in enumerate(grid):
+        for x, value in enumerate(row):
+            if 0 <= value <= 8:
+                adjacent = _neighbors((x, y), grid)
+                neighborhood = adjacent & unresolved
+                residual = value - len(adjacent & fixed)
+                if neighborhood and residual in (0, len(neighborhood)):
+                    raise PublicProofError("Exact layer preceded local certainty exhaustion.")
+    variable_count = len(unresolved)
+    if variable_count <= ORACLE_A_MAX_VARIABLES:
+        actual = _enumerate_supported(grid, fixed, unresolved, remaining)
+        coverage = "ORACLE_A_EVALUATED"
+        reason = None
+        evidence = "INDEPENDENT BOUNDED ARITHMETIC EVIDENCE"
+    else:
+        if independent_only:
+            raise OracleANotEvaluated(variable_count)
+        actual = _materialized_exact(grid, certificate.num_mines, certificate.retained_mines)
+        coverage = "ORACLE_A_NOT_EVALUATED"
+        reason = "unfixed variable count exceeds the qualified finite envelope"
+        evidence = SHARED_KERNEL_EVIDENCE
+    if (
+        actual.total_worlds <= 0
+        or certificate.total_worlds != actual.total_worlds
+        or certificate.mine_worlds != actual.mine_worlds
+        or dict(actual.mine_worlds).get(certificate.target) != actual.total_worlds
+    ):
+        raise PublicProofError("Exact certificate does not establish positive-world G1.")
+    return ExactGlobalCertificateCheck(
+        target=certificate.target,
+        total_worlds=actual.total_worlds,
+        mine_worlds=actual.total_worlds,
+        antecedents=tuple(sorted(fixed, key=_reading_order)),
+        oracle_a_status=coverage,
+        oracle_a_variable_count=variable_count,
+        oracle_a_envelope=ORACLE_A_MAX_VARIABLES,
+        oracle_a_reason=reason,
+        arithmetic_evidence=evidence,
+    )
+
+
+def _verify_history(certificates, *, independent_only=False):
     if type(certificates) not in (tuple, list):
         raise PublicProofError("Prior certificates must be an ordered list/tuple.")
     supported = set()
     previous = None
     num_mines = None
     for certificate in certificates:
-        if type(certificate) is not LocalMineCertificate:
-            raise PublicProofError("Only raw public local certificates are supported.")
+        if type(certificate) not in (LocalMineCertificate, ExactGlobalMineCertificate):
+            raise PublicProofError("Only local and exact-global public certificates are supported.")
         if num_mines is not None and certificate.num_mines != num_mines:
             raise PublicProofError("Proof history changed the public mine total.")
         _public_extension(previous, certificate.observation, supported)
-        _check_local(certificate, supported)
-        # The target becomes available only after its own independent check.
+        if type(certificate) is LocalMineCertificate:
+            _check_local(certificate, supported)
+        else:
+            _check_exact(certificate, supported, independent_only=independent_only)
+        # The target becomes available only after its own public proof check.
         supported.add(certificate.target)
         previous = certificate.observation
         num_mines = certificate.num_mines
@@ -242,7 +401,7 @@ def _verify_history(certificates):
 def verify_local_certificate(
     certificate: LocalMineCertificate,
     *,
-    prior_certificates: tuple[LocalMineCertificate, ...] = (),
+    prior_certificates: tuple[MineCertificate, ...] = (),
 ) -> LocalCertificateCheck:
     """Check a local acquisition from raw public premises and earlier proofs.
 
@@ -260,30 +419,28 @@ def verify_local_certificate(
     return _check_local(certificate, supported)
 
 
-def enumerate_public_worlds(
-    observation,
-    num_mines: int,
+def verify_exact_global_certificate(
+    certificate: ExactGlobalMineCertificate,
     *,
-    status: GameStatus,
-    logical_mines: frozenset[Coordinate] = frozenset(),
-    proofs: tuple[LocalMineCertificate, ...] = (),
-) -> OracleAResult:
-    """Enumerate at most 16 unfixed public variables with integer-only counts.
+    prior_certificates: tuple[MineCertificate, ...] = (),
+) -> ExactGlobalCertificateCheck:
+    """Verify pre-acquisition public G1 evidence and legitimacy of reaching D.
 
-    Every fixed physical/logical mine is separately supported by the supplied
-    ordered public proof history. A zero-world result is reported as zero, not
-    equality/PASS. Beyond the envelope, raise ORACLE_A_NOT_EVALUATED explicitly.
-    No Engine instance, layout, evaluator data, or Stage-2/K helper is accepted.
+    Independent complete-world arithmetic is used within the 16-variable
+    envelope. Larger proofs expose shared-kernel evidence and explicit Oracle-A
+    non-evaluation. This checker never runs as part of live K acquisition.
     """
-    grid = _public_grid(observation, num_mines, status)
-    retained = _mine_set(logical_mines, grid)
-    supported, previous, prior_mine_total = _verify_history(proofs)
-    if prior_mine_total is not None and prior_mine_total != num_mines:
-        raise PublicProofError("Oracle state changed the public mine total.")
-    _public_extension(previous, grid, supported)
-    _, _, fixed, unresolved, remaining = _supported_domains(
-        grid, num_mines, retained, supported
-    )
+    if type(certificate) is not ExactGlobalMineCertificate:
+        raise PublicProofError("Expected a detached public exact-global certificate.")
+    supported, previous, num_mines = _verify_history(prior_certificates)
+    if num_mines is not None and num_mines != certificate.num_mines:
+        raise PublicProofError("Certificate changed the public mine total.")
+    _public_extension(previous, certificate.observation, supported)
+    return _check_exact(certificate, supported)
+
+
+def _enumerate_supported(grid, fixed, unresolved, remaining) -> OracleAResult:
+    """Independent arithmetic with already-checked public fixed-mine premises."""
     ordered = tuple(sorted(unresolved, key=_reading_order))
     if len(ordered) > ORACLE_A_MAX_VARIABLES:
         raise OracleANotEvaluated(len(ordered))
@@ -311,3 +468,110 @@ def enumerate_public_worlds(
         total_worlds=total_worlds,
         mine_worlds=tuple((cell, numerators[cell]) for cell in ordered),
     )
+
+
+def enumerate_public_worlds(
+    observation,
+    num_mines: int,
+    *,
+    status: GameStatus,
+    logical_mines: frozenset[Coordinate] = frozenset(),
+    proofs: tuple[MineCertificate, ...] = (),
+) -> OracleAResult:
+    """Enumerate at most 16 unfixed public variables with integer-only counts.
+
+    Every fixed physical/logical mine is separately supported by the supplied
+    ordered public proof history. A zero-world result is reported as zero, not
+    equality/PASS. Beyond the envelope, raise ORACLE_A_NOT_EVALUATED explicitly.
+    No Engine instance, layout, evaluator data, or Stage-2/K helper is accepted.
+    """
+    grid = _public_grid(observation, num_mines, status)
+    retained = _mine_set(logical_mines, grid)
+    # An exact ancestor outside A's envelope also prevents an independent
+    # Oracle-A claim; never silently validate such a premise with Stage 2.
+    supported, previous, prior_mine_total = _verify_history(proofs, independent_only=True)
+    if prior_mine_total is not None and prior_mine_total != num_mines:
+        raise PublicProofError("Oracle state changed the public mine total.")
+    _public_extension(previous, grid, supported)
+    _, _, fixed, unresolved, remaining = _supported_domains(
+        grid, num_mines, retained, supported
+    )
+    return _enumerate_supported(grid, fixed, unresolved, remaining)
+
+
+def _materialized_exact(grid, num_mines, retained) -> OracleBResult:
+    # Independent from K's materialization and accounting. Only HIDDEN members
+    # of M become informational flags; actual flags/clues and n are preserved.
+    materialized = tuple(
+        tuple(int(CellState.FLAGGED) if value == CellState.HIDDEN and (x, y) in retained
+              else value for x, value in enumerate(row))
+        for y, row in enumerate(grid)
+    )
+    unresolved = tuple(
+        (x, y) for y, row in enumerate(materialized)
+        for x, value in enumerate(row) if value == CellState.HIDDEN
+    )
+    from simple_probability import calculate_probabilities
+
+    try:
+        exact = calculate_probabilities(materialized, num_mines)
+    except ValueError as error:
+        raise PublicProofError(f"Materialized exact reference failed: {error}") from error
+    if type(exact.total_worlds) is not int or exact.total_worlds <= 0:
+        raise PublicProofError("Materialized reference requires positive integer Z.")
+    counts = tuple(
+        (_coordinate(item.coordinate, len(grid[0]), len(grid)), item.mine_worlds)
+        for item in exact.probabilities
+    )
+    if (
+        tuple(cell for cell, _ in counts) != unresolved
+        or any(type(count) is not int or not 0 <= count <= exact.total_worlds
+               for _, count in counts)
+        or any(type(item.total_worlds) is not int or item.total_worlds != exact.total_worlds
+               for item in exact.probabilities)
+    ):
+        raise PublicProofError("Materialized reference has invalid exact domain/counts.")
+    frontier = tuple(cell for cell in unresolved if any(
+        0 <= materialized[ny][nx] <= 8 for nx, ny in _neighbors(cell, materialized)
+    ))
+    frontier_set = frozenset(frontier)
+    floating = tuple(cell for cell in unresolved if cell not in frontier_set)
+    if exact.frontier_cells != frontier or exact.unconstrained_cells != floating:
+        raise PublicProofError("Materialized reference has invalid frontier/floating domains.")
+    minimum = min((count for _, count in counts), default=None)
+    return OracleBResult(
+        materialized_observation=materialized,
+        unresolved_cells=unresolved,
+        frontier_cells=frontier,
+        unconstrained_cells=floating,
+        total_worlds=exact.total_worlds,
+        mine_worlds=counts,
+        G0=frozenset(cell for cell, count in counts if count == 0),
+        G1=frozenset(cell for cell, count in counts if count == exact.total_worlds),
+        minimum_risk=None if minimum is None else Fraction(minimum, exact.total_worlds),
+        minimum_risk_cells=frozenset(cell for cell, count in counts if count == minimum),
+    )
+
+
+def materialized_exact_reference(
+    observation,
+    num_mines: int,
+    *,
+    status: GameStatus,
+    logical_mines: frozenset[Coordinate] = frozenset(),
+    proofs: tuple[MineCertificate, ...] = (),
+) -> OracleBResult:
+    """Oracle B: independently materialize valid public premises and count.
+
+    No scheduling/action selector is called. Q(M) is inference/accounting input
+    only and supplies no physical FLAG/CHORD authority. K shares the frozen
+    exact kernel, so this explicitly reports representation evidence only.
+    """
+    grid = _public_grid(observation, num_mines, status)
+    retained = _mine_set(logical_mines, grid)
+    supported, previous, prior_mine_total = _verify_history(proofs)
+    if prior_mine_total is not None and prior_mine_total != num_mines:
+        raise PublicProofError("Oracle state changed the public mine total.")
+    _public_extension(previous, grid, supported)
+    _supported_domains(grid, num_mines, retained, supported)
+    return _materialized_exact(grid, num_mines, retained)

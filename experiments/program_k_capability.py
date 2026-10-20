@@ -1,6 +1,6 @@
-"""Experimental Program-K local semantic core; no policy or Engine access.
+"""Experimental Program-K local/exact semantic core; no policy or Engine access.
 
-Slice 1 implements only direct local acquisition and A/B/C decision evidence.
+Slices 1/2 implement the bounded A/B/C local and D/E exact decision evidence.
 The session retains mine identities plus minimal public lifecycle metadata. It
 never retains inferred safes, probabilities, counts, components or proof archives.
 The preceding observation is used only to reject public-state regression; all
@@ -9,13 +9,14 @@ inference uses the current observation.
 This slice admits physical flags only after this owner has acquired their mine
 identity. Separately supported V1 flags outside M require a later admission path;
 P <= M is NOT a universal K-C invariant or a restriction on frozen K-CONTROL.
-No action selection, exact-probability layer or research stage is implemented.
+Continuation classification executes no action. No research stage is implemented.
 """
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 from core_engine import CellState, GameStatus
-from experiments.program_k_oracles import LocalMineCertificate
+from experiments.program_k_oracles import ExactGlobalMineCertificate, LocalMineCertificate
 
 
 Coordinate = tuple[int, int]
@@ -76,6 +77,126 @@ class LocalAnalysis:
     S_new: frozenset[Coordinate]
     S_current: frozenset[Coordinate]
     certificates: tuple[LocalMineCertificate, ...]
+
+
+@dataclass(frozen=True)
+class ExactAnalysis:
+    """Detached D/E counts; never stored on the session or reused next decision.
+
+    K and Oracle B share arithmetic, but construct their informational inputs
+    separately. Their agreement is representation evidence, not independent
+    arithmetic corroboration. Oracle A supplies the bounded independent check.
+    """
+
+    unresolved_cells: tuple[Coordinate, ...]
+    frontier_cells: tuple[Coordinate, ...]
+    unconstrained_cells: tuple[Coordinate, ...]
+    total_worlds: int
+    mine_worlds: tuple[tuple[Coordinate, int], ...]
+    G0: frozenset[Coordinate]
+    G1: frozenset[Coordinate]
+    minimum_risk: Fraction | None
+    minimum_risk_cells: frozenset[Coordinate]
+    shared_kernel_evidence: str = "SHARED-KERNEL REPRESENTATION EVIDENCE"
+    kernel: str = "simple_probability.calculate_probabilities"
+
+
+@dataclass(frozen=True)
+class DecisionAnalysis:
+    """Current-decision continuation evidence, not a physical action or plan.
+
+    A later physical input expires this entire record as decision authority.
+    Only M is retained by the session; callers may archive detached evidence.
+    """
+
+    observation: Observation
+    num_mines: int
+    local: LocalAnalysis
+    phase_d: ExactAnalysis | None
+    phase_e: ExactAnalysis | None
+    phase_e_status: str
+    after: Accounting
+    exact_certificates: tuple[ExactGlobalMineCertificate, ...]
+    continuation: str
+    selection_safe_cells: frozenset[Coordinate]
+    guess_target: Coordinate | None
+
+    @property
+    def phase_d_status(self) -> str:
+        return "NOT_REACHED" if self.phase_d is None else "REACHED"
+
+
+def _exact_evidence(total_worlds, mine_worlds, frontier, floating) -> ExactAnalysis:
+    """Classify already validated integer counts, also used for E restriction."""
+    minimum = min((count for _, count in mine_worlds), default=None)
+    return ExactAnalysis(
+        unresolved_cells=tuple(cell for cell, _ in mine_worlds),
+        frontier_cells=frontier,
+        unconstrained_cells=floating,
+        total_worlds=total_worlds,
+        mine_worlds=mine_worlds,
+        G0=frozenset(cell for cell, count in mine_worlds if count == 0),
+        G1=frozenset(cell for cell, count in mine_worlds if count == total_worlds),
+        minimum_risk=None if minimum is None else Fraction(minimum, total_worlds),
+        minimum_risk_cells=frozenset(
+            cell for cell, count in mine_worlds if count == minimum
+        ),
+    )
+
+
+def _exact_analysis(observation, num_mines, accounting) -> ExactAnalysis:
+    # Lazy dependency keeps local inference independent of the exact layer.
+    from simple_algorithm import InconsistentObservationError
+    from simple_probability import calculate_probabilities
+
+    # Q(M) is informational inference/accounting input ONLY. It is never an
+    # actual physical observation or a source of physical CHORD eligibility.
+    materialized = tuple(
+        tuple(
+            int(CellState.FLAGGED)
+            if value == CellState.HIDDEN and (x, y) in accounting.M else value
+            for x, value in enumerate(row)
+        )
+        for y, row in enumerate(observation)
+    )
+    try:
+        result = calculate_probabilities(materialized, num_mines)
+    except InconsistentObservationError as error:
+        raise KIntegrityError("ZERO_WORLDS", "No consistent public exact worlds.") from error
+
+    Z = result.total_worlds
+    if type(Z) is not int or Z <= 0:
+        raise KIntegrityError("EXACT_COUNTS", "Exact Z must be a positive integer.")
+    counts = {}
+    for item in result.probabilities:
+        cell = item.coordinate
+        if (
+            type(cell) is not tuple or len(cell) != 2
+            or any(type(value) is not int for value in cell)
+            or cell not in accounting.U or cell in counts
+        ):
+            raise KIntegrityError("EXACT_DOMAIN", "Invalid/duplicate exact coordinate.")
+        if (
+            type(item.mine_worlds) is not int
+            or type(item.total_worlds) is not int
+            or item.total_worlds != Z or not 0 <= item.mine_worlds <= Z
+        ):
+            raise KIntegrityError("EXACT_COUNTS", "Invalid exact integer marginal.")
+        counts[cell] = item.mine_worlds
+    if counts.keys() != accounting.U:
+        raise KIntegrityError("EXACT_DOMAIN", "Exact result omitted unresolved cells.")
+    frontier = frozenset(cell for clue in accounting.constraints for cell in clue.Uc)
+    expected_frontier = tuple(sorted(frontier, key=reading_order))
+    expected_floating = tuple(sorted(accounting.U - frontier, key=reading_order))
+    if (
+        result.frontier_cells != expected_frontier
+        or result.unconstrained_cells != expected_floating
+    ):
+        raise KIntegrityError("EXACT_DOMAIN", "Exact frontier/floating partition disagrees.")
+    return _exact_evidence(
+        Z, tuple((cell, counts[cell]) for cell in sorted(counts, key=reading_order)),
+        expected_frontier, expected_floating,
+    )
 
 
 def _snapshot(observation: object, width: int, height: int) -> Observation:
@@ -176,11 +297,12 @@ def _direct_pass(
 
 
 class KLocalSession:
-    """Own one game's M; create a new instance for every new game.
+    """Own one game's M; retain the Slice-1 name/API for local-only inspection.
 
     ``validate`` checks only and does not advance the observation guard. Successful
-    ``analyze_local`` atomically commits acquired M and the current public guard.
-    Rich certificates and safe sets leave through LocalAnalysis, never this owner.
+    ``analyze_local`` or ``analyze_decision`` atomically commits acquired M and the
+    current public guard. Rich certificates, safes and exact results leave through
+    detached analysis records, never this owner. Start a new owner for each game.
     A rejected terminal call closes the owner without reading terminal rows or
     changing M. Other integrity failures propagate; the caller must stop the run.
 
@@ -235,6 +357,13 @@ class KLocalSession:
     def analyze_local(self, observation: object, *, status: GameStatus) -> LocalAnalysis:
         """Exactly one complete direct pass, acquisition, and one second check."""
         current = self._check_current(observation, status)
+        result = self._local_analysis(current)
+        self._M = result.after.M
+        self._previous = current
+        return result
+
+    def _local_analysis(self, current: Observation) -> LocalAnalysis:
+        """Stage A/B/C without committing, so a failed D/E cannot partly commit."""
         before = _account(current, self._num_mines, self._M)
         if not before.U:
             raise KIntegrityError("EMPTY_U_PLAYING", "No unresolved cell while PLAYING.")
@@ -250,7 +379,7 @@ class KLocalSession:
             raise KIntegrityError("SAFE_REGRESSION", "Normalization lost first-pass safes.")
         if not after.U:
             raise KIntegrityError("EMPTY_U_PLAYING", "Acquisition exhausted U while PLAYING.")
-        result = LocalAnalysis(
+        return LocalAnalysis(
             before=before,
             after=after,
             acquired_mines=first.mine_cells,
@@ -260,6 +389,74 @@ class KLocalSession:
             S_current=first.safe_cells | second.safe_cells,
             certificates=first.certificates,
         )
-        self._M = staged_mines
+
+    def analyze_decision(self, observation: object, *, status: GameStatus) -> DecisionAnalysis:
+        """Run bounded A/B/C, then D/E only after local-safe exhaustion.
+
+        All G1 enter M simultaneously. E restricts D's counts without another
+        exact call; every D-origin G0 survives. No supplementary local pass is
+        performed. Classification/guess target is evidence for a later policy,
+        not selection or execution of a physical input.
+        """
+        current = self._check_current(observation, status)
+        local = self._local_analysis(current)
+        phase_d = phase_e = None
+        phase_e_status = "NOT_REACHED"
+        exact_certificates = ()
+        after = local.after
+        safes = local.S_current
+        guess_target = None
+        if safes:
+            continuation = "LOCAL_SAFE"
+        else:
+            phase_d = _exact_analysis(current, self._num_mines, local.after)
+            # Every certificate uses the same pre-acquisition M1 and D evidence;
+            # no member of the simultaneous G1 batch is another's premise.
+            exact_certificates = tuple(
+                ExactGlobalMineCertificate(
+                    observation=current,
+                    num_mines=self._num_mines,
+                    target=cell,
+                    retained_mines=local.after.M,
+                    status=GameStatus.PLAYING,
+                    total_worlds=phase_d.total_worlds,
+                    mine_worlds=phase_d.mine_worlds,
+                )
+                for cell in sorted(phase_d.G1, key=reading_order)
+            )
+            after = _account(current, self._num_mines, local.after.M | phase_d.G1)
+            if not after.U:
+                raise KIntegrityError("EMPTY_U_PLAYING", "G1 exhausted U while PLAYING.")
+            phase_e = _exact_evidence(
+                phase_d.total_worlds,
+                tuple(item for item in phase_d.mine_worlds if item[0] in after.U),
+                tuple(cell for cell in phase_d.frontier_cells if cell in after.U),
+                tuple(cell for cell in phase_d.unconstrained_cells if cell in after.U),
+            )
+            if phase_e.G0 != phase_d.G0 or phase_e.G1:
+                raise KIntegrityError("EXACT_RESTRICTION", "Restriction changed certainty.")
+            phase_e_status = "REACHED_CHANGED" if phase_d.G1 else "REACHED_NO_CHANGE"
+            safes = phase_d.G0
+            if safes:
+                continuation = "EXACT_SAFE"
+            else:
+                if phase_e.minimum_risk is None or not 0 < phase_e.minimum_risk < 1:
+                    raise KIntegrityError("EXACT_RISK", "Guess requires strictly uncertain risk.")
+                continuation = "EXACT_GUESS"
+                guess_target = min(phase_e.minimum_risk_cells, key=reading_order)
+        result = DecisionAnalysis(
+            observation=current,
+            num_mines=self._num_mines,
+            local=local,
+            phase_d=phase_d,
+            phase_e=phase_e,
+            phase_e_status=phase_e_status,
+            after=after,
+            exact_certificates=exact_certificates,
+            continuation=continuation,
+            selection_safe_cells=safes,
+            guess_target=guess_target,
+        )
+        self._M = after.M
         self._previous = current
         return result
