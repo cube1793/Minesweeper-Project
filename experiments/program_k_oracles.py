@@ -8,12 +8,15 @@ Coordinates remain (x, y); ordered outputs use the reading-order key (y, x).
 This module supplies unit-verification foundations, not an E0 qualification run.
 """
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 import hashlib
 from itertools import combinations
 import json
 from pathlib import Path
+from threading import RLock
+from time import perf_counter_ns
 
 from core_engine import CellState, GameStatus
 
@@ -46,6 +49,156 @@ class OracleANotEvaluated(ValueError):
 
 def _reading_order(cell: Coordinate) -> tuple[int, int]:
     return cell[1], cell[0]
+
+
+def _diagnostic_digest(value):
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")).hexdigest()
+
+
+def oracle_a_input_digest(grid, fixed, unresolved, remaining):
+    """Identity of public arithmetic premises, with no timing or hidden truth."""
+    return _diagnostic_digest(("A", "COMPLETE_WORLD_ENUMERATION", grid,
+        tuple(sorted(fixed, key=_reading_order)),
+        tuple(sorted(unresolved, key=_reading_order)), remaining))
+
+
+def oracle_b_input_digest(grid, num_mines, retained, *, method="MATERIALIZED_EXACT"):
+    return _diagnostic_digest(("B", method, grid, num_mines,
+                              tuple(sorted(retained, key=_reading_order))))
+
+
+def oracle_result_digest(result):
+    """Bind actual exact counts or local helper outputs without importing K."""
+    if type(result) in (OracleAResult, OracleBResult):
+        payload = ("EXACT_COUNTS", result.total_worlds, result.mine_worlds)
+    elif type(result) is tuple and len(result) == 2:
+        constraints, direct = result
+        payload = ("LOCAL_DIRECT",
+            tuple((c.source, c.remaining_mines,
+                   tuple(sorted(c.hidden_cells, key=_reading_order))) for c in constraints),
+            tuple(sorted(direct.safe_cells, key=_reading_order)),
+            tuple(sorted(direct.mine_cells, key=_reading_order)))
+    else:
+        raise PublicProofError("Unsupported Oracle diagnostic result.")
+    return _diagnostic_digest(payload)
+
+
+@dataclass(frozen=True)
+class OracleCallDiagnostic:
+    """One primitive invocation, ordered by completion within its collection.
+
+    These records are a separate operational evidence layer. No field is added
+    to public arithmetic results, certificates or semantic equality. Only leaf
+    arithmetic/local-helper spans are measured, never enclosing history checks.
+    """
+
+    sequence: int
+    oracle: str
+    method: str
+    input_digest: str
+    output_digest: str | None
+    duration_ns: int
+    variable_count: int
+    status: str
+    arithmetic_evidence: str
+    reason: str | None
+
+    def __post_init__(self):
+        if (type(self.sequence) is not int or self.sequence < 0
+                or type(self.variable_count) is not int or self.variable_count < 0
+                or type(self.duration_ns) is not int or self.duration_ns < 0
+                or (self.oracle, self.method) not in (
+                    ("A", "COMPLETE_WORLD_ENUMERATION"),
+                    ("B", "MATERIALIZED_EXACT"), ("B", "MATERIALIZED_LOCAL"))
+                or self.status not in ("EVALUATED", "NOT_EVALUATED", "ERROR")
+                or self.arithmetic_evidence != (
+                    "INDEPENDENT BOUNDED ARITHMETIC EVIDENCE"
+                    if self.oracle == "A" else SHARED_KERNEL_EVIDENCE)):
+            raise PublicProofError("Malformed Oracle call diagnostic.")
+        for digest in (self.input_digest, self.output_digest):
+            if digest is not None and (type(digest) is not str or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
+                raise PublicProofError("Malformed Oracle diagnostic identity.")
+        if self.input_digest is None or (
+                self.status == "EVALUATED"
+                and (self.output_digest is None or self.reason is not None)) or (
+                self.status != "EVALUATED"
+                and (self.output_digest is not None or type(self.reason) is not str
+                     or not self.reason)):
+            raise PublicProofError("Oracle coverage/result diagnostic is inconsistent.")
+        if self.status == "NOT_EVALUATED" and self.oracle != "A":
+            raise PublicProofError("Only Oracle A has a bounded non-evaluation result.")
+
+
+_oracle_diagnostic_lock = RLock()
+_oracle_diagnostic_collectors = []
+
+
+@contextmanager
+def collect_oracle_diagnostics():
+    """Collect actual calls in this process, including its probe threads.
+
+    Nested collection receives the same individual primitive calls once per
+    collector; no enclosing call receives a second duration. The caller freezes
+    the returned list as a tuple after leaving the scope. Nothing calls an
+    oracle merely to fill diagnostics; an empty collection means no invocation.
+    """
+    calls = []
+    with _oracle_diagnostic_lock:
+        _oracle_diagnostic_collectors.append(calls)
+    try:
+        yield calls
+    finally:
+        with _oracle_diagnostic_lock:
+            # Remove by identity: distinct empty nested collections compare equal.
+            for index, collector in enumerate(_oracle_diagnostic_collectors):
+                if collector is calls:
+                    del _oracle_diagnostic_collectors[index]
+                    break
+
+
+class _OracleMeasurement:
+    def __init__(self, enabled):
+        self.started_ns = perf_counter_ns() if enabled else None
+        self.duration_ns = self.output_digest = None
+
+    def finish(self, result):
+        if self.started_ns is not None:
+            # Hashing is evidence overhead, outside the measured arithmetic span.
+            self.duration_ns = perf_counter_ns() - self.started_ns
+            self.output_digest = oracle_result_digest(result)
+
+
+@contextmanager
+def measure_oracle_call(oracle, method, input_digest, variable_count):
+    """Narrow primitive timing seam also used for the harness's local Oracle B."""
+    with _oracle_diagnostic_lock:
+        collectors = tuple(_oracle_diagnostic_collectors)
+    measurement = _OracleMeasurement(bool(collectors))
+    status, reason = "EVALUATED", None
+    try:
+        yield measurement
+        if collectors and measurement.output_digest is None:
+            raise PublicProofError("An actual Oracle call omitted its result diagnostic.")
+    except BaseException as error:
+        status = "NOT_EVALUATED" if isinstance(error, OracleANotEvaluated) else "ERROR"
+        reason = type(error).__name__ + ":" + str(error)
+        measurement.output_digest = None
+        raise
+    finally:
+        if collectors:
+            duration = (perf_counter_ns() - measurement.started_ns
+                        if measurement.duration_ns is None else measurement.duration_ns)
+            with _oracle_diagnostic_lock:
+                for collector in collectors:
+                    collector.append(OracleCallDiagnostic(
+                        len(collector), oracle, method, input_digest,
+                        measurement.output_digest, duration, variable_count, status,
+                        "INDEPENDENT BOUNDED ARITHMETIC EVIDENCE"
+                        if oracle == "A" else SHARED_KERNEL_EVIDENCE, reason))
 
 
 def _public_grid(observation, num_mines: int, status: GameStatus) -> PublicObservation:
@@ -444,6 +597,16 @@ def verify_exact_global_certificate(
 
 def _enumerate_supported(grid, fixed, unresolved, remaining) -> OracleAResult:
     """Independent arithmetic with already-checked public fixed-mine premises."""
+    with measure_oracle_call(
+            "A", "COMPLETE_WORLD_ENUMERATION",
+            oracle_a_input_digest(grid, fixed, unresolved, remaining),
+            len(unresolved)) as measurement:
+        result = _enumerate_supported_values(grid, fixed, unresolved, remaining)
+        measurement.finish(result)
+        return result
+
+
+def _enumerate_supported_values(grid, fixed, unresolved, remaining) -> OracleAResult:
     ordered = tuple(sorted(unresolved, key=_reading_order))
     if len(ordered) > ORACLE_A_MAX_VARIABLES:
         raise OracleANotEvaluated(len(ordered))
@@ -503,6 +666,18 @@ def enumerate_public_worlds(
 
 
 def _materialized_exact(grid, num_mines, retained) -> OracleBResult:
+    variable_count = sum(value == CellState.HIDDEN and (x, y) not in retained
+                         for y, row in enumerate(grid) for x, value in enumerate(row))
+    with measure_oracle_call(
+            "B", "MATERIALIZED_EXACT",
+            oracle_b_input_digest(grid, num_mines, retained),
+            variable_count) as measurement:
+        result = _materialized_exact_values(grid, num_mines, retained)
+        measurement.finish(result)
+        return result
+
+
+def _materialized_exact_values(grid, num_mines, retained) -> OracleBResult:
     # Independent from K's materialization and accounting. Only HIDDEN members
     # of M become informational flags; actual flags/clues and n are preserved.
     materialized = tuple(
@@ -587,7 +762,18 @@ P8_GRID_HEIGHT = 16
 P8_CELL_COUNT = P8_GRID_WIDTH * P8_GRID_HEIGHT
 P8_EXPECTED_TRIPLE_COUNT = P8_CELL_COUNT * P8_CELL_COUNT * (P8_CELL_COUNT - 1)
 P8_CHECKER_IDENTITY = "experiments.program_k_oracles.check_frozen_p8"
-P8_CHECKER_VERSION = 1
+P8_CHECKER_VERSION = 2
+
+
+def _p8_source_digest(value):
+    if (type(value) is not str or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)):
+        raise PublicProofError("P-8 checker source identity must be a lowercase SHA-256.")
+    return value
+
+
+def _p8_checker_source_sha256():
+    return _p8_source_digest(hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
 
 
 def _p8_positive_table(table):
@@ -660,8 +846,10 @@ class P8Result:
     """Immutable reconstructable scan evidence, including its actual value table.
 
     ``status`` is derived: incomplete coverage cannot become PASS even when all
-    visited gaps are positive. A nonpositive authenticated prefix independently
-    sets ``premise_failure``; interruption cannot erase that counterexample.
+    visited gaps are positive. With stable checker identity, a nonpositive
+    authenticated prefix sets ``premise_failure`` even after interruption.
+    Changed/unreadable checker identity invalidates that premise interpretation
+    while preserving every observed count and witness for diagnosis.
     A PRIVATE_BOUNDED_CHECK PASS says nothing about P-8 qualification.
     """
 
@@ -681,7 +869,9 @@ class P8Result:
     table_order: str
     checker_identity: str
     checker_version: int
+    # The first identity is captured BEFORE invoking the triple iterator.
     checker_source_sha256: str
+    checker_source_end_sha256: str | None
     minimum_gap: int | None
     minimum_gap_witness: P8Witness | None
     zero_gap_count: int
@@ -753,10 +943,11 @@ class P8Result:
                 or self.checker_identity != P8_CHECKER_IDENTITY
                 or type(self.checker_version) is not int
                 or self.checker_version != P8_CHECKER_VERSION
-                or type(self.checker_source_sha256) is not str
-                or len(self.checker_source_sha256) != 64
-                or any(c not in "0123456789abcdef" for c in self.checker_source_sha256)):
+                or type(self.checker_source_sha256) is not str):
             raise PublicProofError("P-8 table/checker identity is missing or malformed.")
+        _p8_source_digest(self.checker_source_sha256)
+        if self.checker_source_end_sha256 is not None:
+            _p8_source_digest(self.checker_source_end_sha256)
         if self.scope == "FROZEN_P8":
             # Lazy import preserves independence of the public arithmetic and
             # certificate APIs from production inference/planning dependencies.
@@ -784,7 +975,13 @@ class P8Result:
     def status(self) -> str:
         if not self.complete:
             return "INCOMPLETE"
+        if not self.checker_source_stable:
+            return "IMPLEMENTATION_IDENTITY_FAIL"
         return "FAIL" if self.zero_gap_count or self.negative_gap_count else "PASS"
+
+    @property
+    def checker_source_stable(self) -> bool:
+        return self.checker_source_end_sha256 == self.checker_source_sha256
 
     @property
     def completion_marker(self) -> str:
@@ -792,10 +989,13 @@ class P8Result:
 
     @property
     def premise_failure(self) -> bool:
-        return self.scope == "FROZEN_P8" and bool(self.zero_gap_count or self.negative_gap_count)
+        return (self.checker_source_stable and self.scope == "FROZEN_P8"
+                and bool(self.zero_gap_count or self.negative_gap_count))
 
     @property
     def failure_kind(self) -> str | None:
+        if not self.checker_source_stable:
+            return "CHECKER_SOURCE_IDENTITY_FAILURE"
         if self.premise_failure:
             return "FROZEN_PREMISE_FAILURE"
         if self.zero_gap_count or self.negative_gap_count:
@@ -835,6 +1035,10 @@ def _scan_p8(table, cells, *, max_triples, interrupt_requested, counterexample_l
         raise PublicProofError("P-8 interruption hook must be callable.")
     if type(counterexample_limit) is not int or counterexample_limit <= 0:
         raise PublicProofError("P-8 counterexample limit must be a positive true int.")
+    # Public callers have already authenticated profile bytes/metadata and the
+    # stored table. Fail before even invoking the iterator if source capture
+    # fails; the end read must never replace this immutable starting identity.
+    checker_source_start = _p8_source_digest(_p8_checker_source_sha256())
     visited = zero_count = negative_count = 0
     minimum = minimum_witness = None
     counterexamples = []
@@ -877,6 +1081,13 @@ def _scan_p8(table, cells, *, max_triples, interrupt_requested, counterexample_l
                 ))
         visited += 1
     complete = visited == expected
+    try:
+        checker_source_end = _p8_source_digest(_p8_checker_source_sha256())
+    except (OSError, PublicProofError):
+        # Preserve the scanned prefix and start identity even when the source
+        # cannot be read at the final boundary. Missing evidence is not zero,
+        # PASS, or an authenticated timing-premise counterexample.
+        checker_source_end = None
     return P8Result(
         scope=scope, table=table, cells=cells,
         expected_triple_count=expected, visited_triple_count=visited,
@@ -888,7 +1099,8 @@ def _scan_p8(table, cells, *, max_triples, interrupt_requested, counterexample_l
         physical_profile_version=None if profile_identity is None else profile_identity.physical_profile_version,
         timing_unit="us", table_order="dx_major_dy_minor",
         checker_identity=P8_CHECKER_IDENTITY, checker_version=P8_CHECKER_VERSION,
-        checker_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        checker_source_sha256=checker_source_start,
+        checker_source_end_sha256=checker_source_end,
         minimum_gap=minimum, minimum_gap_witness=minimum_witness,
         zero_gap_count=zero_count, negative_gap_count=negative_count,
         counterexamples=tuple(counterexamples), counterexample_limit=counterexample_limit,
@@ -923,7 +1135,9 @@ def check_frozen_p8(*, profile_path=None, table=None,
     API. The returned status cannot PASS until the full domain is visited.
 
     Exact profile bytes/metadata and all immutable table values are authenticated
-    by the existing frozen APIs before traversal. A supplied table must itself
+    by the existing frozen APIs before traversal. The checker source digest is
+    then captured before triple iteration and rechecked at the final boundary.
+    A supplied table must itself
     be tuple-of-tuples, positive true ints, and match the authenticated profile.
     No calibration coefficients are accessed and no values are regenerated.
     """

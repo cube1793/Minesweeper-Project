@@ -429,7 +429,7 @@ from experiments import program_k_policy as _policy
 from experiments import program_k_runner as _runner
 from experiments import program_k_evidence as _evidence
 from experiments import program_k_evaluator as _evaluator
-from simple_algorithm import build_constraints, infer_deterministic
+from simple_algorithm import InferenceResult, build_constraints, infer_deterministic
 from simple_decision import DecisionKind
 from stage3_physical import load_timing_table, MODEL_C_V1_IDENTITY
 from stage3_planner import Stage3PlanningError
@@ -642,8 +642,10 @@ def check_p8_gate(result):
         checked = replace(result)
         digest = checked.evidence_sha256
         expected_source = hashlib.sha256(Path(_oracles.__file__).read_bytes()).hexdigest()
-        _need(checked.checker_source_sha256 == expected_source, "P-8 checker source identity changed.")
-    except (ValueError, TypeError, AttributeError) as error:
+        _need(checked.checker_source_stable
+              and checked.checker_source_sha256 == expected_source,
+              "P-8 checker source identity changed or its end identity is unavailable.")
+    except (ValueError, TypeError, AttributeError, OSError) as error:
         return P8Gate("FAIL", "IMPLEMENTATION_IDENTITY_FAIL", None, str(error))
     if checked.scope != "FROZEN_P8":
         return P8Gate("INCOMPLETE", "PRIVATE_CHECK_NOT_RESEARCH_EVIDENCE", digest,
@@ -935,8 +937,14 @@ def verify_fixture(fixture):
         materialized = tuple(tuple(F if value == H and (x, y) in mines else value
                                    for x, value in enumerate(row))
                              for y, row in enumerate(fixture.observation))
-        constraints = build_constraints(materialized)
-        direct = infer_deterministic(constraints)
+        with _oracles.measure_oracle_call(
+                "B", "MATERIALIZED_LOCAL",
+                _oracles.oracle_b_input_digest(fixture.observation, fixture.num_mines, mines,
+                                               method="MATERIALIZED_LOCAL"),
+                sum(value == H for row in materialized for value in row)) as measured:
+            constraints = build_constraints(materialized)
+            direct = infer_deterministic(constraints)
+            measured.finish((constraints, direct))
         if accounting is not None:
             rows = tuple((c.source, c.rc, c.Uc) for c in accounting.constraints)
             reference = tuple((c.source, c.remaining_mines, c.hidden_cells) for c in constraints)
@@ -1014,6 +1022,8 @@ _H = "tests.test_program_k_harness."
 _S = "tests.test_program_k_semantics."
 _P = "tests.test_program_k_policy."
 PROBES = (
+    ProbeSpec("P-8-CHECKER", (_H+"ProgramKSlice6P8CheckerTests",),
+              "Bounded checker authentication/fault qualification; never the exhaustive P-8 gate"),
     ProbeSpec("A-E1/A-E2", (_H+"ProgramKSlice6InterfaceAndEffectsTests",),
               "Public interface sentinels, exact effects and terminal segregation"),
     ProbeSpec("A-E3", (_H+"ProgramKSlice6TimingAndContainmentTests",),
@@ -1536,6 +1546,146 @@ def seal_execution_archive(archive, *, run_id):
                                           tuple(assertions), content_digest(archive))
 
 
+def _bound_archive_answer(archive, sealed):
+    """Evaluator-only projection of an already completed, sealed archive.
+
+    These fixed public mine totals belong to the source-registered capture
+    cases. They are never inferred from assertions, probabilities or truth.
+    Terminal rows leave this function only inside evaluator-owned answer data.
+    """
+    declared = {_ARCHIVE_CASE: 2, _TREATMENT_ARCHIVE_CASE: 1, _GUESS_ARCHIVE_CASE: 2}
+    _need(archive.case_id in declared, "Evaluator archive has no registered public mine total.")
+    _need(sealed.archive_digest == content_digest(archive),
+          "Evaluator seal is not bound to this execution archive.")
+    effects = tuple(t.public_effect for t in archive.result.traces)
+    _need(_evidence.validate_public_effect_stream(effects, complete=True).status == "PASS",
+          "Evaluator requires a complete terminal effect stream.")
+    final = effects[-1]
+    _need(archive.result.status is final.status_after is final.after_observation.status
+          and final.status_after in (GameStatus.WON, GameStatus.LOST),
+          "Evaluator terminal outcome differs from the completed archive.")
+    return _evaluator.derive_terminal_answer(
+        sealed, terminal_status=final.status_after.name,
+        terminal_rows=final.after_observation.rows, num_mines=declared[archive.case_id])
+
+
+@dataclass(frozen=True)
+class PostHocEvaluation:
+    run_id: str
+    archive_digests: tuple[str, ...]
+    findings: tuple[_evaluator.FalsificationResult, ...]
+
+    def __post_init__(self):
+        _need(type(self.run_id) is str and bool(self.run_id), "Evaluator operation needs its run identity.")
+        _need(type(self.archive_digests) is tuple and type(self.findings) is tuple
+              and all(type(f) is _evaluator.FalsificationResult for f in self.findings),
+              "Evaluator operation needs immutable ordered findings.")
+        for digest in self.archive_digests:
+            _sha(digest)
+        _need(tuple(f.sealed_input.archive_digest for f in self.findings) == self.archive_digests
+              and all(f.run_id == self.run_id for f in self.findings),
+              "Evaluator operation findings differ from their sealed archive/run sequence.")
+
+
+def evaluate_execution_archives(archives, *, run_id):
+    """One-way post-hoc operation: no solver, replay or public oracle calls."""
+    _need(type(archives) is tuple and all(type(a) is ExecutionArchive for a in archives),
+          "Evaluator operation accepts only detached completed execution archives.")
+    archives = reconstruct(canonical_bytes(archives))
+    findings = []
+    for archive in archives:
+        if archive.variant not in ("K-P0", "K-CONTROL"):
+            continue
+        sealed = seal_execution_archive(archive, run_id=run_id)
+        answer = _bound_archive_answer(archive, sealed)
+        findings.append(_evaluator.evaluate_falsification(sealed, answer))
+    return PostHocEvaluation(run_id, tuple(f.sealed_input.archive_digest for f in findings),
+                             tuple(findings))
+
+
+@dataclass(frozen=True)
+class OperationDiagnostics:
+    """Sidecar call evidence; never part of a solver/fixture semantic comparison.
+
+    Primitive Oracle spans exclude proof-history callers. Evaluator spans are
+    separate. No nested durations or operation elapsed times are added together.
+    """
+    kind: str
+    operation_id: str
+    mode: str
+    source_digest: str
+    result_digest: str
+    oracle_calls: tuple
+    evaluator_calls: tuple
+    oracle_a_call_count: int
+    oracle_b_call_count: int
+    evaluator_call_count: int
+    not_invoked: tuple[str, ...]
+
+    def __post_init__(self):
+        _need(self.mode in ("IMPLEMENTATION_UNIT", "SUPERVISED_E0"),
+              "Diagnostics must distinguish unit work from actual E0 execution.")
+        _need((self.kind, self.operation_id) in _operation_catalog(),
+              "Diagnostics require a fixed operation identity.")
+        _sha(self.source_digest)
+        _sha(self.result_digest)
+        for calls, cls in ((self.oracle_calls, _oracles.OracleCallDiagnostic),
+                           (self.evaluator_calls, _evaluator.EvaluatorCallDiagnostic)):
+            _need(type(calls) is tuple and all(type(c) is cls for c in calls),
+                  "Malformed call diagnostics.")
+            for call in calls:
+                replace(call)
+                _positive(call.duration_ns, "Actual call duration_ns")
+            _need(tuple(c.sequence for c in calls) == tuple(range(len(calls))),
+                  "Call sequence is omitted, duplicated or reordered.")
+        counts = (sum(c.oracle == "A" for c in self.oracle_calls),
+                  sum(c.oracle == "B" for c in self.oracle_calls), len(self.evaluator_calls))
+        stored = (self.oracle_a_call_count, self.oracle_b_call_count, self.evaluator_call_count)
+        _need(all(type(n) is int and n >= 0 for n in stored) and stored == counts,
+              "Actual call counts do not reconstruct.")
+        _need(type(self.not_invoked) is tuple and self.not_invoked == tuple(name for name, count in zip(
+            ("ORACLE_A_NOT_INVOKED", "ORACLE_B_NOT_INVOKED", "EVALUATOR_NOT_INVOKED"), counts)
+            if count == 0), "Uninvoked calls require explicit absence markers, never zero durations.")
+
+
+@dataclass(frozen=True)
+class MeasuredOperation:
+    result: object
+    diagnostics: OperationDiagnostics
+
+
+def _operation_catalog():
+    return (tuple(("FIXTURE", f.fixture_id) for f in MANIFEST)
+            + tuple(("PROBE", p.gate_id) for p in PROBES)
+            + (("AUDIT", "PUBLIC_EXECUTION_ARCHIVES"),
+               ("EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES")))
+
+
+def _measure_operation(kind, operation_id, identity, *, mode, archives=(), run_id=None):
+    """Fixed dispatch with disjoint diagnostics; no caller-selected callback."""
+    with _oracles.collect_oracle_diagnostics() as oracle_calls, \
+            _evaluator.collect_evaluator_diagnostics() as evaluator_calls:
+        if kind == "FIXTURE":
+            result = verify_fixture(next(f for f in MANIFEST if f.fixture_id == operation_id))
+        elif kind == "PROBE":
+            result = verify_probe(next(p for p in PROBES if p.gate_id == operation_id), identity)
+        elif (kind, operation_id) == ("AUDIT", "PUBLIC_EXECUTION_ARCHIVES"):
+            result = verify_execution_archives(archives)
+        elif (kind, operation_id) == ("EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES"):
+            result = evaluate_execution_archives(archives, run_id=run_id)
+        else:
+            raise QualificationError("Unregistered measured operation.")
+    counts = (sum(c.oracle == "A" for c in oracle_calls),
+              sum(c.oracle == "B" for c in oracle_calls), len(evaluator_calls))
+    diagnostics = OperationDiagnostics(
+        kind, operation_id, mode, content_digest(identity), content_digest(result),
+        tuple(oracle_calls), tuple(evaluator_calls), *counts,
+        tuple(name for name, count in zip(
+            ("ORACLE_A_NOT_INVOKED", "ORACLE_B_NOT_INVOKED", "EVALUATOR_NOT_INVOKED"), counts)
+              if count == 0))
+    return MeasuredOperation(result, diagnostics)
+
+
 @dataclass(frozen=True)
 class GateResult:
     gate_id: str
@@ -1785,6 +1935,7 @@ class QualificationRecord:
     interruptions: tuple[str, ...]
     diagnosed_implementation_defects: tuple[str, ...]
     operational_receipts: tuple = ()
+    unit_diagnostics: tuple[OperationDiagnostics, ...] = ()
 
     def __post_init__(self):
         _need(type(self.run_id) is str and re.fullmatch("[A-Za-z0-9][A-Za-z0-9_-]{0,79}", self.run_id),
@@ -1809,6 +1960,9 @@ class QualificationRecord:
         _need(type(self.operational_receipts) is tuple
               and all(type(r) is OperationReceipt for r in self.operational_receipts),
               "Operational receipts must be immutable typed monitoring evidence.")
+        _need(type(self.unit_diagnostics) is tuple
+              and all(type(d) is OperationDiagnostics for d in self.unit_diagnostics),
+              "Unit diagnostics must be explicitly typed sidecar evidence.")
 
 
 @dataclass(frozen=True)
@@ -1826,19 +1980,32 @@ class QualificationAssessment:
 
 def verify_operational_receipts(record):
     """Bind monitored work to the fixed roster and retained evidence, not labels."""
+    try:
+        return _verify_operational_receipts(record)
+    except (ValueError, TypeError, AttributeError) as error:
+        return GateResult("OPERATING-EXECUTION", "FAIL", (str(error),))
+
+
+def _operation_results(record):
+    results = {("FIXTURE", r.fixture.fixture_id): r for r in record.fixture_results}
+    results.update({("PROBE", r.gate_id): r for r in record.probe_results})
+    results[("AUDIT", "PUBLIC_EXECUTION_ARCHIVES")] = record.execution_evidence
+    results[("EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES")] = PostHocEvaluation(
+        record.run_id, tuple(f.sealed_input.archive_digest for f in record.evaluator_findings),
+        record.evaluator_findings)
+    return results
+
+
+def _verify_operational_receipts(record):
     env = require_envelope(record.operating_envelope)
-    expected = (tuple(("FIXTURE", f.fixture_id) for f in MANIFEST)
-                + tuple(("PROBE", p.gate_id) for p in PROBES)
-                + (("AUDIT", "PUBLIC_EXECUTION_ARCHIVES"),))
+    expected = _operation_catalog()
     receipts = record.operational_receipts
     actual = tuple((r.kind, r.operation_id) for r in receipts)
     if actual != expected:
         return GateResult("OPERATING-EXECUTION", "INCOMPLETE"
             if actual == expected[:len(actual)] else "FAIL",
             ("Missing, interrupted, duplicate or out-of-order monitored work.",))
-    results = {("FIXTURE", r.fixture.fixture_id): r for r in record.fixture_results}
-    results.update({("PROBE", r.gate_id): r for r in record.probe_results})
-    results[("AUDIT", "PUBLIC_EXECUTION_ARCHIVES")] = record.execution_evidence
+    results = _operation_results(record)
     elapsed, storage = 0, 0
     for receipt in receipts:
         replace(receipt)
@@ -1846,6 +2013,13 @@ def verify_operational_receipts(record):
             return GateResult("OPERATING-EXECUTION", "FAIL", ("Receipt source/envelope identity differs.",))
         if receipt.status != "COMPLETE":
             return GateResult("OPERATING-EXECUTION", "INCOMPLETE", (receipt.reason,))
+        if receipt.memory_evidence is None:
+            return GateResult("OPERATING-EXECUTION", "INCOMPLETE", ("Peak-memory evidence is unmeasured.",))
+        memory = replace(receipt.memory_evidence)
+        if (memory.memory_cap_bytes != env.memory_cap_bytes
+                or memory.peak_combined_bytes > env.memory_cap_bytes
+                or memory.peak_worker_tree_bytes > memory.worker_budget_bytes):
+            return GateResult("OPERATING-EXECUTION", "FAIL", ("Memory evidence violates its declared cap.",))
         payload = results.get((receipt.kind, receipt.operation_id))
         if payload is None:
             return GateResult("OPERATING-EXECUTION", "INCOMPLETE", ("Receipt has no retained result.",))
@@ -1887,6 +2061,91 @@ def verify_operational_receipts(record):
             return GateResult("OPERATING-EXECUTION", "INCOMPLETE", ("Operational containment exceeded.",))
     return GateResult("OPERATING-EXECUTION", "PASS",
         ("Fixed dispatch/result/monitor receipts reconstruct; actual P-8 and evaluator gates remain separate.",))
+
+
+def verify_operation_diagnostics(record):
+    """Validate sidecars without re-running any oracle/evaluator or adding spans."""
+    try:
+        actual_e0 = record.purpose == "E0_QUALIFICATION"
+        if actual_e0:
+            _need(not record.unit_diagnostics, "Unit diagnostics cannot substitute for supervised E0.")
+            diagnostics = tuple(r.diagnostics for r in record.operational_receipts)
+        else:
+            diagnostics = record.unit_diagnostics
+        if (any(d is None for d in diagnostics)
+                or tuple((d.kind, d.operation_id) for d in diagnostics) != _operation_catalog()):
+            return GateResult("CALL-DIAGNOSTICS", "INCOMPLETE",
+                              ("Missing fixed-operation Oracle/evaluator duration/coverage evidence.",))
+        results = _operation_results(record)
+        for diagnostic in diagnostics:
+            replace(diagnostic)
+            _need(diagnostic.mode == ("SUPERVISED_E0" if actual_e0 else "IMPLEMENTATION_UNIT")
+                  and diagnostic.source_digest == content_digest(record.source_identity),
+                  "Call diagnostics have the wrong execution/source identity.")
+            payload = results.get((diagnostic.kind, diagnostic.operation_id))
+            _need(payload is not None and diagnostic.result_digest == content_digest(payload),
+                  "Call diagnostics are not bound to the retained operation result.")
+            if diagnostic.kind == "FIXTURE":
+                available = list(diagnostic.oracle_calls)
+                for phase in payload.phases:
+                    expected = phase.expectation
+                    grid, n, mines = payload.fixture.observation, payload.fixture.num_mines, frozenset(expected.M)
+                    fixed = frozenset((x,y) for y,row in enumerate(grid)
+                                      for x,v in enumerate(row) if v == F) | mines
+                    unresolved = frozenset((x,y) for y,row in enumerate(grid)
+                                           for x,v in enumerate(row) if v == H) - mines
+                    requirements = [
+                        ("B", "MATERIALIZED_LOCAL",
+                         _oracles.oracle_b_input_digest(grid, n, mines, method="MATERIALIZED_LOCAL"),
+                         "EVALUATED", _oracles.oracle_result_digest((
+                             phase.local_constraints,
+                             InferenceResult(phase.direct_safes, phase.direct_mines)))),
+                        ("A", "COMPLETE_WORLD_ENUMERATION",
+                         _oracles.oracle_a_input_digest(grid, fixed, unresolved, n-len(fixed)),
+                         "EVALUATED" if phase.oracle_a is not None else "NOT_EVALUATED",
+                         None if phase.oracle_a is None else _oracles.oracle_result_digest(phase.oracle_a)),
+                    ]
+                    if expected.phase in ("D", "E"):
+                        requirements.append(("B", "MATERIALIZED_EXACT",
+                            _oracles.oracle_b_input_digest(grid, n, mines), "EVALUATED",
+                            _oracles.oracle_result_digest(phase.oracle_b)))
+                    for oracle, method, inputs, status, output in requirements:
+                        matched = next((c for c in available if
+                            (c.oracle, c.method, c.input_digest, c.status, c.output_digest, c.variable_count)
+                            == (oracle, method, inputs, status, output, len(unresolved))), None)
+                        _need(matched is not None,
+                              "Mandatory phase Oracle duration/coverage is absent or inconsistent.")
+                        available.remove(matched)
+            elif diagnostic.kind == "PROBE":
+                # These fixed source-registered suites necessarily make actual
+                # calls. A self-declared all-absent sidecar cannot cover them.
+                required = {
+                    "P-1/P-2/LOCAL/ACCOUNTING": ("A",),
+                    "EXACT/TOTALITY/MATERIALIZATION": ("A", "B"),
+                    "EVALUATOR": ("A", "EVALUATOR"),
+                }.get(diagnostic.operation_id, ())
+                for role in required:
+                    count = (diagnostic.evaluator_call_count if role == "EVALUATOR"
+                             else sum(c.oracle == role for c in diagnostic.oracle_calls))
+                    _need(count > 0, "Mandatory fixed-probe call evidence is absent.")
+            elif diagnostic.kind == "AUDIT":
+                _need(diagnostic.oracle_a_call_count > 0,
+                      "Mandatory public archive acquisition checks lack Oracle-A call evidence.")
+            elif diagnostic.kind == "EVALUATOR":
+                _need(not diagnostic.oracle_calls, "Evaluator work cannot invoke public oracles.")
+                _need(len(diagnostic.evaluator_calls) == len(payload.findings) > 0,
+                      "Evaluator call coverage differs from sealed findings.")
+                for call, finding in zip(diagnostic.evaluator_calls, payload.findings):
+                    _need(call.error is None and
+                          (call.sealed_input_digest, call.answer_digest, call.classification,
+                           call.evaluated_coordinate_count) ==
+                          (finding.sealed_input.assertions_digest, finding.answer_digest,
+                           finding.classification, finding.evaluated_coordinate_count),
+                          "Evaluator call duration/coverage differs from the attached finding.")
+        return GateResult("CALL-DIAGNOSTICS", "PASS",
+                          ("Separate ordered primitive calls; absent calls explicitly marked; no summed nested spans.",))
+    except (ValueError, TypeError, AttributeError, StopIteration) as error:
+        return GateResult("CALL-DIAGNOSTICS", "FAIL", (str(error),))
 
 
 def _readiness_for_verdict(verdict, *, purpose, nonexecution_complete):
@@ -1983,12 +2242,22 @@ def assess_qualification(record):
     supplied = tuple(f.sealed_input for f in record.evaluator_findings)
     if not expected_seals or supplied != expected_seals:
         gate("EVALUATOR-SEALED-COVERAGE", "INCOMPLETE", "Missing or unbound post-hoc findings.")
-    elif any(f.classification == "G1_FALSIFICATION" for f in record.evaluator_findings):
-        gate("EVALUATOR-FALSIFICATION", "FAIL", "G1 FAIL; progression stopped pending diagnosis, no repair.")
-    elif any(f.classification == "NOT_EVALUATED" for f in record.evaluator_findings):
-        gate("EVALUATOR-SEALED-COVERAGE", "INCOMPLETE", "No certainty coordinates were actually compared.")
     else:
-        gate("EVALUATOR-SEALED-COVERAGE", "PASS", "No counterexample only; public-proof gates remain separate.")
+        try:
+            for archive, sealed, finding in zip(treatment_archives, expected_seals,
+                                                 record.evaluator_findings):
+                _evaluator.verify_bound_finding(finding, sealed, _bound_archive_answer(archive, sealed))
+        except (ValueError, TypeError, AttributeError, IndexError) as error:
+            gate("EVALUATOR-BOARD-BINDING", "FAIL", str(error))
+        else:
+            if any(f.classification == "G1_FALSIFICATION" for f in record.evaluator_findings):
+                gate("EVALUATOR-FALSIFICATION", "FAIL", "G1 FAIL; progression stopped pending diagnosis, no repair.")
+            elif any(f.classification == "NOT_EVALUATED" for f in record.evaluator_findings):
+                gate("EVALUATOR-SEALED-COVERAGE", "INCOMPLETE", "No certainty coordinates were actually compared.")
+            else:
+                gate("EVALUATOR-SEALED-COVERAGE", "PASS",
+                     "Exact execution-board binding; no counterexample only, never public proof.")
+    gates.append(verify_operation_diagnostics(record))
     if record.interruptions:
         gate("OPERATION", "INCOMPLETE", *record.interruptions)
     if record.diagnosed_implementation_defects:
@@ -2024,18 +2293,29 @@ def assess_qualification(record):
 def collect_unit_readiness(*, run_id, envelope):
     """Implementation/unit integration only. No research E0 or P-8 execution.
 
-    Post-hoc evaluator findings are attached separately after this public bundle
-    is sealed. This function never receives an answer and never selects cases
-    using evaluator output. Actual E0 uses the supervised entry point below.
+    Public results are sealed before the separate post-hoc evaluator operation.
+    No external answer is accepted and no evaluator result selects later cases.
+    Unit diagnostics are explicitly distinct from supervised E0 receipts.
     """
     env = require_envelope(envelope)
     identity = capture_source_identity()
-    fixtures = tuple(verify_fixture(f) for f in MANIFEST)
-    probes = tuple(verify_probe(p, identity) for p in PROBES)
-    execution = verify_execution_archives(tuple(a for p in probes for a in p.execution_archives))
+    measured_fixtures = tuple(_measure_operation(
+        "FIXTURE", f.fixture_id, identity, mode="IMPLEMENTATION_UNIT") for f in MANIFEST)
+    measured_probes = tuple(_measure_operation(
+        "PROBE", p.gate_id, identity, mode="IMPLEMENTATION_UNIT") for p in PROBES)
+    fixtures = tuple(m.result for m in measured_fixtures)
+    probes = tuple(m.result for m in measured_probes)
+    archives = tuple(a for p in probes for a in p.execution_archives)
+    audit = _measure_operation("AUDIT", "PUBLIC_EXECUTION_ARCHIVES", identity,
+                               mode="IMPLEMENTATION_UNIT", archives=archives)
+    evaluated = _measure_operation("EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES", identity,
+                                   mode="IMPLEMENTATION_UNIT", archives=archives, run_id=run_id)
     return QualificationRecord(
         run_id, "IMPLEMENTATION_UNIT_READINESS", None, identity, env, MANIFEST_ID,
-        PINNED_MANIFEST_SHA256, MANIFEST, fixtures, probes, execution, (), None, (), ())
+        PINNED_MANIFEST_SHA256, MANIFEST, fixtures, probes, audit.result,
+        evaluated.result.findings, None, (), (),
+        unit_diagnostics=tuple(m.diagnostics for m in
+                               measured_fixtures + measured_probes + (audit, evaluated)))
 
 
 @dataclass(frozen=True)
@@ -2106,6 +2386,32 @@ def read_qualification_artifact(directory):
 # in the Slice-7 tests. Each source-registered operation owns a disposable
 # process; the parent, not a solver timeout, decides operational containment.
 OPERATIONAL_MONITOR_ID = "WINDOWS_JOB_MEMORY_AND_BOUNDARY_WATCHDOG_V1"
+MEMORY_MEASUREMENT = (
+    "Windows Job Object peak committed worker-tree bytes; maximum sampled sum "
+    "of that peak plus current coordinator private committed bytes. "
+    "Samples at monitor intervals/boundaries and before Job closure; not machine-wide peak."
+)
+
+
+@dataclass(frozen=True)
+class MemoryEvidence:
+    peak_worker_tree_bytes: int
+    peak_combined_bytes: int
+    sample_count: int
+    worker_budget_bytes: int
+    memory_cap_bytes: int
+    monitor_identity: str = OPERATIONAL_MONITOR_ID
+    measurement: str = MEMORY_MEASUREMENT
+
+    def __post_init__(self):
+        for name in ("peak_worker_tree_bytes", "peak_combined_bytes", "sample_count",
+                     "worker_budget_bytes", "memory_cap_bytes"):
+            _positive(getattr(self, name), name)
+        _need(self.monitor_identity == OPERATIONAL_MONITOR_ID
+              and self.measurement == MEMORY_MEASUREMENT
+              and self.peak_combined_bytes >= self.peak_worker_tree_bytes
+              and self.worker_budget_bytes <= self.memory_cap_bytes,
+              "Memory monitor meaning/budget is missing or inconsistent.")
 
 
 @dataclass(frozen=True)
@@ -2139,12 +2445,13 @@ class OperationReceipt:
     result_size_bytes: int
     exit_code: int | None
     monitor_identity: str = OPERATIONAL_MONITOR_ID
+    memory_evidence: MemoryEvidence | None = None
+    diagnostics: OperationDiagnostics | None = None
+    diagnostics_digest: str | None = None
 
     def __post_init__(self):
-        registered = (REQUIRED_FIXTURE_IDS if self.kind == "FIXTURE"
-                      else tuple(p.gate_id for p in PROBES) if self.kind == "PROBE"
-                      else ("PUBLIC_EXECUTION_ARCHIVES",) if self.kind == "AUDIT" else ())
-        _need(self.operation_id in registered, "Only the fixed E0 operation catalog is allowed.")
+        _need((self.kind, self.operation_id) in _operation_catalog(),
+              "Only the fixed E0 operation catalog is allowed.")
         _sha(self.source_digest)
         _sha(self.envelope_digest)
         _need(self.monitor_identity == OPERATIONAL_MONITOR_ID, "Unknown enforcement identity.")
@@ -2175,6 +2482,20 @@ class OperationReceipt:
             self.exit_code == 0 and self.result_digest is not None and self.result_size_bytes > 0
             and self.events and self.events[0].event == "STARTED"
             and self.events[-1].event == "FINISHED"), "Incomplete worker cannot claim completion.")
+        if self.memory_evidence is not None:
+            _need(type(self.memory_evidence) is MemoryEvidence, "Malformed peak-memory evidence.")
+            replace(self.memory_evidence)
+        if self.diagnostics is not None:
+            _need(type(self.diagnostics) is OperationDiagnostics, "Malformed operation diagnostics.")
+            replace(self.diagnostics)
+            _need((self.diagnostics.kind, self.diagnostics.operation_id, self.diagnostics.source_digest,
+                   self.diagnostics.result_digest, self.diagnostics.mode) ==
+                  (self.kind, self.operation_id, self.source_digest, self.result_digest, "SUPERVISED_E0"),
+                  "Receipt diagnostics differ from the operation/source/result identity.")
+            _need(self.diagnostics_digest == content_digest(self.diagnostics),
+                  "Receipt call-diagnostics digest differs from its retained sidecar.")
+        else:
+            _need(self.diagnostics_digest is None, "A diagnostics digest cannot replace missing call evidence.")
 
 
 def _attach_memory_job(pid, memory_cap_bytes):
@@ -2258,8 +2579,9 @@ def _coordinator_private_bytes():
     return counters.private
 
 
-def _fixed_e0_worker(kind, operation_id, identity_bytes, envelope_bytes, archive_bytes, connection, barrier):
-    """Fixed catalog, detached public inputs, no answer or arbitrary callback.
+def _fixed_e0_worker(kind, operation_id, identity_bytes, envelope_bytes, archive_bytes,
+                     connection, barrier, evaluator_run_id=None):
+    """Fixed catalog and detached archives, never a caller-supplied hidden answer.
 
     sys.settrace observes entry before a physical input; it is separate from the
     existing tests' sys.setprofile timing instrumentation. Nested port/Engine
@@ -2329,16 +2651,8 @@ def _fixed_e0_worker(kind, operation_id, identity_bytes, envelope_bytes, archive
         sys.settrace(trace)
         threading.settrace(trace)
         emit("STARTED")
-        if kind == "FIXTURE":
-            item = next(f for f in MANIFEST if f.fixture_id == operation_id)
-            result = verify_fixture(item)
-        elif kind == "PROBE":
-            item = next(p for p in PROBES if p.gate_id == operation_id)
-            result = verify_probe(item, identity)
-        elif kind == "AUDIT" and operation_id == "PUBLIC_EXECUTION_ARCHIVES":
-            result = verify_execution_archives(reconstruct(archive_bytes))
-        else:
-            raise QualificationError("Unregistered E0 operation kind.")
+        result = _measure_operation(kind, operation_id, identity, mode="SUPERVISED_E0",
+                                     archives=reconstruct(archive_bytes), run_id=evaluator_run_id)
         monitor_active = False
         sys.settrace(previous_trace)
         threading.settrace(previous_thread_trace)
@@ -2360,7 +2674,7 @@ def _fixed_e0_worker(kind, operation_id, identity_bytes, envelope_bytes, archive
 
 
 def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_ns,
-                         archive_used_bytes, archives=()):
+                         archive_used_bytes, archives=(), evaluator_run_id=None):
     """Private unit seam and fixed dispatch; abort preserves partial receipts.
 
     Worker-tree committed memory has a hard OS limit. Coordinator private
@@ -2369,15 +2683,18 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
     outside this interval-based policy; this is not a complete-machine cap.
     """
     envelope = require_envelope(envelope)
-    _need(type(archives) is tuple and (kind == "AUDIT" or not archives),
-          "Only the fixed public archive audit accepts archive input.")
+    _need(type(archives) is tuple and (kind in ("AUDIT", "EVALUATOR") or not archives),
+          "Only fixed post-hoc archive operations accept archive input.")
+    _need((kind, operation_id) in _operation_catalog(), "Unregistered operation.")
+    _need((kind == "EVALUATOR" and type(evaluator_run_id) is str and bool(evaluator_run_id))
+          or (kind != "EVALUATOR" and evaluator_run_id is None), "Evaluator run identity is required only post-hoc.")
     import multiprocessing
     context = multiprocessing.get_context("spawn")
     parent, child = context.Pipe(duplex=True)
     barrier = context.Event()
     process = context.Process(target=_fixed_e0_worker, args=(
         kind, operation_id, canonical_bytes(identity), canonical_bytes(envelope),
-        canonical_bytes(archives), child, barrier))
+        canonical_bytes(archives), child, barrier, evaluator_run_id))
     started = time.monotonic_ns()
     api = job = None
     events, result = [], None
@@ -2385,6 +2702,18 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
     decision_started = None
     inputs = received = result_size = 0
     result_hash = None
+    diagnostics = memory = None
+    peak_worker = peak_combined = samples = 0
+    worker_budget = None
+    def sample_memory():
+        nonlocal peak_worker, peak_combined, samples
+        worker, coordinator = peak_memory(), _coordinator_private_bytes()
+        _positive(worker, "Monitored worker-tree peak")
+        _positive(coordinator, "Monitored coordinator memory")
+        peak_worker = max(peak_worker, worker)
+        peak_combined = max(peak_combined, worker + coordinator)
+        samples += 1
+        return worker + coordinator
     def record(event):
         events.append(OperationalEvent(len(events), event, time.monotonic_ns()-started, inputs))
     try:
@@ -2396,7 +2725,7 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
         barrier.set()
         while True:
             now = time.monotonic_ns()
-            if _coordinator_private_bytes() + peak_memory() > envelope.memory_cap_bytes:
+            if sample_memory() > envelope.memory_cap_bytes:
                 reason = "SYSTEM_MEMORY_CAP"
                 break
             deadlines = [(job_started_ns + envelope.max_job_wall_ms*1000000, "SYSTEM_JOB_TIMEOUT"),
@@ -2452,12 +2781,22 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
             elif event == "FINISHED":
                 _need(events and decision_started is None, "Unclosed decision boundary.")
                 expected = (FixtureVerification if kind == "FIXTURE" else ProbeVerification
-                            if kind == "PROBE" else ExecutionVerification)
-                _need(type(payload) is expected, "Worker result has the wrong evidence type.")
-                actual_id = (payload.fixture.fixture_id if kind == "FIXTURE" else payload.gate_id
-                             if kind == "PROBE" else "PUBLIC_EXECUTION_ARCHIVES")
+                            if kind == "PROBE" else ExecutionVerification if kind == "AUDIT"
+                            else PostHocEvaluation)
+                _need(type(payload) is MeasuredOperation and type(payload.result) is expected
+                      and type(payload.diagnostics) is OperationDiagnostics,
+                      "Worker result is missing its typed evidence/diagnostics.")
+                candidate, measured = payload.result, payload.diagnostics
+                actual_id = (candidate.fixture.fixture_id if kind == "FIXTURE" else candidate.gate_id
+                             if kind == "PROBE" else "PUBLIC_EXECUTION_ARCHIVES" if kind == "AUDIT"
+                             else "POST_HOC_EXECUTION_ARCHIVES")
                 _need(actual_id == operation_id, "Worker returned another operation's evidence.")
-                result = payload
+                replace(measured)
+                _need((measured.kind, measured.operation_id, measured.source_digest,
+                       measured.result_digest, measured.mode) ==
+                      (kind, operation_id, content_digest(identity), content_digest(candidate), "SUPERVISED_E0"),
+                      "Worker diagnostics are not bound to this operation/source/result.")
+                result, diagnostics = candidate, measured
                 result_size, result_hash = len(canonical_bytes(result)), content_digest(result)
             elif event == "WORKER_ABORT":
                 _need(type(payload) is str and bool(payload), "Missing abort diagnosis.")
@@ -2472,6 +2811,14 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
         reason = f"SUPERVISION_INCOMPLETE:{type(error).__name__}:{error}"
     finally:
         if job is not None:
+            try:
+                if sample_memory() > envelope.memory_cap_bytes and reason is None:
+                    reason = "SYSTEM_MEMORY_CAP"
+                memory = MemoryEvidence(peak_worker, peak_combined, samples,
+                                        worker_budget, envelope.memory_cap_bytes)
+            except (Exception, KeyboardInterrupt) as error:
+                # A failed final query cannot be presented as complete monitoring.
+                reason = reason or f"MEMORY_MONITOR_INCOMPLETE:{type(error).__name__}"
             if reason is not None:
                 api.TerminateJobObject(job, 1)
             api.CloseHandle(job)  # Also removes any late shadow descendants.
@@ -2483,15 +2830,17 @@ def _supervise_operation(kind, operation_id, envelope, identity, *, job_started_
         child.close()
     receipt = OperationReceipt(kind, operation_id, content_digest(identity), content_digest(envelope),
         "COMPLETE" if reason is None else "INCOMPLETE", reason, tuple(events),
-        time.monotonic_ns()-started, inputs, result_hash, result_size, process.exitcode)
+        time.monotonic_ns()-started, inputs, result_hash, result_size, process.exitcode,
+        memory_evidence=memory, diagnostics=diagnostics,
+        diagnostics_digest=None if diagnostics is None else content_digest(diagnostics))
     return receipt, result, received
 
 
 def execute_e0(*, run_id, envelope, source_identity, p8, authorization_reference):
     """Future separately authorized orchestration. Slice-7 tests never call it.
 
-    P-8 is consumed, never executed. Findings must subsequently be attached by
-    the isolated evaluator after this public record has been sealed. A whole
+    P-8 is consumed, never executed. A fixed supervised evaluator operation
+    follows completed, sealed public execution and auditing. A whole
     worker/Engine/V1 abort preserves its partial receipt and stops dispatch;
     no substitute action or alternate-case retry is available.
     """
@@ -2504,7 +2853,7 @@ def execute_e0(*, run_id, envelope, source_identity, p8, authorization_reference
           "Fixed normal probes use the frozen 1000ms shadow limit; declare at least that limit.")
     _need(type(run_id) is str and re.fullmatch("[A-Za-z0-9][A-Za-z0-9_-]{0,79}", run_id),
           "Invalid execution run identity.")
-    fixtures, probes, receipts, interruptions = [], [], [], []
+    fixtures, probes, receipts, interruptions, findings = [], [], [], [], ()
     started, storage = time.monotonic_ns(), 0
     catalog = tuple(("FIXTURE", f.fixture_id) for f in MANIFEST) + tuple(("PROBE", p.gate_id) for p in PROBES)
     for kind, operation_id in catalog:
@@ -2532,9 +2881,22 @@ def execute_e0(*, run_id, envelope, source_identity, p8, authorization_reference
             execution = result
         if receipt.status != "COMPLETE":
             interruptions.append(receipt.reason)
+        elif execution.status != "PASS":
+            interruptions.append("STOPPED_AFTER_FAILED_OR_INCOMPLETE_PUBLIC_AUDIT")
+    if not interruptions:
+        receipt, result, received = _supervise_operation(
+            "EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES", env, source_identity,
+            job_started_ns=started, archive_used_bytes=storage, archives=archives,
+            evaluator_run_id=run_id)
+        receipts.append(receipt)
+        storage += received + len(canonical_bytes(receipt))
+        if result is not None:
+            findings = result.findings
+        if receipt.status != "COMPLETE":
+            interruptions.append(receipt.reason)
     record = QualificationRecord(
         run_id, "E0_QUALIFICATION", authorization_reference, source_identity, env, MANIFEST_ID,
-        PINNED_MANIFEST_SHA256, MANIFEST, tuple(fixtures), tuple(probes), execution, (), p8,
+        PINNED_MANIFEST_SHA256, MANIFEST, tuple(fixtures), tuple(probes), execution, findings, p8,
         tuple(interruptions), (), operational_receipts=tuple(receipts))
     if max(storage, len(canonical_bytes(record))) > env.archive_cap_bytes:
         record = replace(record, interruptions=record.interruptions + ("SYSTEM_ARCHIVE_CAP",))

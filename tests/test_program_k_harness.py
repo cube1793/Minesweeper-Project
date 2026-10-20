@@ -1388,6 +1388,8 @@ class ProgramKSlice6P8CheckerTests(unittest.TestCase):
         self.assertEqual(witness.table_values, (7, 7, 7))
         self.assertEqual((result.zero_gap_count, result.negative_gap_count), (0, 0))
         self.assertEqual(result.counterexamples, ())
+        self.assertTrue(result.checker_source_stable)
+        self.assertEqual(result.checker_source_sha256, result.checker_source_end_sha256)
 
     def test_d_zero_and_negative_synthetic_gaps_report_exact_first_witness(self):
         for direct, gap in ((2, 0), (3, -1)):
@@ -1470,6 +1472,109 @@ class ProgramKSlice6P8CheckerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
 
+    def test_h_source_capture_follows_all_authentication_and_precedes_iterator_call(self):
+        import stage3_physical
+        events = []
+        load = stage3_physical.load_timing_table
+        validate = stage3_physical.validate_timing_table
+        source = public_oracles._p8_checker_source_sha256
+        triples = public_oracles._iter_p8_triples
+
+        def authenticated_profile(path):
+            value = load(path)
+            events.append("PROFILE_BYTES_METADATA_TABLE_AUTHENTICATED")
+            return value
+
+        def authenticated_table(table):
+            value = validate(table)
+            events.append("TABLE_AUTHENTICATED")
+            return value
+
+        def capture_source():
+            value = source()
+            events.append("SOURCE_CAPTURED")
+            return value
+
+        def iterate(cells):
+            # This is checked at invocation, before generator execution.
+            self.assertIn("PROFILE_BYTES_METADATA_TABLE_AUTHENTICATED", events)
+            self.assertIn("TABLE_AUTHENTICATED", events)
+            self.assertEqual(events[-1], "SOURCE_CAPTURED")
+            events.append("ITERATOR_INVOKED")
+            return triples(cells)
+
+        with patch.object(stage3_physical, "load_timing_table", side_effect=authenticated_profile), \
+                patch.object(stage3_physical, "validate_timing_table", side_effect=authenticated_table), \
+                patch.object(public_oracles, "_p8_checker_source_sha256", side_effect=capture_source), \
+                patch.object(public_oracles, "_iter_p8_triples", side_effect=iterate):
+            result = public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+        first, second = [i for i, event in enumerate(events) if event == "SOURCE_CAPTURED"]
+        self.assertLess(first, events.index("ITERATOR_INVOKED"))
+        self.assertGreater(second, events.index("ITERATOR_INVOKED"))
+        self.assertTrue(result.checker_source_stable)
+        self.assertEqual(result.visited_triple_count, 0)
+
+    def test_i_source_and_metadata_authentication_faults_prevent_iterator_invocation(self):
+        for source_error in (OSError("unreadable source"), None, "", "g" * 64, "A" * 64, True):
+            with self.subTest(source_error=source_error), \
+                    patch.object(public_oracles, "_iter_p8_triples") as iterate:
+                kwargs = ({"side_effect": source_error} if isinstance(source_error, Exception)
+                          else {"return_value": source_error})
+                with patch.object(public_oracles, "_p8_checker_source_sha256", **kwargs):
+                    with self.assertRaises((OSError, ValueError)):
+                        public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+                iterate.assert_not_called()
+        import json
+        profile = json.loads(PROFILE_PATH.read_bytes())
+        for field, bad in (("model_id", "wrong"), ("table_order", "dy_major_dx_minor"),
+                           ("grid_width", True), ("timing_unit", "ns")):
+            malformed = dict(profile, **{field: bad})
+            with self.subTest(metadata=field), \
+                    patch("stage3_physical.json.loads", return_value=malformed), \
+                    patch.object(public_oracles, "_p8_checker_source_sha256") as source, \
+                    patch.object(public_oracles, "_iter_p8_triples") as iterate:
+                with self.assertRaisesRegex(ValueError, "metadata"):
+                    public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+                source.assert_not_called()
+                iterate.assert_not_called()
+
+    def test_j_post_scan_source_change_invalidates_identity_not_the_timing_premise(self):
+        for table in (((7,), (7,), (7,)), ((1,), (1,), (3,))):
+            with self.subTest(table=table), \
+                    patch.object(public_oracles, "_p8_checker_source_sha256",
+                                 side_effect=("a" * 64, "b" * 64)):
+                result = public_oracles._check_p8_table(table)
+            self.assertTrue(result.complete)
+            self.assertEqual(result.visited_triple_count, 18)
+            self.assertEqual(result.checker_source_sha256, "a" * 64)
+            self.assertEqual(result.checker_source_end_sha256, "b" * 64)
+            self.assertFalse(result.checker_source_stable)
+            self.assertEqual(result.status, "IMPLEMENTATION_IDENTITY_FAIL")
+            self.assertEqual(result.failure_kind, "CHECKER_SOURCE_IDENTITY_FAILURE")
+            self.assertFalse(result.premise_failure)
+            self.assertEqual(result.negative_gap_count, 2 if table[-1] == (3,) else 0)
+            self.assertEqual(replace(result), result)
+
+    def test_k_interruption_preserves_start_identity_and_end_read_failure_never_passes(self):
+        for end in ("b" * 64, OSError("source disappeared"), None):
+            with self.subTest(end=end), \
+                    patch.object(public_oracles, "_p8_checker_source_sha256",
+                                 side_effect=("a" * 64, end)):
+                result = public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+            self.assertEqual(result.status, "INCOMPLETE")
+            self.assertEqual(result.visited_triple_count, 0)
+            self.assertEqual(result.interruption_reason, "INTERRUPTED")
+            self.assertEqual(result.checker_source_sha256, "a" * 64)
+            self.assertEqual(result.checker_source_end_sha256, end if type(end) is str else None)
+            self.assertEqual(result.failure_kind, "CHECKER_SOURCE_IDENTITY_FAILURE")
+            self.assertFalse(result.premise_failure)
+        with patch.object(public_oracles, "_p8_checker_source_sha256",
+                          side_effect=("a" * 64, OSError("source disappeared"))):
+            complete = public_oracles._check_p8_table(((7,), (7,)))
+        self.assertTrue(complete.complete)
+        self.assertEqual(complete.status, "IMPLEMENTATION_IDENTITY_FAIL")
+        self.assertIsNone(complete.checker_source_end_sha256)
+
     def test_w_p8_results_are_immutable_and_losslessly_reconstructable(self):
         result = public_oracles._check_p8_table(((1,), (1,), (3,)))
         self.assertEqual(pickle.loads(pickle.dumps(result)), result)
@@ -1480,9 +1585,14 @@ class ProgramKSlice6P8CheckerTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             result.minimum_gap_witness.gap = 1
         for changes in ({"complete": False}, {"minimum_gap_witness": None},
-                        {"visited_triple_count": 17}, {"checker_identity": ""}):
+                        {"visited_triple_count": 17}, {"checker_identity": ""},
+                        {"checker_source_end_sha256": "invalid"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(result, **changes)
+        with self.assertRaises(FrozenInstanceError):
+            result.checker_source_sha256 = "0" * 64
+        with self.assertRaises(FrozenInstanceError):
+            result.checker_source_end_sha256 = "0" * 64
 
 
 class ProgramKSlice6O4ProjectionTests(unittest.TestCase):
@@ -2304,6 +2414,210 @@ class ProgramKSlice7EvaluatorTests(unittest.TestCase):
         sealed = self.sealed(assertion)
         return evaluator.evaluate_falsification(sealed, self.answer(mines))
 
+    def bound_archive(self, *, loss=False, variant="K-P0"):
+        from experiments import program_k_harness as h
+        mines = frozenset({(1, 0), (2, 0)}) if loss else frozenset({(1, 0)})
+        engine = fixed_engine(5 if loss else 4, 1, mines)
+        run = runner.run_k_p0 if variant == "K-P0" else runner.run_k_control
+        produced = run(engine, table=self.table, capture_effects=True)
+        archive = h.ExecutionArchive("terminal-binding-unit", variant, produced)
+        sealed = h.seal_execution_archive(archive, run_id="terminal-binding-run")
+        terminal = produced.traces[-1].public_effect.after_observation
+        answer = evaluator.derive_terminal_answer(
+            sealed, terminal_status=terminal.status.name, terminal_rows=terminal.rows,
+            num_mines=len(mines))
+        return archive, sealed, answer
+
+    def test_bound_won_truth_exactly_reconstructs_automatic_and_existing_flags(self):
+        from experiments import program_k_harness as h
+        for variant in ("K-P0", "K-CONTROL"):
+            with self.subTest(variant=variant):
+                archive, sealed, answer = self.bound_archive(variant=variant)
+                self.assertIs(archive.result.status, GameStatus.WON)
+                self.assertEqual(answer.mines, frozenset({(1, 0)}))
+                self.assertEqual(answer.num_mines, 1)
+                self.assertEqual(answer.archive_digest, h.content_digest(archive))
+                self.assertEqual((answer.case_id, answer.run_id, answer.width, answer.height),
+                                 (sealed.case_id, sealed.run_id, 4, 1))
+                finding = evaluator.evaluate_falsification(sealed, answer)
+                evaluator.verify_bound_finding(finding, sealed, answer)
+                self.assertEqual(finding.classification, "NO_COUNTEREXAMPLE")
+                self.assertFalse(finding.proof_upgrade_allowed)
+                self.assertEqual(archive.result.final_M, frozenset({(1, 0)}))
+
+    def test_bound_lost_truth_includes_mine_exploded_flagged_and_excludes_false_flag(self):
+        from experiments import program_k_harness as h
+        # Deliberately incorrect physical flags are confined to this manual
+        # Engine/effect fixture, not asserted to be a valid K policy execution.
+        mines = frozenset({(1, 0), (3, 0), (5, 0)})
+        engine = fixed_engine(6, 2, mines)
+        effects, cursor = [], (0, 0)
+        for index, move in enumerate((SimpleMove(Action.OPEN, 0, 0),
+                                      SimpleMove(Action.FLAG, 1, 0),
+                                      SimpleMove(Action.FLAG, 0, 1),
+                                      SimpleMove(Action.OPEN, 3, 0))):
+            before = engine.get_observation()
+            engine.step(move.x, move.y, move.action)
+            effects.append(evidence_records.make_public_effect(
+                before, move, engine.get_observation(), input_index=index,
+                status_after=engine.status, cursor_before=cursor,
+                modeled_action_us=self.table[abs(move.x-cursor[0])][abs(move.y-cursor[1])]))
+            cursor = (move.x, move.y)
+        self.assertEqual(evidence_records.validate_public_effect_stream(
+            tuple(effects), complete=True).status, "PASS")
+        terminal = effects[-1].after_observation
+        self.assertIs(terminal.status, GameStatus.LOST)
+        for cell, glyph in (((1, 0), CellState.FLAGGED), ((3, 0), CellState.EXPLODED),
+                            ((5, 0), CellState.MINE), ((0, 1), CellState.FALSE_FLAG)):
+            self.assertEqual(terminal.rows[cell[1]][cell[0]], int(glyph))
+        sealed = evaluator.SealedEvaluatorInput(
+            "manual-terminal-glyph-unit", "terminal-binding-run", 6, 2,
+            (evaluator.ArchivedAssertion("LOGICAL_M", 3, mines),),
+            h.content_digest(tuple(effects)))
+        answer = evaluator.derive_terminal_answer(
+            sealed, terminal_status="LOST", terminal_rows=terminal.rows, num_mines=3)
+        self.assertEqual(answer.mines, mines)
+        self.assertNotIn((0, 1), answer.mines)
+        self.assertNotIn((2, 1), answer.mines)  # A still HIDDEN safe cell.
+        finding = evaluator.evaluate_falsification(sealed, answer)
+        evaluator.verify_bound_finding(finding, sealed, answer)
+        self.assertEqual(finding.classification, "NO_COUNTEREXAMPLE")
+
+    def test_terminal_truth_rejects_malformed_ambiguous_outcome_and_wrong_count(self):
+        _, sealed, _ = self.bound_archive()
+        base = dict(terminal_status="WON", terminal_rows=((1, F, 1, 0),), num_mines=1)
+        changes = (
+            {"terminal_status": "PLAYING"}, {"terminal_status": GameStatus.WON},
+            {"terminal_rows": ((1, F, 1),)}, {"terminal_rows": [[1, F, 1, 0]]},
+            {"terminal_rows": ((True, F, 1, 0),)}, {"terminal_rows": ((9, F, 1, 0),)},
+            {"terminal_rows": ((0, F, 1, 0),)}, {"terminal_rows": ((1, F, 1, H),)},
+            {"terminal_rows": ((1, int(CellState.EXPLODED), 1, 0),)},
+            {"terminal_rows": ((1, int(CellState.MINE), 1, 0),)},
+            {"terminal_rows": ((1, F, 1, int(CellState.FALSE_FLAG)),)},
+            {"terminal_status": "LOST"},  # No exploded mine.
+            {"num_mines": 0}, {"num_mines": 2}, {"num_mines": True},
+            {"num_mines": 1.0}, {"num_mines": None},
+        )
+        for changed in changes:
+            with self.subTest(changed=changed), self.assertRaises(evaluator.EvaluatorInputError):
+                evaluator.derive_terminal_answer(sealed, **(base | changed))
+
+    def test_wrong_same_size_layout_and_unbound_matching_answer_cannot_qualify(self):
+        _, sealed, answer = self.bound_archive(loss=True)
+        self.assertEqual(answer.mines, frozenset({(1, 0), (2, 0)}))
+        # The changed mine is an excluded uncertain guess, so the old unbound
+        # comparison alone would report agreement with every certainty claim.
+        wrong = replace(answer, mines=frozenset({(1, 0), (3, 0)}))
+        unbound = replace(answer, archive_digest=None, num_mines=None)
+        for supplied in (wrong, unbound):
+            finding = evaluator.evaluate_falsification(sealed, supplied)
+            self.assertEqual(finding.classification, "NO_COUNTEREXAMPLE")
+            self.assertNotEqual(finding.answer_digest, answer.answer_digest)
+            with self.assertRaises(evaluator.EvaluatorInputError):
+                evaluator.verify_bound_finding(finding, sealed, answer)
+        with self.assertRaises(evaluator.EvaluatorInputError):
+            evaluator.verify_bound_finding(
+                evaluator.evaluate_falsification(sealed, unbound), sealed, unbound)
+
+    def test_bound_identity_mine_count_and_finding_sequence_fail_closed(self):
+        _, sealed, answer = self.bound_archive()
+        finding = evaluator.evaluate_falsification(sealed, answer)
+        for changed in ({"case_id": "other-case"}, {"run_id": "other-run"},
+                        {"width": 5}, {"height": 2}, {"archive_digest": "f"*64}):
+            with self.subTest(changed=changed), self.assertRaises(evaluator.EvaluatorInputError):
+                evaluator.evaluate_falsification(sealed, replace(answer, **changed))
+        for changed in ({"num_mines": 2}, {"num_mines": True},
+                        {"archive_digest": None}, {"num_mines": None},
+                        {"mines": frozenset()}):
+            with self.subTest(changed=changed), self.assertRaises(evaluator.EvaluatorInputError):
+                replace(answer, **changed)
+        for changed in (finding.findings[:-1], finding.findings + finding.findings[-1:],
+                        finding.findings[::-1]):
+            corrupted = deepcopy(finding)
+            object.__setattr__(corrupted, "findings", changed)
+            with self.subTest(length=len(changed)), self.assertRaises(evaluator.EvaluatorInputError):
+                evaluator.verify_bound_finding(corrupted, sealed, answer)
+        checked = next(item for item in finding.findings if item.comparisons)
+        bad_comparison = replace(checked.comparisons[0], hidden_mine=not checked.comparisons[0].hidden_mine)
+        forged = replace(finding, findings=tuple(
+            replace(item, comparisons=(bad_comparison,) + item.comparisons[1:])
+            if item is checked else item for item in finding.findings))
+        # A correct answer hash cannot authenticate fabricated comparison bits.
+        self.assertEqual(forged.answer_digest, answer.answer_digest)
+        with self.assertRaises(evaluator.EvaluatorInputError):
+            evaluator.verify_bound_finding(forged, sealed, answer)
+
+    def test_bound_truth_and_findings_cannot_resume_or_mutate_archived_solver(self):
+        from experiments import program_k_harness as h
+        archive, sealed, answer = self.bound_archive()
+        before = h.canonical_bytes(archive)
+        terminal = archive.result.traces[-1].public_effect.after_observation
+        blocked = AssertionError("Post-hoc truth must never resume solver/public proof")
+        with patch.object(KLocalSession, "analyze_decision", side_effect=blocked), \
+                patch.object(runner, "run_k_p0", side_effect=blocked), \
+                patch.object(runner, "run_k_control", side_effect=blocked), \
+                patch.object(runner, "select_policy", side_effect=blocked), \
+                patch.object(public_oracles, "enumerate_public_worlds", side_effect=blocked), \
+                patch.object(public_oracles, "materialized_exact_reference", side_effect=blocked), \
+                patch.object(public_oracles, "verify_local_certificate", side_effect=blocked):
+            derived = evaluator.derive_terminal_answer(
+                sealed, terminal_status=terminal.status.name, terminal_rows=terminal.rows, num_mines=1)
+            result = evaluator.evaluate_falsification(sealed, derived)
+            evaluator.verify_bound_finding(result, sealed, answer)
+        self.assertEqual(h.canonical_bytes(archive), before)
+        with self.assertRaises(KIntegrityError):
+            KLocalSession(4, 1, 1).analyze_decision(answer, status=PLAYING)
+        with self.assertRaises(public_oracles.PublicProofError):
+            public_oracles.enumerate_public_worlds(answer, 1, status=PLAYING)
+        with self.assertRaises(KIntegrityError):
+            select_policy(answer, (0, 0), self.table)
+
+    def test_evaluator_call_durations_and_coverage_are_separate_from_semantics(self):
+        _, sealed, answer = self.bound_archive()
+        baseline = evaluator.evaluate_falsification(sealed, answer)
+        with evaluator.collect_evaluator_diagnostics() as records:
+            first = evaluator.evaluate_falsification(sealed, answer)
+            second = evaluator.evaluate_falsification(sealed, answer)
+        self.assertEqual(first, second)
+        self.assertEqual(first, baseline)
+        self.assertEqual(tuple(r.sequence for r in records), (0, 1))
+        for record in records:
+            self.assertIs(type(record.duration_ns), int)
+            self.assertGreaterEqual(record.duration_ns, 0)
+            self.assertEqual(record.sealed_input_digest, sealed.assertions_digest)
+            self.assertEqual(record.answer_digest, answer.answer_digest)
+            self.assertEqual(record.classification, first.classification)
+            self.assertEqual(record.evaluated_coordinate_count, first.evaluated_coordinate_count)
+            self.assertIsNone(record.error)
+            self.assertEqual(pickle.loads(pickle.dumps(record)), record)
+        self.assertNotIn("duration_ns", {field.name for field in fields(first)})
+        with evaluator.collect_evaluator_diagnostics() as absent:
+            evaluator.verify_bound_finding(first, sealed, answer)
+        self.assertEqual(absent, [])  # Validation does not generate another evaluation.
+
+    def test_evaluator_empty_error_and_nested_call_diagnostics_are_lossless(self):
+        sealed = self.sealed(evaluator.ArchivedAssertion("LOGICAL_M", 0, ()))
+        answer = self.answer({(1, 0)})
+        with evaluator.collect_evaluator_diagnostics() as outer:
+            with evaluator.collect_evaluator_diagnostics() as inner:
+                result = evaluator.evaluate_falsification(sealed, answer)
+                with self.assertRaises(evaluator.EvaluatorInputError):
+                    evaluator.evaluate_falsification(sealed, None)
+        self.assertEqual(inner, outer)
+        self.assertEqual(len(outer), 2)  # One record per call, not nested-span sums.
+        self.assertEqual(result.classification, "NOT_EVALUATED")
+        self.assertEqual(outer[0].classification, "NOT_EVALUATED")
+        self.assertEqual(outer[0].evaluated_coordinate_count, 0)
+        self.assertEqual(outer[1].classification, "ERROR")
+        self.assertIsNone(outer[1].evaluated_coordinate_count)
+        self.assertIsNone(outer[1].answer_digest)
+        self.assertTrue(outer[1].error)
+        for change in ({"duration_ns": True}, {"duration_ns": -1},
+                       {"duration_ns": None}, {"evaluated_coordinate_count": None},
+                       {"classification": "NO_COUNTEREXAMPLE"}):
+            with self.subTest(change=change), self.assertRaises(evaluator.EvaluatorInputError):
+                replace(outer[0], **change)
+
     def test_j_correct_m_is_no_counterexample_only_and_never_a_proof_upgrade(self):
         owner, decision = public_decision(HISTORICAL, 1)
         assertion = evaluator.ArchivedAssertion("LOGICAL_M", 1, owner.M)
@@ -2547,7 +2861,7 @@ class ProgramKSlice7EvaluatorTests(unittest.TestCase):
                 for child in value:
                     inspect_record(child)
             else:
-                self.assertIn(type(value), (str, int, bool))
+                self.assertIn(type(value), (str, int, bool, type(None)))
 
         for record in (sealed, answer, result):
             inspect_record(record)
@@ -2886,18 +3200,7 @@ class ProgramKSlice7QualificationTests(unittest.TestCase):
             10000, 30000, 120000, 1000, 1000, 1000000000, 100000000, 100,
             "UNIT_ONLY", "Explicit synthetic containment for unit verification.")
         public = h.collect_unit_readiness(run_id="slice7-unit", envelope=cls.env)
-        findings = []
-        for archive in public.execution_evidence.archives:
-            if archive.variant in ("K-P0", "K-CONTROL"):
-                sealed = h.seal_execution_archive(archive, run_id=public.run_id)
-                # Tiny test construction's answer is confined to evaluator input.
-                mines = (frozenset({(1, 0)}) if sealed.width == 4 else
-                         frozenset({(1, 0), (2, 0)}) if sealed.height == 1 else
-                         frozenset({(1, 2), (3, 2)}))
-                answer = evaluator.HiddenAnswer(sealed.case_id, public.run_id,
-                                                 sealed.width, sealed.height, mines)
-                findings.append(evaluator.evaluate_falsification(sealed, answer))
-        cls.record = replace(public, evaluator_findings=tuple(findings))
+        cls.record = public
 
     def test_ready_except_execution_is_not_e0_pass(self):
         outcome = self.h.assess_qualification(self.record)
@@ -2908,6 +3211,122 @@ class ProgramKSlice7QualificationTests(unittest.TestCase):
         self.assertTrue(all(g.status == "PASS" for g in outcome.gates if g.gate_id != "P-8"))
         self.assertEqual(self.record.purpose, "IMPLEMENTATION_UNIT_READINESS")
         self.assertEqual(self.record.operational_receipts, ())
+
+    def test_post_audit_fixed_p8_probe_is_bounded_and_cannot_release_p8_gate(self):
+        h = self.h
+        spec = next(p for p in h.PROBES if p.gate_id == "P-8-CHECKER")
+        self.assertEqual(spec.test_classes, (
+            "tests.test_program_k_harness.ProgramKSlice6P8CheckerTests",))
+        actual = next(p for p in self.record.probe_results if p.gate_id == spec.gate_id)
+        self.assertEqual(actual.status, "PASS")
+        # The existing checker tests authenticate the public domain and cancel
+        # before its first triple; private unit domains have at most 48 triples.
+        self.assertTrue(any("public_checker" in name for name in actual.executed_tests))
+        self.assertEqual(h.check_p8_gate(None).classification, "MISSING_P8")
+        interrupted = public_oracles.check_frozen_p8(interrupt_requested=lambda: True)
+        self.assertEqual(interrupted.visited_triple_count, 0)
+        with patch.object(public_oracles.Path, "read_bytes", side_effect=OSError("unreadable source")):
+            self.assertEqual(h.check_p8_gate(interrupted).classification, "IMPLEMENTATION_IDENTITY_FAIL")
+
+    def test_post_audit_unbound_wrong_board_or_reordered_findings_never_qualify(self):
+        h = self.h
+        findings = self.record.evaluator_findings
+        archive = next(a for a in self.record.execution_evidence.archives if a.variant == "K-CONTROL")
+        sealed = h.seal_execution_archive(archive, run_id=self.record.run_id)
+        bound = h._bound_archive_answer(archive, sealed)
+        # Keep every asserted mine but add a wrong extra mine. A shadow-only
+        # finding still says NO_COUNTEREXAMPLE, which is not board identity.
+        extra = next((x,y) for y in range(bound.height) for x in range(bound.width)
+                     if (x,y) not in bound.mines)
+        wrong = evaluator.HiddenAnswer(bound.case_id, bound.run_id, bound.width, bound.height,
+                                        bound.mines | {extra})
+        finding = evaluator.evaluate_falsification(sealed, wrong)
+        self.assertEqual(finding.classification, "NO_COUNTEREXAMPLE")
+        altered = tuple(finding if f.sealed_input == sealed else f for f in findings)
+        for supplied in (findings[:-1], findings + findings[:1], findings[::-1], altered):
+            with self.subTest(count=len(supplied)):
+                record = replace(self.record, evaluator_findings=supplied)
+                self.assertNotEqual(h.assess_qualification(record).readiness, "READY_EXCEPT_EXECUTION")
+                research_labeled = replace(record, purpose="E0_QUALIFICATION", unit_diagnostics=())
+                self.assertNotEqual(h.assess_qualification(research_labeled).verdict, "E0_PASS")
+
+    def test_post_audit_call_diagnostics_are_separate_complete_and_lossless(self):
+        h = self.h
+        self.assertEqual(tuple((d.kind, d.operation_id) for d in self.record.unit_diagnostics),
+                         h._operation_catalog())
+        self.assertEqual(h.verify_operation_diagnostics(self.record).status, "PASS")
+        for diagnostic in self.record.unit_diagnostics:
+            self.assertEqual(diagnostic.mode, "IMPLEMENTATION_UNIT")
+            self.assertEqual(h.reconstruct(h.canonical_bytes(diagnostic)), diagnostic)
+            for call in diagnostic.oracle_calls + diagnostic.evaluator_calls:
+                self.assertIs(type(call.duration_ns), int)
+                self.assertGreater(call.duration_ns, 0)
+        extreme = next(d for d in self.record.unit_diagnostics
+                       if d.kind == "FIXTURE" and d.operation_id == "arithmetic-extreme")
+        skipped = tuple(c for c in extreme.oracle_calls if c.oracle == "A")
+        self.assertTrue(skipped)
+        self.assertTrue(all(c.status == "NOT_EVALUATED" and c.duration_ns > 0
+                            and c.output_digest is None for c in skipped))
+        no_calls = next(d for d in self.record.unit_diagnostics if d.operation_id == "P-8-CHECKER")
+        self.assertEqual(no_calls.oracle_calls, ())
+        self.assertIn("ORACLE_A_NOT_INVOKED", no_calls.not_invoked)
+        posthoc = self.record.unit_diagnostics[-1]
+        self.assertEqual(posthoc.oracle_calls, ())
+        self.assertEqual(posthoc.evaluator_call_count, len(self.record.evaluator_findings))
+        for call, result in zip(posthoc.evaluator_calls, self.record.evaluator_findings):
+            self.assertEqual(call.sealed_input_digest, result.sealed_input.assertions_digest)
+            self.assertEqual(call.evaluated_coordinate_count, result.evaluated_coordinate_count)
+            self.assertEqual(call.classification, "NO_COUNTEREXAMPLE")
+        self.assertEqual(self.record.manifest_digest, h.PINNED_MANIFEST_SHA256)
+        for cls in (h.Fixture, h.FixtureExpectation, h.GuessCheckpoint, evidence_records.V1DecisionProjection):
+            self.assertFalse(any("duration" in f.name or "diagnostic" in f.name for f in fields(cls)))
+
+    def test_post_audit_diagnostic_omission_mutation_and_zero_duration_cannot_pass(self):
+        h = self.h
+        diagnostics = self.record.unit_diagnostics
+        self.assertEqual(h.verify_operation_diagnostics(replace(self.record, unit_diagnostics=())).status,
+                         "INCOMPLETE")
+        for index in (0, next(i for i,d in enumerate(diagnostics)
+                             if d.operation_id == "P-1/P-2/LOCAL/ACCOUNTING"),
+                      len(diagnostics)-2, len(diagnostics)-1):
+            old = diagnostics[index]
+            empty = replace(old, oracle_calls=(), evaluator_calls=(),
+                            oracle_a_call_count=0, oracle_b_call_count=0, evaluator_call_count=0,
+                            not_invoked=("ORACLE_A_NOT_INVOKED", "ORACLE_B_NOT_INVOKED",
+                                         "EVALUATOR_NOT_INVOKED"))
+            record = replace(self.record, unit_diagnostics=diagnostics[:index]+(empty,)+diagnostics[index+1:])
+            with self.subTest(operation=old.operation_id):
+                self.assertEqual(h.verify_operation_diagnostics(record).status, "FAIL")
+        first = diagnostics[0]
+        for changed in (
+                replace(first, result_digest="0"*64),
+                replace(first, oracle_calls=tuple(replace(c, input_digest="0"*64)
+                                                  for c in first.oracle_calls))):
+            record = replace(self.record, unit_diagnostics=(changed,)+diagnostics[1:])
+            self.assertEqual(h.verify_operation_diagnostics(record).status, "FAIL")
+        with self.assertRaises(ValueError):
+            replace(first, oracle_calls=(replace(first.oracle_calls[0], duration_ns=0),)
+                    + first.oracle_calls[1:])
+        with self.assertRaises(ValueError):
+            replace(first, oracle_calls=first.oracle_calls[:-1])
+        # Mutating sidecar durations has no effect on the retained semantic payload.
+        before = h.canonical_bytes(self.record.fixture_results[0])
+        replace(first, oracle_calls=tuple(replace(c, duration_ns=c.duration_ns+1) for c in first.oracle_calls))
+        self.assertEqual(h.canonical_bytes(self.record.fixture_results[0]), before)
+
+    def test_post_audit_primitive_calls_do_not_sum_parent_history_spans(self):
+        observation = ((H, 1, H, H, H),)
+        _, decision = public_decision(observation, 3)
+        with public_oracles.collect_oracle_diagnostics() as calls:
+            result = public_oracles.materialized_exact_reference(
+                observation, 3, status=PLAYING, logical_mines=decision.after.M,
+                proofs=decision.exact_certificates)
+        # Two pre-acquisition public proofs each run A; B's exact kernel runs once.
+        self.assertEqual(tuple(c.oracle for c in calls), ("A", "A", "B"))
+        self.assertTrue(all(c.method in ("COMPLETE_WORLD_ENUMERATION", "MATERIALIZED_EXACT")
+                            for c in calls))
+        self.assertEqual(result.total_worlds, 2)
+        self.assertFalse(hasattr(result, "duration_ns"))
 
     def test_required_envelope_and_all_limits_are_exact_positive(self):
         h = self.h
@@ -3098,7 +3517,7 @@ class ProgramKSlice7QualificationTests(unittest.TestCase):
             lambda t: replace(t, external_flag=None))).status, "PASS")
         self.assertNotEqual(h.verify_execution_archives(original[:-1]).status, "PASS")
 
-    def test_falsification_is_g1_fail_with_unresolved_overall_diagnosis(self):
+    def test_wrong_board_finding_is_implementation_failure_not_bound_falsification(self):
         h = self.h
         original = next(f for f in self.record.evaluator_findings if f.sealed_input.case_id.endswith(":K-P0"))
         sealed = original.sealed_input
@@ -3109,8 +3528,8 @@ class ProgramKSlice7QualificationTests(unittest.TestCase):
         altered = replace(self.record, evaluator_findings=tuple(
             finding if f is original else f for f in self.record.evaluator_findings))
         result = h.assess_qualification(altered)
-        self.assertEqual(result.verdict, "INCOMPLETE")
-        self.assertEqual(next(g.status for g in result.gates if g.gate_id == "EVALUATOR-FALSIFICATION"), "FAIL")
+        self.assertEqual(result.verdict, "IMPLEMENTATION_IDENTITY_FAIL")
+        self.assertEqual(next(g.status for g in result.gates if g.gate_id == "EVALUATOR-BOARD-BINDING"), "FAIL")
         self.assertFalse(result.progression_allowed)
         self.assertEqual(altered.fixture_results, self.record.fixture_results)
         self.assertEqual(altered.execution_evidence, self.record.execution_evidence)
@@ -3190,14 +3609,14 @@ class ProgramKSlice7QualificationTests(unittest.TestCase):
         self.assertEqual(execution.status, "INCOMPLETE")
         altered = replace(self.record, probe_results=probes, execution_evidence=execution)
         assessment = h.assess_qualification(altered)
-        self.assertEqual(assessment.verdict, "INCOMPLETE")
+        self.assertIn(assessment.verdict, ("INCOMPLETE", "IMPLEMENTATION_IDENTITY_FAIL"))
         self.assertNotEqual(assessment.readiness, "READY_EXCEPT_EXECUTION")
 
     def test_research_receipt_assessment_never_dispatches_unmonitored_solver_replay(self):
         # A synthetic malformed research-labeled RECORD, not execution of E0.
         # No authorization, machine identity, operating receipts or P-8 exists.
         h = self.h
-        record = replace(self.record, purpose="E0_QUALIFICATION")
+        record = replace(self.record, purpose="E0_QUALIFICATION", unit_diagnostics=())
         with patch.object(h, "verify_fixture", side_effect=AssertionError("unmonitored solver")), \
              patch.object(h, "verify_execution_archives", side_effect=AssertionError("unmonitored audit")):
             assessment = h.assess_qualification(record)
@@ -3251,6 +3670,60 @@ class ProgramKSlice7SupervisorTests(unittest.TestCase):
         self.assertIn("DECISION_START", tuple(e.event for e in receipt.events))
         self.assertEqual(h.reconstruct(h.canonical_bytes(receipt)), receipt)
         self.assertFalse(hasattr(receipt, "research_pass"))
+        memory = receipt.memory_evidence
+        self.assertGreater(memory.peak_worker_tree_bytes, 0)
+        self.assertGreaterEqual(memory.peak_combined_bytes, memory.peak_worker_tree_bytes)
+        self.assertGreater(memory.sample_count, 0)
+        self.assertLessEqual(memory.peak_combined_bytes, self.env.memory_cap_bytes)
+        self.assertEqual(memory.measurement, h.MEMORY_MEASUREMENT)
+        self.assertIn("not machine-wide", memory.measurement)
+        self.assertEqual(receipt.diagnostics.result_digest, receipt.result_digest)
+        self.assertEqual(receipt.diagnostics_digest, h.content_digest(receipt.diagnostics))
+        # This is an isolated one-operation gate test, never an E0 record.
+        unit = SimpleNamespace(
+            run_id="unit-receipt", purpose="E0_QUALIFICATION", unit_diagnostics=(),
+            operating_envelope=self.env, source_identity=h.capture_source_identity(),
+            fixture_results=(result,), probe_results=(),
+            execution_evidence=h.ExecutionVerification((), (), (), (), (), (), ("unit-only",)),
+            evaluator_findings=(), operational_receipts=(receipt,))
+        with patch.object(h, "_operation_catalog", return_value=(("FIXTURE", "no-new-m"),)):
+            self.assertEqual(h.verify_operational_receipts(unit).status, "PASS")
+            self.assertEqual(h.verify_operation_diagnostics(unit).status, "PASS")
+            unit.operational_receipts = (replace(receipt, memory_evidence=None),)
+            self.assertEqual(h.verify_operational_receipts(unit).status, "INCOMPLETE")
+            excessive = replace(memory, peak_combined_bytes=self.env.memory_cap_bytes+1)
+            unit.operational_receipts = (replace(receipt, memory_evidence=excessive),)
+            self.assertEqual(h.verify_operational_receipts(unit).status, "FAIL")
+            unit.operational_receipts = (replace(receipt, diagnostics=None, diagnostics_digest=None),)
+            self.assertEqual(h.verify_operation_diagnostics(unit).status, "INCOMPLETE")
+            with self.assertRaises(ValueError):
+                replace(receipt, diagnostics_digest="0"*64)
+        for changes in ({"peak_worker_tree_bytes": 0}, {"sample_count": 0},
+                        {"peak_combined_bytes": True}, {"measurement": "machine-wide"}):
+            with self.assertRaises(ValueError):
+                replace(memory, **changes)
+        self.assertEqual(h.check_p8_gate(None).status, "INCOMPLETE")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
+    def test_private_post_hoc_evaluator_worker_has_no_solver_admissions(self):
+        import time
+        h = self.h
+        result = runner.run_k_p0(fixed_engine(), table=load_timing_table(), capture_effects=True)
+        archive = h.ExecutionArchive(h._TREATMENT_ARCHIVE_CASE, "K-P0", result)
+        sealed_before = h.canonical_bytes(archive)
+        receipt, evaluated, _ = h._supervise_operation(
+            "EVALUATOR", "POST_HOC_EXECUTION_ARCHIVES", self.env, h.capture_source_identity(),
+            job_started_ns=time.monotonic_ns(), archive_used_bytes=0,
+            archives=(archive,), evaluator_run_id="unit-post-hoc")
+        self.assertEqual(receipt.status, "COMPLETE", receipt.reason)
+        self.assertEqual(tuple(e.event for e in receipt.events), ("STARTED", "FINISHED"))
+        self.assertEqual(receipt.physical_inputs, 0)
+        self.assertEqual(receipt.diagnostics.oracle_calls, ())
+        self.assertEqual(receipt.diagnostics.evaluator_call_count, 1)
+        self.assertGreater(receipt.diagnostics.evaluator_calls[0].duration_ns, 0)
+        self.assertEqual(evaluated.findings[0].classification, "NO_COUNTEREXAMPLE")
+        self.assertEqual(h.canonical_bytes(archive), sealed_before)
+        self.assertIsNone(h.check_p8_gate(None).evidence_digest)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows Job Object containment")
     def test_private_tiny_case_deadline_aborts_without_fallback(self):
