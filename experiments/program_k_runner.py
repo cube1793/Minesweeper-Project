@@ -11,16 +11,17 @@ replacement. Archived selections explain inputs; they grant no suffix authority.
 SETUP_OPEN uses the normal policy vocabulary; P-8 is still unqualified.
 
 K-CONTROL seals frozen V1 authority before detached, bounded K-C shadow work.
-CONTROL remains production run_stage3. No research harness or O-4 qualification
-is implemented here.
+CONTROL remains production run_stage3, with an optional experimental capture
+facade. Slice-6 evidence and timing are implementation foundations, not O-4 or
+A-E qualification. Terminal effects are opt-in archival data only.
 """
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from fractions import Fraction
 from math import isfinite
 from queue import Empty, Queue
 from threading import Thread
-from time import monotonic
+from time import monotonic, perf_counter_ns
 
 from core_engine import Action, CellState, GameStatus
 from experiments.program_k_capability import (
@@ -32,10 +33,15 @@ from experiments.program_k_oracles import (
     ExactGlobalMineCertificate, LocalMineCertificate, PublicProofError,
 )
 from experiments.program_k_policy import KCandidate, PolicySelection, select_policy
+from experiments.program_k_evidence import (
+    ArchivalObservation, DecisionTimings, ExternalV1FlagProvenance,
+    PublicEffectRecord, ShadowSoundnessEvidence, compare_shadow_soundness,
+    make_public_effect, make_v1_flag_provenance, project_v1_decision,
+)
 from simple_algorithm import SimpleMove
 from stage3_physical import TimingTable, action_cost, load_timing_table, validate_timing_table
 from stage3_planner import RevealPlan, Stage3Decision, plan_position
-from stage3_runner import Stage3RunnerError, _validate_execution
+from stage3_runner import Stage3RunResult, Stage3RunnerError, _validate_execution, run_stage3
 
 
 class KExecutionError(KIntegrityError):
@@ -323,6 +329,37 @@ class _PublicEnginePort:
         self.__engine.step(move.x, move.y, move.action)
 
 
+class _EffectArchive:
+    """Separate archival reader, never supplied to K/shadow/public proof.
+
+    PLAYING rows come from the status-gated execution prefix. A terminal read
+    is made only here and immediately wrapped by make_public_effect. Its result
+    is appended to the trace; it cannot replace the next live observation.
+    """
+
+    __slots__ = ("__engine",)
+
+    def __init__(self, engine):
+        self.__engine = engine
+
+    def capture(self, before, move, *, after_playing, status_after, input_index,
+                cursor_before, modeled_action_us):
+        _require(self.__engine.status is status_after, "ARCHIVE_STATUS",
+                 "Effect capture crossed a status boundary.")
+        if status_after is GameStatus.PLAYING:
+            _require(after_playing is not None, "ARCHIVE_PREFIX", "Missing PLAYING postinput capture.")
+            after = after_playing
+        else:
+            _require(after_playing is None, "ARCHIVE_TERMINAL", "Terminal effects are archival only.")
+            after = self.__engine.get_observation()
+        _require(self.__engine.status is status_after, "ARCHIVE_STATUS",
+                 "Effect observation capture crossed a status boundary.")
+        return make_public_effect(
+            before, move, after, input_index=input_index, status_after=status_after,
+            cursor_before=cursor_before, modeled_action_us=modeled_action_us,
+        )
+
+
 @dataclass(frozen=True)
 class KActionTrace:
     """Detached archival evidence for one executed input, never a pending plan."""
@@ -336,6 +373,9 @@ class KActionTrace:
     status_after: GameStatus
     M_before: frozenset[Coordinate]
     preinput_M: frozenset[Coordinate]
+    timings: DecisionTimings = field(default_factory=DecisionTimings, compare=False)
+    public_effect: PublicEffectRecord | None = None
+    public_effect_status: str = "NOT_EVALUATED"
 
 
 @dataclass(frozen=True)
@@ -374,14 +414,18 @@ def _validate_progress(before, after, move):
                  "PUBLIC_EFFECT", "Reveal input must open its public targets and create no flags.")
 
 
-def run_k_p0(engine, *, table: TimingTable | None = None) -> KRunResult:
+def run_k_p0(engine, *, table: TimingTable | None = None,
+             capture_effects: bool = False) -> KRunResult:
     """Canonical complete K-P0 unit run; no research stages, retries or resume.
 
-    Analysis/planning CPU time is unmeasured. Model C is exactly the sum of the
-    executed movement-plus-input lookups, including initial and terminal inputs.
+    Analysis+planning runs from K decision entry through selected policy return;
+    execution validation and optional archival effects have separate ns spans.
+    Model C sums executed lookups, including initial and terminal inputs.
     Progress bounds the number of inputs by board area without a move fallback.
     """
+    _require(type(capture_effects) is bool, "ARCHIVE_OPTION", "Expected boolean capture option.")
     port = _PublicEnginePort(engine)
+    archive = _EffectArchive(engine) if capture_effects else None
     table = load_timing_table() if table is None else validate_timing_table(table)
     session = KLocalSession(port.width, port.height, port.num_mines)
     cursor = (0, 0)
@@ -391,35 +435,57 @@ def run_k_p0(engine, *, table: TimingTable | None = None) -> KRunResult:
         initial = not traces
         M_before = session.M
         decision = selection = None
+        analysis_ns = None
         if initial:
             move = SimpleMove(Action.OPEN, 0, 0)
             category = "POLICY_INITIAL_OPEN"
         else:
+            started_ns = perf_counter_ns()
             decision = session.analyze_decision(observation, status=GameStatus.PLAYING)
             selection = select_policy(decision, cursor, table)
+            analysis_ns = perf_counter_ns() - started_ns
             _require(type(selection) is PolicySelection, "DECISION_EVIDENCE", "Policy returned no valid selection.")
             move, category = selection.move, selection.category
         # Re-read actual state after planning; cached analysis input cannot
         # detect an intervening public mutation. No policy result proves this.
         current = port.observe_playing()
+        status_before = port.status()
+        current_mines = session.M
+        started_ns = perf_counter_ns()
         validate_k_p0_execution(
-            current, move, status=port.status(), num_mines=port.num_mines,
-            cursor=cursor, current_mines=session.M, decision=decision,
+            current, move, status=status_before, num_mines=port.num_mines,
+            cursor=cursor, current_mines=current_mines, decision=decision,
             selection=selection, initial=initial,
         )
+        validation_ns = perf_counter_ns() - started_ns
         preinput_M = session.M
         cost = action_cost(table, cursor, (move.x, move.y))
         port.apply(move)
         status_after = port.status()  # FIRST read after physical input.
+        after_playing = None
+        if status_after is GameStatus.PLAYING:
+            after_playing = port.observe_playing()
+            _validate_progress(current, after_playing, move)
+        effect = evidence_ns = None
+        if archive is not None:
+            started_ns = perf_counter_ns()
+            effect = archive.capture(
+                current, move, after_playing=after_playing, status_after=status_after,
+                input_index=len(traces), cursor_before=cursor, modeled_action_us=cost,
+            )
+            evidence_ns = perf_counter_ns() - started_ns
         traces.append(KActionTrace(len(traces), move, category, selection, cursor,
-                                   cost, status_after, M_before, preinput_M))
+                                   cost, status_after, M_before, preinput_M,
+                                   DecisionTimings(k_analysis_planning_ns=analysis_ns,
+                                                   k_execution_validation_ns=validation_ns,
+                                                   evidence_ns=evidence_ns),
+                                   effect, "CAPTURED" if effect is not None else "NOT_EVALUATED"))
         # Only the archive holds these records now. No suffix/evidence is read
         # by the next decision, and terminal state never enters K reasoning.
         decision = selection = None
         if status_after is not GameStatus.PLAYING:
             return KRunResult(status_after, tuple(traces), session.M)
-        observation = port.observe_playing()
-        _validate_progress(current, observation, move)
+        observation = after_playing
         cursor = (move.x, move.y)
 
 
@@ -454,7 +520,7 @@ class ShadowComparisonError(ValueError):
 
 
 class ShadowSoundnessViolation(ShadowComparisonError):
-    """Reserved public-comparison/fault-injection hook; no hidden-truth audit."""
+    """Public semantic discrepancy/fault hook; never a hidden-truth audit."""
 
 
 class _MalformedShadowOutput(ValueError):
@@ -467,6 +533,8 @@ class ShadowFailure:
     detected_boundary: int
     last_valid_boundary: int | None
     detail: str
+    implicated_boundary: int | None = None
+    invalidation_scope: str = "WHOLE_SHADOW_STREAM"
 
 
 @dataclass(frozen=True)
@@ -499,6 +567,12 @@ class KControlActionTrace:
     shadow: ShadowCheckpoint
     M_before: frozenset[Coordinate]
     preinput_M: frozenset[Coordinate]
+    timings: DecisionTimings = field(default_factory=DecisionTimings, compare=False)
+    public_effect: PublicEffectRecord | None = None
+    public_effect_status: str = "NOT_EVALUATED"
+    soundness: ShadowSoundnessEvidence | None = None
+    external_flag: ExternalV1FlagProvenance | None = None
+    external_flag_antecedents: tuple[ExternalV1FlagProvenance, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -644,57 +718,98 @@ def _validate_shadow_result(inputs, result):
                         "Exact certificate is not from this pre-acquisition D phase.")
 
 
-def _shadow_worker(inputs, mailbox):
+def _shadow_worker(inputs, mailbox, v1_projection, boundary):
     """One disposable daemon operation; no reference to the active run owner.
 
     The mailbox is private to this checkpoint. A timeout abandons it permanently;
     a late publication cannot change active/archived M or start another call.
     """
+    result = soundness = None
+    failure_class, detail = None, ""
+    started_ns = perf_counter_ns()
     try:
         result = _analyze_shadow(inputs)
     except ShadowSoundnessViolation as error:
-        mailbox.put((None, "SHADOW_SOUNDNESS_VIOLATION", str(error)))
+        failure_class, detail = "SHADOW_SOUNDNESS_VIOLATION", str(error)
     except (ShadowComparisonError, PublicProofError) as error:
-        mailbox.put((None, "SHADOW_COMPARISON_EXCEPTION", str(error)))
+        failure_class, detail = "SHADOW_COMPARISON_EXCEPTION", str(error)
     except KIntegrityError as error:
-        mailbox.put((None, "SHADOW_SEMANTIC_EXCEPTION", str(error)))
+        failure_class, detail = "SHADOW_SEMANTIC_EXCEPTION", str(error)
     except Exception as error:
-        mailbox.put((None, "SHADOW_EXCEPTION", f"{type(error).__name__}: {error}"))
+        failure_class, detail = "SHADOW_EXCEPTION", f"{type(error).__name__}: {error}"
     else:
         try:
             _validate_shadow_result(inputs, result)
         except Exception as error:
             # Suspect objects never cross into the active state or diagnostics;
             # only a detached textual diagnosis is retained.
-            mailbox.put((None, "SHADOW_MALFORMED_OUTPUT", f"{type(error).__name__}: {error}"))
-        else:
-            mailbox.put((result, None, ""))
+            failure_class, detail = "SHADOW_MALFORMED_OUTPUT", f"{type(error).__name__}: {error}"
+    shadow_ns = perf_counter_ns() - started_ns
+    comparison_ns = None
+    if failure_class is None:
+        # The separate public comparator sees a detached semantic projection,
+        # never V1 ownership. It is within the same enforceable deadline, but
+        # its measured span is disjoint from shadow analysis/output validation.
+        started_ns = perf_counter_ns()
+        try:
+            soundness = compare_shadow_soundness(
+                v1_projection, result.selection_safe_cells, boundary=boundary,
+            )
+            if (type(soundness) is not ShadowSoundnessEvidence
+                    or soundness.boundary != boundary
+                    or soundness.v1_decision != v1_projection
+                    or soundness.safe_cells != tuple(sorted(result.selection_safe_cells,
+                                                           key=reading_order))):
+                raise ShadowComparisonError("Malformed or unbound public shadow comparison result.")
+            # Reconstruct to enforce the immutable evidence invariants even if
+            # a faulty comparator bypassed its dataclass constructor.
+            soundness = replace(soundness)
+            if soundness.classification == "SHADOW_SOUNDNESS_VIOLATION":
+                failure_class = soundness.classification
+                detail = "Current shadow safety contradicts the sealed frozen V1 probability guess."
+            elif soundness.classification not in ("NO_DISCREPANCY", "NOT_EVALUATED"):
+                raise ShadowComparisonError("Unsupported public shadow comparison result.")
+        except Exception as error:
+            failure_class, detail = "SHADOW_COMPARISON_EXCEPTION", f"{type(error).__name__}: {error}"
+            soundness = None
+        comparison_ns = perf_counter_ns() - started_ns
+    mailbox.put((result if failure_class is None else None, failure_class, detail,
+                 soundness, shadow_ns, comparison_ns))
 
 
-def _advance_shadow(state, inputs, boundary, timeout_s):
+def _advance_shadow(state, inputs, boundary, timeout_s, v1_projection):
     """Only this Engine-owner-side function can accept a new shadow snapshot."""
     if not state.enabled:
-        return replace(state, decision=None, evidence_valid=False)
+        return replace(state, decision=None, evidence_valid=False), None, None, None
     mailbox = Queue(maxsize=1)
     deadline = monotonic() + timeout_s
-    worker = Thread(target=_shadow_worker, args=(inputs, mailbox), daemon=True,
+    worker = Thread(target=_shadow_worker, args=(inputs, mailbox, v1_projection, boundary), daemon=True,
                     name="program-k-shadow")
     worker.start()
     try:
-        result, failure_class, detail = mailbox.get(timeout=max(0, deadline - monotonic()))
+        result, failure_class, detail, soundness, shadow_ns, comparison_ns = mailbox.get(
+            timeout=max(0, deadline - monotonic()))
         if monotonic() > deadline:
             raise Empty
     except Empty:
         result, failure_class, detail = None, "SHADOW_TIMEOUT", "Shadow-only deadline expired."
+        soundness = shadow_ns = comparison_ns = None
     if failure_class is not None:
-        failure = ShadowFailure(failure_class, boundary, state.last_valid_boundary, detail)
-        return ShadowCheckpoint(False, state.last_valid_M, None, failure,
-                                state.last_valid_boundary, False, True)
-    return ShadowCheckpoint(True, result.after.M, result, None, boundary, True, True)
+        # The failed claim's checkpoint is exact. Earlier acquisition origin is
+        # not established by this comparison, so dependent qualification of the
+        # whole shadow stream is invalidated; last M remains archive only.
+        failure = ShadowFailure(failure_class, boundary, state.last_valid_boundary, detail,
+                                boundary if failure_class == "SHADOW_SOUNDNESS_VIOLATION" else None)
+        checkpoint = ShadowCheckpoint(False, state.last_valid_M, None, failure,
+                                      state.last_valid_boundary, False, True)
+        return checkpoint, soundness, shadow_ns, comparison_ns
+    return (ShadowCheckpoint(True, result.after.M, result, None, boundary, True, True),
+            soundness, shadow_ns, comparison_ns)
 
 
 def run_k_control(engine, *, table: TimingTable | None = None,
-                  shadow_timeout_s: float = 1.0) -> KControlRunResult:
+                  shadow_timeout_s: float = 1.0,
+                  capture_effects: bool = False) -> KControlRunResult:
     """Frozen V1 physical stream plus detached K-C, for bounded unit use only.
 
     The caller grants exclusive Engine/input ownership, just as for run_k_p0.
@@ -705,58 +820,260 @@ def run_k_control(engine, *, table: TimingTable | None = None,
     if (type(shadow_timeout_s) not in (int, float) or not isfinite(shadow_timeout_s)
             or not 0 < shadow_timeout_s <= 60):
         raise ValueError("Shadow-only timeout must be finite and in (0, 60] seconds.")
+    _require(type(capture_effects) is bool, "ARCHIVE_OPTION", "Expected boolean capture option.")
     shadow = ShadowCheckpoint()
     status = engine.status
     if status in (GameStatus.WON, GameStatus.LOST):
         return KControlRunResult(status, (), shadow)
     port = _PublicEnginePort(engine)
+    archive = _EffectArchive(engine) if capture_effects else None
     table = load_timing_table() if table is None else validate_timing_table(table)
     observation = port.observe_playing()
     if len(_cells(observation, CellState.HIDDEN)) != port.width * port.height:
         raise Stage3RunnerError("Canonical K-CONTROL requires an entirely HIDDEN start.")
     cursor = (0, 0)
     executed_v1_flags = frozenset()
+    flag_provenance = ()
     traces = []
     while True:
         decision = None
+        planner_ns = shadow_ns = comparison_ns = None
+        soundness = external_flag = None
         if not traces:
             move = SimpleMove(Action.OPEN, 0, 0)
         else:
+            started_ns = perf_counter_ns()
             decision = plan_position(observation, port.num_mines, cursor, table)
+            planner_ns = perf_counter_ns() - started_ns
             if decision is None:
                 raise Stage3RunnerError("Planner returned no action while PLAYING.")
             move = decision.move
+        started_ns = perf_counter_ns()
         _validate_execution(observation, move, decision)
+        validation_ns = perf_counter_ns() - started_ns
         sealed = _SealedV1Input(observation, decision, move, cursor,
                                 action_cost(table, cursor, (move.x, move.y)))
         M_before = shadow.last_valid_M
+        started_ns = perf_counter_ns()
+        v1_projection = project_v1_decision(decision) if decision is not None else None
+        # Provenance is evidence about V1's validated physical FLAG, not an M
+        # acquisition. Independent verification is post-hoc, outside selection.
+        if move.action is Action.FLAG:
+            external_flag = make_v1_flag_provenance(
+                sealed.observation, sealed.decision, num_mines=port.num_mines,
+                boundary=len(traces), prior_flags=flag_provenance,
+            )
+        antecedents = tuple(record for record in flag_provenance
+                            if (record.move.x, record.move.y) in _cells(observation, CellState.FLAGGED))
+        evidence_ns = perf_counter_ns() - started_ns
         if decision is not None and shadow.enabled:
             # Provenance comes only from successfully executed validated V1
             # FLAG inputs. Physical identity itself never promotes a mine to M.
             inputs = _shadow_input(sealed.observation, port.width, port.height,
                                    port.num_mines, sealed.cursor_before,
                                    shadow.last_valid_M, executed_v1_flags)
-            shadow = _advance_shadow(shadow, inputs, len(traces), shadow_timeout_s)
+            shadow, soundness, shadow_ns, comparison_ns = _advance_shadow(
+                shadow, inputs, len(traces), shadow_timeout_s, v1_projection,
+            )
         # A shadow failure changes no action field. If exclusive ownership was
         # violated, abort as a V1/system failure; never replan a replacement.
         current = port.observe_playing()
         if current != sealed.observation:
             raise Stage3RunnerError("Public state changed after the V1 input was sealed.")
+        started_ns = perf_counter_ns()
         _validate_execution(current, sealed.move, sealed.decision)
+        # These are two disjoint frozen-validation calls, not nested spans.
+        validation_ns += perf_counter_ns() - started_ns
         port.apply(sealed.move)
         status_after = port.status()  # FIRST access after Engine input.
+        after_playing = None
+        if status_after is GameStatus.PLAYING:
+            after_playing = port.observe_playing()
+            _validate_progress(sealed.observation, after_playing, sealed.move)
+        effect = None
+        if archive is not None:
+            started_ns = perf_counter_ns()
+            effect = archive.capture(
+                sealed.observation, sealed.move, after_playing=after_playing,
+                status_after=status_after, input_index=len(traces),
+                cursor_before=sealed.cursor_before, modeled_action_us=sealed.modeled_action_us,
+            )
+            evidence_ns += perf_counter_ns() - started_ns
         traces.append(KControlActionTrace(
             len(traces), sealed.observation, sealed.decision, sealed.move,
             sealed.cursor_before, sealed.modeled_action_us, status_after,
             shadow, M_before, shadow.last_valid_M,
+            DecisionTimings(v1_plan_position_ns=planner_ns,
+                            v1_execution_validation_ns=validation_ns,
+                            shadow_ns=shadow_ns, comparison_ns=comparison_ns,
+                            evidence_ns=evidence_ns),
+            effect, "CAPTURED" if effect is not None else "NOT_EVALUATED",
+            soundness, external_flag, antecedents,
         ))
-        # No terminal observation, capability call, comparison or further job.
+        # Optional terminal effects above are archive only. No further live
+        # observation, capability call, public-proof comparison or shadow job.
         if status_after is not GameStatus.PLAYING:
             return KControlRunResult(status_after, tuple(traces),
                                      replace(shadow, decision=None, evidence_valid=False))
         if sealed.move.action is Action.FLAG:
             executed_v1_flags = executed_v1_flags | {(sealed.move.x, sealed.move.y)}
-        observation = port.observe_playing()
-        _validate_progress(sealed.observation, observation, sealed.move)
+            flag_provenance += (external_flag,)
+        observation = after_playing
         cursor = (sealed.move.x, sealed.move.y)
         shadow = replace(shadow, decision=None, evidence_valid=False)
+
+
+@dataclass(frozen=True)
+class ControlCaptureResult:
+    """Unchanged frozen CONTROL result plus segregated experimental archives."""
+
+    control: Stage3RunResult
+    effects: tuple[PublicEffectRecord, ...]
+    timings: tuple[DecisionTimings, ...] = field(compare=False)
+    capture_method: str = "STATUS_GATED_ACTUAL_EXECUTION"
+
+    def __post_init__(self):
+        _require(type(self.control) is Stage3RunResult
+                 and type(self.effects) is tuple and type(self.timings) is tuple
+                 and len(self.control.traces) == len(self.effects) == len(self.timings)
+                 and all(type(e) is PublicEffectRecord for e in self.effects)
+                 and all(type(t) is DecisionTimings for t in self.timings)
+                 and self.capture_method == "STATUS_GATED_ACTUAL_EXECUTION",
+                 "ARCHIVE_SEQUENCE", "CONTROL capture needs complete immutable paired records.")
+        for index, (trace, effect, timings) in enumerate(zip(
+                self.control.traces, self.effects, self.timings)):
+            _require(effect.input_index == index
+                     and (effect.move.action, effect.move.x, effect.move.y)
+                     == (trace.move.action, trace.move.x, trace.move.y)
+                     and effect.status_after is trace.status_after
+                     and effect.cursor_before == trace.cursor_before
+                     and effect.modeled_action_us == trace.modeled_action_us
+                     and timings.v1_plan_position_ns == trace.decision_compute_ns,
+                     "ARCHIVE_SEQUENCE", "CONTROL trace/effect/timing bindings disagree.")
+
+    @property
+    def traces(self):
+        return self.control.traces
+
+    @property
+    def moves(self):
+        return self.control.moves
+
+    @property
+    def status(self):
+        return self.control.status
+
+    @property
+    def total_modeled_us(self):
+        return self.control.total_modeled_us
+
+    @property
+    def capture_status(self):
+        if not self.effects:
+            return "NOT_REACHED"
+        return ("COMPLETE" if self.status in (GameStatus.WON, GameStatus.LOST)
+                and self.effects[-1].status_after is self.status else "INCOMPLETE")
+
+
+class _ControlCapturePort:
+    """Minimal facade for frozen run_stage3; no inference or action selection.
+
+    Its PLAYING observations are the actual status-gated execution prefix.
+    The one terminal get_observation call required by frozen run_stage3 is
+    explicitly archival: V1 uses it for effect deltas, then exits on status.
+    It is never installed as this facade's next PLAYING observation. No K or
+    public-proof function receives this facade or its terminal archive.
+    """
+
+    __slots__ = ("__engine", "__port", "__playing", "__before", "__after",
+                 "__move", "__status_after", "effects", "timings")
+
+    def __init__(self, engine):
+        self.__engine = engine
+        self.__port = _PublicEnginePort(engine)
+        self.__playing = self.__before = self.__after = self.__move = None
+        self.__status_after = None
+        self.effects, self.timings = [], []
+
+    @property
+    def width(self):
+        return self.__port.width
+
+    @property
+    def height(self):
+        return self.__port.height
+
+    @property
+    def num_mines(self):
+        return self.__port.num_mines
+
+    @property
+    def status(self):
+        return self.__port.status()
+
+    def get_observation(self):
+        status = self.__port.status()
+        if self.__move is None:
+            self.__playing = self.__port.observe_playing()
+            return self.__playing
+        _require(status is self.__status_after, "ARCHIVE_STATUS", "CONTROL capture status changed.")
+        if self.__after is None:
+            if status is GameStatus.PLAYING:
+                rows = self.__port.observe_playing()
+                self.__playing = rows
+            else:
+                rows = self.__engine.get_observation()
+                self.__playing = None
+            _require(self.__port.status() is status, "ARCHIVE_STATUS",
+                     "CONTROL effect observation crossed a status boundary.")
+            self.__after = ArchivalObservation(rows, status)
+        # This terminal return belongs solely to frozen V1's existing effect
+        # bookkeeping. It never becomes an observation in the K execution port.
+        return self.__after.rows
+
+    def step(self, x, y, action):
+        _require(self.__move is None and self.__playing is not None,
+                 "ARCHIVE_SEQUENCE", "CONTROL input needs its current PLAYING prefix.")
+        current = self.__port.observe_playing()
+        _require(current == self.__playing, "ARCHIVE_PREFIX", "CONTROL public prefix changed.")
+        self.__before, self.__move = current, SimpleMove(action, x, y)
+        self.__port.apply(self.__move)
+        self.__status_after = self.__port.status()  # First access after input.
+        # The complete Engine return payload has already been discarded.
+
+    def record(self, trace):
+        started_ns = perf_counter_ns()
+        _require(self.__move == trace.move and self.__after is not None
+                 and trace.status_after is self.__status_after,
+                 "ARCHIVE_SEQUENCE", "Frozen CONTROL trace is not bound to the captured input.")
+        effect = make_public_effect(
+            self.__before, trace.move, self.__after.rows, input_index=len(self.effects),
+            status_after=trace.status_after, cursor_before=trace.cursor_before,
+            modeled_action_us=trace.modeled_action_us,
+        )
+        _require(effect.safe_cells_opened_delta == trace.safe_cells_opened_delta
+                 and effect.explicit_flag_delta == trace.explicit_flag_delta,
+                 "ARCHIVE_DELTA", "CONTROL deltas disagree with captured public effects.")
+        self.effects.append(effect)
+        self.__before = self.__after = self.__move = self.__status_after = None
+        evidence_ns = perf_counter_ns() - started_ns
+        self.timings.append(DecisionTimings(
+            v1_plan_position_ns=trace.decision_compute_ns, evidence_ns=evidence_ns,
+        ))
+
+
+def run_control_capture(engine, *, table: TimingTable | None = None) -> ControlCaptureResult:
+    """Observe unchanged CONTROL execution; no production monkeypatch or replay.
+
+    Planner-only ns are copied from frozen decision_compute_ns exactly. Frozen
+    validation is UNMEASURED. evidence_ns measures only observer record assembly
+    and delta checks; observation capture is unmeasured. This is an implementation
+    API and confers no A-E2 or O-4 research qualification.
+    """
+    if engine.status in (GameStatus.WON, GameStatus.LOST):
+        return ControlCaptureResult(run_stage3(engine, table=table), (), ())
+    port = _ControlCapturePort(engine)
+    control = run_stage3(port, table=table, observer=port.record)
+    _require(len(control.traces) == len(port.effects) == len(port.timings),
+             "ARCHIVE_SEQUENCE", "Missing CONTROL input coverage.")
+    return ControlCaptureResult(control, tuple(port.effects), tuple(port.timings))

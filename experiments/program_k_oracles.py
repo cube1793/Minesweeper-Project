@@ -8,9 +8,12 @@ Coordinates remain (x, y); ordered outputs use the reading-order key (y, x).
 This module supplies unit-verification foundations, not an E0 qualification run.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from fractions import Fraction
+import hashlib
 from itertools import combinations
+import json
+from pathlib import Path
 
 from core_engine import CellState, GameStatus
 
@@ -575,3 +578,369 @@ def materialized_exact_reference(
     _public_extension(previous, grid, supported)
     _supported_domains(grid, num_mines, retained, supported)
     return _materialized_exact(grid, num_mines, retained)
+
+
+# P-8 is a separate timing-premise checker. Neither a private fixture PASS nor
+# merely constructing this API qualifies the full frozen timing premise.
+P8_GRID_WIDTH = 30
+P8_GRID_HEIGHT = 16
+P8_CELL_COUNT = P8_GRID_WIDTH * P8_GRID_HEIGHT
+P8_EXPECTED_TRIPLE_COUNT = P8_CELL_COUNT * P8_CELL_COUNT * (P8_CELL_COUNT - 1)
+P8_CHECKER_IDENTITY = "experiments.program_k_oracles.check_frozen_p8"
+P8_CHECKER_VERSION = 1
+
+
+def _p8_positive_table(table):
+    """Reject mutable, nonrectangular, nonpositive and non-true-int inputs."""
+    if (type(table) is not tuple or not table
+            or type(table[0]) is not tuple or not table[0]
+            or any(type(row) is not tuple or len(row) != len(table[0])
+                   for row in table)
+            or any(type(value) is not int or value <= 0
+                   for row in table for value in row)):
+        raise PublicProofError("P-8 needs an immutable positive true-int dx/dy table.")
+    return table
+
+
+def _p8_cells(cells, table):
+    if type(cells) is not tuple or len(cells) < 2:
+        raise PublicProofError("P-8 needs an immutable domain with at least two cells.")
+    for cell in cells:
+        _coordinate(cell, len(table), len(table[0]))
+    if len(set(cells)) != len(cells):
+        raise PublicProofError("P-8 coordinate domain contains duplicates.")
+    return tuple(sorted(cells, key=_reading_order))
+
+
+def _p8_table_digest(table):
+    encoded = ",".join(str(value) for row in table for value in row).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _p8_displacement(start, end):
+    return abs(end[0] - start[0]), abs(end[1] - start[1])
+
+
+@dataclass(frozen=True)
+class P8Witness:
+    """One exact ordered triple; displacements/values follow cb, bv, cv order."""
+
+    triple_index: int
+    c: Coordinate
+    b: Coordinate
+    v: Coordinate
+    displacements: tuple[Coordinate, Coordinate, Coordinate]
+    table_values: tuple[int, int, int]
+    gap: int
+
+    def __post_init__(self):
+        if type(self.triple_index) is not int or self.triple_index < 0:
+            raise PublicProofError("P-8 witness index must be a nonnegative true int.")
+        for cell in (self.c, self.b, self.v):
+            if (type(cell) is not tuple or len(cell) != 2
+                    or any(type(value) is not int or value < 0 for value in cell)):
+                raise PublicProofError("P-8 witness coordinates must be immutable (x,y) ints.")
+        expected = (_p8_displacement(self.c, self.b),
+                    _p8_displacement(self.b, self.v),
+                    _p8_displacement(self.c, self.v))
+        if (self.b == self.v or type(self.displacements) is not tuple
+                or any(type(item) is not tuple or len(item) != 2
+                       or any(type(value) is not int or value < 0 for value in item)
+                       for item in self.displacements)
+                or self.displacements != expected
+                or type(self.table_values) is not tuple or len(self.table_values) != 3
+                or any(type(value) is not int or value <= 0 for value in self.table_values)
+                or type(self.gap) is not int
+                or self.gap != self.table_values[0] + self.table_values[1] - self.table_values[2]):
+            raise PublicProofError("P-8 witness displacements, values or exact gap disagree.")
+
+
+@dataclass(frozen=True)
+class P8Result:
+    """Immutable reconstructable scan evidence, including its actual value table.
+
+    ``status`` is derived: incomplete coverage cannot become PASS even when all
+    visited gaps are positive. A nonpositive authenticated prefix independently
+    sets ``premise_failure``; interruption cannot erase that counterexample.
+    A PRIVATE_BOUNDED_CHECK PASS says nothing about P-8 qualification.
+    """
+
+    scope: str
+    table: tuple[tuple[int, ...], ...]
+    cells: tuple[Coordinate, ...]
+    expected_triple_count: int
+    visited_triple_count: int
+    complete: bool
+    interruption_reason: str | None
+    authentication_status: str
+    profile_sha256: str | None
+    table_sha256: str
+    physical_model_id: str | None
+    physical_profile_version: int | None
+    timing_unit: str
+    table_order: str
+    checker_identity: str
+    checker_version: int
+    checker_source_sha256: str
+    minimum_gap: int | None
+    minimum_gap_witness: P8Witness | None
+    zero_gap_count: int
+    negative_gap_count: int
+    counterexamples: tuple[P8Witness, ...]
+    counterexample_limit: int
+
+    def __post_init__(self):
+        if any(type(value) is not str for value in (
+                self.scope, self.authentication_status, self.table_sha256,
+                self.timing_unit, self.table_order, self.checker_identity,
+                self.checker_source_sha256)):
+            raise PublicProofError("P-8 identity/status fields must be immutable strings.")
+        _p8_positive_table(self.table)
+        cells = _p8_cells(self.cells, self.table)
+        if self.cells != cells:
+            raise PublicProofError("P-8 evidence coordinates must be in (y,x) traversal order.")
+        n = len(cells)
+        if (type(self.expected_triple_count) is not int
+                or self.expected_triple_count != n * n * (n - 1)
+                or type(self.visited_triple_count) is not int
+                or not 0 <= self.visited_triple_count <= self.expected_triple_count
+                or type(self.complete) is not bool
+                or self.complete != (self.visited_triple_count == self.expected_triple_count)
+                or (self.complete and self.interruption_reason is not None)
+                or (not self.complete and (type(self.interruption_reason) is not str
+                                           or not self.interruption_reason))):
+            raise PublicProofError("P-8 coverage/completion evidence is inconsistent.")
+        for count in (self.zero_gap_count, self.negative_gap_count):
+            if type(count) is not int or count < 0:
+                raise PublicProofError("P-8 gap counts must be nonnegative true ints.")
+        bad_count = self.zero_gap_count + self.negative_gap_count
+        if bad_count > self.visited_triple_count:
+            raise PublicProofError("P-8 nonpositive count exceeds visited triples.")
+        if (type(self.counterexample_limit) is not int or self.counterexample_limit <= 0
+                or type(self.counterexamples) is not tuple
+                or len(self.counterexamples) != min(bad_count, self.counterexample_limit)
+                or any(type(item) is not P8Witness or item.gap > 0
+                       for item in self.counterexamples)
+                or any(left.triple_index >= right.triple_index
+                       for left, right in zip(self.counterexamples, self.counterexamples[1:]))):
+            raise PublicProofError("P-8 counterexamples must be a deterministic bounded prefix.")
+        if self.visited_triple_count == 0:
+            if self.minimum_gap is not None or self.minimum_gap_witness is not None:
+                raise PublicProofError("Unvisited P-8 evidence cannot fabricate a minimum.")
+        elif (type(self.minimum_gap) is not int
+              or type(self.minimum_gap_witness) is not P8Witness
+              or self.minimum_gap != self.minimum_gap_witness.gap
+              or (self.minimum_gap <= 0) != bool(bad_count)
+              or (self.minimum_gap < 0) != bool(self.negative_gap_count)):
+            raise PublicProofError("P-8 minimum/count evidence is inconsistent.")
+        witnesses = self.counterexamples
+        if self.minimum_gap_witness is not None:
+            witnesses += (self.minimum_gap_witness,)
+        positions = {cell: index for index, cell in enumerate(cells)}
+        for witness in witnesses:
+            if any(cell not in positions for cell in (witness.c, witness.b, witness.v)):
+                raise PublicProofError("P-8 witness lies outside its recorded domain.")
+            ci, bi, vi = (positions[cell] for cell in (witness.c, witness.b, witness.v))
+            index = ci * n * (n - 1) + bi * (n - 1) + vi - (vi > bi)
+            if (witness.triple_index != index or index >= self.visited_triple_count
+                    or witness.table_values != tuple(self.table[dx][dy]
+                                                     for dx, dy in witness.displacements)
+                    or witness.gap < self.minimum_gap):
+                raise PublicProofError("P-8 witness does not reconstruct from the table/prefix.")
+        if (type(self.table_sha256) is not str
+                or self.table_sha256 != _p8_table_digest(self.table)
+                or self.table_order != "dx_major_dy_minor" or self.timing_unit != "us"
+                or self.checker_identity != P8_CHECKER_IDENTITY
+                or type(self.checker_version) is not int
+                or self.checker_version != P8_CHECKER_VERSION
+                or type(self.checker_source_sha256) is not str
+                or len(self.checker_source_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in self.checker_source_sha256)):
+            raise PublicProofError("P-8 table/checker identity is missing or malformed.")
+        if self.scope == "FROZEN_P8":
+            # Lazy import preserves independence of the public arithmetic and
+            # certificate APIs from production inference/planning dependencies.
+            from stage3_physical import MODEL_C_V1_IDENTITY, validate_timing_table
+
+            identity = MODEL_C_V1_IDENTITY
+            validate_timing_table(self.table)
+            if (self.cells != tuple((x, y) for y in range(P8_GRID_HEIGHT)
+                                    for x in range(P8_GRID_WIDTH))
+                    or self.expected_triple_count != P8_EXPECTED_TRIPLE_COUNT
+                    or self.authentication_status != "AUTHENTICATED"
+                    or self.profile_sha256 != identity.physical_profile_sha256
+                    or self.table_sha256 != identity.timing_table_sha256
+                    or self.physical_model_id != identity.physical_model_id
+                    or type(self.physical_profile_version) is not int
+                    or self.physical_profile_version != identity.physical_profile_version):
+                raise PublicProofError("Frozen P-8 evidence requires the full authenticated domain.")
+        elif (self.scope != "PRIVATE_BOUNDED_CHECK"
+              or self.authentication_status != "NOT_EVALUATED"
+              or any(value is not None for value in (
+                  self.profile_sha256, self.physical_model_id, self.physical_profile_version))):
+            raise PublicProofError("Private fixture evidence cannot assert frozen authentication.")
+
+    @property
+    def status(self) -> str:
+        if not self.complete:
+            return "INCOMPLETE"
+        return "FAIL" if self.zero_gap_count or self.negative_gap_count else "PASS"
+
+    @property
+    def completion_marker(self) -> str:
+        return "COMPLETE" if self.complete else "INCOMPLETE"
+
+    @property
+    def premise_failure(self) -> bool:
+        return self.scope == "FROZEN_P8" and bool(self.zero_gap_count or self.negative_gap_count)
+
+    @property
+    def failure_kind(self) -> str | None:
+        if self.premise_failure:
+            return "FROZEN_PREMISE_FAILURE"
+        if self.zero_gap_count or self.negative_gap_count:
+            return "SYNTHETIC_COUNTEREXAMPLE"
+        return None
+
+    @property
+    def counterexamples_complete(self) -> bool:
+        return len(self.counterexamples) == self.zero_gap_count + self.negative_gap_count
+
+    @property
+    def evidence_sha256(self) -> str:
+        """Canonical evidence identity; includes all reconstructable premises."""
+        payload = {**asdict(self), "status": self.status,
+                   "completion_marker": self.completion_marker,
+                   "premise_failure": self.premise_failure,
+                   "failure_kind": self.failure_kind}
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+def _iter_p8_triples(cells):
+    """The only exclusion is b == v; c == b and c == v remain in the domain."""
+    for c in cells:
+        for b in cells:
+            for v in cells:
+                if b != v:
+                    yield c, b, v
+
+
+def _scan_p8(table, cells, *, max_triples, interrupt_requested, counterexample_limit,
+             scope, profile_identity=None):
+    expected = len(cells) * len(cells) * (len(cells) - 1)
+    if max_triples is not None and (type(max_triples) is not int or max_triples < 0):
+        raise PublicProofError("P-8 private traversal limit must be a nonnegative true int.")
+    if interrupt_requested is not None and not callable(interrupt_requested):
+        raise PublicProofError("P-8 interruption hook must be callable.")
+    if type(counterexample_limit) is not int or counterexample_limit <= 0:
+        raise PublicProofError("P-8 counterexample limit must be a positive true int.")
+    visited = zero_count = negative_count = 0
+    minimum = minimum_witness = None
+    counterexamples = []
+    interruption_reason = None
+    for c, b, v in _iter_p8_triples(cells):
+        if max_triples is not None and visited >= max_triples:
+            interruption_reason = "PRIVATE_TRIPLE_LIMIT"
+            break
+        if interrupt_requested is not None:
+            # Cancellation is checked at a triple boundary, before any part of
+            # that triple is counted. Callback failure preserves the prefix as
+            # incomplete; it never converts interruption into positive evidence.
+            try:
+                interrupted = interrupt_requested()
+                if type(interrupted) is not bool:
+                    raise ValueError("Interruption hook must return a true boolean.")
+            except (Exception, KeyboardInterrupt) as error:
+                interruption_reason = f"INTERRUPTION_HOOK_ERROR:{type(error).__name__}"
+                break
+            if interrupted:
+                interruption_reason = "INTERRUPTED"
+                break
+        cb = _p8_displacement(c, b)
+        bv = _p8_displacement(b, v)
+        cv = _p8_displacement(c, v)
+        values = table[cb[0]][cb[1]], table[bv[0]][bv[1]], table[cv[0]][cv[1]]
+        # No geometric surrogate, formula regeneration, added input charge or
+        # tolerance. Each stored lookup already includes movement + target input.
+        gap = values[0] + values[1] - values[2]
+        witness = None
+        if minimum is None or gap < minimum:
+            witness = P8Witness(visited, c, b, v, (cb, bv, cv), values, gap)
+            minimum, minimum_witness = gap, witness
+        if gap <= 0:
+            zero_count += gap == 0
+            negative_count += gap < 0
+            if len(counterexamples) < counterexample_limit:
+                counterexamples.append(witness or P8Witness(
+                    visited, c, b, v, (cb, bv, cv), values, gap,
+                ))
+        visited += 1
+    complete = visited == expected
+    return P8Result(
+        scope=scope, table=table, cells=cells,
+        expected_triple_count=expected, visited_triple_count=visited,
+        complete=complete, interruption_reason=interruption_reason,
+        authentication_status="AUTHENTICATED" if profile_identity is not None else "NOT_EVALUATED",
+        profile_sha256=None if profile_identity is None else profile_identity.physical_profile_sha256,
+        table_sha256=_p8_table_digest(table),
+        physical_model_id=None if profile_identity is None else profile_identity.physical_model_id,
+        physical_profile_version=None if profile_identity is None else profile_identity.physical_profile_version,
+        timing_unit="us", table_order="dx_major_dy_minor",
+        checker_identity=P8_CHECKER_IDENTITY, checker_version=P8_CHECKER_VERSION,
+        checker_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        minimum_gap=minimum, minimum_gap_witness=minimum_witness,
+        zero_gap_count=zero_count, negative_gap_count=negative_count,
+        counterexamples=tuple(counterexamples), counterexample_limit=counterexample_limit,
+    )
+
+
+def _check_p8_table(table, *, cells=None, max_triples=None,
+                    interrupt_requested=None, counterexample_limit=16) -> P8Result:
+    """Private unit seam; synthetic/reduced evidence can never claim frozen P-8.
+
+    Values are stored dx-major/dy-minor. If supplied, ``cells`` is an immutable
+    reduced domain, sorted here by (y,x) without transposing stored coordinates.
+    A partial/interrupted traversal is INCOMPLETE even for a positive table.
+    """
+    table = _p8_positive_table(table)
+    if cells is None:
+        cells = tuple((x, y) for y in range(len(table[0])) for x in range(len(table)))
+    cells = _p8_cells(cells, table)
+    return _scan_p8(table, cells, max_triples=max_triples,
+                    interrupt_requested=interrupt_requested,
+                    counterexample_limit=counterexample_limit,
+                    scope="PRIVATE_BOUNDED_CHECK")
+
+
+def check_frozen_p8(*, profile_path=None, table=None,
+                    interrupt_requested=None, counterexample_limit=16) -> P8Result:
+    """Authenticate and exhaustively check the fixed 110,361,600-triple domain.
+
+    Calling without cancellation performs the full scan and needs separate
+    execution authorization. Slice-6 unit tests may stop it immediately via
+    ``interrupt_requested``; no range/subdomain parameter exists on this public
+    API. The returned status cannot PASS until the full domain is visited.
+
+    Exact profile bytes/metadata and all immutable table values are authenticated
+    by the existing frozen APIs before traversal. A supplied table must itself
+    be tuple-of-tuples, positive true ints, and match the authenticated profile.
+    No calibration coefficients are accessed and no values are regenerated.
+    """
+    from stage3_physical import (
+        MODEL_C_V1_IDENTITY, PROFILE_PATH, load_timing_table, validate_timing_table,
+    )
+
+    authenticated = load_timing_table(PROFILE_PATH if profile_path is None else profile_path)
+    _p8_positive_table(authenticated)
+    validate_timing_table(authenticated)
+    if table is not None:
+        _p8_positive_table(table)
+        validate_timing_table(table)
+        if table != authenticated:
+            raise PublicProofError("P-8 table differs from the authenticated preserved profile.")
+    cells = tuple((x, y) for y in range(P8_GRID_HEIGHT) for x in range(P8_GRID_WIDTH))
+    return _scan_p8(authenticated, cells, max_triples=None,
+                    interrupt_requested=interrupt_requested,
+                    counterexample_limit=counterexample_limit,
+                    scope="FROZEN_P8", profile_identity=MODEL_C_V1_IDENTITY)
