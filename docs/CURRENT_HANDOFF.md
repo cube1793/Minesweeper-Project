@@ -35,12 +35,12 @@ Approved Python:
 
 `C:\venvs\minesweeper\Scripts\python.exe`
 
-Last verified **PRE-MATERIALIZATION baseline** for the Program K research
-specification freeze (2026-10-20):
+Last verified **PRE-MATERIALIZATION baseline** for the Program K Gate-R protocol
+freeze (2026-10-20):
 
 - branch: `main`
-- HEAD / local `origin/main`: `23177852dba59d1e1ce31c2cc19a9dc8aa980f68`
-- subject: `docs: close fixed-exemplar interpretation`
+- HEAD / local `origin/main`: `697221da0342feb7e5e3833343bf2b6b1d2e9ab6`
+- subject: `docs: freeze Program K research specification`
 - ahead/behind: `0 / 0`; worktree/index clean **before documentation edits**
 - remote relationship is locally available evidence; no fetch was performed
 
@@ -125,8 +125,10 @@ Closed:
 Milestones **1–9 remain CLOSED**. Milestone **10 — algorithm-research
 direction/specification decision** selected **Program K**. The
 [Program K research specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
-is **FROZEN / ACCEPTED**; Program K is not implemented. This freeze does not
-authorize implementation or experiments. See §7.1 for the current Gate R boundary.
+and [Gate-R E0/E1 research protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
+are **FROZEN / ACCEPTED**. Program K remains **UNIMPLEMENTED**; **Gate R is NOT
+GRANTED**. Neither freeze authorizes implementation or experiments. See §7.1 for
+the current Gate R boundary and prospective execution prerequisites.
 
 Useful accepted identities:
 
@@ -344,23 +346,38 @@ nor refuted by this interpretation**.
 
 ### 7.1 Current NEXT
 
-**Program K research specification — FROZEN / ACCEPTED (2026-10-20).**
+**Program K research specification and Gate-R E0/E1 research protocol —
+FROZEN / ACCEPTED (2026-10-20).**
 
 Milestone 10 selected **Program K — Logical Known-Mine Capability + Selective
 Physical Materialization**. The [frozen specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
 preserves the accepted K-C/K-P0 boundary and frozen V1 historical authority.
-Final content verdict: **BLOCKER 0 / REQUIRED 0 / CONTENT FREEZE PASS**.
-**P-1 through P-8 remain mandatory protocol-required obligations** before the
-relevant experiment stages/results; **O-4/O-5/O-7 remain OPTIONAL / DEFER**.
+The [frozen Gate-R protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
+records the complete corrected E0/E1 contract. These are the two current Program-K
+documentary authorities. Initial Claude audit required A-R1..A-R4; ChatGPT also
+promoted A-E6. Those corrections and A-O3/A-O4 clarifications are incorporated.
+Focused independent Claude re-audit: **BLOCKER 0 / REQUIRED 0 / READY TO FREEZE**.
+Final ChatGPT adjudication: **CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+**P-1 through P-8 remain mandatory**; **O-4/O-7 are protocol-required** and
+**O-5 remains OPTIONAL / DEFER**. Nonblocking audit follow-ups remain optional.
 
-**Program K is NOT IMPLEMENTED.** The specification freeze grants no implementation,
-experiment or production-integration authorization. **Program L** remains fallback
-if K fails: local completion / target ordering restricted to existing V1-admissible
-certainty alternatives. Stage-3 Extended remains **ACTIVE**.
+**Program K is UNIMPLEMENTED. Gate R is NOT GRANTED.** No implementation, E0/E1
+execution, P-8 execution, E2/E3 or production integration is authorized; no research
+PASS is claimed. **Program L** remains fallback if K itself fails under the frozen
+contract: local completion / target ordering restricted to existing V1-admissible
+certainty alternatives. L implementation is not authorized. Extended remains **ACTIVE**.
 
-**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
-authorization contract.** Implementation and execution require separate Gate R
-authorization; production integration requires later Gate P authorization.
+**NEXT: explicit Gate R authorization decision for the bounded experimental
+implementation scope.** Proposed production modifications remain **NONE**.
+Production integration requires later, separate Gate P authorization.
+A-E1 (answer-bearing Engine/interface isolation), A-E2 (CONTROL PLAYING-prefix
+observation/public-effects capture), A-E3 (comparable compute spans), and A-E4
+(pinned finite fixture/expected-result manifest) remain **prospective execution
+prerequisites**. A-E5 is conditional only if E1 lacks mandatory K-specific mechanism
+coverage. Implementation identity/scope, operating limits and oracle/certificate/
+validator/evidence readiness remain open; E1 also requires accepted E0 PASS,
+P-8 PASS and sealed case identities/runtime configuration. Any effectiveness corpus
+requires a separate E2 protocol and authorization.
 Do not reopen fixed-exemplar gameplay inspection, regenerate accepted reports or
 rerun the official 100k. The ZiNi final holdout remains **unopened/excluded**.
 
@@ -434,19 +451,23 @@ At a new chat:
 
 1. verify live Git branch / HEAD / locally available origin relationship / worktree/index;
    do not assume the pre-materialization SHA above is still current
-2. read `docs/CURRENT_HANDOFF.md`, `docs/README.md` and `docs/stage3-extended/README.md`
-3. read `docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md`
-   as the latest closed qualitative boundary
-4. read `docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md` as the frozen
-   Program K research contract, including P-1..P-8 and deferred O-4/O-5/O-7
+2. read this [CURRENT_HANDOFF](CURRENT_HANDOFF.md), then the
+   [Stage-3 Extended README](stage3-extended/README.md); use [docs index](README.md) for navigation
+3. read the [frozen Program K research specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
+   as semantic authority, then the [frozen Gate-R E0/E1 protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
+   for P-1..P-8, promoted O-4/O-7, deferred O-5 and open execution prerequisites
+4. use current source/tests for disputed implementation facts; read
+   `docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md`
+   only as the closed qualitative boundary when needed
 5. use `STAGE3_ALGORITHM_SPEC_v1.md` and `STAGE3_EXTENSION_BACKLOG.md` as
    frozen/deferred design boundaries; neither is authorization to implement
 6. do **not** reopen completed fixed-exemplar gameplay inspection or reselect boards
 7. do **not** rerun the official 100k, regenerate accepted reports or repeat closed
-   Viewer/Polish qualification merely to prepare a research protocol
+   Viewer/Polish qualification merely for a Gate R authorization decision
 8. do **not** open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
-9. prepare the bounded E0/E1 research protocol/harness authorization contract;
-   do **not** implement or execute until separate Gate R authorization
+9. make the explicit Gate R authorization decision for the frozen bounded scope;
+   do **not** implement or execute without that authorization and the relevant
+   prospective execution prerequisites; E2/E3 and later Gate P remain separate
 
 Supporting authorities, only as needed to resolve a concrete meaning:
 

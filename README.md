@@ -165,19 +165,29 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
    [Closeout](docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 10. **Program K selected / research specification FROZEN / ACCEPTED** —
     Algorithm-research direction/specification decision.
-    [Program K research specification](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md).
+    [Program K research specification](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)와
+    [Gate-R E0/E1 research protocol — FROZEN / ACCEPTED](docs/stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md).
 
 Milestones **1–9는 CLOSED 유지**, Stage-3 Extended 전체는 **ACTIVE**입니다.
 Program K — Logical Known-Mine Capability + Selective Physical Materialization의
-연구 명세를 동결/수용했으며 **K는 미구현**입니다. 명세 동결 자체는 구현이나 실험을
-승인하지 않습니다. **P-1..P-8은 필수 protocol-required**, **O-4/O-5/O-7은 OPTIONAL / DEFER**입니다.
-K가 실패하면 **Program L**(기존 V1-admissible certainty 대안 내 local completion / target ordering)이 fallback입니다.
-**NEXT: Gate R preparation — bounded E0/E1 research protocol/harness authorization contract 설계.**
-구현/실행은 별도 Gate R 승인이 필요하며 production integration은 이후 Gate P 범위입니다.
+연구 명세와 Gate-R E0/E1 연구 protocol은 모두 **FROZEN / ACCEPTED**이며 두 문서가
+현재 Program-K documentary authorities입니다. 독립 protocol audit/re-audit 최종 결과는
+**BLOCKER 0 / REQUIRED 0 / CONTENT FREEZE PASS**입니다. **K는 UNIMPLEMENTED**이며
+**Gate R은 NOT GRANTED**입니다. **P-1..P-8은 필수**, **O-4/O-7은 protocol-required**,
+**O-5는 OPTIONAL / DEFER**입니다. A-E1..A-E4는 향후 실행 전제이며 A-E5는 조건부입니다.
+K 자체가 frozen contract 아래에서 실패하면 **Program L**(기존 V1-admissible certainty
+대안 내 local completion / target ordering)이 fallback이며 L 구현 승인도 아닙니다.
+**NEXT: bounded experimental implementation scope에 대한 명시적 Gate R authorization 결정.**
+제안된 production modifications는 **NONE**이며 구현과 E0/E1 실행은 승인되지 않았습니다.
+E2/E3도 승인되지 않았고 production integration은 이후 별도 Gate P 범위입니다.
 공식 100k 재실행은 없고 ZiNi final holdout은 미개봉/제외 상태입니다.
 Frozen Stage-3 V1은 historical authority로 유지합니다. 추가 fixed-exemplar gameplay 검토는
 필요하지 않습니다. Nearest Minimum-Risk Guess는 별도 후보이며 기존 해석은 이를
 평가하거나 지지·반박하는 구별 증거를 제공하지 않았습니다.
+
+현재 작업 복구는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md) →
+[Stage-3 Extended README](docs/stage3-extended/README.md) → 위 frozen K 명세와
+frozen Gate-R protocol 순서이며 구현 사실이 다투어지면 현재 source/tests를 확인합니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에

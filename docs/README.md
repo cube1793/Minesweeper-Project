@@ -58,6 +58,7 @@ Start from:
 
 - [Stage-3 Extended README](stage3-extended/README.md)
 - [Program K research specification — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
+- [Program K Gate-R E0/E1 research protocol — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
 - [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
   not an implementation priority list.
 
@@ -84,16 +85,26 @@ Closed milestones / durable closeouts:
 
 Milestones **1–9 remain CLOSED**. Milestone **10**, the algorithm-research
 direction/specification decision, selected **Program K**; its research specification
-is **FROZEN / ACCEPTED**. Program K is **not implemented**, and the freeze authorizes
-neither implementation nor experiments. **P-1 through P-8 remain protocol-required**;
-**O-4/O-5/O-7 remain OPTIONAL / DEFER**. **Program L** remains fallback if K fails,
-restricted to existing V1-admissible certainty alternatives.
+is **FROZEN / ACCEPTED**. The Gate-R E0/E1 research protocol is also **FROZEN /
+ACCEPTED**; these are the two current Program-K documentary authorities. Independent
+protocol audit/re-audit concluded **BLOCKER 0 / REQUIRED 0**, with final **CONTENT
+FREEZE PASS**. Program K remains **UNIMPLEMENTED** and **Gate R is NOT GRANTED**.
+**P-1 through P-8 remain mandatory**; **O-4/O-7 are protocol-required** and
+**O-5 remains OPTIONAL / DEFER**. A-E1..A-E4 remain prospective execution
+prerequisites; A-E5 is conditional. **Program L** remains fallback if K itself fails
+under the frozen contract, restricted to existing V1-admissible certainty
+alternatives; this does not authorize L implementation.
 
-**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
-authorization contract.** Gate R authorization is separate; production integration
-requires later Gate P authorization. No official 100k rerun; the ZiNi final holdout
-remains unopened/excluded. Frozen Stage-3 V1 remains historical authority.
+**NEXT: explicit Gate R authorization decision for the bounded experimental
+implementation scope.** Proposed production modifications remain **NONE**.
+Implementation, E0/E1 execution and E2/E3 are not authorized; production integration
+requires later, separate Gate P authorization. No official 100k rerun; the ZiNi
+final holdout remains unopened/excluded. Frozen Stage-3 V1 remains historical authority.
 Stage-3 Extended remains **ACTIVE**; previous closeouts are not reopened.
+
+Recovery order: [CURRENT_HANDOFF](CURRENT_HANDOFF.md) → [Extended README](stage3-extended/README.md)
+→ frozen K specification → frozen Gate-R protocol → current source/tests for disputed
+implementation facts. Protocol freeze is not a research PASS or executed E0/E1 evidence.
 
 ## Experiments
 

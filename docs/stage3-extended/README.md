@@ -27,9 +27,11 @@ Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
 Gameplay inspection is COMPLETE; additional gameplay required: NONE.
 Milestones **1–9 remain CLOSED**. Milestone **10** selected **Program K**; its
 [research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) is **FROZEN / ACCEPTED**
-(2026-10-20). Program K is **not implemented**; the freeze authorizes no experiment
-or implementation. **NEXT: Gate R preparation — bounded E0/E1 research
-protocol/harness authorization contract design.**
+(2026-10-20). The [Gate-R E0/E1 research protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
+is now also **FROZEN / ACCEPTED**. Independent protocol audit/re-audit concluded
+**BLOCKER 0 / REQUIRED 0**, with final **CONTENT FREEZE PASS**. Program K remains
+**UNIMPLEMENTED** and **Gate R is NOT GRANTED**. **NEXT: explicit Gate R
+authorization decision for the bounded experimental implementation scope.**
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -171,16 +173,28 @@ results retain their original identity and meaning.
    [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 10. **Program K selected / research specification FROZEN / ACCEPTED** —
     Algorithm-research direction/specification decision;
-    [frozen Program K contract](STAGE3_PROGRAM_K_RESEARCH_SPEC.md).
+    [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
+    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md).
 
-**NEXT: Gate R preparation — design the bounded E0/E1 research protocol/harness
-authorization contract.** Program K is not implemented; specification freeze
-grants no implementation or experiment authorization. **P-1 through P-8 remain
-mandatory protocol-required obligations**; **O-4/O-5/O-7 remain OPTIONAL / DEFER**.
-**Program L** remains fallback if K fails, restricted to existing V1-admissible
-certainty alternatives. Gate R authorization is separate; later production
-integration requires Gate P. No official 100k rerun; the ZiNi final holdout remains
-unopened/excluded. Frozen Stage-3 V1 remains historical authority. Extended remains ACTIVE.
+**NEXT: explicit Gate R authorization decision for the bounded experimental
+implementation scope.** The frozen specification and frozen protocol are the two
+current Program-K documentary authorities. Program K remains **UNIMPLEMENTED**;
+**Gate R is NOT GRANTED**. Proposed production modifications remain **NONE**.
+**P-1 through P-8 remain mandatory**; **O-4/O-7 are protocol-required** and
+**O-5 remains OPTIONAL / DEFER**. A-E1..A-E4 remain prospective execution
+prerequisites; A-E5 remains conditional on missing mandatory E1 mechanism coverage.
+No implementation, E0/E1 execution or E2/E3 is authorized, and no research PASS is
+claimed. **Program L** remains fallback if K itself fails under the frozen contract,
+restricted to existing V1-admissible certainty alternatives; L implementation is
+not authorized. Production integration requires later, separate Gate P authorization.
+No official 100k rerun; the ZiNi final holdout remains unopened/excluded.
+Frozen Stage-3 V1 remains historical authority. Extended remains ACTIVE.
+
+Recovery order: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this Extended README →
+[frozen K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) →
+[frozen Gate-R protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) → current source/tests
+when implementation facts are disputed. The protocol records the completed audit
+chain and preserves all execution prerequisites as future obligations.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
@@ -303,9 +317,10 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
   playback/clock, Engine, solver/planner, Model C or process lifecycle.
 
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
-That interpretation is now CLOSED; Program K's research specification is now
-FROZEN / ACCEPTED. Current NEXT is Gate R preparation as recorded above;
-no implementation or experiment is authorized by the freeze.
+That interpretation is now CLOSED; Program K's research specification and Gate-R
+E0/E1 protocol are now FROZEN / ACCEPTED. Current NEXT is the explicit Gate R
+authorization decision as recorded above; neither freeze authorizes implementation
+or experiment execution.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -643,8 +658,9 @@ exemplars and both report runs. No visual/manual substitution, official
 source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
-are also CLOSED. Program K's research specification is FROZEN / ACCEPTED;
-current NEXT is Gate R preparation, not implementation or experiment execution.
+are also CLOSED. Program K's research specification and Gate-R E0/E1 protocol are
+FROZEN / ACCEPTED; current NEXT is the explicit Gate R authorization decision.
+Implementation and experiment execution remain unauthorized.
 The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;
 its dated record remains unchanged. No historical acceptance is reopened.
