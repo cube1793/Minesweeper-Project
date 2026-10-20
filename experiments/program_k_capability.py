@@ -6,9 +6,9 @@ never retains inferred safes, probabilities, counts, components or proof archive
 The preceding observation is used only to reject public-state regression; all
 inference uses the current observation.
 
-This slice admits physical flags only after this owner has acquired their mine
-identity. Separately supported V1 flags outside M require a later admission path;
-P <= M is NOT a universal K-C invariant or a restriction on frozen K-CONTROL.
+By default physical flags require prior owned-M proof. K-CONTROL may explicitly
+admit current physical flags established by its validated frozen V1 stream;
+admission is detached and observation-bound, never an acquisition into M.
 Continuation classification executes no action. No research stage is implemented.
 """
 
@@ -29,6 +29,39 @@ class KIntegrityError(ValueError):
     def __init__(self, code: str, detail: str):
         self.code = code
         super().__init__(f"{code}: {detail}")
+
+
+@dataclass(frozen=True)
+class CurrentPhysicalFlagAdmission:
+    """Runner-owned admission of executed V1 flags for this public checkpoint.
+
+    The K-CONTROL runner authenticates provenance against its executed validated
+    V1 FLAG stream. This value only binds that admission to current physical
+    flags; it neither proves nor promotes their identities into K-owned M.
+    Independent public certificate/oracle interfaces do not accept this value.
+    Callers must supply it explicitly on each decision; the session retains none.
+    """
+
+    observation: Observation
+    flags: frozenset[Coordinate]
+
+    def __post_init__(self):
+        if (type(self.observation) not in (tuple, list) or not self.observation
+                or type(self.observation[0]) not in (tuple, list)
+                or not self.observation[0]):
+            raise KIntegrityError("PHYSICAL_FLAG_ADMISSION", "Expected current public rows.")
+        height, width = len(self.observation), len(self.observation[0])
+        current = _snapshot(self.observation, width, height)
+        if type(self.flags) not in (tuple, list, set, frozenset):
+            raise KIntegrityError("PHYSICAL_FLAG_ADMISSION", "Expected finite physical flag identities.")
+        for cell in self.flags:
+            if (type(cell) is not tuple or len(cell) != 2
+                    or any(type(value) is not int for value in cell)
+                    or not 0 <= cell[0] < width or not 0 <= cell[1] < height
+                    or current[cell[1]][cell[0]] != CellState.FLAGGED):
+                raise KIntegrityError("PHYSICAL_FLAG_ADMISSION", "Admission must name current physical flags.")
+        object.__setattr__(self, "observation", current)
+        object.__setattr__(self, "flags", frozenset(self.flags))
 
 
 def reading_order(cell: Coordinate) -> tuple[int, int]:
@@ -222,6 +255,7 @@ def _snapshot(observation: object, width: int, height: int) -> Observation:
 
 def _account(
     observation: Observation, num_mines: int, mines: frozenset[Coordinate],
+    physical_flag_admission: CurrentPhysicalFlagAdmission | None = None,
 ) -> Accounting:
     height, width = len(observation), len(observation[0])
     flags = frozenset(
@@ -234,9 +268,16 @@ def _account(
     )
     if not mines <= flags | hidden:
         raise KIntegrityError("M_REVEALED", "A retained mine is no longer hidden/flagged.")
-    if not flags <= mines:
+    admitted = frozenset()
+    if physical_flag_admission is not None:
+        if type(physical_flag_admission) is not CurrentPhysicalFlagAdmission:
+            raise KIntegrityError("PHYSICAL_FLAG_ADMISSION", "Expected explicit current V1 flag admission.")
+        if physical_flag_admission.observation != observation:
+            raise KIntegrityError("STALE_FLAG_ADMISSION", "Admission belongs to another observation.")
+        admitted = physical_flag_admission.flags
+    if not flags - mines <= admitted:
         raise KIntegrityError(
-            "UNSUPPORTED_FLAG", "Slice 1 requires prior owned-M proof for flags.",
+            "UNSUPPORTED_FLAG", "Physical flags require owned-M proof or explicit current V1 admission.",
         )
     fixed = flags | mines
     unresolved = hidden - mines
@@ -308,7 +349,8 @@ class KLocalSession:
 
     This pure boundary cannot authenticate a caller's claimed PLAYING observation
     against an Engine. Later status-gated capture is still required by A-E1/A-E2.
-    Only detached current public rows and scalar metadata are accepted here.
+    Only detached current public rows, scalar metadata and explicit current
+    physical-flag admission are accepted here.
     """
 
     __slots__ = ("_width", "_height", "_num_mines", "_M", "_previous", "_closed")
@@ -346,30 +388,39 @@ class KLocalSession:
                     raise KIntegrityError("PUBLIC_REGRESSION", "A revealed clue changed/disappeared.")
         return current
 
-    def validate(self, observation: object, *, status: GameStatus) -> Accounting:
+    def validate(
+        self, observation: object, *, status: GameStatus,
+        physical_flag_admission: CurrentPhysicalFlagAdmission | None = None,
+    ) -> Accounting:
         """Check retained M/current accounting without repair or acquisition."""
         current = self._check_current(observation, status)
-        accounting = _account(current, self._num_mines, self._M)
+        accounting = _account(current, self._num_mines, self._M, physical_flag_admission)
         if not accounting.U:
             raise KIntegrityError("EMPTY_U_PLAYING", "No unresolved cell while PLAYING.")
         return accounting
 
-    def analyze_local(self, observation: object, *, status: GameStatus) -> LocalAnalysis:
+    def analyze_local(
+        self, observation: object, *, status: GameStatus,
+        physical_flag_admission: CurrentPhysicalFlagAdmission | None = None,
+    ) -> LocalAnalysis:
         """Exactly one complete direct pass, acquisition, and one second check."""
         current = self._check_current(observation, status)
-        result = self._local_analysis(current)
+        result = self._local_analysis(current, physical_flag_admission)
         self._M = result.after.M
         self._previous = current
         return result
 
-    def _local_analysis(self, current: Observation) -> LocalAnalysis:
+    def _local_analysis(
+        self, current: Observation,
+        physical_flag_admission: CurrentPhysicalFlagAdmission | None = None,
+    ) -> LocalAnalysis:
         """Stage A/B/C without committing, so a failed D/E cannot partly commit."""
-        before = _account(current, self._num_mines, self._M)
+        before = _account(current, self._num_mines, self._M, physical_flag_admission)
         if not before.U:
             raise KIntegrityError("EMPTY_U_PLAYING", "No unresolved cell while PLAYING.")
         first = _direct_pass(before, current, self._num_mines)
         staged_mines = self._M | first.mine_cells
-        after = _account(current, self._num_mines, staged_mines)
+        after = _account(current, self._num_mines, staged_mines, physical_flag_admission)
         second = _direct_pass(after, current, self._num_mines)
         if second.mine_cells:
             raise KIntegrityError(
@@ -390,7 +441,10 @@ class KLocalSession:
             certificates=first.certificates,
         )
 
-    def analyze_decision(self, observation: object, *, status: GameStatus) -> DecisionAnalysis:
+    def analyze_decision(
+        self, observation: object, *, status: GameStatus,
+        physical_flag_admission: CurrentPhysicalFlagAdmission | None = None,
+    ) -> DecisionAnalysis:
         """Run bounded A/B/C, then D/E only after local-safe exhaustion.
 
         All G1 enter M simultaneously. E restricts D's counts without another
@@ -399,7 +453,7 @@ class KLocalSession:
         not selection or execution of a physical input.
         """
         current = self._check_current(observation, status)
-        local = self._local_analysis(current)
+        local = self._local_analysis(current, physical_flag_admission)
         phase_d = phase_e = None
         phase_e_status = "NOT_REACHED"
         exact_certificates = ()
@@ -424,7 +478,8 @@ class KLocalSession:
                 )
                 for cell in sorted(phase_d.G1, key=reading_order)
             )
-            after = _account(current, self._num_mines, local.after.M | phase_d.G1)
+            after = _account(current, self._num_mines, local.after.M | phase_d.G1,
+                             physical_flag_admission)
             if not after.U:
                 raise KIntegrityError("EMPTY_U_PLAYING", "G1 exhausted U while PLAYING.")
             phase_e = _exact_evidence(

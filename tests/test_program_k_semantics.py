@@ -1,7 +1,7 @@
-"""Slice-1/2 synthetic implementation/unit verification, not E0 qualification.
+"""Slice-1/2/5 synthetic implementation/unit verification, not E0 qualification.
 
 All observations are constructed public states. No Engine, hidden layout,
-physical policy, complete-game runner, timing-table scan, or corpus is used.
+physical input, complete-game runner, timing-table scan, or corpus is used.
 Coordinates are stored as (x, y); ordered expectations use the (y, x) key.
 """
 
@@ -18,7 +18,9 @@ from unittest.mock import patch
 from core_engine import CellState, GameStatus
 from experiments import program_k_capability as capability
 from experiments import program_k_oracles as oracles
-from experiments.program_k_capability import KIntegrityError, KLocalSession
+from experiments.program_k_capability import (
+    CurrentPhysicalFlagAdmission, KIntegrityError, KLocalSession,
+)
 from experiments.program_k_oracles import (
     ExactGlobalMineCertificate,
     LocalMineCertificate,
@@ -418,6 +420,236 @@ class ProgramKLocalSemanticsTests(unittest.TestCase):
                 self.assertEqual(dict(exact.mine_worlds), {
                     next(iter(mines)): 1, next(iter(safes)): 0,
                 })
+
+
+class ProgramKExternalPhysicalFlagTests(unittest.TestCase):
+    """Admission/accounting units; live V1 stream provenance is runner-owned.
+
+    The primary external flag has this independently checked public prefix:
+    clue (0,0) with sole HIDDEN neighbor (1,0) proves the subsequently flagged
+    target. The mixed case supplies a second ordered public proof. Supplying
+    admission does not supply either identity to K-owned M.
+    """
+
+    def admission(self, observation, total, flags=frozenset({(1, 0)})):
+        before = [list(row) for row in observation]
+        before[0][1] = H
+        verify_local_certificate(certificate(before, total, (0, 0), (1, 0)))
+        return CurrentPhysicalFlagAdmission(observation, flags)
+
+    def test_explicit_current_flag_is_fixed_without_becoming_a_logical_fact(self):
+        observation = ((1, F, 1, H),)
+        owner = KLocalSession(4, 1, 1)
+        admission = self.admission(observation, 1)
+
+        result = owner.analyze_decision(
+            observation, status=PLAYING, physical_flag_admission=admission,
+        )
+
+        self.assertEqual(result.after.P, {(1, 0)})
+        self.assertEqual(result.after.M, frozenset())
+        self.assertEqual(owner.M, frozenset())
+        self.assertEqual(result.local.acquired_mines, frozenset())
+        self.assertEqual(result.after.J, {(1, 0)})
+        self.assertEqual(result.after.U, {(3, 0)})
+        self.assertEqual(result.after.b, 0)
+        self.assertEqual(result.selection_safe_cells, {(3, 0)})
+        self.assertEqual(result.local.certificates, ())
+        self.assertEqual(result.exact_certificates, ())
+        for clue in result.after.constraints:
+            self.assertEqual(clue.fixed_mines, {(1, 0)})
+            self.assertEqual(clue.rc, 0)
+
+    def test_external_flag_can_support_a_separate_k_local_acquisition(self):
+        observation = ((1, F, 2, H, H),)
+        owner = KLocalSession(5, 1, 2)
+        result = owner.analyze_decision(
+            observation, status=PLAYING,
+            physical_flag_admission=self.admission(observation, 2),
+        )
+
+        self.assertEqual(result.local.before.M, frozenset())
+        self.assertEqual(result.local.acquired_mines, {(3, 0)})
+        self.assertEqual(owner.M, {(3, 0)})
+        self.assertEqual(result.after.J, {(1, 0), (3, 0)})
+        self.assertEqual(result.after.b, 0)
+        self.assertEqual(result.selection_safe_cells, {(4, 0)})
+        proof, = result.local.certificates
+        self.assertEqual(proof.target, (3, 0))
+        self.assertEqual(proof.retained_mines, frozenset())
+        # Admission is not an independent public certificate; the unchanged
+        # checker still requires the prefix rather than trusting bare flags.
+        with self.assertRaises(PublicProofError):
+            verify_local_certificate(proof)
+        prior = certificate([[1, H, 2, H, H]], 2, (0, 0), (1, 0))
+        self.assertEqual(
+            verify_local_certificate(proof, prior_certificates=(prior,)).target,
+            (3, 0),
+        )
+
+    def test_external_flag_threads_through_exact_acquisition_and_restriction(self):
+        observation = ((1, F, H, H, 1, H, H),)
+        owner = KLocalSession(7, 1, 4)
+        result = owner.analyze_decision(
+            observation, status=PLAYING,
+            physical_flag_admission=self.admission(observation, 4),
+        )
+
+        self.assertEqual(result.local.after.M, frozenset())
+        self.assertEqual(result.local.after.b, 3)
+        self.assertEqual(result.phase_d.total_worlds, 2)
+        self.assertEqual(result.phase_d.mine_worlds, (
+            ((2, 0), 2), ((3, 0), 1), ((5, 0), 1), ((6, 0), 2),
+        ))
+        self.assertEqual(result.phase_d.G1, {(2, 0), (6, 0)})
+        self.assertEqual(owner.M, {(2, 0), (6, 0)})
+        self.assertNotIn((1, 0), owner.M)
+        self.assertEqual(result.after.J, {(1, 0), (2, 0), (6, 0)})
+        self.assertEqual(result.after.b, 1)
+        self.assertEqual(result.phase_e.mine_worlds, (((3, 0), 1), ((5, 0), 1)))
+        self.assertEqual(result.phase_e_status, "REACHED_CHANGED")
+        self.assertEqual(result.guess_target, (3, 0))
+
+    def test_supported_physical_logical_overlap_is_counted_once(self):
+        # Obtain an independent K proof before materialization. Compare the
+        # externally admitted snapshot with the separately supported overlap;
+        # no external flag is automatically acquired by either operation.
+        observation = ((1, F, 1, H),)
+        admission = self.admission(observation, 1)
+        external = KLocalSession(4, 1, 1).validate(
+            observation, status=PLAYING, physical_flag_admission=admission,
+        )
+        owner = KLocalSession(4, 1, 1)
+        owner.analyze_local(((1, H, 1, H),), status=PLAYING)
+        overlap = owner.validate(
+            observation, status=PLAYING, physical_flag_admission=admission,
+        )
+
+        self.assertEqual(external.M, frozenset())
+        self.assertEqual(overlap.P & overlap.M, {(1, 0)})
+        self.assertEqual(overlap.J, external.J)
+        self.assertEqual(overlap.b, external.b)
+        self.assertEqual(overlap.constraints, external.constraints)
+        self.assertEqual(overlap.U, external.U)
+        self.assertEqual(owner.M, {(1, 0)})
+
+    def test_default_k_p0_rule_rejects_bare_flag_on_every_capability_entry(self):
+        observation = ((1, F, 1, H),)
+        for method in ("validate", "analyze_local", "analyze_decision"):
+            with self.subTest(method=method):
+                owner = KLocalSession(4, 1, 1)
+                with self.assertRaises(KIntegrityError) as failure:
+                    getattr(owner, method)(observation, status=PLAYING)
+                self.assertEqual(failure.exception.code, "UNSUPPORTED_FLAG")
+                self.assertEqual(owner.M, frozenset())
+
+    def test_mixed_owned_overlap_and_external_flag_require_only_external_admission(self):
+        owner = KLocalSession(5, 1, 2)
+        first = owner.analyze_local(((1, H, H, H, H),), status=PLAYING)
+        next_proof = certificate(((1, F, 2, H, H),), 2, (2, 0), (3, 0), {(1, 0)})
+        verify_local_certificate(next_proof, prior_certificates=first.certificates)
+        observation = ((1, F, 2, F, H),)
+
+        with self.assertRaises(KIntegrityError) as failure:
+            owner.validate(
+                observation, status=PLAYING,
+                physical_flag_admission=CurrentPhysicalFlagAdmission(observation, {(1, 0)}),
+            )
+        self.assertEqual(failure.exception.code, "UNSUPPORTED_FLAG")
+        result = owner.analyze_decision(
+            observation, status=PLAYING,
+            physical_flag_admission=CurrentPhysicalFlagAdmission(observation, {(3, 0)}),
+        )
+
+        self.assertEqual(owner.M, {(1, 0)})
+        self.assertEqual(result.after.P, {(1, 0), (3, 0)})
+        self.assertEqual(result.after.J, {(1, 0), (3, 0)})
+        self.assertEqual(result.after.b, 0)
+        clue = next(c for c in result.after.constraints if c.source == (2, 0))
+        self.assertEqual(clue.fixed_mines, {(1, 0), (3, 0)})
+        self.assertEqual(clue.rc, 0)
+        self.assertEqual(result.selection_safe_cells, {(4, 0)})
+
+    def test_admission_is_not_retained_and_must_cover_each_current_external_flag(self):
+        observation = ((1, F, 1, H),)
+        owner = KLocalSession(4, 1, 1)
+        owner.analyze_local(
+            observation, status=PLAYING,
+            physical_flag_admission=self.admission(observation, 1),
+        )
+        for admission in (None, CurrentPhysicalFlagAdmission(observation, frozenset())):
+            with self.subTest(admission=admission):
+                with self.assertRaises(KIntegrityError) as failure:
+                    owner.analyze_decision(
+                        observation, status=PLAYING, physical_flag_admission=admission,
+                    )
+                self.assertEqual(failure.exception.code, "UNSUPPORTED_FLAG")
+        self.assertEqual(owner.M, frozenset())
+        self.assertEqual(KLocalSession.__slots__, (
+            "_width", "_height", "_num_mines", "_M", "_previous", "_closed",
+        ))
+
+    def test_stale_or_untyped_admission_is_rejected_without_state_change(self):
+        old = ((1, F, H, H, H),)
+        current = ((1, F, 1, H, H),)
+        for admission, expected in (
+            (self.admission(old, 1), "STALE_FLAG_ADMISSION"),
+            (frozenset({(1, 0)}), "PHYSICAL_FLAG_ADMISSION"),
+        ):
+            owner = KLocalSession(5, 1, 1)
+            with self.subTest(admission=admission), self.assertRaises(KIntegrityError) as failure:
+                owner.analyze_decision(
+                    current, status=PLAYING, physical_flag_admission=admission,
+                )
+            self.assertEqual(failure.exception.code, expected)
+            self.assertEqual(owner.M, frozenset())
+
+    def test_admission_detaches_inputs_and_rejects_nonphysical_or_invalid_identities(self):
+        observation = [[1, F, 1, H]]
+        flags = {(1, 0)}
+        admission = self.admission(observation, 1, flags)
+        observation[0][1] = H
+        flags.clear()
+        self.assertEqual(admission.observation, ((1, F, 1, H),))
+        self.assertEqual(admission.flags, {(1, 0)})
+        with self.assertRaises(FrozenInstanceError):
+            admission.flags = frozenset()
+        for cell in ((0, 0), (3, 0), (4, 0), (1, 1), (True, 0), (1.0, 0), [1, 0]):
+            with self.subTest(cell=cell), self.assertRaises(KIntegrityError):
+                CurrentPhysicalFlagAdmission(((1, F, 1, H),), [cell])
+        with self.assertRaises(KIntegrityError):
+            CurrentPhysicalFlagAdmission(((1, F, CellState.MINE, H),), {(1, 0)})
+
+    def test_admission_does_not_weaken_oracle_a_or_k_p0_policy(self):
+        observation = ((1, F, 1, H),)
+        admission = self.admission(observation, 1)
+        evidence = KLocalSession(4, 1, 1).analyze_decision(
+            observation, status=PLAYING, physical_flag_admission=admission,
+        )
+        with self.assertRaises(PublicProofError):
+            enumerate_public_worlds(observation, 1, status=PLAYING)
+        with self.assertRaises(TypeError):
+            enumerate_public_worlds(
+                observation, 1, status=PLAYING, physical_flag_admission=admission,
+            )
+        from experiments.program_k_policy import select_policy
+        from stage3_physical import load_timing_table
+
+        with self.assertRaises(KIntegrityError) as failure:
+            select_policy(evidence, (0, 0), load_timing_table())
+        self.assertEqual(failure.exception.code, "PHYSICAL_ACCOUNTING")
+
+    def test_terminal_gate_precedes_any_admission_or_public_input_use(self):
+        for status in (GameStatus.WON, GameStatus.LOST):
+            for method in ("validate", "analyze_local", "analyze_decision"):
+                owner = KLocalSession(4, 1, 1)
+                with self.subTest(status=status, method=method):
+                    with self.assertRaises(KIntegrityError) as failure:
+                        getattr(owner, method)(
+                            UntouchableObservation(), status=status,
+                            physical_flag_admission=UntouchableObservation(),
+                        )
+                    self.assertEqual(failure.exception.code, "TERMINAL_INPUT")
 
 
 class ProgramKIndependentCertificateTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""Slice-4 implementation/unit integration only; no E0/E1 or P-8 claim.
+"""Slice-4/5 implementation/unit integration only; no E0/E1 or P-8 claim.
 
 Tiny explicit layouts are confined to Engine construction below. Solver-facing
 fixtures are raw public observations; no answer, fingerprint, evaluator or ZiNi
@@ -10,6 +10,8 @@ import ast
 from dataclasses import FrozenInstanceError, fields, is_dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+import sys
+from threading import Event, Thread
 import unittest
 from unittest.mock import patch
 
@@ -19,7 +21,8 @@ from experiments.program_k_capability import KIntegrityError, KLocalSession
 from experiments.program_k_policy import KCandidate, select_policy
 from simple_algorithm import SimpleMove
 from stage3_physical import load_timing_table
-from stage3_planner import RevealPlan
+from stage3_planner import RevealPlan, Stage3Decision, plan_position
+from stage3_runner import Stage3RunnerError, _validate_execution, run_stage3
 
 
 H, F = int(CellState.HIDDEN), int(CellState.FLAGGED)
@@ -714,10 +717,15 @@ class ProgramKTreatmentRunnerTests(unittest.TestCase):
                 imports.update(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
                 imports.add(node.module)
-        self.assertFalse(imports & {"stage3_runner", "simple_runner", "board_snapshot", "zini_core",
+        self.assertFalse(imports & {"simple_runner", "board_snapshot", "zini_core",
                                     "benchmark_board", "benchmark_runner", "experiments.program_k_evaluator"})
-        self.assertFalse(any(isinstance(node, ast.Name) and node.id == "_validate_execution"
-                             for node in ast.walk(tree)))
+        # Slice 5 permits frozen V1 APIs only for K-CONTROL. K-P0's authority
+        # remains its existing capability, policy and separate validator.
+        for function in ("run_k_p0", "validate_k_p0_execution"):
+            body = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == function)
+            calls = {node.id for node in ast.walk(body) if isinstance(node, ast.Name)}
+            self.assertFalse(calls & {"_validate_execution", "plan_position", "run_stage3"})
 
     def test_v_results_trace_and_all_nested_evidence_are_immutable_detached_values(self):
         port = PublicPort(fixed_engine())
@@ -744,6 +752,598 @@ class ProgramKTreatmentRunnerTests(unittest.TestCase):
                 self.assertIsInstance(value, (str, int, Fraction, type(None)))
 
         verify_detached(result)
+
+
+class ProgramKControlRunnerTests(unittest.TestCase):
+    """Bounded implementation fixtures only, never the E1 scheduled suite.
+
+    CONTROL is always the unchanged production run_stage3. Its terminal
+    observations belong to that production runner and never feed K-CONTROL.
+    The comparison below checks physical inputs/cursors/cost/outcome; full O-4
+    persistence, public effects, qualification and hidden truth are excluded.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = load_timing_table()
+
+    def assert_physical_identity(self, actual, control):
+        self.assertEqual(actual.moves, control.moves)
+        self.assertEqual(actual.status, control.status)
+        self.assertEqual(actual.total_modeled_us, control.total_modeled_us)
+        self.assertEqual(
+            tuple((t.cursor_before, t.modeled_action_us, t.status_after) for t in actual.traces),
+            tuple((t.cursor_before, t.modeled_action_us, t.status_after) for t in control.traces),
+        )
+
+    def assert_status_first(self, port):
+        for index, event in enumerate(port.events):
+            if event[0] == "step":
+                self.assertEqual(port.events[index + 1][0], "status")
+                if port.events[index + 1][1] is not PLAYING:
+                    self.assertFalse(any(item[0] in ("observation", "shadow", "step")
+                                         for item in port.events[index + 2:]))
+
+    def assert_disabled(self, result, failure_class, boundary=1, last_valid=None):
+        shadow = result.shadow
+        self.assertFalse(shadow.enabled)
+        self.assertFalse(shadow.evidence_valid)
+        self.assertIsNone(shadow.decision)
+        self.assertTrue(shadow.v1_continues)
+        self.assertEqual(shadow.failure.failure_class, failure_class)
+        self.assertEqual(shadow.failure.detected_boundary, boundary)
+        self.assertEqual(shadow.failure.last_valid_boundary, last_valid)
+        self.assertEqual(shadow.last_valid_boundary, last_valid)
+        for trace in result.traces[boundary:]:
+            self.assertFalse(trace.shadow.enabled)
+            self.assertFalse(trace.shadow.evidence_valid)
+            self.assertIsNone(trace.shadow.decision)
+            self.assertEqual(trace.shadow.failure, shadow.failure)
+
+    def test_a_canonical_initial_input_matches_control_without_shadow_work(self):
+        control = run_stage3(fixed_engine(), table=self.table)
+        result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        actual, expected = result.traces[0], control.traces[0]
+        self.assertEqual(actual.move, SimpleMove(Action.OPEN, 0, 0))
+        self.assertEqual(actual.move, expected.move)
+        self.assertEqual(actual.cursor_before, expected.cursor_before)
+        self.assertEqual(actual.modeled_action_us, expected.modeled_action_us)
+        self.assertEqual(actual.modeled_action_us, 126005)
+        self.assertIsNone(actual.decision)
+        self.assertEqual(actual.M_before, frozenset())
+        self.assertEqual(actual.preinput_M, frozenset())
+        self.assertIsNone(actual.shadow.decision)
+        self.assertTrue(actual.shadow.enabled)
+
+    def test_b_v1_planner_validator_cost_and_seal_precede_detached_shadow(self):
+        port = PublicPort(fixed_engine())
+        original = runner._analyze_shadow
+        boundaries, sealed, inputs = [], [], []
+        code_names = {
+            plan_position.__code__: "plan",
+            _validate_execution.__code__: "validate",
+            runner.action_cost.__code__: "cost",
+            runner._SealedV1Input.__init__.__code__: "seal",
+        }
+
+        def profile(frame, event, value):
+            if event == "return" and frame.f_code in code_names:
+                name = code_names[frame.f_code]
+                boundaries.append(name)
+                if name == "seal":
+                    sealed.append(frame.f_locals["self"])
+
+        def shadow(snapshot):
+            self.assertTrue(sealed)
+            self.assertEqual(boundaries[-1], "seal")
+            latest = sealed[-1]
+            self.assertEqual(latest.observation, snapshot.observation)
+            self.assertEqual(latest.cursor_before, snapshot.cursor)
+            self.assertEqual(latest.move, latest.decision.move)
+            expected = self.table[abs(latest.move.x - snapshot.cursor[0])][
+                abs(latest.move.y - snapshot.cursor[1])]
+            self.assertEqual(latest.modeled_action_us, expected)
+            seal_index = len(boundaries) - 1
+            validation = max(i for i, name in enumerate(boundaries[:seal_index]) if name == "validate")
+            self.assertIn("plan", boundaries[:validation])
+            self.assertIn("cost", boundaries[validation + 1:seal_index])
+            with self.assertRaises(FrozenInstanceError):
+                latest.move = SimpleMove(Action.OPEN, 3, 0)
+            inputs.append(snapshot)
+            return original(snapshot)
+
+        previous_profile = sys.getprofile()
+        try:
+            sys.setprofile(profile)
+            with patch.object(runner, "_analyze_shadow", side_effect=shadow), \
+                    patch.object(runner, "select_policy", side_effect=AssertionError("K-P0 authority")):
+                result = runner.run_k_control(port, table=self.table)
+        finally:
+            sys.setprofile(previous_profile)
+        self.assertTrue(result.shadow.enabled, result.shadow.failure)
+        self.assertEqual(len(inputs), len(result.traces) - 1)
+        noninitial = [item for item in sealed if item.decision is not None]
+        self.assertEqual(len(noninitial), len(inputs))
+        for seal, trace in zip(noninitial, result.traces[1:]):
+            self.assertEqual(trace.move, seal.move)
+            self.assertEqual(trace.decision, seal.decision)
+            self.assertEqual(trace.cursor_before, seal.cursor_before)
+            self.assertEqual(trace.modeled_action_us, seal.modeled_action_us)
+        self.assertEqual(tuple(port.inputs), result.moves)
+        self.assert_status_first(port)
+
+    def test_c_e_g_executed_v1_flag_admission_accepts_empty_shadow_m(self):
+        """Compose real V1 execution with the runner's admission boundary.
+
+        The empty shadow is a deliberately supplied current unit snapshot. It
+        does not claim a natural canonical run produced this scheduling gap.
+        Every physical flag here comes from an actually executed, unchanged
+        frozen planner/validator action; no shadow analysis is fabricated.
+        """
+        port = PublicPort(fixed_engine())
+        initial = SimpleMove(Action.OPEN, 0, 0)
+        observation = tuple(tuple(row) for row in port.get_observation())
+        _validate_execution(observation, initial, None)
+        port.step(initial.x, initial.y, initial.action)
+        self.assertIs(port.status, PLAYING)
+        observation = tuple(tuple(row) for row in port.get_observation())
+        flag_decision = plan_position(observation, port.num_mines, (0, 0), self.table)
+        flag = flag_decision.move
+        self.assertEqual(flag, SimpleMove(Action.FLAG, 1, 0))
+        self.assertIsNone(flag_decision.plan)  # Frozen V1 standalone fallback.
+        _validate_execution(observation, flag, flag_decision)
+        shadow_m = frozenset()
+        self.assertNotIn((flag.x, flag.y), shadow_m)
+        port.step(flag.x, flag.y, flag.action)
+        self.assertIs(port.status, PLAYING)
+        flagged = tuple(tuple(row) for row in port.get_observation())
+        self.assertEqual(flagged, ((1, F, H, H),))
+        executed = frozenset({(flag.x, flag.y)})
+
+        next_v1 = plan_position(flagged, port.num_mines, (flag.x, flag.y), self.table)
+        _validate_execution(flagged, next_v1.move, next_v1)
+        seal = runner._SealedV1Input(
+            flagged, next_v1, next_v1.move, (flag.x, flag.y),
+            self.table[abs(next_v1.move.x - flag.x)][abs(next_v1.move.y - flag.y)],
+        )
+        snapshot = runner._shadow_input(flagged, port.width, port.height, port.num_mines,
+                                        seal.cursor_before, shadow_m, executed)
+        self.assertEqual(snapshot.physical_flag_admission.flags, executed)
+        analysis = runner._analyze_shadow(snapshot)
+        self.assertEqual(analysis.after.P, executed)
+        self.assertEqual(analysis.after.J, executed)
+        self.assertEqual(analysis.after.M, frozenset())
+        self.assertEqual(analysis.after.b, 0)
+        self.assertEqual(analysis.selection_safe_cells, {(2, 0), (3, 0)})
+        self.assertEqual(analysis.local.acquired_mines, frozenset())
+        self.assertEqual(analysis.exact_certificates, ())
+
+        without_provenance = runner._shadow_input(
+            flagged, port.width, port.height, port.num_mines, seal.cursor_before,
+            shadow_m, frozenset(),
+        )
+        with self.assertRaises(KIntegrityError) as rejected:
+            runner._analyze_shadow(without_provenance)
+        self.assertEqual(rejected.exception.code, "UNSUPPORTED_FLAG")
+
+        _validate_execution(flagged, seal.move, seal.decision)
+        port.step(seal.move.x, seal.move.y, seal.move.action)
+        self.assertIs(port.status, PLAYING)
+        control = run_stage3(fixed_engine(), table=self.table)
+        self.assertEqual(tuple(port.inputs), control.moves[:3])
+        self.assertEqual(seal.move, control.traces[2].move)
+        self.assertEqual(seal.modeled_action_us, control.traces[2].modeled_action_us)
+        self.assertEqual(analysis.after.M, shadow_m)
+        self.assert_status_first(port)
+
+    def test_g_public_proof_history_has_real_v1_flag_outside_current_shadow_m(self):
+        """Public semantic checkpoint, with a declared synthetic cursor.
+
+        This is not a canonical trajectory: cursor (0,0) is supplied solely
+        to exercise the frozen planner's cost choice. K's two retained mines
+        have real earlier exact proof, and every subsequent result is computed
+        without forged shadow evidence, hidden layout or evaluator input.
+        """
+        first = ((H, 1, H, H), (H, H, H, H))
+        later = ((H, 1, H, H), (1, H, 2, H))
+        owner = KLocalSession(4, 2, 3)
+        prior = owner.analyze_decision(first, status=PLAYING)
+        self.assertEqual(prior.after.M, {(3, 0), (3, 1)})
+        self.assertEqual({proof.target for proof in prior.exact_certificates}, prior.after.M)
+        v1 = plan_position(later, 3, (0, 0), self.table)
+        _validate_execution(later, v1.move, v1)
+        self.assertEqual(v1.move, SimpleMove(Action.FLAG, 0, 0))
+        shadow = owner.analyze_decision(later, status=PLAYING)
+        self.assertEqual(shadow.continuation, "LOCAL_SAFE")
+        self.assertEqual(shadow.selection_safe_cells, {(2, 0), (1, 1)})
+        self.assertEqual(shadow.after.M, prior.after.M)
+        self.assertNotIn((v1.move.x, v1.move.y), shadow.after.M)
+        # V1 validity remains unchanged by this benign schedule discrepancy.
+        _validate_execution(later, v1.move, v1)
+        self.assertEqual(v1.move, SimpleMove(Action.FLAG, 0, 0))
+
+    def test_h_k_semantic_exception_disables_once_and_cannot_choose_or_skip(self):
+        control = run_stage3(fixed_engine(), table=self.table)
+        port = PublicPort(fixed_engine())
+        with patch.object(runner, "_analyze_shadow",
+                          side_effect=KIntegrityError("INJECTED", "shadow-only semantic fault")) as shadow, \
+                patch.object(runner, "select_policy", side_effect=AssertionError("K-P0 substitute")):
+            result = runner.run_k_control(port, table=self.table)
+        self.assertEqual(shadow.call_count, 1)
+        self.assert_disabled(result, "SHADOW_SEMANTIC_EXCEPTION")
+        self.assertEqual(result.final_M, frozenset())
+        self.assert_physical_identity(result, control)
+        self.assertEqual(tuple(port.inputs), control.moves)
+        self.assertIs(result.traces[1].move.action, Action.FLAG)
+        self.assertIsNone(result.traces[1].decision.plan)  # Real V1 fallback.
+
+    def test_shadow_comparison_exception_has_its_own_contained_class(self):
+        control = run_stage3(fixed_engine(), table=self.table)
+        with patch.object(runner, "_analyze_shadow",
+                          side_effect=runner.ShadowComparisonError("injected oracle failure")) as shadow:
+            result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assertEqual(shadow.call_count, 1)
+        self.assert_disabled(result, "SHADOW_COMPARISON_EXCEPTION")
+        self.assert_physical_identity(result, control)
+
+    def test_unexpected_shadow_only_exception_is_contained_without_retry(self):
+        with patch.object(runner, "_analyze_shadow",
+                          side_effect=RuntimeError("unexpected shadow-only defect")) as shadow:
+            result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assertEqual(shadow.call_count, 1)
+        self.assert_disabled(result, "SHADOW_EXCEPTION")
+        self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+
+    def test_shadow_soundness_failure_hook_preserves_v1_stream(self):
+        # Fault injection only: no evaluator or answer-based checking is added.
+        with patch.object(runner, "_analyze_shadow",
+                          side_effect=runner.ShadowSoundnessViolation("injected soundness failure")):
+            result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assert_disabled(result, "SHADOW_SOUNDNESS_VIOLATION")
+        self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+
+    def test_i_malformed_shadow_output_disables_without_substitution(self):
+        control = run_stage3(fixed_engine(), table=self.table)
+        for malformed in (None, object(), {"move": SimpleMove(Action.OPEN, 3, 0)}):
+            with self.subTest(type=type(malformed)), \
+                    patch.object(runner, "_analyze_shadow", return_value=malformed) as shadow:
+                result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+            self.assertEqual(shadow.call_count, 1)
+            self.assert_disabled(result, "SHADOW_MALFORMED_OUTPUT")
+            self.assert_physical_identity(result, control)
+
+    def test_i_q_inconsistent_shadow_record_preserves_last_valid_archive(self):
+        original = runner._analyze_shadow
+        calls = []
+
+        def corrupt_second(snapshot):
+            valid = original(snapshot)
+            calls.append(valid)
+            if len(calls) == 2:
+                return replace(valid, after=replace(valid.after, M=frozenset()))
+            return valid
+
+        with patch.object(runner, "_analyze_shadow", side_effect=corrupt_second):
+            result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assertEqual(len(calls), 2)
+        self.assert_disabled(result, "SHADOW_MALFORMED_OUTPUT", boundary=2, last_valid=1)
+        self.assertEqual(result.final_M, {(1, 0)})
+        self.assertEqual(result.final_M, calls[0].after.M)
+        self.assertEqual(result.traces[1].shadow.decision, calls[0])
+        self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+
+    def test_i_malformed_current_binding_and_mutable_nested_output_are_contained(self):
+        original = runner._analyze_shadow
+        corruptions = (
+            lambda value: replace(value, observation=((1, H, 1, H),)),
+            lambda value: replace(value, num_mines=2),
+            lambda value: replace(value, after=replace(value.after, b=False)),
+            lambda value: replace(value, selection_safe_cells=set(value.selection_safe_cells)),
+            lambda value: replace(value, continuation="SUBSTITUTE_V1_ACTION"),
+        )
+        for corruption in corruptions:
+            def malformed(snapshot):
+                return corruption(original(snapshot))
+
+            with self.subTest(corruption=corruption), \
+                    patch.object(runner, "_analyze_shadow", side_effect=malformed) as shadow:
+                result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+            self.assertEqual(shadow.call_count, 1)
+            self.assert_disabled(result, "SHADOW_MALFORMED_OUTPUT")
+            self.assertEqual(result.final_M, frozenset())
+            self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+
+    def test_j_timeout_returns_while_worker_blocked_and_late_m_cannot_commit(self):
+        entered, release, finished, completed = Event(), Event(), Event(), Event()
+        original = runner._analyze_shadow
+        late_outputs, results, errors = [], [], []
+
+        def blocked(snapshot):
+            entered.set()
+            release.wait(3)
+            try:
+                output = original(snapshot)
+                late_outputs.append(output)
+                return output
+            finally:
+                finished.set()
+
+        def execute():
+            try:
+                results.append(runner.run_k_control(PublicPort(fixed_engine()), table=self.table,
+                                                    shadow_timeout_s=0.05))
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                completed.set()
+
+        with patch.object(runner, "_analyze_shadow", side_effect=blocked) as shadow:
+            owner = Thread(target=execute, daemon=True)
+            owner.start()
+            try:
+                self.assertTrue(entered.wait(2), "Shadow worker did not start")
+                self.assertTrue(completed.wait(2), "Hung shadow blocked the V1 owner")
+                self.assertFalse(errors, errors)
+                self.assertFalse(release.is_set())
+                self.assertFalse(finished.is_set())
+                result = results[0]
+                self.assert_disabled(result, "SHADOW_TIMEOUT")
+                self.assertEqual(result.final_M, frozenset())
+                self.assertEqual(shadow.call_count, 1)
+                self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+            finally:
+                release.set()
+                owner.join(2)
+                self.assertTrue(finished.wait(2), "Released shadow did not exit")
+            self.assertEqual(late_outputs[0].after.M, {(1, 0)})
+            self.assertEqual(result.final_M, frozenset())
+            self.assertEqual(result.shadow.last_valid_M, frozenset())
+            self.assertEqual(shadow.call_count, 1)
+            self.assert_disabled(result, "SHADOW_TIMEOUT")
+
+    def test_j_shadow_output_validation_is_also_inside_the_timeout(self):
+        entered, release, finished = Event(), Event(), Event()
+        original = runner._validate_shadow_result
+
+        def blocked_validation(snapshot, output):
+            entered.set()
+            release.wait(2)
+            try:
+                return original(snapshot, output)
+            finally:
+                finished.set()
+
+        with patch.object(runner, "_validate_shadow_result", side_effect=blocked_validation) as validation:
+            try:
+                result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table,
+                                             shadow_timeout_s=0.05)
+                self.assertTrue(entered.is_set())
+                self.assertFalse(finished.is_set(), "Output validation blocked V1 beyond its timeout")
+                self.assert_disabled(result, "SHADOW_TIMEOUT")
+                self.assertEqual(result.final_M, frozenset())
+                self.assertEqual(validation.call_count, 1)
+                self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+            finally:
+                release.set()
+                self.assertTrue(finished.wait(2))
+            self.assertEqual(result.final_M, frozenset())
+            self.assertFalse(result.shadow.enabled)
+            self.assertEqual(validation.call_count, 1)
+
+    def test_l_v1_planner_exception_propagates_before_any_shadow(self):
+        port = PublicPort(fixed_engine())
+        error = RuntimeError("frozen planner defect")
+        with patch.object(runner, "plan_position", side_effect=error), \
+                patch.object(runner, "_analyze_shadow") as shadow:
+            with self.assertRaises(RuntimeError) as caught:
+                runner.run_k_control(port, table=self.table)
+        self.assertIs(caught.exception, error)
+        shadow.assert_not_called()
+        self.assertEqual(port.inputs, [SimpleMove(Action.OPEN, 0, 0)])
+
+    def test_m_frozen_validator_failure_is_not_a_shadow_failure(self):
+        port = PublicPort(fixed_engine())
+
+        def invalid_plan(*args):
+            valid = plan_position(*args)
+            return replace(valid, move=SimpleMove(Action.OPEN, 1, 0))
+
+        # The real frozen validator rejects the unproved OPEN. It is neither
+        # replaced nor wrapped by a monkeypatch in this or any Slice-5 test.
+        with patch.object(runner, "plan_position", side_effect=invalid_plan), \
+                patch.object(runner, "_analyze_shadow") as shadow:
+            with self.assertRaises(Stage3RunnerError):
+                runner.run_k_control(port, table=self.table)
+        shadow.assert_not_called()
+        self.assertEqual(port.inputs, [SimpleMove(Action.OPEN, 0, 0)])
+
+    def test_n_engine_input_failure_propagates_after_shadow(self):
+        port = PublicPort(fixed_engine())
+        original_step = PublicPort.step
+        error = RuntimeError("Engine owner input defect")
+
+        def broken(view, x, y, action):
+            if view.inputs:
+                raise error
+            return original_step(view, x, y, action)
+
+        with patch.object(PublicPort, "step", new=broken), \
+                patch.object(runner, "_analyze_shadow", wraps=runner._analyze_shadow) as shadow:
+            with self.assertRaises(RuntimeError) as caught:
+                runner.run_k_control(port, table=self.table)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(shadow.call_count, 1)
+        self.assertEqual(port.inputs, [SimpleMove(Action.OPEN, 0, 0)])
+
+    def test_external_public_mutation_after_seal_aborts_without_replanning(self):
+        port = PublicPort(fixed_engine())
+        original = runner._analyze_shadow
+
+        def change_public_state(snapshot):
+            result = original(snapshot)
+            # An Engine-owner contract fault, not information given to K.
+            port.observation_fault = lambda rows: [[1, H, 1, H]]
+            return result
+
+        with patch.object(runner, "_analyze_shadow", side_effect=change_public_state) as shadow, \
+                patch.object(runner, "plan_position", wraps=plan_position) as planner:
+            with self.assertRaisesRegex(Stage3RunnerError, "sealed"):
+                runner.run_k_control(port, table=self.table)
+        self.assertEqual(shadow.call_count, 1)
+        self.assertEqual(planner.call_count, 1)
+        self.assertEqual(port.inputs, [SimpleMove(Action.OPEN, 0, 0)])
+
+    def test_o_initial_terminal_barrier_permits_no_k_or_shadow_call(self):
+        for width, mines, outcome in ((3, {(2, 0)}, GameStatus.WON),
+                                      (2, {(0, 0)}, GameStatus.LOST)):
+            port = PublicPort(fixed_engine(width, 1, frozenset(mines)))
+            with self.subTest(outcome=outcome), \
+                    patch.object(runner, "_analyze_shadow", side_effect=AssertionError("shadow")) as shadow, \
+                    patch.object(KLocalSession, "analyze_decision", side_effect=AssertionError("K")):
+                result = runner.run_k_control(port, table=self.table)
+            shadow.assert_not_called()
+            self.assertIs(result.status, outcome)
+            self.assertEqual(result.final_M, frozenset())
+            self.assertEqual(result.moves, (SimpleMove(Action.OPEN, 0, 0),))
+            self.assert_status_first(port)
+
+    def test_o_terminal_after_noninitial_input_is_status_first_without_proof_read(self):
+        for width, mines, outcome in ((4, {(1, 0)}, GameStatus.WON),
+                                      (5, {(1, 0), (2, 0)}, GameStatus.LOST)):
+            port = PublicPort(fixed_engine(width, 1, frozenset(mines)))
+            original = runner._analyze_shadow
+
+            def shadow(snapshot):
+                self.assertIs(port.status, PLAYING)
+                port.events.append(("shadow", snapshot.observation))
+                return original(snapshot)
+
+            with self.subTest(outcome=outcome), patch.object(runner, "_analyze_shadow", side_effect=shadow) as call:
+                result = runner.run_k_control(port, table=self.table)
+            self.assertTrue(result.shadow.enabled, result.shadow.failure)
+            self.assertIs(result.status, outcome)
+            self.assertEqual(call.call_count, len(result.traces) - 1)
+            self.assertEqual(result.final_M, result.traces[-1].preinput_M)
+            self.assert_status_first(port)
+
+    def test_p_successful_shadow_acquisitions_are_monotonic_and_expire_decisions(self):
+        port = PublicPort(fixed_engine(5, 4, frozenset({(1, 2), (3, 2)})))
+        result = runner.run_k_control(port, table=self.table)
+        self.assertTrue(result.shadow.enabled, result.shadow.failure)
+        self.assertIsNone(result.shadow.failure)
+        self.assertEqual(result.final_M, {(1, 2), (3, 2)})
+        prior = frozenset()
+        for index, trace in enumerate(result.traces[1:], start=1):
+            self.assertEqual(trace.M_before, prior)
+            self.assertLessEqual(prior, trace.preinput_M)
+            self.assertEqual(trace.shadow.last_valid_M, trace.preinput_M)
+            self.assertEqual(trace.shadow.last_valid_boundary, index)
+            self.assertTrue(trace.shadow.evidence_valid)
+            self.assertEqual(trace.shadow.decision.observation, trace.observation)
+            self.assertEqual(trace.shadow.decision.after.M, trace.preinput_M)
+            prior = trace.preinput_M
+        self.assertEqual(result.final_M, prior)
+
+    def test_r_shadow_receives_only_detached_immutable_public_values(self):
+        original = runner._analyze_shadow
+        snapshots = []
+        allowed = {"observation", "width", "height", "num_mines", "cursor", "M",
+                   "physical_flag_admission"}
+
+        def verify(value):
+            self.assertNotIsInstance(value, (MinesweeperEngine, PublicPort, KLocalSession, Stage3Decision))
+            self.assertFalse(callable(value))
+            if is_dataclass(value):
+                self.assertTrue(type(value).__dataclass_params__.frozen)
+                for field in fields(value):
+                    verify(getattr(value, field.name))
+            elif type(value) in (tuple, frozenset):
+                for item in value:
+                    verify(item)
+            else:
+                self.assertIsInstance(value, (int, str, type(None)))
+
+        def shadow(snapshot):
+            self.assertIs(type(snapshot), runner.ShadowInput)
+            self.assertEqual({field.name for field in fields(snapshot)}, allowed)
+            verify(snapshot)
+            with self.assertRaises(FrozenInstanceError):
+                snapshot.M = frozenset({(3, 0)})
+            with self.assertRaises(TypeError):
+                snapshot.observation[0][0] = 8
+            snapshots.append(snapshot)
+            return original(snapshot)
+
+        with patch.object(runner, "_analyze_shadow", side_effect=shadow):
+            result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assertTrue(result.shadow.enabled, result.shadow.failure)
+        self.assertTrue(snapshots)
+        for snapshot, trace in zip(snapshots, result.traces[1:]):
+            self.assertEqual(snapshot.observation, trace.observation)
+            self.assertIsNot(snapshot.observation, trace.observation)
+            self.assertEqual(snapshot.cursor, trace.cursor_before)
+            self.assertEqual(snapshot.M, trace.M_before)
+            self.assertEqual(snapshot.physical_flag_admission.observation, snapshot.observation)
+            earlier_flags = frozenset((prior.move.x, prior.move.y)
+                                      for prior in result.traces[:trace.input_index]
+                                      if prior.move.action is Action.FLAG)
+            self.assertLessEqual(snapshot.physical_flag_admission.flags, earlier_flags)
+
+    def test_s_t_bounded_control_physical_stream_cost_and_outcome_identity(self):
+        # Three explicit, independently fixed tiny layouts. No generation,
+        # scan, benchmark tuple, research manifest, or E1 dispatcher is used.
+        fixtures = ((4, 1, frozenset({(1, 0)})),
+                    (5, 1, frozenset({(1, 0), (2, 0)})),
+                    (5, 4, frozenset({(1, 2), (3, 2)})))
+        seen_actions, seen_outcomes = set(), set()
+        for width, height, mines in fixtures:
+            with self.subTest(size=(width, height), mines=mines):
+                control = run_stage3(fixed_engine(width, height, mines), table=self.table)
+                result = runner.run_k_control(PublicPort(fixed_engine(width, height, mines)), table=self.table)
+                self.assert_physical_identity(result, control)
+                self.assertTrue(result.shadow.enabled, result.shadow.failure)
+                seen_actions.update(move.action for move in result.moves)
+                seen_outcomes.add(result.status)
+                cursor, total = (0, 0), 0
+                for trace in result.traces:
+                    self.assertEqual(trace.cursor_before, cursor)
+                    cost = self.table[abs(trace.move.x - cursor[0])][abs(trace.move.y - cursor[1])]
+                    self.assertEqual(trace.modeled_action_us, cost)
+                    total += cost
+                    cursor = (trace.move.x, trace.move.y)
+                self.assertEqual(result.total_modeled_us, total)
+        self.assertEqual(seen_actions, {Action.OPEN, Action.FLAG, Action.CHORD})
+        self.assertEqual(seen_outcomes, {GameStatus.WON, GameStatus.LOST})
+
+    def test_u_real_v1_flag_fallback_survives_shadow_safe_disagreement(self):
+        result = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        fallback = result.traces[1]
+        self.assertIs(fallback.move.action, Action.FLAG)
+        self.assertIsNone(fallback.decision.plan)
+        self.assertTrue(fallback.shadow.decision.selection_safe_cells)
+        self.assertEqual(fallback.move, SimpleMove(Action.FLAG, 1, 0))
+        self.assertTrue(fallback.shadow.enabled)
+        self.assert_physical_identity(result, run_stage3(fixed_engine(), table=self.table))
+
+    def test_v_repeated_fresh_runs_have_identical_full_internal_records(self):
+        first = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        second = runner.run_k_control(PublicPort(fixed_engine()), table=self.table)
+        self.assertEqual(first, second)
+        self.assertEqual(first.moves, second.moves)
+        self.assertEqual(first.total_modeled_us, second.total_modeled_us)
+
+    def test_invalid_timeout_and_table_are_rejected_before_physical_input(self):
+        for timeout in (0, -1, True, float("inf"), float("nan"), 61, None):
+            port = PublicPort(fixed_engine())
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                runner.run_k_control(port, table=self.table, shadow_timeout_s=timeout)
+            self.assertEqual(port.inputs, [])
+        changed = [list(row) for row in self.table]
+        changed[0][0] += 1
+        port = PublicPort(fixed_engine())
+        with self.assertRaises(ValueError):
+            runner.run_k_control(port, table=changed)
+        self.assertEqual(port.inputs, [])
 
 
 if __name__ == "__main__":
