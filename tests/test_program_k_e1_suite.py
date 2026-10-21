@@ -451,7 +451,7 @@ class SourceIdentityTests(SuiteCase):
     def test_current_committed_slice3_identity(self):
         plan, archives, audits = _data()
         current = audit.capture_audit_source_identity(plan, archives[0])
-        self.assertEqual(current.digest, "47ceca0595cacf08f70bd14911a805c5d0358fa3e60e695349a66689b9d994b1")
+        self.assertEqual(current.digest, "b6cc2964e3b75b5d85889b9d69957ede6cf1789fb5d511618bbd747e36a5b211")
         identity = suite.capture_suite_source_identity(plan, archives[0], audits[0])
         self.assertEqual(identity.audit_source_digest, current.digest)
 

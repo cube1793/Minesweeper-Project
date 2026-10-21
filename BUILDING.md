@@ -48,8 +48,31 @@ not source files to commit.
 The plotting dependencies above are required by the existing Benchmark Statistics
 UI and match the versions exercised on 2026-10-14. The original Qt/PyInstaller
 pins are unchanged. Record `pip freeze`, Python version and architecture per build.
-The normal development environment is the authority for full source regression:
-`C:\venvs\minesweeper\Scripts\python.exe -m unittest discover -s tests -v`.
+The normal development environment is the authority for full source regression.
+Run the isolation-aware acceptance gate from the repository root:
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE = '1'
+& 'C:\venvs\minesweeper\Scripts\python.exe' -B scripts/run_source_unittest_isolated.py
+if ($LASTEXITCODE -ne 0) { throw 'Full source acceptance failed.' }
+```
+
+This runner discovers every source test and executes each exactly once. The entire
+`test_program_k_harness.ProgramKSlice7SupervisorTests` class runs in a fresh
+approved-Python subprocess; all other tests run in the main partition. These
+supervisor tests validate an explicit 1,000,000,000-byte coordinator+worker
+private-committed-memory contract. Arbitrary memory retained by thousands of
+unrelated earlier unittest cases is outside the operation being tested. The fresh
+process preserves the original test source, cap, assertions and production
+supervisor semantics. The gate reconciles both partitions' executed IDs and
+counts, reports skips separately, and fails on test or accounting errors.
+
+Direct `python -B -m unittest discover -s tests -v` remains useful as a raw
+monolithic diagnostic (including the clean-build check above). It is not the
+normal development full-source acceptance gate: process history can interfere
+with this fixed-memory supervisor boundary. Historical commands and results
+below remain records of their original executions.
+
 The clean app build environment can skip optional image/video replay-validation
 tests when their separate dependencies are absent; record those skips explicitly.
 Do not treat skipped tests as passed or omit required app/UI dependencies.

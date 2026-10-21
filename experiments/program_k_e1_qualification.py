@@ -34,7 +34,7 @@ QUALIFICATION_SOURCE_PATHS = (
     "experiments/program_k_e1_persistence.py",
 )
 # Recomputed from the clean committed post-Slice-5 baseline, not prompt text.
-ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "b724e22dd10a70880533430b906c7723b3150e09c250a2580eba78a6bfa0c828"
+ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "6dd0477b05b7ce86e2d37e6163d4b4474dd8fe9c99f8205bb2cfa5987e8b17cd"
 _AUTHORITIES = _execution._AUTHORITY_FIELDS
 _ERRORS = (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError)
 # Fixed reconciliation bodies, distinct from the live orchestration entrypoints.

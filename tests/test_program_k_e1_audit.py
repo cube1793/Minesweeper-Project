@@ -1456,5 +1456,293 @@ class ReadinessPhysicalFlagTests(unittest.TestCase):
                                      calls=[], findings=audit._Findings())
 
 
+class ExactReferenceReuseTests(unittest.TestCase):
+    """Arithmetic reuse never supplies authority for a target or proof history."""
+
+    def fixture(self):
+        rows = ((1, H, H, H, H), (H, H, H, H, H))
+        case = SimpleNamespace(case_id="NON_E1_EXACT_REUSE_PUBLIC_FIXTURE",
+                               width=5, height=2, num_mines=7, first_click=(0, 0))
+        result = _public_result("K-P0", 5, 2, 7, (rows,))
+        return rows, result, case
+
+    def projected(self, components):
+        from experiments import program_k_e1_suite as suite
+        return suite._encoded(tuple(sorted(components.items())), semantic=True)
+
+    def uncached(self):
+        return SimpleNamespace(oracles=oracles, audit_acquisition=harness.audit_acquisition)
+
+    def test_repeated_identical_public_requests_enumerate_once(self):
+        rows = ((H, H, H),)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            with oracles.collect_oracle_diagnostics() as calls:
+                results = tuple(references.oracles.enumerate_public_worlds(
+                    rows, 1, status=GameStatus.PLAYING) for _ in range(7))
+        self.assertEqual(enumerate_values.call_count, 1)
+        self.assertEqual(results, (oracles.OracleAResult(
+            3, (((0, 0), 1), ((1, 0), 1), ((2, 0), 1))),) * 7)
+        self.assertEqual(len(calls), 7)
+        self.assertTrue(all(c.status == "EVALUATED" for c in calls))
+
+    def test_two_distinct_public_requests_repeated_n_m_enumerate_once_each(self):
+        rows = ((H, H, H),)
+        totals = (1,) * 5 + (2,) * 3 + (1, 2)
+        expected = tuple(oracles.enumerate_public_worlds(
+            rows, n, status=GameStatus.PLAYING) for n in totals)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            actual = tuple(references.oracles.enumerate_public_worlds(
+                rows, n, status=GameStatus.PLAYING) for n in totals)
+        self.assertEqual(actual, expected)
+        self.assertEqual(enumerate_values.call_count, 2)
+        self.assertNotEqual(actual[0].mine_worlds, actual[5].mine_worlds)
+
+    def test_equal_separately_allocated_history_and_arithmetic_reuse(self):
+        rows, result, _ = self.fixture()
+        proof = result.traces[1].selection.evidence.exact_certificates[0]
+        copied_rows = tuple(tuple(v for v in row) for row in rows)
+        copied_proof = replace(proof, observation=copied_rows,
+                               mine_worlds=tuple((tuple(c), n) for c, n in proof.mine_worlds))
+        self.assertIsNot(copied_rows, rows)
+        self.assertIsNot(copied_proof, proof)
+        self.assertEqual(copied_proof, proof)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values, patch.object(
+                oracles, "_materialized_exact_values",
+                wraps=oracles._materialized_exact_values) as materialize:
+            references = audit._ExactReferenceReuse()
+            first = references.oracles.materialized_exact_reference(
+                rows, 7, status=GameStatus.PLAYING,
+                logical_mines=frozenset((proof.target,)), proofs=(proof,))
+            second = references.oracles.materialized_exact_reference(
+                copied_rows, 7, status=GameStatus.PLAYING,
+                logical_mines=frozenset(tuple(c) for c in (copied_proof.target,)),
+                proofs=tuple(p for p in (copied_proof,)))
+        self.assertEqual(first, second)
+        self.assertEqual(enumerate_values.call_count, 1)
+        self.assertEqual(materialize.call_count, 1)
+
+    def test_each_arithmetic_input_part_changes_reference_request(self):
+        # Exercise the primitive's complete contract, comparing every result
+        # with its unchanged implementation before any memo is populated.
+        base = (((H, H, H),), frozenset(), frozenset({(0, 0), (1, 0), (2, 0)}), 1)
+        requests = (
+            base,
+            (((H, H, H, H),), *base[1:]),
+            (base[0], frozenset({(3, 0)}), *base[2:]),
+            (base[0], base[1], frozenset({(0, 0), (1, 0)}), base[3]),
+            (*base[:3], 2),
+        )
+        expected = tuple(oracles._enumerate_supported(*args) for args in requests)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            for _ in range(2):
+                self.assertEqual(tuple(references.oracles._enumerate_supported(*args)
+                                       for args in requests), expected)
+        self.assertEqual(enumerate_values.call_count, len(requests))
+
+    def test_changed_materialized_domain_and_mine_total_miss(self):
+        requests = (
+            (((H, H, H),), 1, frozenset()),
+            (((H, H, H, H),), 1, frozenset()),
+            (((H, H, H),), 2, frozenset()),
+            (((H, H, H),), 1, frozenset({(0, 0)})),
+        )
+        expected = tuple(oracles._materialized_exact(*args) for args in requests)
+        with patch.object(oracles, "_materialized_exact_values",
+                          wraps=oracles._materialized_exact_values) as materialize:
+            references = audit._ExactReferenceReuse()
+            for _ in range(2):
+                self.assertEqual(tuple(references.oracles._materialized_exact(*args)
+                                       for args in requests), expected)
+        self.assertEqual(materialize.call_count, len(requests))
+
+    def test_arithmetic_key_distinguishes_boolean_from_equal_integer(self):
+        # The low-level arithmetic accepts either combinations count, but
+        # Python's True == 1 must not merge different typed requests.
+        rows, fixed = ((H, H, H),), frozenset()
+        unresolved = frozenset({(0, 0), (1, 0), (2, 0)})
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            results = tuple(references.oracles._enumerate_supported(rows, fixed, unresolved, count)
+                            for count in (1, True, 1, True))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(enumerate_values.call_count, 2)
+
+    def test_live_facades_do_not_share_results_or_rebind_module_functions(self):
+        names = ("_enumerate_supported", "_materialized_exact", "_check_exact",
+                 "_verify_history", "materialized_exact_reference", "enumerate_public_worlds")
+        originals = tuple(getattr(oracles, name) for name in names)
+        acquisition = harness.audit_acquisition
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            first, second = audit._ExactReferenceReuse(), audit._ExactReferenceReuse()
+            results = tuple(checker.enumerate_public_worlds(((H, H, H),), 1, status=GameStatus.PLAYING)
+                            for checker in (first.oracles, first.oracles, second.oracles, oracles))
+        self.assertEqual(results, (results[0],) * 4)
+        self.assertEqual(enumerate_values.call_count, 3)
+        for name, original in zip(names, originals):
+            self.assertIs(getattr(oracles, name), original)
+        self.assertIs(harness.audit_acquisition, acquisition)
+
+    def test_full_audit_bounds_enumeration_by_distinct_arithmetic_not_targets(self):
+        _, result, case = self.fixture()
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            components = audit._audit_run(result, "K-P0", case)
+        self.assertEqual(components["audit_status"], "PASS", components["discrepancies"])
+        certificates = result.traces[1].selection.evidence.exact_certificates
+        self.assertEqual(len(certificates), 6)
+        self.assertEqual(tuple(a.certificate for a in components["acquisition_audits"]), certificates)
+        self.assertTrue(all(a.status == "PASS" for a in components["acquisition_audits"]))
+        self.assertEqual(enumerate_values.call_count, 1)
+        self.assertGreater(sum(c.oracle == "A" for c in components["oracle_calls"]), 6)
+
+    def test_separate_audit_runs_start_with_empty_reuse(self):
+        _, result, case = self.fixture()
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            first = audit._audit_run(result, "K-P0", case)
+            first_count = enumerate_values.call_count
+            second = audit._audit_run(result, "K-P0", case)
+        self.assertEqual(first_count, 1)
+        self.assertEqual(enumerate_values.call_count, 2)
+        self.assertEqual(first["audit_status"], second["audit_status"])
+        self.assertEqual(self.projected(first), self.projected(second))
+
+    def test_warm_arithmetic_never_authorizes_changed_target_or_claim(self):
+        _, result, _ = self.fixture()
+        certificate = result.traces[1].selection.evidence.exact_certificates[0]
+        references = audit._ExactReferenceReuse()
+        good = references.oracles.verify_exact_global_certificate(certificate)
+        self.assertEqual(good.oracle_a_status, "ORACLE_A_EVALUATED")
+        bad_counts = ((certificate.mine_worlds[0][0], 99),) + certificate.mine_worlds[1:]
+        for changed in (
+            replace(certificate, target=(1, 0)),
+            replace(certificate, total_worlds=certificate.total_worlds + 1),
+            replace(certificate, mine_worlds=bad_counts),
+            replace(certificate, exact_reached=False),
+        ):
+            with self.subTest(changed=changed):
+                for _ in range(2):
+                    with self.assertRaises(oracles.PublicProofError):
+                        references.oracles.verify_exact_global_certificate(changed)
+
+    def test_warm_arithmetic_never_bypasses_history_support_or_status(self):
+        rows, result, _ = self.fixture()
+        certificate = result.traces[1].selection.evidence.exact_certificates[0]
+        logical = frozenset({certificate.target})
+        references = audit._ExactReferenceReuse()
+        references.oracles.materialized_exact_reference(
+            rows, 7, status=GameStatus.PLAYING, logical_mines=logical, proofs=(certificate,))
+        invalid_histories = ((), (replace(certificate, total_worlds=99),))
+        for proofs in invalid_histories:
+            with self.subTest(proofs=proofs), self.assertRaises(oracles.PublicProofError):
+                references.oracles.materialized_exact_reference(
+                    rows, 7, status=GameStatus.PLAYING, logical_mines=logical, proofs=proofs)
+        with self.assertRaises(oracles.PublicProofError):
+            references.oracles.materialized_exact_reference(
+                rows, 7, status=GameStatus.LOST, logical_mines=logical, proofs=(certificate,))
+
+    def test_failed_reference_does_not_become_cached_success(self):
+        rows = ((H, H, H),)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          side_effect=oracles.PublicProofError("contradictory public arithmetic")) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            with oracles.collect_oracle_diagnostics() as calls:
+                for _ in range(2):
+                    with self.assertRaises(oracles.PublicProofError):
+                        references.oracles.enumerate_public_worlds(rows, 1, status=GameStatus.PLAYING)
+        self.assertEqual(enumerate_values.call_count, 2)
+        self.assertEqual(tuple(c.status for c in calls), ("ERROR", "ERROR"))
+
+    def test_not_evaluated_remains_not_evaluated_on_repetition(self):
+        rows = ((H,) * 17,)
+        references = audit._ExactReferenceReuse()
+        with oracles.collect_oracle_diagnostics() as calls:
+            for _ in range(2):
+                with self.assertRaises(oracles.OracleANotEvaluated) as caught:
+                    references.oracles.enumerate_public_worlds(rows, 1, status=GameStatus.PLAYING)
+                self.assertEqual(caught.exception.variable_count, 17)
+        self.assertEqual(tuple(c.status for c in calls), ("NOT_EVALUATED", "NOT_EVALUATED"))
+        self.assertTrue(all(c.output_digest is None for c in calls))
+
+    def test_shared_reference_cannot_replace_first_bounded_independent_check(self):
+        rows, result, _ = self.fixture()
+        certificate = result.traces[1].selection.evidence.exact_certificates[0]
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            references = audit._ExactReferenceReuse()
+            references.oracles.materialized_exact_reference(rows, 7, status=GameStatus.PLAYING)
+            self.assertEqual(enumerate_values.call_count, 0)
+            checked = references.oracles.verify_exact_global_certificate(certificate)
+        self.assertEqual(enumerate_values.call_count, 1)
+        self.assertEqual(checked.oracle_a_status, "ORACLE_A_EVALUATED")
+        self.assertEqual(checked.arithmetic_evidence, "INDEPENDENT BOUNDED ARITHMETIC EVIDENCE")
+
+    def test_cached_and_uncached_audit_semantics_match_existing_projection(self):
+        _, result, case = self.fixture()
+        with patch.object(audit, "_ExactReferenceReuse", side_effect=self.uncached):
+            before = audit._audit_run(result, "K-P0", case)
+        after = audit._audit_run(result, "K-P0", case)
+        self.assertEqual(before["audit_status"], "PASS")
+        self.assertEqual(after["audit_status"], "PASS")
+        self.assertEqual(self.projected(before), self.projected(after))
+
+    def test_warmed_audit_failure_matches_uncached_semantic_projection(self):
+        _, result, case = self.fixture()
+        trace = result.traces[1]
+        decision = trace.selection.evidence
+        first, second, *later = decision.exact_certificates
+        changed = replace(decision, exact_certificates=(
+            first, replace(second, total_worlds=second.total_worlds + 1), *later))
+        trace = replace(trace, selection=replace(trace.selection, evidence=changed))
+        invalid = replace(result, traces=(result.traces[0], trace))
+        with patch.object(audit, "_ExactReferenceReuse", side_effect=self.uncached):
+            before = audit._audit_run(invalid, "K-P0", case)
+        with patch.object(oracles, "_enumerate_supported_values",
+                          wraps=oracles._enumerate_supported_values) as enumerate_values:
+            after = audit._audit_run(invalid, "K-P0", case)
+        self.assertEqual(before["audit_status"], "FAIL")
+        self.assertEqual(after["audit_status"], "FAIL")
+        self.assertEqual(after["acquisition_audits"][0].status, "PASS")
+        self.assertEqual(after["acquisition_audits"][1].status, "FAIL")
+        self.assertEqual(enumerate_values.call_count, 1)
+        self.assertEqual(self.projected(before), self.projected(after))
+
+    def test_cached_and_uncached_r1_shared_flag_semantics_match(self):
+        case = SimpleNamespace(case_id="NON_E1_REUSE_SHARED_FLAG",
+                               width=6, height=4, num_mines=5, first_click=(0, 0))
+        result = _public_result("K-CONTROL", 6, 4, 5, _s_replan_public_prefixes())
+        prerequisite = _plan().prerequisite
+        with patch.object(audit, "_ExactReferenceReuse", side_effect=self.uncached):
+            before = audit._audit_run(result, "K-CONTROL", case, prerequisite=prerequisite)
+        after = audit._audit_run(result, "K-CONTROL", case, prerequisite=prerequisite)
+        self.assertEqual(self.projected(before), self.projected(after))
+        qualification = after["v1_audits"][4].external_qualification
+        self.assertEqual(qualification.raw_verification.status, "NOT_EVALUATED")
+        self.assertEqual(qualification.status, "PASS")
+        self.assertEqual(qualification.shared_kernel_evidence, "SHARED-KERNEL REPRESENTATION EVIDENCE")
+
+    def test_cache_hit_measures_fresh_work_instead_of_repeating_enumeration_duration(self):
+        rows = ((H, H, H),)
+        with patch.object(oracles, "perf_counter_ns", side_effect=(100, 1100, 2000, 2007)):
+            references = audit._ExactReferenceReuse()
+            with oracles.collect_oracle_diagnostics() as calls:
+                first = references.oracles.enumerate_public_worlds(rows, 1, status=GameStatus.PLAYING)
+                second = references.oracles.enumerate_public_worlds(rows, 1, status=GameStatus.PLAYING)
+        self.assertEqual(first, second)
+        self.assertEqual(tuple(c.duration_ns for c in calls), (1000, 7))
+        self.assertEqual(sum(c.duration_ns for c in calls), 1007)
+        self.assertEqual(calls[0].output_digest, calls[1].output_digest)
+        self.assertEqual(tuple(c.sequence for c in calls), (0, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

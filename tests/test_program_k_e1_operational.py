@@ -279,9 +279,9 @@ class SourceIdentityTests(unittest.TestCase):
         self.assertEqual(identity.suite_source_identity,
                          suite.capture_suite_source_identity(plan, archives[0], audits[0]))
         self.assertEqual(identity.audit_source_identity.digest,
-                         "47ceca0595cacf08f70bd14911a805c5d0358fa3e60e695349a66689b9d994b1")
+                         "b6cc2964e3b75b5d85889b9d69957ede6cf1789fb5d511618bbd747e36a5b211")
         self.assertEqual(identity.suite_source_identity.digest,
-                         "afbc71a19af9d31944ed9489420b5eb505871ba195b4888bac185301b3d8c328")
+                         "edd1943499bfecdedb3a64fca2489db58ffb84593651dd61cde04266e875ff24")
 
     def test_evaluator_and_operational_exact_bytes_and_sizes(self):
         identity = operational.capture_operational_source_identity(_data()[0])

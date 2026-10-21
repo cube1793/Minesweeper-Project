@@ -10,6 +10,7 @@ from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
+from types import FunctionType, SimpleNamespace
 
 from core_engine import Action, CellState, GameStatus
 from experiments import program_k_capability as _capability
@@ -1151,11 +1152,87 @@ def _diagnostic_span(calls, start, expected, complete, index, operation, finding
     return span
 
 
-def _audit_certificate(certificate, index, proofs, external, calls, findings, premises=None):
+class _ExactReferenceReuse:
+    """One audit's arithmetic payloads, never certificate/history authority.
+
+    Every frozen history, public-domain, target and claimed-count check still
+    executes. Only their arithmetic leaves reuse successful results. Full
+    canonical values (including types), not object IDs or digest equality,
+    identify those leaves. Exceptions and non-evaluation are never cached.
+
+    Private function bindings keep the existing validation implementation and
+    its call graph intact without patching any module or process-global state.
+    Nothing here is retained by the returned audit or shared with another run.
+    """
+
+    def __init__(self):
+        self._a = {}
+        self._b = {}
+        namespace = dict(vars(_oracles))
+        for name in (
+                "_check_exact", "_verify_history", "verify_local_certificate",
+                "verify_exact_global_certificate", "enumerate_public_worlds",
+                "materialized_exact_reference"):
+            namespace[name] = self._bind(namespace[name], namespace)
+        namespace["_enumerate_supported"] = self._enumerate_supported
+        namespace["_materialized_exact"] = self._materialized_exact
+        self.oracles = SimpleNamespace(**namespace)
+        self.audit_acquisition = self._bind(
+            _harness.audit_acquisition,
+            dict(vars(_harness), _oracles=self.oracles))
+
+    @staticmethod
+    def _bind(function, namespace):
+        # Keep injected verifier seams observable, including failed results.
+        if type(function) is not FunctionType:
+            return function
+        bound = FunctionType(function.__code__, namespace, function.__name__,
+                             function.__defaults__, function.__closure__)
+        bound.__kwdefaults__ = function.__kwdefaults__
+        return bound
+
+    def _enumerate_supported(self, grid, fixed, unresolved, remaining):
+        key = _harness.canonical_bytes((grid, fixed, unresolved, remaining))
+        if key not in self._a:
+            result = _oracles._enumerate_supported(grid, fixed, unresolved, remaining)
+            _need(type(result) is _oracles.OracleAResult, "Oracle A returned the wrong class.")
+            self._a[key] = result
+            return result
+        # Preserve logical diagnostic coverage, but measure this retrieval,
+        # never replay the duration of the earlier expensive enumeration.
+        with _oracles.measure_oracle_call(
+                "A", "COMPLETE_WORLD_ENUMERATION",
+                _oracles.oracle_a_input_digest(grid, fixed, unresolved, remaining),
+                len(unresolved)) as measurement:
+            result = self._a[key]
+            measurement.finish(result)
+            return result
+
+    def _materialized_exact(self, grid, num_mines, retained):
+        key = _harness.canonical_bytes((grid, num_mines, retained))
+        if key not in self._b:
+            result = _oracles._materialized_exact(grid, num_mines, retained)
+            _need(type(result) is _oracles.OracleBResult, "Oracle B returned the wrong class.")
+            self._b[key] = result
+            return result
+        variables = len(_cells(grid, CellState.HIDDEN) - retained)
+        with _oracles.measure_oracle_call(
+                "B", "MATERIALIZED_EXACT",
+                _oracles.oracle_b_input_digest(grid, num_mines, retained),
+                variables) as measurement:
+            result = self._b[key]
+            measurement.finish(result)
+            return result
+
+
+def _audit_certificate(certificate, index, proofs, external, calls, findings, premises=None,
+                       references=None):
     start = len(calls)
+    checker = _oracles if references is None else references.oracles
     if premises is None and not external:
-        audit = _harness.audit_acquisition(certificate, boundary=index,
-                                          prior_certificates=proofs, external_flags=external)
+        acquisition = _harness.audit_acquisition if references is None else references.audit_acquisition
+        audit = acquisition(certificate, boundary=index,
+                            prior_certificates=proofs, external_flags=external)
     else:
         # K-CONTROL's physical premises were independently admitted once at
         # their executed inputs. Existing low-level certificate checks preserve
@@ -1173,7 +1250,7 @@ def _audit_certificate(certificate, index, proofs, external, calls, findings, pr
             supported = frozenset(p.target for p in history)
             check = (_oracles._check_local(certificate, supported)
                      if type(certificate) is _oracles.LocalMineCertificate
-                     else _oracles._check_exact(certificate, supported))
+                     else checker._check_exact(certificate, supported))
             status, detail = "PASS", "Public physical premises admitted once; current K certificate independently checked."
         except _PUBLIC_ERRORS as error:
             status, detail = "FAIL", str(error)
@@ -1230,8 +1307,9 @@ def _exact_differences(expected, actual):
 
 
 def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, calls, findings,
-              premises=None):
+              premises=None, references=None):
     start = len(calls)
+    checker = _oracles if references is None else references.oracles
     actual = None
     differences = ()
     complete = False
@@ -1240,12 +1318,12 @@ def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, c
     leaf = _call_expectation("B", observation, num_mines, logical)
     try:
         if premises is None:
-            actual = _oracles.materialized_exact_reference(
+            actual = checker.materialized_exact_reference(
                 observation, num_mines, status=GameStatus.PLAYING,
                 logical_mines=logical, proofs=proofs)
         else:
             premises.public_domains(observation, num_mines, logical, proofs, index)
-            actual = _oracles._materialized_exact(observation, num_mines, logical)
+            actual = checker._materialized_exact(observation, num_mines, logical)
         _need(type(actual) is _oracles.OracleBResult, "Oracle B returned the wrong class.")
         leaf = _call_expectation("B", observation, num_mines, logical, actual)
         complete = True
@@ -1266,8 +1344,9 @@ def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, c
 
 
 def _oracle_a(index, observation, num_mines, logical, proofs, exact, oracle_b, calls, findings,
-              premises=None):
+              premises=None, references=None):
     start = len(calls)
+    checker = _oracles if references is None else references.oracles
     predicted, blocked_ancestor = _history_expectations(proofs, independent=True)
     if premises is not None:
         predicted = ()
@@ -1278,14 +1357,14 @@ def _oracle_a(index, observation, num_mines, logical, proofs, exact, oracle_b, c
     expected = predicted
     try:
         if premises is None:
-            actual = _oracles.enumerate_public_worlds(
+            actual = checker.enumerate_public_worlds(
                 observation, num_mines, status=GameStatus.PLAYING, logical_mines=logical, proofs=proofs)
         else:
             _, _, fixed, unresolved, remaining = premises.public_domains(
                 observation, num_mines, logical, proofs, index)
             if blocked_ancestor is not None:
                 raise _oracles.OracleANotEvaluated(blocked_ancestor)
-            actual = _oracles._enumerate_supported(observation, fixed, unresolved, remaining)
+            actual = checker._enumerate_supported(observation, fixed, unresolved, remaining)
         _need(type(actual) is _oracles.OracleAResult, "Oracle A returned the wrong class.")
         _need(blocked_ancestor is None and variables <= 16,
               "Oracle A claimed evaluation outside its qualified envelope.")
@@ -1423,6 +1502,7 @@ def _audit_run(result, variant, case, *, prerequisite=None):
     its bindings before reaching this function. This seam never executes a run.
     """
     findings = _Findings()
+    references = _ExactReferenceReuse()
     table = _physical.load_timing_table()
     effects, stream, stream_sound = _public_stream(result, variant, case, findings)
     costs, total, recorded = _costs(result, effects, table, findings)
@@ -1471,7 +1551,7 @@ def _audit_run(result, variant, case, *, prerequisite=None):
                         # never gain authority for subsequent D/E Oracle work.
                         for certificate in decision.local.certificates:
                             audit, span, passed = _audit_certificate(
-                                certificate, index, proofs, external, calls, findings, premises)
+                                certificate, index, proofs, external, calls, findings, premises, references)
                             acquisitions.append(audit)
                             spans.append(span)
                             proofs += (certificate,)
@@ -1487,13 +1567,14 @@ def _audit_run(result, variant, case, *, prerequisite=None):
                             if d_ready:
                                 d_b, span = _oracle_b(
                                     index, "D", effect.before_observation, case.num_mines,
-                                    decision.local.after.M, d_history, decision.phase_d, calls, findings, premises)
+                                    decision.local.after.M, d_history, decision.phase_d, calls, findings, premises,
+                                    references)
                                 b_audits.append(d_b)
                                 spans.append(span)
                                 a, span = _oracle_a(
                                     index, effect.before_observation, case.num_mines,
                                     decision.local.after.M, d_history, decision.phase_d, d_b.result, calls, findings,
-                                    premises)
+                                    premises, references)
                                 a_audits.append(a)
                                 spans.append(span)
                             else:
@@ -1508,7 +1589,7 @@ def _audit_run(result, variant, case, *, prerequisite=None):
                                     "INCOMPLETE", (reason,)))
                         for certificate in decision.exact_certificates:
                             audit, span, passed = _audit_certificate(
-                                certificate, index, proofs, external, calls, findings, premises)
+                                certificate, index, proofs, external, calls, findings, premises, references)
                             acquisitions.append(audit)
                             spans.append(span)
                             proofs += (certificate,)
@@ -1519,7 +1600,8 @@ def _audit_run(result, variant, case, *, prerequisite=None):
                                 e_history = _support_history(proofs, external, premises)
                                 e, span = _oracle_b(
                                     index, "E", effect.before_observation, case.num_mines,
-                                    decision.after.M, e_history, decision.phase_e, calls, findings, premises)
+                                    decision.after.M, e_history, decision.phase_e, calls, findings, premises,
+                                    references)
                                 b_audits.append(e)
                                 spans.append(span)
                             else:
