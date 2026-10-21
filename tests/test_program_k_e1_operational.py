@@ -37,6 +37,7 @@ from tests.test_program_k_e1_suite import _manual_audit
 
 ROOT = Path(__file__).resolve().parents[1]
 _AGGREGATE = None
+_ADMISSION = None
 _RESOURCE_DATA = None
 
 
@@ -45,6 +46,15 @@ def _aggregate():
     if _AGGREGATE is None:
         _AGGREGATE = suite.aggregate_e1_suite(*_data())
     return _AGGREGATE
+
+
+def _admission():
+    global _ADMISSION
+    if _ADMISSION is None:
+        aggregate = _aggregate()
+        _ADMISSION = e1_evaluator.admit_evaluator_phase(
+            aggregate.plan, aggregate, run_id="e1-operational-unit")
+    return _ADMISSION
 
 
 def _envelope(**changes):
@@ -84,9 +94,45 @@ def _noop_worker(kind, request, identity, envelope, connection, barrier):
     connection.close()
 
 
-def _manual_evaluation(aggregate, binding, *, falsification=False):
+def _bounded_compact_worker(kind, request, identity, envelope, connection, barrier):
+    """Spawn-only unit seam: fabricated answers, never any fixed research layout."""
+    import benchmark_board
+    encoded, digest = suite._encoded, suite._content_digest
+
+    def reject_whole(value, operation, *args, **kwargs):
+        if type(value) is suite.E1SuiteAggregate:
+            raise AssertionError("Whole suite crossed the compact worker boundary")
+        return operation(value, *args, **kwargs)
+
+    def fabricated_answer(case, sealed):
+        # Construct an explicitly invented unit answer only after the production
+        # worker has passed its Job barrier and source/request authentication.
+        cells = tuple((x, y) for y in range(case.height) for x in range(case.width)
+                      if (x, y) != (0, 0))[:case.num_mines]
+        return evaluator.HiddenAnswer(
+            sealed.case_id, sealed.run_id, sealed.width, sealed.height,
+            frozenset(cells), sealed.archive_digest, case.num_mines)
+
+    with ExitStack() as stack:
+        for owner, name in ((suite, "aggregate_e1_suite"),
+                            (e1_evaluator, "require_complete_suite"),
+                            (benchmark_board, "generate_board"),
+                            (execution, "execute_scheduled_entry"),
+                            (core_engine.MinesweeperEngine, "__init__"),
+                            (core_engine.MinesweeperEngine, "step")):
+            stack.enter_context(patch.object(owner, name, side_effect=AssertionError(name)))
+        stack.enter_context(patch.object(
+            suite, "_encoded", side_effect=lambda v, *a, **k: reject_whole(v, encoded, *a, **k)))
+        stack.enter_context(patch.object(
+            suite, "_content_digest", side_effect=lambda v, *a, **k: reject_whole(v, digest, *a, **k)))
+        stack.enter_context(patch.object(e1_evaluator, "_fixed_answer", side_effect=fabricated_answer))
+        operational._worker_main(kind, request, identity, envelope, connection, barrier)
+
+
+def _manual_evaluation(aggregate, binding, *, falsification=False, evaluation_run_id=None):
     """Declare evaluator records from public assertions, never an actual answer."""
-    run_id = "slice5-manual-evaluator-" + str(binding.schedule_entry.schedule_index)
+    run_id = ("slice5-manual-evaluator-" + str(binding.schedule_entry.schedule_index)
+              if evaluation_run_id is None else evaluation_run_id)
     sealed = e1_evaluator._seal(binding, run_id)
     answer_digest = "1" * 64
     findings = []
@@ -315,6 +361,24 @@ class SourceIdentityTests(unittest.TestCase):
             with self.subTest(filename=filename), patch.object(Path, "read_bytes", altered):
                 changed = operational.capture_operational_source_identity(_data()[0])
             self.assertNotEqual(original.digest, changed.digest)
+
+    def test_compact_source_validation_binds_every_current_source_and_runtime(self):
+        plan = _data()[0]
+        original = operational.capture_operational_source_identity(plan)
+        self.assertEqual(operational.require_evaluator_source_identity(original, plan.runtime), original)
+        read = Path.read_bytes
+        for filename in ("program_k_e1_evaluator.py", "program_k_e1_operational.py",
+                         "program_k_e1_harness.py", "benchmark_board.py",
+                         "program_k_e1_execution.py", "program_k_e1_audit.py",
+                         "program_k_e1_suite.py", "program_k_capability.py"):
+            def altered(path, target=filename):
+                raw = read(path)
+                return raw + b"\n# compact source drift probe\n" if path.name == target else raw
+            with self.subTest(filename=filename), patch.object(Path, "read_bytes", altered):
+                with self.assertRaises(ValueError):
+                    operational.require_evaluator_source_identity(original, plan.runtime)
+        with self.assertRaises(ValueError):
+            operational.require_evaluator_source_identity(original, replace(plan.runtime, node="stale"))
 
     def test_prior_slice_byte_drift_is_rejected(self):
         read = Path.read_bytes
@@ -613,42 +677,40 @@ class PublicDispatchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate((_data()[1][0], _data()[2][0], None))
 
-    def test_evaluator_requires_complete_exact_54_run_aggregate(self):
-        aggregate = _aggregate()
-        binding = next(b for b in aggregate.bindings if b.schedule_entry.variant == "K-P0")
-        for invalid in (None, _corrupt(aggregate, bindings=aggregate.bindings[:-1])):
+    def test_evaluator_requires_complete_exact_phase_admission(self):
+        admission = _admission()
+        target = admission.targets[0]
+        for invalid in (None, _corrupt(admission, targets=admission.targets[:-1]), _aggregate()):
             with self.subTest(invalid=type(invalid).__name__), \
                     patch.object(operational, "_supervise_e1") as supervise:
                 with self.assertRaises(ValueError):
                     operational.supervise_posthoc_evaluator(
-                        _data()[0], invalid, binding, _envelope(),
-                        job_started_ns=time.monotonic_ns(), archive_used_bytes=0,
-                        evaluation_run_id="unit-evaluator")
+                        invalid, target, _envelope(),
+                        job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
                 supervise.assert_not_called()
 
     def test_evaluator_dispatch_is_posthoc_and_target_is_kp0_only(self):
-        aggregate = _aggregate()
-        binding = next(b for b in aggregate.bindings if b.schedule_entry.variant == "K-P0")
+        admission = _admission()
+        target = admission.targets[0]
         with patch.object(operational, "_supervise_e1", return_value=None) as supervise, \
-                patch.object(e1_evaluator, "evaluate_scheduled_kp0",
+                patch.object(e1_evaluator, "evaluate_compact_request",
                              side_effect=AssertionError("No truth before worker barrier")) as evaluate:
             operational.supervise_posthoc_evaluator(
-                _data()[0], aggregate, binding, _envelope(),
-                job_started_ns=time.monotonic_ns(), archive_used_bytes=0,
-                evaluation_run_id="unit-evaluator")
+                admission, target, _envelope(),
+                job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
         supervise.assert_called_once()
         self.assertEqual(supervise.call_args.args[0], "POST_HOC_EVALUATOR")
-        self.assertEqual(supervise.call_args.args[1], binding.schedule_entry)
+        self.assertEqual(supervise.call_args.args[1], target.schedule_entry)
+        self.assertEqual(supervise.call_args.args[4], (target, admission.target_digests[0]))
         evaluate.assert_not_called()
 
     def test_evaluator_parent_rejects_control_binding_without_worker(self):
-        aggregate = _aggregate()
+        admission = _admission()
         with patch.object(operational, "_supervise_e1") as supervise:
             with self.assertRaises(ValueError):
                 operational.supervise_posthoc_evaluator(
-                    _data()[0], aggregate, aggregate.bindings[0], _envelope(),
-                    job_started_ns=time.monotonic_ns(), archive_used_bytes=0,
-                    evaluation_run_id="unit-evaluator")
+                    admission, _aggregate().bindings[0], _envelope(),
+                    job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
         supervise.assert_not_called()
 
 
@@ -819,7 +881,7 @@ class ProcessSupervisorTests(unittest.TestCase):
         finding = _manual_evaluation(_aggregate(), binding, falsification=True)
         result, _, context, _ = self.supervise(
             kind="POST_HOC_EVALUATOR", entry=binding.schedule_entry,
-            request=(finding.evaluation_run_id,),
+            request=(SimpleNamespace(evaluation_run_id=finding.evaluation_run_id),),
             messages=_result_messages((None, None, finding)), finish=True)
         self.assertEqual(result.receipt.status, "COMPLETE", result.receipt.reason)
         self.assertEqual(result.evaluation.classification, "G1_FALSIFICATION")
@@ -830,7 +892,7 @@ class ProcessSupervisorTests(unittest.TestCase):
         binding = next(b for b in _aggregate().bindings if b.schedule_entry.variant == "K-P0")
         result, _, context, _ = self.supervise(
             kind="POST_HOC_EVALUATOR", entry=binding.schedule_entry,
-            request=("manual-abort",), aborted=True)
+            request=(SimpleNamespace(evaluation_run_id="manual-abort"),), aborted=True)
         self.assertEqual(result.receipt.status, "INCOMPLETE")
         self.assertIsNone(result.evaluation)
         self.assertEqual(result.receipt.physical_inputs, 0)
@@ -839,7 +901,8 @@ class ProcessSupervisorTests(unittest.TestCase):
     def test_evaluator_physical_input_message_is_rejected(self):
         binding = next(b for b in _aggregate().bindings if b.schedule_entry.variant == "K-P0")
         result, _, _, _ = self.supervise(
-            kind="POST_HOC_EVALUATOR", entry=binding.schedule_entry, request=("manual-abort",),
+            kind="POST_HOC_EVALUATOR", entry=binding.schedule_entry,
+            request=(SimpleNamespace(evaluation_run_id="manual-abort"),),
             messages=(pickle.dumps(("STARTED", None)), pickle.dumps(("BEFORE_INPUT", None))))
         self.assertEqual(result.receipt.status, "INCOMPLETE")
         self.assertEqual(result.receipt.physical_inputs, 0)
@@ -869,6 +932,56 @@ class ProcessSupervisorTests(unittest.TestCase):
 
 
 class WorkerDispatchTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Actual Windows compact spawn/Job unit fixtures")
+    def test_all_18_spawned_compact_workers_use_only_fabricated_unit_answers(self):
+        admission = _admission()
+        supervise = operational._supervise_e1
+        encoded, digest = suite._encoded, suite._content_digest
+        before = {child.pid for child in multiprocessing.active_children()}
+        dispatched, completed = [], []
+
+        def reject_whole(value, operation, *args, **kwargs):
+            self.assertIsNot(type(value), suite.E1SuiteAggregate)
+            return operation(value, *args, **kwargs)
+
+        def unit_spawn(kind, entry, identity, envelope, request, **kwargs):
+            target, expected_digest = request
+            self.assertIs(type(target), e1_evaluator.E1EvaluatorRequest)
+            self.assertEqual(expected_digest, e1_evaluator.request_digest(target))
+            self.assertEqual(entry, target.schedule_entry)
+            dispatched.append(entry.schedule_index)
+            return supervise(kind, entry, identity, envelope, request,
+                             worker_target=_bounded_compact_worker, **kwargs)
+
+        with ExitStack() as stack:
+            for owner, name in ((suite, "aggregate_e1_suite"),
+                                (e1_evaluator, "require_complete_suite"),
+                                (e1_evaluator, "_fixed_answer"),
+                                (evaluator, "evaluate_falsification")):
+                stack.enter_context(patch.object(owner, name, side_effect=AssertionError(name)))
+            stack.enter_context(patch.object(
+                suite, "_encoded", side_effect=lambda v, *a, **k: reject_whole(v, encoded, *a, **k)))
+            stack.enter_context(patch.object(
+                suite, "_content_digest", side_effect=lambda v, *a, **k: reject_whole(v, digest, *a, **k)))
+            stack.enter_context(patch.object(operational, "_supervise_e1", side_effect=unit_spawn))
+            for target in admission.targets:
+                with self.subTest(index=target.schedule_entry.schedule_index):
+                    result = operational.supervise_posthoc_evaluator(
+                        admission, target, _envelope(),
+                        job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
+                    self.assertEqual(result.receipt.status, "COMPLETE", result.receipt.reason)
+                    self.assertEqual(result.receipt.exit_code, 0)
+                    self.assertEqual(result.receipt.physical_inputs, 0)
+                    self.assertIsNotNone(result.receipt.memory_evidence)
+                    self.assertEqual(result.evaluation.finding.sealed_input, target.sealed_input)
+                    self.assertFalse(result.evaluation.proof_upgrade_allowed)
+                    self.assertIsNone(result.archive)
+                    self.assertIsNone(result.audit)
+                    completed.append(result.receipt.schedule_index)
+        self.assertEqual(dispatched, list(range(2, 54, 3)))
+        self.assertEqual(completed, dispatched)
+        self.assertTrue({child.pid for child in multiprocessing.active_children()} <= before)
+
     def test_scheduled_worker_exact_single_dispatch_no_tracer_and_audit_after_monitor(self):
         plan, archives, audits = _data()
         entry = plan.schedule[0]
@@ -954,27 +1067,94 @@ class WorkerDispatchTests(unittest.TestCase):
 
     def test_evaluator_worker_calls_adapter_once_and_never_runner_or_engine(self):
         aggregate = _aggregate()
-        binding = next(b for b in aggregate.bindings if b.schedule_entry.variant == "K-P0")
-        finding = _manual_evaluation(aggregate, binding)
-        identity = operational.capture_operational_source_identity(aggregate.plan)
+        admission = _admission()
+        target, expected_digest = admission.targets[0], admission.target_digests[0]
+        binding = aggregate.bindings[target.schedule_entry.schedule_index]
+        finding = _manual_evaluation(aggregate, binding, evaluation_run_id=target.evaluation_run_id)
+        identity = admission.operational_source_identity
         channel, connection, barrier = Mock(), Mock(), Mock()
         with patch.object(operational, "_WorkerChannel", return_value=channel), \
-                patch.object(e1_evaluator, "evaluate_scheduled_kp0", return_value=finding) as evaluate, \
-                patch.object(e1_evaluator, "verify_e1_finding", wraps=e1_evaluator.verify_e1_finding) as verify, \
+                patch.object(e1_evaluator, "evaluate_compact_request", return_value=finding) as evaluate, \
+                patch.object(e1_evaluator, "verify_compact_finding", wraps=e1_evaluator.verify_compact_finding) as verify, \
                 patch.object(execution, "execute_scheduled_entry", side_effect=AssertionError("runner")) as execute, \
                 patch.object(core_engine.MinesweeperEngine, "step", side_effect=AssertionError("Engine")) as step:
             operational._worker_main(
                 "POST_HOC_EVALUATOR",
-                (aggregate.plan, aggregate, binding, finding.evaluation_run_id),
+                (target, expected_digest),
                 identity, _envelope(), connection, barrier)
-        evaluate.assert_called_once_with(
-            aggregate.plan, aggregate, binding, evaluation_run_id=finding.evaluation_run_id)
+        evaluate.assert_called_once_with(target, expected_digest, identity)
         verify.assert_called_once()
         execute.assert_not_called()
         step.assert_not_called()
         barrier.wait.assert_called_once_with()
         channel.finish.assert_called_once_with((None, None, finding))
         self.assertNotIn("BEFORE_INPUT", repr(channel.event.call_args_list))
+
+    def test_evaluator_worker_rejects_source_drift_before_comparison(self):
+        admission = _admission()
+        target, expected_digest = admission.targets[0], admission.target_digests[0]
+        read = Path.read_bytes
+        for filename in ("program_k_e1_evaluator.py", "program_k_e1_operational.py"):
+            def changed(path, name=filename):
+                raw = read(path)
+                return raw + b"\n# changed before worker comparison\n" if path.name == name else raw
+            with self.subTest(filename=filename), patch.object(Path, "read_bytes", changed), \
+                    patch.object(operational, "_WorkerChannel") as channel, \
+                    patch.object(e1_evaluator, "evaluate_compact_request") as evaluate:
+                with self.assertRaises(ValueError):
+                    operational._worker_main(
+                        "POST_HOC_EVALUATOR", (target, expected_digest),
+                        admission.operational_source_identity, _envelope(), Mock(), Mock())
+                evaluate.assert_not_called()
+                channel.return_value.finish.assert_not_called()
+
+    def test_all_18_parent_and_worker_paths_transfer_only_compact_values(self):
+        aggregate, admission = _aggregate(), _admission()
+        findings = tuple(_manual_evaluation(
+            aggregate, aggregate.bindings[target.schedule_entry.schedule_index],
+            evaluation_run_id=target.evaluation_run_id) for target in admission.targets)
+        encoded, digest = suite._encoded, suite._content_digest
+
+        def no_aggregate_encode(value, *args, **kwargs):
+            self.assertIsNot(type(value), suite.E1SuiteAggregate)
+            return encoded(value, *args, **kwargs)
+
+        def no_aggregate_digest(value, *args, **kwargs):
+            self.assertIsNot(type(value), suite.E1SuiteAggregate)
+            return digest(value, *args, **kwargs)
+
+        with ExitStack() as stack:
+            for owner, name in ((suite, "aggregate_e1_suite"),
+                                (e1_evaluator, "require_complete_suite"),
+                                (e1_evaluator, "_fixed_answer"),
+                                (execution, "execute_scheduled_entry")):
+                stack.enter_context(patch.object(owner, name, side_effect=AssertionError(name)))
+            stack.enter_context(patch.object(suite, "_encoded", side_effect=no_aggregate_encode))
+            stack.enter_context(patch.object(suite, "_content_digest", side_effect=no_aggregate_digest))
+            for target, expected_digest, finding in zip(
+                    admission.targets, admission.target_digests, findings):
+                with self.subTest(index=target.schedule_entry.schedule_index), \
+                        patch.object(operational, "_supervise_e1") as supervise:
+                    operational.supervise_posthoc_evaluator(
+                        admission, target, _envelope(),
+                        job_started_ns=time.monotonic_ns(), archive_used_bytes=0)
+                called = supervise.call_args
+                self.assertEqual(called.args[4], (target, expected_digest))
+                # Equal detached values survive the exact spawn serialization boundary.
+                transported = pickle.loads(pickle.dumps(called.args[4]))
+                self.assertEqual(transported, (target, expected_digest))
+                channel = Mock()
+                with patch.object(operational, "_WorkerChannel", return_value=channel), \
+                        patch.object(e1_evaluator, "evaluate_compact_request", return_value=finding):
+                    operational._worker_main(
+                        called.args[0], transported, called.args[2], called.args[3], Mock(), Mock())
+                channel.finish.assert_called_once_with((None, None, finding))
+                called.kwargs["validate"]((None, None, finding))
+                for wrong in ((aggregate.bindings[0].archive, None, finding),
+                              (None, aggregate.bindings[0].audit, finding),
+                              (None, None, _corrupt(finding, suite_content_digest="f" * 64))):
+                    with self.assertRaises(ValueError):
+                        called.kwargs["validate"](wrong)
 
 
 class ReceiptIntegrityTests(unittest.TestCase):

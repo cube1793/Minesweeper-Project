@@ -34,7 +34,7 @@ QUALIFICATION_SOURCE_PATHS = (
     "experiments/program_k_e1_persistence.py",
 )
 # Recomputed from the clean committed post-Slice-5 baseline, not prompt text.
-ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "6dd0477b05b7ce86e2d37e6163d4b4474dd8fe9c99f8205bb2cfa5987e8b17cd"
+ACCEPTED_OPERATIONAL_SOURCE_DIGEST = "c538ef92a751e5cbb3d6cafd2a5a9cf8c0a154151161c797a77f340f372a78d5"
 _AUTHORITIES = _execution._AUTHORITY_FIELDS
 _ERRORS = (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError)
 # Fixed reconciliation bodies, distinct from the live orchestration entrypoints.
@@ -734,15 +734,15 @@ def execute_e1(*, run_id, plan, envelope, source_identity, authorization_referen
             if aggregate.suite_status == "FAIL":
                 defects.append("SUITE_FAIL: " + "; ".join(aggregate.semantic_failures))
             elif source_current():
-                for binding in aggregate.bindings:
-                    if binding.schedule_entry.variant != "K-P0":
-                        continue
+                # This exact aggregate was just constructed from the 54 supervised
+                # results. Project it once; no per-target aggregate admission.
+                admission = _evaluator._admit_constructed_suite(plan, aggregate, run_id=run_id)
+                for request in admission.targets:
                     if not source_current():
                         break
-                    index = binding.schedule_entry.schedule_index
                     result = _operational.supervise_posthoc_evaluator(
-                        plan, aggregate, binding, envelope, job_started_ns=started,
-                        archive_used_bytes=used, evaluation_run_id=evaluation_run_id(run_id, index))
+                        admission, request, envelope, job_started_ns=started,
+                        archive_used_bytes=used)
                     _need(type(result) is _operational.E1OperationResult, "Evaluator supervisor returned a non-result.")
                     evaluations.append(result)
                     used = result.receipt.archive_used_after_bytes

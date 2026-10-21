@@ -176,6 +176,28 @@ def capture_operational_source_identity(plan):
     return _capture_operational_source_identity(plan, Path(__file__).resolve().parents[1])
 
 
+def require_evaluator_source_identity(identity, runtime):
+    """Authenticate the compact evaluator's source chain without a plan/result graph."""
+    identity = _checked(identity, E1OperationalSourceIdentity)
+    runtime = _checked(runtime, _e1.RuntimeIdentity)
+    _need(runtime == _e1.capture_runtime_identity(),
+          "Evaluator runtime/executable identity differs.")
+    _need(_harness.content_digest(_harness.capture_source_identity())
+          == identity.plan_source_identity.base_source_digest,
+          "Evaluator base source identity differs.")
+    root = Path(__file__).resolve().parents[1]
+    files = (identity.plan_source_identity.files
+             + (identity.execution_source_identity.execution_file,
+                identity.audit_source_identity.audit_file,
+                identity.suite_source_identity.suite_file)
+             + identity.files)
+    for item in files:
+        raw = (root / item.path).read_bytes()
+        _need((hashlib.sha256(raw).hexdigest(), len(raw)) == (item.sha256, item.size_bytes),
+              "Evaluator source bytes differ: " + item.path)
+    return identity
+
+
 def require_operating_envelope(envelope):
     """Admit the existing numeric contract and this runtime's E1 monitoring context."""
     envelope = _harness.require_envelope(envelope)
@@ -603,12 +625,11 @@ def _worker_main(kind, request, identity, envelope, connection, barrier):
             payload = _scheduled_worker_operation(plan, entry, identity, envelope, report=channel.event)
         elif kind == "POST_HOC_EVALUATOR":
             from experiments import program_k_e1_evaluator as evaluator
-            plan, aggregate, binding, run_id = request
-            _need(capture_operational_source_identity(plan) == identity, "Evaluator source precheck differs.")
-            finding = evaluator.evaluate_scheduled_kp0(
-                plan, aggregate, binding, evaluation_run_id=run_id)
-            evaluator.verify_e1_finding(plan, aggregate, binding, finding, evaluation_run_id=run_id)
-            _need(capture_operational_source_identity(plan) == identity, "Evaluator source postcheck differs.")
+            target, expected_digest = request
+            evaluator.validate_compact_request(target, expected_digest, identity)
+            finding = evaluator.evaluate_compact_request(target, expected_digest, identity)
+            evaluator.verify_compact_finding(target, expected_digest, identity, finding)
+            require_evaluator_source_identity(identity, target.case.runtime)
             payload = (None, None, finding)
         else:
             raise E1OperationalError("Unknown E1 operation kind.")
@@ -647,7 +668,7 @@ def _supervise_e1(kind, entry, identity, envelope, request, *, job_started_ns,
     _integer(archive_used_bytes, "archive_used_bytes")
     started = time.monotonic_ns()
     _need(job_started_ns <= started, "Whole-job start must not be in the future.")
-    run_id = request[-1] if kind == "POST_HOC_EVALUATOR" else None
+    run_id = request[0].evaluation_run_id if kind == "POST_HOC_EVALUATOR" else None
     operation_id = f"{kind}:{entry.schedule_index:02d}" + (f":{run_id}" if run_id is not None else "")
     context = multiprocessing.get_context("spawn")
     parent, child = context.Pipe(duplex=True)
@@ -909,25 +930,23 @@ def supervise_scheduled_run(plan, schedule_index, envelope, *, job_started_ns, a
                          validate=validate)
 
 
-def supervise_posthoc_evaluator(plan, suite_aggregate, kp0_binding, envelope, *,
-                                job_started_ns, archive_used_bytes, evaluation_run_id):
+def supervise_posthoc_evaluator(admission, request, envelope, *,
+                                job_started_ns, archive_used_bytes):
     """One post-hoc worker after all fixed archives exist; no truth in the parent."""
     from experiments import program_k_e1_evaluator as evaluator
-    binding = evaluator.validate_evaluator_request(plan, suite_aggregate, kp0_binding)
-    _need(type(evaluation_run_id) is str and bool(evaluation_run_id.strip()),
-          "Explicit evaluator run identifier is required.")
+    expected_digest = evaluator.validate_admitted_request(admission, request)
     envelope = require_operating_envelope(envelope)
-    identity = capture_operational_source_identity(plan)
+    identity = admission.operational_source_identity
+    evaluator.validate_compact_request(request, expected_digest, identity)
 
     def validate(payload):
         _need(payload[0] is None and payload[1] is None, "Evaluator returned solver records.")
-        evaluator.verify_e1_finding(plan, suite_aggregate, binding, payload[2],
-                                    evaluation_run_id=evaluation_run_id)
-        _need(capture_operational_source_identity(plan) == identity, "Parent source postcheck differs.")
+        evaluator.verify_compact_finding(request, expected_digest, identity, payload[2])
+        require_evaluator_source_identity(identity, request.case.runtime)
 
     return _supervise_e1(
-        "POST_HOC_EVALUATOR", binding.schedule_entry, identity, envelope,
-        (plan, suite_aggregate, binding, evaluation_run_id),
+        "POST_HOC_EVALUATOR", request.schedule_entry, identity, envelope,
+        (request, expected_digest),
         job_started_ns=job_started_ns, archive_used_bytes=archive_used_bytes, validate=validate)
 
 

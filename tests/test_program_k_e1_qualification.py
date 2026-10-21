@@ -229,7 +229,7 @@ class QualificationCase(unittest.TestCase):
         return {gate.gate_id: gate.status for gate in result.gates}
 
     def execute_mocked(self, *, scheduled=None, evaluated=None, aggregate=None,
-                       source_side_effect=None):
+                       source_side_effect=None, construct_suite=False):
         record = self.record
         scheduled = record.scheduled_results if scheduled is None else scheduled
         evaluated = record.evaluator_results if evaluated is None else evaluated
@@ -242,9 +242,10 @@ class QualificationCase(unittest.TestCase):
 
         evaluated_iterator = iter(evaluated)
 
-        def evaluated_call(plan, supplied, binding, envelope, **kwargs):
-            log.append(("evaluator", binding.schedule_entry.schedule_index, kwargs))
-            self.assertIs(supplied, aggregate)
+        def evaluated_call(admission, request, envelope, **kwargs):
+            log.append(("evaluator", request.schedule_entry.schedule_index,
+                        {**kwargs, "evaluation_run_id": request.evaluation_run_id}))
+            e1_evaluator.validate_admitted_request(admission, request)
             return next(evaluated_iterator)
 
         with ExitStack() as stack:
@@ -265,7 +266,8 @@ class QualificationCase(unittest.TestCase):
             evaluate = stack.enter_context(patch.object(
                 operational, "supervise_posthoc_evaluator", side_effect=evaluated_call))
             combine = stack.enter_context(patch.object(
-                suite, "aggregate_e1_suite", return_value=aggregate))
+                suite, "aggregate_e1_suite", **({"wraps": suite.aggregate_e1_suite}
+                                              if construct_suite else {"return_value": aggregate})))
             result = qualification.execute_e1(
                 run_id=record.run_id, plan=record.plan,
                 envelope=record.operating_envelope, source_identity=record.source_identity,
@@ -590,6 +592,46 @@ class ReconstructionTests(QualificationCase):
 
 
 class MockOrchestrationTests(QualificationCase):
+    def test_live_phase_constructs_admits_and_hashes_once_before_18_compact_dispatches(self):
+        phase = {"active": False, "dispatched": 0}
+        whole_hashes, admissions = [], []
+        content_digest = suite._content_digest
+        admit = e1_evaluator._admit_constructed_suite
+        validate = e1_evaluator.validate_admitted_request
+
+        def digest(value):
+            if phase["active"] and type(value) is suite.E1SuiteAggregate:
+                whole_hashes.append(value)
+                self.assertEqual(phase["dispatched"], 0, "Whole-suite hash during dispatch")
+            return content_digest(value)
+
+        def admission(plan, aggregate, *, run_id):
+            phase["active"] = True
+            admitted = admit(plan, aggregate, run_id=run_id)
+            admissions.append(admitted)
+            return admitted
+
+        def target(admitted, request):
+            self.assertEqual(len(admissions), 1)
+            self.assertEqual(len(whole_hashes), 1)
+            result = validate(admitted, request)
+            phase["dispatched"] += 1
+            if phase["dispatched"] == 18:
+                # Record construction below is historical reconciliation, outside
+                # the live evaluator phase, and still admits its retained graph.
+                phase["active"] = False
+            return result
+
+        with patch.object(e1_evaluator, "require_complete_suite",
+                          side_effect=AssertionError("Repeated whole-suite admission")), \
+                patch.object(e1_evaluator, "_admit_constructed_suite", side_effect=admission), \
+                patch.object(e1_evaluator, "validate_admitted_request", side_effect=target), \
+                patch.object(suite, "_content_digest", side_effect=digest):
+            result, run, evaluate, combine, *_ = self.execute_mocked(construct_suite=True)
+        self.assertEqual((run.call_count, combine.call_count, len(admissions),
+                          len(whole_hashes), evaluate.call_count), (54, 1, 1, 1, 18))
+        self.assertEqual(result.evaluator_results, self.record.evaluator_results)
+
     def test_exact_54_scheduled_and_18_evaluator_calls_once(self):
         result, run, evaluate, combine, capture, preflight, log = self.execute_mocked()
         self.assertEqual(run.call_count, 54)

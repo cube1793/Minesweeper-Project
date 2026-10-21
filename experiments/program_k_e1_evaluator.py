@@ -7,10 +7,11 @@ finding structure and answer digest, never the complete layout. No result can
 resume execution, establish public proof, or select a later experiment.
 """
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import asdict, dataclass, fields, replace
 import hashlib
 import json
 from pathlib import Path
+import re
 
 import benchmark_board as _board
 from experiments import program_k_e1_harness as _e1
@@ -110,6 +111,187 @@ def _seal(binding, evaluation_run_id):
     return _harness.seal_execution_archive(
         _harness.ExecutionArchive(binding.case.case_id, "K-P0", binding.archive.result),
         run_id=evaluation_run_id)
+
+
+def _phase_run_id(run_id):
+    _need(type(run_id) is str
+          and re.fullmatch(r"e1-[A-Za-z0-9][A-Za-z0-9_-]{0,75}", run_id) is not None,
+          "An exact qualification run identity is required.")
+
+
+@dataclass(frozen=True, slots=True)
+class E1EvaluatorRequest:
+    """One public seal, with no plan, execution result, audit or answer graph.
+
+    Its digest is compared with the independently retained phase commitment.
+    A self-consistent request alone is never evidence of complete-suite membership.
+    """
+
+    schedule_entry: _e1.ScheduleEntry
+    case: _e1.SealedCaseRegistration
+    plan_source_digest: str
+    suite_source_digest: str
+    suite_content_digest: str
+    archive_content_digest: str
+    evaluation_run_id: str
+    sealed_input: _evaluator.SealedEvaluatorInput
+
+    def __post_init__(self):
+        _need(type(self.schedule_entry) is _e1.ScheduleEntry
+              and type(self.case) is _e1.SealedCaseRegistration
+              and type(self.sealed_input) is _evaluator.SealedEvaluatorInput,
+              "Exact detached schedule, case and public seal required.")
+        entry, case, sealed = (replace(self.schedule_entry), replace(self.case),
+                               replace(self.sealed_input))
+        _need(entry == _e1.build_schedule()[entry.schedule_index]
+              and entry.variant == "K-P0" and case.case_id == entry.case_id,
+              "Compact target is not an exact fixed K-P0 schedule member.")
+        for name in ("plan_source_digest", "suite_source_digest", "suite_content_digest",
+                     "archive_content_digest"):
+            _sha(getattr(self, name))
+        suffix = f"-kp0-{entry.schedule_index:02d}"
+        _need(type(self.evaluation_run_id) is str and self.evaluation_run_id.endswith(suffix),
+              "Evaluator run identity does not bind its schedule index.")
+        _phase_run_id(self.evaluation_run_id[:-len(suffix)])
+        _need((sealed.case_id, sealed.run_id, sealed.width, sealed.height)
+              == (case.case_id + ":K-P0", self.evaluation_run_id, case.width, case.height),
+              "Public seal differs from the compact case/run binding.")
+
+
+def request_bytes(request):
+    """Closed value encoding of one target, including its public assertions."""
+    _need(type(request) is E1EvaluatorRequest, "Exact compact evaluator request required.")
+    checked = replace(request)
+    return json.dumps(asdict(checked), sort_keys=True, ensure_ascii=True,
+                      separators=(",", ":"), allow_nan=False).encode("ascii")
+
+
+def request_digest(request):
+    return hashlib.sha256(request_bytes(request)).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class E1EvaluatorAdmission:
+    """The 18 immutable projections and commitments from one admitted suite.
+
+    This value stays in the coordinator. Only one target and its independent
+    commitment cross each worker boundary. Neither object identity nor a cache
+    is used as membership authority.
+    """
+
+    run_id: str
+    operational_source_identity: object
+    suite_content_digest: str
+    targets: tuple[E1EvaluatorRequest, ...]
+    target_digests: tuple[str, ...]
+
+    def __post_init__(self):
+        from experiments import program_k_e1_operational as operational
+        _phase_run_id(self.run_id)
+        _sha(self.suite_content_digest)
+        _need(type(self.operational_source_identity) is operational.E1OperationalSourceIdentity,
+              "Exact admitted operational source identity required.")
+        replace(self.operational_source_identity)
+        _admission_catalog(self)
+        for target, digest in zip(self.targets, self.target_digests):
+            _need(request_digest(target) == digest, "Admitted target commitment differs.")
+
+
+def _admission_catalog(admission):
+    """Check the small fixed catalog; never traverse unrelated public seals."""
+    from experiments import program_k_e1_operational as operational
+    _phase_run_id(admission.run_id)
+    _sha(admission.suite_content_digest)
+    _need(type(admission.targets) is tuple and len(admission.targets) == 18
+          and type(admission.target_digests) is tuple and len(admission.target_digests) == 18,
+          "Exactly 18 ordered evaluator targets and commitments required.")
+    source = admission.operational_source_identity
+    _need(type(source) is operational.E1OperationalSourceIdentity,
+          "Exact admitted operational source identity required.")
+    replace(source)
+    plan_digest, suite_digest = source.plan_source_identity.digest, source.suite_source_identity.digest
+    for index, target, digest in zip(range(2, 54, 3), admission.targets, admission.target_digests):
+        _need(type(target) is E1EvaluatorRequest
+              and type(target.schedule_entry) is _e1.ScheduleEntry
+              and target.schedule_entry == _e1.build_schedule()[index]
+              and (target.plan_source_digest, target.suite_source_digest,
+                   target.suite_content_digest, target.evaluation_run_id)
+              == (plan_digest, suite_digest, admission.suite_content_digest,
+                  f"{admission.run_id}-kp0-{index:02d}"),
+              "Missing, reordered, substituted or stale admitted evaluator target.")
+        _sha(digest)
+
+
+def _admit_constructed_suite(plan, aggregate, *, run_id):
+    """Project the aggregate just returned by live orchestration's sole builder.
+
+    Private construction seam, not an admission API for supplied aggregates.
+    External aggregate callers use admit_evaluator_phase and its reconstruction.
+    """
+    from experiments import program_k_e1_operational as operational
+    _phase_run_id(run_id)
+    _need(type(plan) is _e1.E1Plan and type(aggregate) is _suite.E1SuiteAggregate,
+          "An exact constructed plan/suite is required.")
+    replace(plan)
+    source = operational.capture_operational_source_identity(plan)
+    _need(aggregate.plan == plan and aggregate.plan_identity == plan.source_identity.digest
+          and aggregate.source_identity == source.suite_source_identity
+          and aggregate.coverage.status == "PASS"
+          and aggregate.coverage.expected_count == aggregate.coverage.archive_count
+          == aggregate.coverage.audit_count == 54
+          and type(aggregate.bindings) is tuple and len(aggregate.bindings) == 54
+          and aggregate.suite_status in ("PASS", "INCOMPLETE"),
+          "Evaluator phase requires the complete non-FAIL constructed suite.")
+    # The sole whole-suite content digest for the live evaluator phase.
+    digest = _suite._content_digest(aggregate)
+    targets = []
+    for entry, binding in zip(plan.schedule, aggregate.bindings):
+        _need(type(binding) is _suite.AuditedScheduledRun
+              and binding.schedule_entry == entry, "Constructed suite order differs.")
+        # The suite builder also supports incomplete diagnostic records; live
+        # admission requires every scheduled archive to be terminal.
+        replace(binding.archive)
+        if entry.variant == "K-P0":
+            evaluation_id = f"{run_id}-kp0-{entry.schedule_index:02d}"
+            targets.append(E1EvaluatorRequest(
+                entry, binding.case, plan.source_identity.digest, aggregate.source_identity.digest,
+                digest, binding.archive_content_digest, evaluation_id, _seal(binding, evaluation_id)))
+    return E1EvaluatorAdmission(run_id, source, digest, tuple(targets),
+                                tuple(request_digest(target) for target in targets))
+
+
+def admit_evaluator_phase(plan, aggregate, *, run_id):
+    """One complete admission for an externally supplied public aggregate."""
+    return _admit_constructed_suite(
+        plan, require_complete_suite(plan, aggregate), run_id=run_id)
+
+
+def validate_compact_request(request, expected_digest, source_identity):
+    """Authenticate one transported target against its independent commitment."""
+    from experiments import program_k_e1_operational as operational
+    _sha(expected_digest)
+    _need(request_digest(request) == expected_digest,
+          "Compact request differs from the admitted target commitment.")
+    operational.require_evaluator_source_identity(source_identity, request.case.runtime)
+    _need((request.plan_source_digest, request.suite_source_digest)
+          == (source_identity.plan_source_identity.digest, source_identity.suite_source_identity.digest),
+          "Compact request source binding differs.")
+    return request
+
+
+def validate_admitted_request(admission, request):
+    """Truth-free membership check against persistent admitted values."""
+    _need(type(admission) is E1EvaluatorAdmission and type(request) is E1EvaluatorRequest,
+          "Exact immutable admission and compact request required.")
+    _admission_catalog(admission)
+    # Validate shape before indexing; bools and CONTROL targets cannot select a slot.
+    request_bytes(request)
+    position = request.schedule_entry.schedule_index // 3
+    expected_digest = admission.target_digests[position]
+    _need(request_bytes(request) == request_bytes(admission.targets[position]),
+          "Request is not the exact admitted K-P0 projection.")
+    validate_compact_request(request, expected_digest, admission.operational_source_identity)
+    return expected_digest
 
 
 def _fixed_answer(case, sealed):
@@ -332,3 +514,54 @@ def evaluate_scheduled_kp0(plan, aggregate, binding, *, evaluation_run_id):
         if type(error) is E1EvaluatorError:
             raise
         raise E1EvaluatorError("Post-hoc fixed-board evaluation refused: " + str(error)) from error
+
+
+def verify_compact_finding(request, expected_digest, source_identity, finding):
+    """Parent/worker verification against one admitted public projection only.
+
+    Hidden-answer binding is checked by the accepted comparator in the worker;
+    this truth-free verifier retains the original no-proof-upgrade semantics.
+    Historical reconstruction continues to use _verify_admitted_finding.
+    """
+    validate_compact_request(request, expected_digest, source_identity)
+    _need(type(finding) is E1EvaluatorFinding, "Exact E1 evaluator finding required.")
+    finding = replace(finding)
+    entry, case, sealed = request.schedule_entry, request.case, request.sealed_input
+    _need((finding.schedule_index, finding.case_id, finding.repetition, finding.variant,
+           finding.evaluation_run_id, finding.plan_source_digest, finding.suite_source_digest,
+           finding.suite_content_digest, finding.archive_content_digest, finding.board_fingerprint)
+          == (entry.schedule_index, case.case_id, entry.repetition, "K-P0",
+              request.evaluation_run_id, request.plan_source_digest, request.suite_source_digest,
+              request.suite_content_digest, request.archive_content_digest, case.board_fingerprint),
+          "Finding differs from its admitted target/source/archive binding.")
+    _need((finding.evaluator_source_sha256, finding.evaluator_source_size_bytes)
+          == (source_identity.evaluator_file.sha256, source_identity.evaluator_file.size_bytes),
+          "Finding evaluator source differs.")
+    _need(finding.finding.sealed_input == sealed
+          and finding.sealed_archive_digest == sealed.archive_digest,
+          "Finding public seal differs from the exact admitted input.")
+    canonical_bytes(finding)
+    return finding
+
+
+def evaluate_compact_request(request, expected_digest, source_identity):
+    """Worker-only falsification; no aggregate reconstruction, hash or transport."""
+    validate_compact_request(request, expected_digest, source_identity)
+    try:
+        sealed = request.sealed_input
+        answer = _fixed_answer(request.case, sealed)
+        with _evaluator.collect_evaluator_diagnostics() as calls:
+            finding = _evaluator.evaluate_falsification(sealed, answer)
+        _evaluator.verify_bound_finding(finding, sealed, answer)
+        entry = request.schedule_entry
+        retained = E1EvaluatorFinding(
+            entry.schedule_index, entry.case_id, entry.repetition, "K-P0",
+            request.evaluation_run_id, request.suite_source_digest, request.suite_content_digest,
+            request.plan_source_digest, request.archive_content_digest, request.case.board_fingerprint,
+            sealed.archive_digest, answer.answer_digest, source_identity.evaluator_file.sha256,
+            source_identity.evaluator_file.size_bytes, finding, tuple(calls))
+        return verify_compact_finding(request, expected_digest, source_identity, retained)
+    except (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError) as error:
+        if type(error) is E1EvaluatorError:
+            raise
+        raise E1EvaluatorError("Compact fixed-board evaluation refused: " + str(error)) from error
