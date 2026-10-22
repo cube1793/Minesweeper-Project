@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Durable recovery state for a new chat or context-loss event.
-> Updated: 2026-10-20 (Asia/Seoul)
+> Updated: 2026-10-22 (Asia/Seoul)
 
 ---
 
@@ -33,22 +33,59 @@ Repository:
 
 Approved Python:
 
-`C:\venvs\minesweeper\Scripts\python.exe`
+`C:\venvs\minesweeper\Scripts\python.exe -B`
 
-Last verified **PRE-MATERIALIZATION baseline** for the Program K Gate-R protocol
-freeze (2026-10-20):
+Required execution environment for Program-K qualification/rehearsal work:
+
+`PYTHONDONTWRITEBYTECODE=1`
+
+Last verified committed baseline after the post-F1 final full-source gate:
 
 - branch: `main`
-- HEAD / local `origin/main`: `697221da0342feb7e5e3833343bf2b6b1d2e9ab6`
-- subject: `docs: freeze Program K research specification`
-- ahead/behind: `0 / 0`; worktree/index clean **before documentation edits**
-- remote relationship is locally available evidence; no fetch was performed
+- HEAD / local `origin/main`:
+  `6106f730320c35e7123a75526f34dbeadeef3c5d`
+- subject: `fix: bound Program K E1 evaluator phase`
+- ahead/behind: `0 / 0`
+- worktree/index: clean
+- `git diff --check` / `git diff --cached --check`: clean
+- final full-source gate: `3359 / 3359 PASS`, failures/errors/skips `0 / 0 / 0`
+- test retries: `0`
 
-This is the pre-materialization baseline, not a claim that the edited worktree is clean.
-A later user-performed documentation commit will legitimately advance HEAD; no
-future SHA is inferred. Always verify live Git at recovery time.
-Documentation-only commits do not replace qualified technical source identities.
+Current accepted E1 source/composite identities at that baseline:
 
+- Slice 1 / plan:
+  `8f60ef5ff1590f855562d5d6c58e0b3333f213da267ad742c1bf9e98b6edcb24`
+- Slice 2 / execution:
+  `45b1e40ad36f473a4682f36a152fea2904bcf0b58d0fb4c7016e7930356aac82`
+- Slice 3 / audit:
+  `b6cc2964e3b75b5d85889b9d69957ede6cf1789fb5d511618bbd747e36a5b211`
+- Slice 4 / suite:
+  `edd1943499bfecdedb3a64fca2489db58ffb84593651dd61cde04266e875ff24`
+- Slice 5 / operational:
+  `c538ef92a751e5cbb3d6cafd2a5a9cf8c0a154151161c797a77f340f372a78d5`
+- Slice 6 / qualification:
+  `939664757a5c308f599b6cf80eb0ac07081998e1fead5f465f5706ebe7071906`
+
+Relevant current raw source identities:
+
+- `experiments/program_k_e1_evaluator.py`:
+  `254632b04ff445d6146fc039f4a4e89e63f47a19a7c652a8c7f1ba9587288b7d`
+  / `30243 B`
+- `experiments/program_k_e1_operational.py`:
+  `1eb1e3b8e35d849c0306434253d05f5158fa41a993581cc4f84f1c55a404c935`
+  / `56839 B`
+- `experiments/program_k_e1_qualification.py`:
+  `a7d4bc01220a1cf294909d1a5a02b7ba7cd2ec31687ad499b241e972fb5940c9`
+  / `38455 B`
+
+Current host used for accepted E0/R3/F1 readiness work:
+
+- runtime: `Windows-11-10.0.26200-SP0`
+- machine: `DESKTOP-OV6N603`
+- Python: `3.12.10`, 64-bit AMD64
+
+Always verify live Git/runtime again before actual E1. Do not reset to this SHA blindly if
+the repository has legitimately advanced.
 ---
 
 ## 3. Closed baselines
@@ -120,17 +157,37 @@ Closed:
 6. Representative-board Demonstrations / Timeline Analytics
 7. Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer
 8. Visualization Usability Polish
-9. Fixed-Exemplar Human/Domain Interpretation — CLOSED
+9. Fixed-Exemplar Human/Domain Interpretation
 
-Milestones **1–9 remain CLOSED**. Milestone **10 — algorithm-research
-direction/specification decision** selected **Program K**. The
-[Program K research specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
-and [Gate-R E0/E1 research protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
-are **FROZEN / ACCEPTED**. Program K remains **UNIMPLEMENTED**; **Gate R is NOT
-GRANTED**. Neither freeze authorizes implementation or experiments. See §7.1 for
-the current Gate R boundary and prospective execution prerequisites.
+Milestone **10 — Program K: Logical Known-Mine Capability + Selective Physical
+Materialization** is the active research milestone.
 
-Useful accepted identities:
+The Program-K research specification and Gate-R E0/E1 protocol remain
+**FROZEN / ACCEPTED**. Historical statements saying Program K was unimplemented or
+Gate R had not yet been authorized are superseded by the current source/evidence state:
+
+- bounded experimental Program-K implementation exists;
+- full P-8 is **PASS / ACCEPTED**;
+- actual E0 is **E0_PASS / E0_QUALIFIED / ACCEPTED**;
+- R-1 and R-2 readiness corrections are **CLOSED / ACCEPTED**;
+- R3 Expert-scale non-E1 feasibility work is **CLOSED / ACCEPTED**;
+- R3-C1 audit-feasibility correction is **CLOSED / ACCEPTED**;
+- F1 compact post-hoc evaluator correction is **CLOSED / ACCEPTED**;
+- independent F1 targeted re-audit is **PASS — BLOCKER 0 / REQUIRED 0**;
+- Expert-scale compact evaluator rehearsal is **PASS — BLOCKER 0 / REQUIRED 0**;
+- post-F1 full-source gate is **PASS — 3359 / 3359**;
+- final E1 operating envelope is **ACCEPTED**;
+- **Actual E1 is explicitly authorized for ONE attempt, but has not yet run.**
+
+Actual E1 state at this handoff:
+
+- scheduled runs: `0`
+- evaluator runs: `0`
+- durable actual-E1 artifact: `0`
+
+E2/E3 and Gate P / production integration remain **NOT AUTHORIZED**.
+
+Useful accepted historical identities:
 
 - Human Mouse Trace qualified SHA:
   `e32145fa5c114e1ce500ad2e837ef6000cc49cca`
@@ -144,7 +201,6 @@ Useful accepted identities:
   `31630dd6ffa2301c41534fca3b003838d865f313`
 
 Historical acceptance identities remain historical even if later maintenance changes the branch.
-
 ---
 
 ## 5. Selected Exemplar Viewer — FINAL ACCEPTANCE PASS / CLOSED
@@ -344,43 +400,193 @@ or counterfactual whole-run outcome/cost is established. Nearest exact-minimum-r
 guess using movement cost remains a **separate backlog candidate, neither supported
 nor refuted by this interpretation**.
 
-### 7.1 Current NEXT
+### 7.1 Current Program-K boundary / NEXT
 
-**Program K research specification and Gate-R E0/E1 research protocol —
-FROZEN / ACCEPTED (2026-10-20).**
+**Program K research specification and Gate-R E0/E1 research protocol remain
+FROZEN / ACCEPTED.** They remain the semantic/protocol authorities; current
+source/tests and accepted execution evidence determine implementation status.
 
-Milestone 10 selected **Program K — Logical Known-Mine Capability + Selective
-Physical Materialization**. The [frozen specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
-preserves the accepted K-C/K-P0 boundary and frozen V1 historical authority.
-The [frozen Gate-R protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
-records the complete corrected E0/E1 contract. These are the two current Program-K
-documentary authorities. Initial Claude audit required A-R1..A-R4; ChatGPT also
-promoted A-E6. Those corrections and A-O3/A-O4 clarifications are incorporated.
-Focused independent Claude re-audit: **BLOCKER 0 / REQUIRED 0 / READY TO FREEZE**.
-Final ChatGPT adjudication: **CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
-**P-1 through P-8 remain mandatory**; **O-4/O-7 are protocol-required** and
-**O-5 remains OPTIONAL / DEFER**. Nonblocking audit follow-ups remain optional.
+#### Accepted P-8 / E0
 
-**Program K is UNIMPLEMENTED. Gate R is NOT GRANTED.** No implementation, E0/E1
-execution, P-8 execution, E2/E3 or production integration is authorized; no research
-PASS is claimed. **Program L** remains fallback if K itself fails under the frozen
-contract: local completion / target ordering restricted to existing V1-admissible
-certainty alternatives. L implementation is not authorized. Extended remains **ACTIVE**.
+Full P-8:
 
-**NEXT: explicit Gate R authorization decision for the bounded experimental
-implementation scope.** Proposed production modifications remain **NONE**.
-Production integration requires later, separate Gate P authorization.
-A-E1 (answer-bearing Engine/interface isolation), A-E2 (CONTROL PLAYING-prefix
-observation/public-effects capture), A-E3 (comparable compute spans), and A-E4
-(pinned finite fixture/expected-result manifest) remain **prospective execution
-prerequisites**. A-E5 is conditional only if E1 lacks mandatory K-specific mechanism
-coverage. Implementation identity/scope, operating limits and oracle/certificate/
-validator/evidence readiness remain open; E1 also requires accepted E0 PASS,
-P-8 PASS and sealed case identities/runtime configuration. Any effectiveness corpus
-requires a separate E2 protocol and authorization.
-Do not reopen fixed-exemplar gameplay inspection, regenerate accepted reports or
-rerun the official 100k. The ZiNi final holdout remains **unopened/excluded**.
+- status: `PASS / ACCEPTED`
+- evidence digest:
+  `9ccffab72d34173181dd84170cf442156f2df888f03d87c1571660ba7774137d`
 
+Actual E0:
+
+- `E0_PASS / E0_QUALIFIED / ACCEPTED`
+- artifact:
+  `results/program_k_research/e0-20261020T091707Z-a64907341e6c/`
+- qualification SHA-256:
+  `71ee9b3a9dc0a24de7471be996da5069f5c77ed750485a84b298ee74b7065576`
+  / `1,762,287 B`
+- COMPLETE SHA-256:
+  `a664e8dfdc5e6aa8a6fe02d6fabe84da3df9018291558d5d874d646eb522`
+  / `520 B`
+
+Do not rerun P-8 or E0 absent a real identity invalidation.
+
+#### R-1 / R-2 / R3 — CLOSED
+
+The independent readiness audit at historical baseline `88a366f...` found the
+R-1 bounded external-FLAG qualification gap and R-2 exponential
+`ExternalV1FlagProvenance.prior_flags` DAG expansion.
+
+Current accepted disposition:
+
+- **R-1 CLOSED:** >16-variable external frozen-V1 exact FLAG may qualify at E1 only
+  through the accepted exact V1 validation + archived certainty + public
+  Oracle-B/shared-kernel representation evidence path; raw independent
+  Oracle-A result remains truthfully `NOT_EVALUATED`; raw FAIL is never upgraded.
+- **R-2 CLOSED:** DAG-aware/memoized E1 qualification plus deterministic
+  value-semantic suite/persistence codecs; structural scale coverage includes
+  `k=16/32/64/98`.
+- **R3-C1 CLOSED:** exact-history arithmetic reuse removed the O(P²+QP) audit
+  feasibility defect without weakening evidence semantics.
+- Accepted R3 Attempt 3 root:
+  `results/program_k_research/r3-20261021T124332Z-4a74bbe2d1dd/`
+- R3 Attempt 3 inventory SHA-256:
+  `042550eed92b3401c37a6c7fca53ee6079a6238ba9f549769041db38c2e54d98`
+- R3 accepted max operation wall:
+  `202.141 s`
+- R3 accepted max same-operation combined memory:
+  `1,116,086,272 B`
+- R3 max physical inputs:
+  `207`
+- repeated-max 54-scheduled descriptive projection:
+  `6,772.23 s`
+
+R3 is feasibility evidence, not actual E1 or effectiveness evidence.
+
+#### F1 compact evaluator — CLOSED
+
+Claude's final-readiness audit later promoted the old live evaluator architecture
+to REQUIRED F1 because each of 18 evaluator targets repeatedly rebuilt/hashed/
+transported the whole 54-run suite.
+
+Accepted correction commit:
+
+`6106f730320c35e7123a75526f34dbeadeef3c5d`
+— `fix: bound Program K E1 evaluator phase`
+
+Current live architecture:
+
+`54 scheduled results -> aggregate once -> compact admission once -> 18 compact requests`
+
+Per evaluator target there is no whole-suite rebuild/hash/transfer on the live path.
+Hidden truth remains worker-only.
+
+Independent Claude targeted re-audit:
+
+**PASS — BLOCKER 0 / REQUIRED 0 — READY FOR EXPERT-SCALE EVALUATOR REHEARSAL.**
+
+Its one procedural deviation was a read-only text search into preserved R3 evidence
+for old digest locations; no R3 execution or mutation occurred. The verdict remains accepted.
+
+Expert-scale evaluator rehearsal root:
+
+`results/program_k_research/f1-evaluator-rehearsal-20261021T160656Z-6106f730320c/`
+
+Accepted rehearsal facts:
+
+- primary compact evaluators: `18 / 18 COMPLETE`
+- total evaluator whole-call wall: `48.516 s`
+- max evaluator whole-call wall: `3.796 s`
+- max primary combined memory: `165,232,640 B`
+- coordinator-retention challenge combined peak:
+  `1,431,109,632 B`
+- optional 1000-boundary stress:
+  `15.250 s`, `COMPLETE`, combined `503,877,632 B`
+- conservative projected archive usage after scheduled basis + evaluators:
+  `252,166,662 / 536,870,912 B = 46.969701%`
+
+#### Final full-source gate — CLOSED
+
+Evidence root:
+
+`results/program_k_research/f1-final-source-gate-20261021T234111Z-6106f730320c/`
+
+Isolation-aware runner:
+
+`C:\venvs\minesweeper\Scripts\python.exe -B scripts/run_source_unittest_isolated.py`
+
+Result:
+
+- MAIN: `3353 / 3353 PASS`
+- ISOLATED: `6 / 6 PASS`
+- combined: `3359 / 3359 PASS`
+- failures/errors/skips: `0 / 0 / 0`
+- retries: `0`
+- process elapsed: `911.273551 s`
+
+Exactly one isolated class remains:
+`test_program_k_harness.ProgramKSlice7SupervisorTests`.
+
+#### Final E1 operating envelope — ACCEPTED
+
+Use exactly for the authorized actual E1 attempt:
+
+```text
+max_decision_wall_ms         = 30000
+max_case_wall_ms             = 420000
+max_job_wall_ms              = 14400000
+shadow_timeout_ms            = 1000
+max_physical_inputs_per_case = 1000
+memory_cap_bytes             = 4294967296
+archive_cap_bytes            = 536870912
+monitor_interval_ms          = 25
+monitoring_policy            = WINDOWS_JOB_MEMORY_AND_STACK_SAMPLING_WATCHDOG_V1
+```
+
+F2 is **CLOSED** by widening the provisional case cap from `300 s` to `420 s`.
+This is operational containment, not an effectiveness threshold and never
+action-substitution authority.
+
+#### Actual E1 — AUTHORIZED ONCE / NOT YET EXECUTED
+
+Authorization reference:
+
+`CHATGPT_FINAL_E1_AUTHORIZATION_2026-10-22_6106f730_CASE420S`
+
+Current operator contract:
+
+- use a new `e1-<UTC>-6106f730320c` run id;
+- run `preflight_e1(..., repository_root=<absolute repo>)`;
+- require `READY / reasons == ()`;
+- then call `execute_e1(...)` **exactly once**;
+- no retry, no resume, no new run id after execution begins;
+- persist the returned record exactly once even if FAIL/INCOMPLETE;
+- read back through the official persistence API;
+- return the result to ChatGPT for E1/Gate-R adjudication.
+
+If preflight is not READY, actual E1 does not start.
+
+If E1 returns `E1_A_E5_REQUIRED`, **no supplement is currently authorized**.
+If it returns `INCOMPLETE` or `IMPLEMENTATION_IDENTITY_FAIL`, **no retry or repair
+is currently authorized**.
+
+If it returns `E1_PASS / E1_QUALIFIED`, that qualifies the implementation identity
+for E1. It is **not** Program-K research/effectiveness PASS; E2 remains separate.
+
+The approved operator prompt generated for this boundary is:
+`PK_E1_05_ACTUAL_E1.txt`.
+
+#### Preservation / still forbidden
+
+Do not:
+
+- rerun the official 100k;
+- rerun E/L;
+- rerun P-8/E0/R3/F1 merely for reassurance;
+- access ZiNi holdout `2,010,000 .. 2,010,099`;
+- tune policy using E1 results;
+- execute A-E5 without new authorization;
+- begin E2/E3 without a separate protocol/authorization;
+- perform Gate P / production integration.
+
+Stage-3 Extended remains **ACTIVE** until the later research/production closeout path completes.
 ---
 
 ## 8. Authority boundaries
@@ -447,38 +653,47 @@ Disputed findings return to source/tests/evidence.
 
 ## 10. New-chat recovery sequence
 
-At a new chat:
+At a new chat or after context loss:
 
-1. verify live Git branch / HEAD / locally available origin relationship / worktree/index;
-   do not assume the pre-materialization SHA above is still current
-2. read this [CURRENT_HANDOFF](CURRENT_HANDOFF.md), then the
-   [Stage-3 Extended README](stage3-extended/README.md); use [docs index](README.md) for navigation
-3. read the [frozen Program K research specification](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
-   as semantic authority, then the [frozen Gate-R E0/E1 protocol](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
-   for P-1..P-8, promoted O-4/O-7, deferred O-5 and open execution prerequisites
-4. use current source/tests for disputed implementation facts; read
-   `docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md`
-   only as the closed qualitative boundary when needed
-5. use `STAGE3_ALGORITHM_SPEC_v1.md` and `STAGE3_EXTENSION_BACKLOG.md` as
-   frozen/deferred design boundaries; neither is authorization to implement
-6. do **not** reopen completed fixed-exemplar gameplay inspection or reselect boards
-7. do **not** rerun the official 100k, regenerate accepted reports or repeat closed
-   Viewer/Polish qualification merely for a Gate R authorization decision
-8. do **not** open the ZiNi final quality holdout `2,010,000 .. 2,010,099`
-9. make the explicit Gate R authorization decision for the frozen bounded scope;
-   do **not** implement or execute without that authorization and the relevant
-   prospective execution prerequisites; E2/E3 and later Gate P remain separate
+1. verify live Git branch / HEAD / locally available `origin/main` relationship /
+   worktree/index; never reset to a remembered SHA blindly;
+2. read this `docs/CURRENT_HANDOFF.md`, then `docs/README.md`, then the
+   Stage-3 Extended index;
+3. read the frozen Program-K research specification and frozen Gate-R E0/E1
+   protocol for semantic/protocol authority;
+4. use current committed source/tests for disputed implementation facts;
+5. authenticate whether the last accepted technical baseline is still
+   `6106f730320c35e7123a75526f34dbeadeef3c5d`;
+6. check `results/program_k_research/` **before doing anything**:
+   - if an actual `e1-*` qualification artifact now exists, DO NOT execute E1 again;
+     read/adjudicate that artifact instead;
+   - if no actual E1 artifact exists and live identities still match this handoff,
+     the next authorized operation is the single Actual E1 attempt under the
+     accepted 420 s case-cap envelope;
+7. actual E1 must use READY preflight, one `execute_e1` call, exact persistence
+   and readback; no retry/resume/new run id after execution begins;
+8. if E1 is `E1_A_E5_REQUIRED`, return to ChatGPT; no supplement is implicitly authorized;
+9. if E1 is `E1_PASS / E1_QUALIFIED`, return to ChatGPT for final E1/Gate-R
+   adjudication before any E2 work;
+10. do not begin E2/E3 or Gate P without separate authorization;
+11. do not rerun the official 100k, E/L, accepted P-8/E0/R3/F1 evidence or closed
+    Viewer/Timeline/Polish work merely for recovery;
+12. do not open the ZiNi final holdout `2,010,000 .. 2,010,099`.
 
-Supporting authorities, only as needed to resolve a concrete meaning:
+Recommended immediate source set only when a current implementation dispute requires it:
 
-- `docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md`
-- `docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md` and its contract
-- `docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md` and its contract
-- accepted Timeline/Viewer evidence in place; exact current source/tests for disputed semantics
+- `experiments/program_k_e1_harness.py`
+- `experiments/program_k_e1_execution.py`
+- `experiments/program_k_e1_audit.py`
+- `experiments/program_k_e1_suite.py`
+- `experiments/program_k_e1_evaluator.py`
+- `experiments/program_k_e1_operational.py`
+- `experiments/program_k_e1_qualification.py`
+- `experiments/program_k_e1_persistence.py`
+- corresponding Program-K E1 tests
+- `scripts/run_source_unittest_isolated.py`
 
-Do not treat the external pre-correction synthesis audit target as final authority.
-Do not preload large source sets or rerun gameplay merely because those resources exist.
-
+Do not preload or refactor production source merely to recover context.
 ---
 
 ## 11. Handoff maintenance rule
