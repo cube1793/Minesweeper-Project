@@ -88,8 +88,9 @@ Closed milestones / durable closeouts:
 
 Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
 Capability + Selective Physical Materialization** remains **ACTIVE**, not globally
-closed. Bounded experimental Program K exists; full P-8 and Gate-R E0/E1
-implementation qualification are **ACCEPTED / CLOSED**.
+closed. Bounded experimental Program K exists; full P-8 is **PASS / ACCEPTED**,
+E0 is **PASS / QUALIFIED / ACCEPTED**, and Gate-R E0/E1 implementation qualification
+is **CLOSED / ACCEPTED**.
 
 Actual E1 final adjudication: **GATE-R E1 FINAL PASS / ACCEPTED — BLOCKER 0 /
 REQUIRED 0**. The result is **E1_PASS / E1_QUALIFIED**, `progression_allowed = true`:
@@ -106,18 +107,24 @@ envelope, gate results, readback checks and procedural notes. The approximately
 
 The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
 is **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
-**Current next work: separate E2 experimental implementation authorization /
-implementation**, then implementation qualification, then separately authorized
-R0 operational readiness. Protocol freeze grants no implementation or execution
-permission. E2 implementation, R0-A/R0-B, Actual E2, E3 and Gate P remain
-**NOT AUTHORIZED**. No E2 effectiveness result exists yet. Production
-modification/integration remains **NONE** and **Gate P remains a separate later decision**.
+**Implementation midpoint: I1–I4 = 4/8 COMPLETE / ACCEPTED (50%).** I0 is accepted
+architecture mapping/discovery and is excluded from the implementation denominator.
+**NEXT: Program K E2 Slice I5 — certificate/evaluator/Oracle-B/determinism audit adapters.**
+The [current handoff](CURRENT_HANDOFF.md) records the frozen protocol identity,
+accepted I4 technical source baseline, exact slice commits and I0–I8 table;
+[Extended README](stage3-extended/README.md) provides the remaining roadmap.
+I5 remains implementation qualification infrastructure. **Actual E2 is NOT RUN**;
+no effectiveness PASS/FAIL/DEFER result exists, and effectiveness is
+**NOT YET ESTABLISHED**. E3 is conditional/later under the frozen protocol;
+**Gate P remains separate**. This midpoint update authorizes no I5, R0, Actual E2,
+E3 or Gate P execution. Production modification/integration remains **NONE**.
 
 Recovery order: [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
+[Extended README](stage3-extended/README.md) →
+[frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
 [E1 closeout and existing accepted evidence](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
-→ [frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
-→ [Extended README](stage3-extended/README.md) → frozen K specification/Gate-R
-protocol → current source/tests only for disputed implementation facts.
+→ frozen K specification/Gate-R protocol → current source/tests only for disputed
+implementation facts.
 Do not repeat E2-D0, protocol audits or content adjudication merely for recovery.
 Do not repeat the old Gate-R authorization or E1 execution/adjudication decision,
 or invoke execute/assess/persist/readback for recovery. Do not rerun the official

@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Durable recovery state for a new chat or context-loss event.
-> Updated: 2026-10-23 (Asia/Seoul)
+> Updated: 2026-10-24 (Asia/Seoul)
 
 ---
 
@@ -39,25 +39,36 @@ Required execution environment for Program-K qualification/rehearsal work:
 
 `PYTHONDONTWRITEBYTECODE=1`
 
-Live documentation baseline verified at the E2 protocol materialization preflight:
+Live Git verified before the E2 implementation midpoint documentation update:
 
 - branch: `main`
 - HEAD / local `origin/main`:
-  `c0ba2b55fa49bba1003578360f72fc8447cc73b9`
-- subject: `docs: close Program K Gate-R E1 qualification`
+  `f9a213b15e990cc50dedad6c8c10c42519593af7`
+- subject: `feat: add Program K E2 I4 durable game evidence`
 - ahead/behind: `0 / 0`
 - worktree/index before these documentation edits: clean
 - `git diff --check`: clean; nothing staged
 
-Accepted technical source baseline remains
+The accepted **Program K E2 I4 / midpoint technical source baseline** is
+`f9a213b15e990cc50dedad6c8c10c42519593af7`. A later documentation-only commit
+will not replace this accepted technical source identity. Live Git history and
+changed-path provenance establish the implementation commits:
+
+| Slice | Accepted implementation commit |
+| --- | --- |
+| I1 | `aa687d2627dceeb037a6f79e1f4a7017e38c13f7` |
+| I2 | `441e165acea308ba885615c25b7cd244b6a5f3ef` |
+| I3 | `9c8acef772cc71de0dae09e4e238ed42bf05a1e4` |
+| I4 / midpoint | `f9a213b15e990cc50dedad6c8c10c42519593af7` |
+
+The historical E1 qualified technical baseline remains
 `6106f730320c35e7123a75526f34dbeadeef3c5d`
-(`fix: bound Program K E1 evaluator phase`), an ancestor of that documentation
-HEAD. Only documentation changed between them: `docs/CURRENT_HANDOFF.md`,
-`docs/README.md`, `docs/stage3-extended/README.md` and the E1 closeout.
-There is no source/test delta.
-Its historical final full-source gate was `3359 / 3359 PASS`,
+(`fix: bound Program K E1 evaluator phase`); its documentation closeout is
+`c0ba2b55fa49bba1003578360f72fc8447cc73b9`. Only the three navigation docs and
+the E1 closeout changed between those two E1 anchors; the later E2 implementation
+commits above are separate. The E1 historical final full-source gate was `3359 / 3359 PASS`,
 failures/errors/skips `0 / 0 / 0`, test retries `0`; it was not rerun for this
-documentation materialization.
+documentation-only midpoint update.
 
 Current accepted E1 source/composite identities at that baseline:
 
@@ -172,8 +183,7 @@ Milestone **10 — Program K: Logical Known-Mine Capability + Selective Physical
 Materialization** is the active research milestone.
 
 The Program-K research specification and Gate-R E0/E1 protocol remain
-**FROZEN / ACCEPTED**. Historical statements saying Program K was unimplemented or
-Gate R had not yet been authorized are superseded by the current source/evidence state:
+**FROZEN / ACCEPTED**. Current source/evidence establish the accepted qualification state:
 
 - bounded experimental Program-K implementation exists;
 - full P-8 is **PASS / ACCEPTED**;
@@ -202,10 +212,12 @@ Actual E1 state at this handoff:
 qualification; Program K effectiveness is **NOT ESTABLISHED**.
 The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
 is **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
-**NEXT: separate E2 experimental implementation authorization / implementation work.**
-Protocol freeze grants no implementation or execution permission. E2 implementation,
-R0-A/R0-B, Actual E2, E3 and Gate P remain **NOT AUTHORIZED**. Production
-modification/integration remains **NONE**. Milestone 10 and Extended remain **ACTIVE**.
+**Implementation midpoint: I1–I4 = 4/8 COMPLETE / ACCEPTED (50%).**
+I0 is accepted architecture mapping and is excluded from the implementation denominator.
+**NEXT: Program K E2 Slice I5 — certificate/evaluator/Oracle-B/determinism audit adapters.**
+Actual E2 is **NOT RUN**; no effectiveness PASS/FAIL/DEFER result exists.
+This midpoint update authorizes no I5, R0, Actual E2, E3 or Gate P execution.
+Production modification/integration remains **NONE**. Milestone 10 and Extended remain **ACTIVE**.
 
 Useful accepted historical identities:
 
@@ -609,11 +621,81 @@ under `CHATGPT_PROGRAM_K_E2_PROTOCOL_CONTENT_FREEZE_2026-10-23_V2`.
 E2-D0, the v0 audit, the v1 re-audit and the six bounded v2 corrections are complete;
 no further independent v2 audit is claimed. Detailed lineage remains in the protocol.
 
-**NEXT: separate E2 experimental implementation authorization / implementation work.**
-Protocol freeze alone authorizes no E2 implementation, R0-A/R0-B, Actual E2, E3 or
-Gate P. No Program-K effectiveness result exists yet. Implementation qualification
-must precede separately authorized R0 operational readiness; Actual E2 has its own
-later authorization. Gate P remains a separate production decision.
+- Frozen protocol commit: `6d3eb456d72632d24e9cab14bdeea0cffd279092`
+- Git blob: `3351017f0f0116be00917be3ff95312120f43117`
+- SHA-256: `10b1055a6e1bcab8e03ab504755c9c9d655d5457800318396afb6e31497ba2fa`
+
+#### E2 implementation midpoint — I1–I4 COMPLETE / ACCEPTED
+
+| Slice | Scope | State |
+| --- | --- | --- |
+| I0 | Architecture mapping / boundary discovery | ACCEPTED; not counted in 4/8 implementation denominator |
+| I1 | Identity + immutable evidence records | COMPLETE / ACCEPTED |
+| I2 | Streaming append-only durable store | COMPLETE / ACCEPTED |
+| I3 | Aggregate effectiveness analysis + shared bootstrap + verdict/report core | COMPLETE / ACCEPTED |
+| I4 | Per-game CONTROL/K-P0 projection + full P-3 + G5 provenance + durable decision/plan/M projection | COMPLETE / ACCEPTED |
+| I5 | Certificate/evaluator/Oracle-B/determinism audit adapters | NEXT |
+| I6 | Execution/coordinator + operational/resource layer | PENDING |
+| I7 | Integration qualification | PENDING |
+| I8 | Readiness / R0 admission layer | PENDING |
+
+**Implementation midpoint: I1–I4 = 4/8 COMPLETE / ACCEPTED (50%).**
+Only I1–I8 form this denominator; I0 is discovery, not an implementation slice.
+The accepted I4 technical source baseline and exact slice commits are recorded in §2.
+
+Accepted responsibilities and corrections:
+
+- **I1:** exact identity helpers, immutable E2 vocabulary and strict canonical JSON
+  with no float authority. I4 added the accepted `ActionDecisionRecord` for durable
+  per-input decisions. `SCHEMA_VERSION` remains 1; **18/18** pre-existing top-level
+  record fixtures retained byte-for-byte canonical encodings and hashes. This is
+  an accepted additive schema correction, not an invalidation of I1.
+- **I2:** streaming append-only JSONL; incremental digest/count/byte accounting;
+  explicit checkpoint/fsync; strict sequential readback; no whole-stream rescan
+  per append; exclusive receipt write.
+- **I3:** exact outcome/primary arithmetic and diagnostic distributions; one shared
+  deterministic **10,000-replicate SplitMix64** bootstrap stream for G5/G8/G9;
+  frozen inequalities/causes, verdict precedence and exact E3 trigger computation;
+  deterministic canonical JSON/static HTML core. Accepted corrections require
+  complete evidence for valid G5 N/A, embedded G5/G8/G9 status/cause consistency
+  and G9 compact quantitative-summary self-consistency.
+- **I4:** existing CONTROL/K-P0 runner reuse without a new solver loop; exact
+  physical inputs/Model C, public-versus-terminal effects and comparable compute;
+  full per-arm P-3 checkpoints and cross-arm comparison; CONTROL FLAG provenance
+  and productive-CHORD G5 witnesses; K certificate references without truth admission.
+  Durable decisions retain selected category, semantic kind, full ordered plan,
+  K setup/reveal cells and logical M before/after. Final M reconciles with unique
+  acquisitions; encode/decode-only validation needs no raw runner object.
+  Full-plan suffix comparison distinguishes realized, abandoned/replanned and
+  truncated setup records without a causal saved-FLAG claim.
+
+Final accepted I4 verification: the exact specified **9 modules, 551 / 551 PASS**;
+failures/errors/skips **0 / 0 / 0**. This was a focused/related regression set,
+not a full-suite run. No tests were rerun for this documentation update.
+
+**NEXT: Program K E2 Slice I5 — certificate/evaluator/Oracle-B/determinism audit adapters.**
+I5 is implementation qualification infrastructure, not Actual E2, R0, E3, Gate P
+or production integration. Remaining sequence, with separate authorization at
+the applicable boundaries:
+
+1. I5 — certificate/evaluator/Oracle-B/determinism audit adapters.
+2. I6 — execution/coordinator + operational/resource layer.
+3. I7 — integration qualification.
+4. I8 — readiness / R0 admission.
+5. R0-A / R0-B and operating-envelope validation.
+6. Actual E2 execution and frozen-gate adjudication.
+7. E3 only if the frozen E2 trigger conditions require it.
+8. Gate P remains a separate production decision.
+
+Listing this sequence grants no execution permission. **Actual E2 is NOT RUN**;
+no effectiveness PASS/FAIL/DEFER result exists. No Actual E2 corpus or E2
+rehearsal/R0 was executed as part of I1–I4 acceptance. Program K effectiveness
+is **NOT YET ESTABLISHED**; implementation midpoint is no production-superiority
+claim. Production integration is **NONE**, and this documentation update changes
+no production algorithm/V1. Stage-3 V1 and Model C remain **CLOSED / FROZEN**;
+ZiNi Improvement remains **CLOSED**, with final holdout
+`2,010,000 .. 2,010,099` unopened/excluded. Model C is modeled physical time, not
+CPU time or measured human wall time; decision-compute ns remains a separate diagnostic.
 
 #### Preservation / still forbidden
 
@@ -625,7 +707,7 @@ Do not:
 - access ZiNi holdout `2,010,000 .. 2,010,099`;
 - tune policy using E1 results;
 - execute A-E5 without new authorization;
-- begin E2 implementation, R0-A/R0-B, Actual E2 or E3 without separate authorization;
+- start I5–I8, R0-A/R0-B, Actual E2 or conditional E3 merely from this midpoint update;
 - perform Gate P / production integration.
 
 Stage-3 Extended remains **ACTIVE** until the later research/production closeout path completes.
@@ -699,23 +781,23 @@ At a new chat or after context loss:
 
 1. verify live Git branch / HEAD / locally available `origin/main` relationship /
    worktree/index; never reset to a remembered SHA blindly;
-2. read this `docs/CURRENT_HANDOFF.md`, then `docs/README.md`, then the
-   Stage-3 Extended index;
+2. read this `docs/CURRENT_HANDOFF.md`, then the
+   [Stage-3 Extended index](stage3-extended/README.md), then
+   [frozen E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md);
+   I1–I4 are accepted and protocol content freeze is accepted; do not repeat E2-D0,
+   protocol audits or content adjudication merely for recovery;
 3. read the [Gate-R E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
    and its existing final report/artifact references read-only: E0/E1 qualification
    is accepted/closed, so do not repeat the old Gate-R authorization, execution or
    final adjudication sequence;
-4. then read the [frozen E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md);
-   content freeze is accepted, so do not repeat E2-D0, protocol audits or final
-   content adjudication merely for recovery;
+4. use [docs/README](README.md) for additional navigation;
 5. read the frozen Program-K specification and Gate-R E0/E1 protocol for their
    semantic/protocol authority, preserving historical prerequisite wording;
 6. use current committed source/tests only for disputed implementation facts;
-   compare live lineage with accepted technical baseline
-   `6106f730320c35e7123a75526f34dbeadeef3c5d`, without rerunning accepted evidence;
-7. next is separate **E2 experimental implementation authorization / implementation**
-   under the frozen protocol, followed by implementation qualification; R0-A/R0-B
-   and Actual E2 remain separately unauthorized;
+   compare live lineage with accepted I4 / midpoint technical baseline
+   `f9a213b15e990cc50dedad6c8c10c42519593af7`, without rerunning accepted evidence;
+7. **NEXT is I5 — certificate/evaluator/Oracle-B/determinism audit adapters**;
+   this recovery sequence does not authorize starting I5 or executing R0/Actual E2;
 8. E3 remains later/separate under the frozen E2 protocol; production
    modification/integration remains NONE pending later Gate P authorization;
 9. do not invoke execute/assess/persist/readback, create a new E1 run_id or rerun
@@ -725,16 +807,14 @@ At a new chat or after context loss:
 
 Recommended immediate source set only when a current implementation dispute requires it:
 
-- `experiments/program_k_e1_harness.py`
-- `experiments/program_k_e1_execution.py`
-- `experiments/program_k_e1_audit.py`
-- `experiments/program_k_e1_suite.py`
-- `experiments/program_k_e1_evaluator.py`
-- `experiments/program_k_e1_operational.py`
-- `experiments/program_k_e1_qualification.py`
-- `experiments/program_k_e1_persistence.py`
-- corresponding Program-K E1 tests
-- `scripts/run_source_unittest_isolated.py`
+- `experiments/program_k_e2_identity.py` / `program_k_e2_records.py`
+- `experiments/program_k_e2_store.py`
+- `experiments/program_k_e2_analysis.py` / `program_k_e2_report.py`
+- `experiments/program_k_e2_game.py`
+- corresponding Program-K E2 tests
+- existing Program-K runner/capability/policy/evidence and E1 qualified seams only
+  when a specific boundary needs checking; E1 historical source references remain
+  in the E1 closeout
 
 Do not preload or refactor production source merely to recover context.
 ---
