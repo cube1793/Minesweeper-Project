@@ -637,16 +637,35 @@ class StreamingCoordinatorTests(unittest.TestCase):
             self.assertNotIn("ETA", repr(events))
 
     def test_cancelled_plan_retains_every_terminal_without_running(self):
-        cancel = threading.Event()
-        cancel.set()
-        with tempfile.TemporaryDirectory() as directory:
-            with patch.object(op, "_workflow", side_effect=AssertionError("cancelled work executed")):
-                result = op.coordinate(_plan(2), directory, _envelope(), cancel=cancel)
-            self.assertEqual(len(result.receipts), 6)
-            self.assertTrue(all(value.status is records.AuditStatus.INCOMPLETE for value in result.receipts))
-            events = []
-            store.scan_stream(directory, "operations", visit=lambda key, value: events.append(value))
-            self.assertEqual(sum(event.event_kind is records.EventKind.ERROR for event in events), 6)
+        scheduled = tuple(f"{position}:{kind}" for position in range(2)
+                          for kind in ("PRIMARY", "DETERMINISM", "K_CONTROL"))
+        # Full-source parent memory is incidental, not this cancellation test's authority.
+        for memory, reason, coordinator_reasons in (
+                (512, "CANCELLED_BEFORE_START", ()),
+                (100_000_001, "MEMORY_CAP", ("MEMORY_CAP",))):
+            with self.subTest(coordinator_bytes=memory), tempfile.TemporaryDirectory() as directory:
+                cancel = threading.Event()
+                cancel.set()
+                with patch.object(op, "_workflow", side_effect=AssertionError("cancelled work executed")) as workflow, \
+                     patch.object(op.harness, "_coordinator_private_bytes", return_value=memory):
+                    result = op.coordinate(_plan(2), directory, _envelope(), cancel=cancel)
+                workflow.assert_not_called()
+                self.assertIs(result.status, records.AuditStatus.INCOMPLETE)
+                self.assertEqual(result.reason_codes, coordinator_reasons)
+                self.assertEqual(len(result.receipts), 6)
+                self.assertEqual(tuple(f"{value.position}:{value.kind.value}" for value in result.receipts), scheduled)
+                self.assertTrue(all(value.status is records.AuditStatus.INCOMPLETE for value in result.receipts))
+                self.assertEqual(tuple(value.reason for value in result.receipts), (reason,) * 6)
+                events = []
+                store.scan_stream(directory, "operations", visit=lambda key, value: events.append(value))
+                errors = tuple(event for event in events if event.event_kind is records.EventKind.ERROR)
+                unit_errors = tuple(event for event in errors if not event.unit_id.startswith("coordinator:"))
+                coordinator_errors = tuple(event for event in errors if event.unit_id.startswith("coordinator:"))
+                self.assertEqual(tuple(event.unit_id for event in unit_errors),
+                                 tuple(unit + ":" + reason for unit in scheduled))
+                self.assertEqual(tuple(event.unit_id for event in coordinator_errors),
+                                 tuple("coordinator:" + value for value in coordinator_reasons))
+                self.assertTrue(all(event.status is records.OperationStatus.INCOMPLETE for event in errors))
 
     def test_diagnosed_fail_dominates_other_incomplete_units(self):
         def workflow(work, *args):
