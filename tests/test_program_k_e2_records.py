@@ -1225,5 +1225,465 @@ class DurableAuditCodecAndTransportTests(unittest.TestCase):
                 writer.close()
 
 
+_PRE_I6_SHA256 = dict(_OLD_RECORD_SHA256, **{
+    "CertificateAuditRecord": "dae0755dce59b52dab5d6f4970409efb6b90bbb300a8254041111a20dcc6dbb3",
+    "OracleBAuditRecord": "fbb055c466545b53324ee210562930289b97b30c117548612a20d4f367e22815",
+    "DeterminismAuditRecord": "6529e79d2ce61689da528bb1747c93d33c7865a1ecf62b162be8f93a0d7fa44b",
+})
+
+
+def _kc_fixture(*, initial=False, reference=False, terminal=False):
+    """Literal invented public evidence only; no Engine, solver or corpus."""
+    board = r.BoardIdentity(7, "synthetic-kcontrol", 3, 2, 1, (0, 0), "invented-generator", "invented-spec")
+    arm = r.ArmIdentity(r.Arm.CONTROL if reference else r.Arm.K_CONTROL, board, "synthetic", "maintenance")
+    ordinal = 0 if initial else 1
+    status = r.Status.WON if terminal else r.Status.PLAYING
+    target = (0, 0) if initial else (1, 0)
+    physical = r.PhysicalInputRecord(ordinal, r.Action.OPEN, target, (0, 0), 100000,
+                                      100000 * (ordinal + 1), status)
+    observation = ((-2, -2, -2), (-2, -2, -2)) if initial else ((0, -2, -2), (-2, -2, -2))
+    public = r.PublicEffectRecord(ordinal, (r.PublicCellChange(target, "HIDDEN", "CLUE_0"),),
+                                  r.Status.PLAYING, status)
+    terminal_effect = r.TerminalEffectRecord(ordinal, (), status) if terminal else None
+    timing_values = (None if initial else 10, None, None, 2, None if initial or reference else 3,
+                     4, None if initial or reference else 1, None, None)
+    timings = tuple(zip(r._KC_TIMING_NAMES, timing_values))
+    decision = None
+    shadow = r.KControlShadowState(True, (), None, None, None, False, True)
+    soundness = None
+    if not initial:
+        hidden = ((1, 0), (2, 0), (0, 1), (1, 1), (2, 1))
+        adjacent = ((1, 0), (0, 1), (1, 1))
+        accounting = r.KControlAccounting((), hidden, (), (), hidden, 1, (((0, 0), 0, (), adjacent, 0),))
+        current = r.KControlShadowDecision(observation, 1, accounting, accounting, (), ((1, 0),),
+            ((1, 0),), (), ((1, 0),), (), None, None, "NOT_REACHED", accounting, (),
+            "LOCAL_SAFE", ((1, 0),), None)
+        shadow = r.KControlShadowState(True, (), current, None, ordinal, True, True)
+        decision = r.KControlV1Decision(r.Action.OPEN, target, "LOCAL_DETERMINISTIC", r.Action.OPEN,
+            (0, 1), (((0, 0), 0, adjacent),), ((1, 0),), (), None, (), (), (), (), None, None)
+        soundness = (("classification", "NO_DISCREPANCY"), ("boundary", ordinal),
+                     ("implicated_boundary", None), ("safe_cells", ((1, 0),)), ("detail", ""))
+    final_shadow = replace(shadow, decision=None, evidence_valid=False) if terminal else None
+    return r.KControlMaintenanceRecord(arm, physical, observation, public, terminal_effect, decision,
+        None, timings, (), (), None if reference else shadow, None if reference else soundness,
+        None if reference else final_shadow, "REFERENCE" if reference else "NOT_REACHED" if initial else "PASS")
+
+
+def _kc_failed(failure_class="SHADOW_TIMEOUT"):
+    value = _kc_fixture()
+    failure = (("failure_class", failure_class), ("detected_boundary", 1), ("last_valid_boundary", None),
+               ("detail", "Synthetic detached shadow failure."),
+               ("implicated_boundary", 1 if failure_class == "SHADOW_SOUNDNESS_VIOLATION" else None),
+               ("invalidation_scope", "WHOLE_SHADOW_STREAM"))
+    state = r.KControlShadowState(False, (), None, failure, None, False, True)
+    return replace(value, shadow=state, soundness=None,
+                   classification="IMPLEMENTATION_IDENTITY_FAIL" if failure_class == "SHADOW_SOUNDNESS_VIOLATION"
+                   else "INCOMPLETE")
+
+
+class KControlMaintenanceRecordTests(unittest.TestCase):
+    def test_all_live_twenty_two_prior_kinds_keep_fixed_canonical_hashes(self):
+        values = _fixtures() + (_decision_fixture(), _certificate_audit_fixture(),
+                                _oracle_audit_fixture(), _determinism_summary_fixtures()[0])
+        discovered = {type(value).__name__ for value in values}
+        self.assertEqual(discovered, set(_PRE_I6_SHA256))
+        self.assertEqual(len(discovered), 22)
+        self.assertEqual(r.SCHEMA_VERSION, 1)
+        for value in values:
+            with self.subTest(kind=type(value).__name__):
+                canonical = r.encode(value)
+                self.assertEqual(hashlib.sha256(canonical).hexdigest(), _PRE_I6_SHA256[type(value).__name__])
+                self.assertEqual(r.encode(r.decode(canonical)), canonical)
+
+    def test_initial_postinitial_reference_terminal_and_failure_roundtrip(self):
+        values = (_kc_fixture(initial=True), _kc_fixture(), _kc_fixture(reference=True),
+                  _kc_fixture(terminal=True), _kc_fixture(initial=True, terminal=True),
+                  _kc_failed(), _kc_failed("SHADOW_EXCEPTION"), _kc_failed("SHADOW_SOUNDNESS_VIOLATION"))
+        for value in values:
+            with self.subTest(classification=value.classification, initial=value.physical.action_ordinal == 0):
+                canonical = r.encode(value)
+                self.assertEqual(r.decode(canonical), value)
+                self.assertEqual(r.encode(r.decode(canonical)), canonical)
+                self.assertEqual(json.loads(canonical)["kind"], "k_control_maintenance")
+
+    def test_full_o4_distinguishes_recommendation_from_selected_move(self):
+        value = _kc_fixture(reference=True)
+        self.assertNotEqual(value.v1_decision.target, value.v1_decision.evidence_target)
+        decoded = r.decode(r.encode(value)).v1_decision
+        self.assertEqual(decoded, value.v1_decision)
+        changed = replace(value, v1_decision=replace(value.v1_decision, evidence_target=(2, 1)))
+        self.assertNotEqual(r.encode(changed), r.encode(value))
+
+    def test_o4_ordered_probabilities_constraints_and_plan_are_retained(self):
+        value = _kc_fixture(reference=True)
+        v1 = value.v1_decision
+        probability = (((2, 1), 1, 2), ((1, 0), 1, 2))
+        v1 = replace(v1, evidence_kind="PROBABILITY_GUESS", probability_total_worlds=2,
+                     probabilities=probability, frontier_cells=((2, 1), (1, 0)),
+                     plan_actions=((r.Action.OPEN, (1, 0)), (r.Action.OPEN, (2, 1))),
+                     plan_model_us=200000, plan_safe_reveals=2)
+        rebuilt = r.decode(r.encode(replace(value, v1_decision=v1)))
+        self.assertEqual(rebuilt.v1_decision.probabilities, probability)
+        self.assertEqual(rebuilt.v1_decision.frontier_cells, ((2, 1), (1, 0)))
+        self.assertEqual(rebuilt.v1_decision.plan_actions, v1.plan_actions)
+        self.assertNotEqual(r.encode(rebuilt), r.encode(replace(rebuilt,
+            v1_decision=replace(v1, probabilities=probability[::-1]))))
+
+    def test_unbounded_v1_counts_keep_exact_tagged_integers(self):
+        value = _kc_fixture(reference=True)
+        count = 1 << 20000
+        v1 = replace(value.v1_decision, probability_total_worlds=count,
+                     probabilities=(((1, 0), count // 2, count),), frontier_cells=((1, 0),))
+        rebuilt = r.decode(r.encode(replace(value, v1_decision=v1)))
+        self.assertEqual(rebuilt.v1_decision.probability_total_worlds, count)
+
+    def test_shadow_current_and_final_checkpoint_expiry_are_exact(self):
+        value = _kc_fixture(terminal=True)
+        self.assertTrue(value.shadow.evidence_valid)
+        self.assertFalse(value.final_shadow.evidence_valid)
+        self.assertIsNone(value.final_shadow.decision)
+        for state in (value.shadow, replace(value.final_shadow, last_valid_boundary=None)):
+            with self.assertRaises(r.RecordError):
+                replace(value, final_shadow=state)
+        with self.assertRaises(r.RecordError):
+            replace(_kc_fixture(), final_shadow=value.final_shadow)
+        incomplete = replace(value, final_shadow=None, classification="INCOMPLETE")
+        self.assertEqual(r.decode(r.encode(incomplete)), incomplete)
+
+    def test_stale_or_invalid_attached_shadow_decision_is_rejected(self):
+        value = _kc_fixture()
+        for changes in (dict(evidence_valid=False), dict(enabled=False), dict(decision=None),
+                        dict(last_valid_boundary=None)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value.shadow, **changes)
+        with self.assertRaises(r.RecordError):
+            replace(value, shadow=replace(value.shadow, last_valid_boundary=2))
+        with self.assertRaises(r.RecordError):
+            current = replace(value.shadow.decision, num_mines=2)
+            replace(value, shadow=replace(value.shadow, decision=current))
+
+    def test_p5_exact_failure_classes_and_no_fail_downgrade(self):
+        for failure_class in r._KC_FAILURE_CLASSES:
+            value = _kc_failed(failure_class)
+            expected = "IMPLEMENTATION_IDENTITY_FAIL" if failure_class == "SHADOW_SOUNDNESS_VIOLATION" else "INCOMPLETE"
+            self.assertEqual(value.classification, expected)
+            for bad in ("PASS", "NOT_EVALUATED", "REFERENCE", "NOT_REACHED"):
+                with self.assertRaises(r.RecordError):
+                    replace(value, classification=bad)
+        value = _kc_failed()
+        with self.assertRaises(r.RecordError):
+            replace(value.shadow, enabled=True)
+        with self.assertRaises(r.RecordError):
+            replace(value.shadow, failure=_named_change(value.shadow.failure, "failure_class", "UNKNOWN"))
+
+    def test_diagnosed_soundness_violation_cannot_be_downgraded(self):
+        value = _kc_failed("SHADOW_SOUNDNESS_VIOLATION")
+        v1 = replace(value.v1_decision, evidence_kind="PROBABILITY_GUESS", probability_total_worlds=2,
+                     probabilities=(((1, 0), 1, 2),), frontier_cells=((1, 0),))
+        soundness = (("classification", "SHADOW_SOUNDNESS_VIOLATION"), ("boundary", 1),
+                     ("implicated_boundary", 1), ("safe_cells", ((1, 0),)), ("detail", "Synthetic contradiction."))
+        valid = replace(value, v1_decision=v1, soundness=soundness)
+        self.assertEqual(r.decode(r.encode(valid)), valid)
+        with self.assertRaises(r.RecordError):
+            replace(_kc_fixture(), v1_decision=v1, soundness=soundness)
+        with self.assertRaises(r.RecordError):
+            replace(_kc_failed(), v1_decision=v1, soundness=soundness)
+        with self.assertRaises(r.RecordError):
+            replace(_kc_fixture(), v1_decision=v1)
+
+    def test_missing_current_evidence_is_incomplete(self):
+        value = _kc_fixture()
+        for changes in (dict(public_effect=None), dict(v1_decision=None, soundness=None), dict(soundness=None)):
+            incomplete = replace(value, **changes, classification="INCOMPLETE")
+            self.assertEqual(r.decode(r.encode(incomplete)), incomplete)
+            with self.assertRaises(r.RecordError):
+                replace(incomplete, classification="PASS")
+
+    def test_physical_arm_ordinal_action_target_cursor_and_status_binding(self):
+        value = _kc_fixture()
+        for physical in (replace(value.physical, action=r.Action.FLAG),
+                         replace(value.physical, target=(2, 0)),
+                         replace(value.physical, cursor_before=(3, 0)),
+                         replace(value.physical, after_status=r.Status.LOST),
+                         replace(value.physical, action_ordinal=2)):
+            with self.assertRaises(r.RecordError):
+                replace(value, physical=physical)
+        with self.assertRaises(r.RecordError):
+            replace(value, arm=replace(value.arm, arm=r.Arm.K_P0))
+        with self.assertRaises(r.RecordError):
+            replace(value, terminal_effect=r.TerminalEffectRecord(1, (), r.Status.LOST))
+
+    def test_public_observation_rejects_mutable_nonpublic_malformed_and_inexact_values(self):
+        value = _kc_fixture()
+        for observation in ([], {}, ((-2,),), ((True, -2, -2), (-2, -2, -2)),
+                            ((0.0, -2, -2), (-2, -2, -2)), ((-5, -2, -2), (-2, -2, -2)),
+                            ([0, -2, -2], [-2, -2, -2])):
+            with self.subTest(observation=observation), self.assertRaises(r.RecordError):
+                replace(value, observation=observation)
+
+    def test_nested_mutability_bool_float_and_unknown_enum_are_rejected(self):
+        value = _kc_fixture()
+        for changes in (dict(constraints=list(value.v1_decision.constraints)), dict(safe_cells={(1, 0)}),
+                        dict(probability_total_worlds=True), dict(plan_model_us=1.0),
+                        dict(evidence_kind="UNKNOWN"), dict(action="OPEN"), dict(target=(True, 0)),
+                        dict(probabilities=(((1, 0), True, 2),), probability_total_worlds=2)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value.v1_decision, **changes)
+        for changes in (dict(enabled=1), dict(last_valid_boundary=True), dict(last_valid_M=[]),
+                        dict(v1_continues=False)):
+            with self.assertRaises(r.RecordError):
+                replace(value.shadow, **changes)
+        for bad in (True, 1.0, "1", -1):
+            with self.assertRaises(r.RecordError):
+                replace(value, timings=_named_change(value.timings, "shadow_ns", bad))
+
+    def test_all_nested_v1_coordinate_fields_are_bound_to_board_dimensions(self):
+        value = _kc_fixture(reference=True)
+        for changes in (dict(evidence_target=(3, 0)), dict(safe_cells=((3, 0),)),
+                        dict(mine_cells=((3, 0),)), dict(constraints=(((3, 0), 0, ()),)),
+                        dict(constraints=(((0, 0), 0, ((3, 0),)),)),
+                        dict(probability_total_worlds=1, probabilities=(((3, 0), 0, 1),),
+                             frontier_cells=((3, 0),)),
+                        dict(plan_actions=((r.Action.OPEN, (1, 0)), (r.Action.OPEN, (3, 0))),
+                             plan_model_us=200000, plan_safe_reveals=2)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value, v1_decision=replace(value.v1_decision, **changes))
+
+    def test_shadow_accounting_domains_budget_and_clue_bind_public_observation(self):
+        value = _kc_fixture().shadow.decision
+        accounting = value.local_before
+        outside = ((1, 0), (2, 0), (0, 1), (1, 1), (3, 1))
+        for changes in (dict(b=0), dict(H=outside, U=outside),
+                        dict(constraints=(((1, 0), 0, (), ((0, 1),), 0),)),
+                        dict(constraints=(((0, 0), 0, (), ((2, 1),), 0),))):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value, local_before=replace(accounting, **changes))
+        for field in ("acquired_mines", "S_first", "S_second_all", "S_new", "S_current", "selection_safe_cells"):
+            with self.subTest(field=field), self.assertRaises(r.RecordError):
+                replace(value, **{field: ((3, 0),)})
+        raw = json.loads(r.encode(_kc_fixture()))
+        raw["fields"]["shadow"]["decision"]["local_before"]["b"] = 0
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(raw))
+
+    def test_setlike_membership_order_and_duplicates_rejected(self):
+        value = _kc_fixture()
+        for cells in (((1, 0), (1, 0)), ((1, 1), (1, 0))):
+            with self.assertRaises(r.RecordError):
+                replace(value.v1_decision, safe_cells=cells)
+            with self.assertRaises(r.RecordError):
+                replace(value, logical_m_before=cells)
+        with self.assertRaises(r.RecordError):
+            replace(value.v1_decision, frontier_cells=((1, 0), (1, 0)))
+
+    def test_closed_wire_rejects_missing_extra_and_payload_fields_at_every_level(self):
+        original = r.encode(_kc_fixture())
+        paths = ((), ("v1_decision",), ("shadow",), ("shadow", "decision"),
+                 ("shadow", "decision", "local_before"))
+        for path in paths:
+            source = json.loads(original)["fields"]
+            for part in path:
+                source = source[part]
+            for name in tuple(source) + ("payload", "module", "__class__", "hidden_answer"):
+                node = json.loads(original)
+                target = node["fields"]
+                for part in path:
+                    target = target[part]
+                if name in target:
+                    del target[name]
+                else:
+                    target[name] = {}
+                with self.subTest(path=path, field=name), self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+
+    def test_named_timing_failure_soundness_wire_shape_is_exact(self):
+        for value, field in ((_kc_fixture(), "timings"), (_kc_fixture(), "soundness"), (_kc_failed(), "failure")):
+            for change in ("missing", "extra", "order", "map"):
+                node = json.loads(r.encode(value))
+                owner = node["fields"]["shadow"] if field == "failure" else node["fields"]
+                pairs = owner[field]
+                if change == "missing":
+                    pairs.pop()
+                elif change == "extra":
+                    pairs.append(["other", None])
+                elif change == "order":
+                    pairs.reverse()
+                else:
+                    owner[field] = dict(pairs)
+                with self.subTest(field=field, change=change), self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+
+    def test_helpers_are_deeply_frozen_and_not_top_level_kinds(self):
+        value = _kc_fixture()
+        for helper in (value.v1_decision, value.shadow, value.shadow.decision, value.shadow.decision.after):
+            self.assertFalse(hasattr(helper, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                setattr(helper, fields(helper)[0].name, None)
+            with self.assertRaises(r.RecordError):
+                r.encode(helper)
+        object.__setattr__(value.shadow.decision.local_before, "b", True)
+        with self.assertRaises(r.RecordError):
+            r.encode(value)
+
+    def test_unchanged_i2_transports_one_closed_maintenance_family(self):
+        values = (_kc_fixture(initial=True, reference=True), _kc_fixture(reference=True),
+                  _kc_fixture(initial=True), _kc_fixture(), _kc_fixture(terminal=True), _kc_failed())
+        canonical = tuple(r.encode(value) for value in values)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with store.StreamWriter(root, "kcontrol_maintenance") as writer:
+                for index, value in enumerate(values):
+                    writer.append((index,), value)
+                checkpoint = writer.checkpoint()
+                sealed = writer.seal()
+            found = []
+            scanned = store.scan_stream(root, "kcontrol_maintenance", visit=lambda key, value: found.append(value))
+            self.assertEqual(scanned, sealed)
+            self.assertEqual(checkpoint.record_count, len(values))
+            self.assertEqual(tuple(found), values)
+            self.assertEqual(tuple(r.encode(value) for value in found), canonical)
+            expected = b"".join(_wire([index]) + b"\t" + data + b"\n" for index, data in enumerate(canonical))
+            self.assertEqual((root / "kcontrol_maintenance.jsonl").read_bytes(), expected)
+
+
+_PRE_I6_FIX_SHA256 = dict(_PRE_I6_SHA256,
+    KControlMaintenanceRecord="23b9d4b2d166583ca3c1d183614046ce03fa443db743b10c79d7507c2d116e4e")
+
+
+def _oracle_coverage_fixture(*, selected=True, applicable=((1, "D"), (1, "E"), (4, "D"))):
+    return r.OracleBCoverageRecord(_fixtures()[5], selected, applicable)
+
+
+class OracleBCoverageRecordTests(unittest.TestCase):
+    def test_all_twenty_three_pre_correction_kinds_keep_fixed_canonical_hashes(self):
+        values = _fixtures() + (_decision_fixture(), _certificate_audit_fixture(),
+                                _oracle_audit_fixture(), _determinism_summary_fixtures()[0], _kc_fixture())
+        self.assertEqual({type(value).__name__ for value in values}, set(_PRE_I6_FIX_SHA256))
+        self.assertEqual(len(values), 23)
+        self.assertEqual(r.SCHEMA_VERSION, 1)
+        for value in values:
+            with self.subTest(kind=type(value).__name__):
+                canonical = r.encode(value)
+                self.assertEqual(hashlib.sha256(canonical).hexdigest(), _PRE_I6_FIX_SHA256[type(value).__name__])
+                self.assertEqual(r.encode(r.decode(canonical)), canonical)
+
+    def test_selected_and_applicability_are_independent_canonical_premises(self):
+        for selected in (False, True):
+            for applicable in ((), ((1, "D"),), ((1, "E"),), ((1, "D"), (1, "E")),
+                               ((1, "D"), (1, "E"), (3, "D"), (9, "E"))):
+                with self.subTest(selected=selected, applicable=applicable):
+                    value = _oracle_coverage_fixture(selected=selected, applicable=applicable)
+                    canonical = r.encode(value)
+                    self.assertEqual(r.decode(canonical), value)
+                    self.assertEqual(r.encode(r.decode(canonical)), canonical)
+                    self.assertEqual(json.loads(canonical), {"version": 1, "kind": "oracle_b_coverage",
+                        "fields": {"arm": json.loads(r.encode(value.arm)), "selected": selected,
+                                   "applicable": [list(entry) for entry in applicable]}})
+
+    def test_arm_is_exact_kp0_and_nested_identity_is_revalidated(self):
+        value = _oracle_coverage_fixture()
+        for arm in (r.Arm.CONTROL, r.Arm.K_CONTROL):
+            with self.assertRaises(r.RecordError):
+                replace(value, arm=replace(value.arm, arm=arm))
+        for arm in (None, {}, value.arm.board):
+            with self.assertRaises(r.RecordError):
+                replace(value, arm=arm)
+        object.__setattr__(value.arm.board, "width", True)
+        with self.assertRaises(r.RecordError):
+            r.encode(value)
+
+    def test_selected_requires_an_exact_bool(self):
+        for selected in (0, 1, 0.0, 1.0, "true", None, (), []):
+            with self.subTest(selected=selected), self.assertRaises(r.RecordError):
+                _oracle_coverage_fixture(selected=selected)
+
+    def test_applicability_requires_exact_immutable_pair_shape(self):
+        for applicable in ([], {}, {(1, "D")}, iter(((1, "D"),)), ([1, "D"],),
+                           ((1,),), ((1, "D", "extra"),), ("1D",), (None,)):
+            with self.subTest(applicable=applicable), self.assertRaises(r.RecordError):
+                _oracle_coverage_fixture(applicable=applicable)
+
+    def test_ordinals_are_positive_exact_integers_and_phases_closed_text(self):
+        class IntSubclass(int):
+            pass
+        class TextSubclass(str):
+            pass
+        for ordinal in (True, False, 0, -1, 1.0, Fraction(1, 1), "1", None, 1 << 64, IntSubclass(1)):
+            with self.subTest(ordinal=ordinal), self.assertRaises(r.RecordError):
+                _oracle_coverage_fixture(applicable=((ordinal, "D"),))
+        for phase in ("A", "B", "d", "e", "DE", "", True, 0, None, TextSubclass("D")):
+            with self.subTest(phase=phase), self.assertRaises(r.RecordError):
+                _oracle_coverage_fixture(applicable=((1, phase),))
+
+    def test_duplicate_descending_and_e_before_d_keys_rejected_without_repair(self):
+        for applicable in (((1, "D"), (1, "D")), ((1, "E"), (1, "E")),
+                           ((1, "E"), (1, "D")), ((2, "D"), (1, "E")),
+                           ((1, "D"), (2, "D"), (1, "E"))):
+            with self.subTest(applicable=applicable), self.assertRaises(r.RecordError):
+                _oracle_coverage_fixture(applicable=applicable)
+
+    def test_unknown_missing_extra_fields_and_wrong_nested_kind_reject(self):
+        canonical = r.encode(_oracle_coverage_fixture())
+        for field in ("arm", "selected", "applicable", "status", "verdict", "payload", "hidden_answer", "__class__"):
+            node = json.loads(canonical)
+            if field in node["fields"]:
+                del node["fields"][field]
+            else:
+                node["fields"][field] = "PASS"
+            with self.subTest(field=field), self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+        node = json.loads(canonical)
+        node["fields"]["arm"] = json.loads(r.encode(_fixtures()[4]))
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(node))
+
+    def test_malformed_wire_pairs_float_bool_and_order_reject(self):
+        canonical = r.encode(_oracle_coverage_fixture())
+        for applicable in (None, {}, [1, "D"], [[1]], [[1, "D", 0]], [[True, "D"]],
+                           [[1.0, "D"]], [[1, True]], [[1, "E"], [1, "D"]], [[1, "D"], [1, "D"]]):
+            node = json.loads(canonical)
+            node["fields"]["applicable"] = applicable
+            with self.subTest(applicable=applicable), self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+
+    def test_frozen_slotted_and_encoder_rejects_corruption_or_subclasses(self):
+        value = _oracle_coverage_fixture()
+        self.assertEqual(tuple(field.name for field in fields(value)), ("arm", "selected", "applicable"))
+        self.assertFalse(hasattr(value, "__dict__"))
+        with self.assertRaises(FrozenInstanceError):
+            value.selected = False
+        with self.assertRaises(TypeError):
+            value.applicable[0] = (2, "D")
+        class Subclass(r.OracleBCoverageRecord):
+            pass
+        with self.assertRaises(r.RecordError):
+            r.encode(Subclass(value.arm, value.selected, value.applicable))
+        object.__setattr__(value, "applicable", list(value.applicable))
+        with self.assertRaises(r.RecordError):
+            r.encode(value)
+
+    def test_unchanged_i2_transports_selected_zero_and_unselected_applicability(self):
+        values = (_oracle_coverage_fixture(applicable=()), _oracle_coverage_fixture(applicable=((1, "D"),)),
+                  _oracle_coverage_fixture(), _oracle_coverage_fixture(selected=False))
+        canonical = tuple(r.encode(value) for value in values)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with store.StreamWriter(root, "oracle_b_coverage") as writer:
+                for index, value in enumerate(values):
+                    writer.append((index,), value)
+                checkpoint = writer.checkpoint()
+                sealed = writer.seal()
+            found = []
+            scanned = store.scan_stream(root, "oracle_b_coverage",
+                visit=lambda key, value: found.append((key, value)))
+            self.assertEqual(scanned, sealed)
+            self.assertEqual(checkpoint.record_count, len(values))
+            self.assertEqual(found, [((index,), value) for index, value in enumerate(values)])
+            self.assertEqual(tuple(r.encode(value) for _, value in found), canonical)
+            expected = b"".join(_wire([index]) + b"\t" + data + b"\n" for index, data in enumerate(canonical))
+            self.assertEqual((root / "oracle_b_coverage.jsonl").read_bytes(), expected)
+            self.assertEqual(sealed.sha256, hashlib.sha256(expected).hexdigest())
+
+
 if __name__ == "__main__":
     unittest.main()

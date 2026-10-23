@@ -868,6 +868,35 @@ class OracleBAuditRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class OracleBCoverageRecord:
+    """Raw-trace applicability, independently retained from Oracle audit children.
+
+    Selection and applicability are distinct: an unselected board may reach
+    exact phases, while a selected board may have no applicable phase at all.
+    This record supplies coverage premises, never an audit or research verdict.
+    """
+
+    arm: ArmIdentity
+    selected: bool
+    applicable: tuple
+
+    def __post_init__(self):
+        _record(self.arm, ArmIdentity)
+        _need(self.arm.arm is Arm.K_P0, "Oracle-B coverage requires a K-P0 arm.")
+        _need(type(self.selected) is bool, "Oracle-B selection must be an exact bool.")
+        _tuple(self.applicable)
+        previous = None
+        for entry in self.applicable:
+            _need(type(entry) is tuple and len(entry) == 2, "Expected a closed Oracle-B boundary/phase pair.")
+            ordinal, phase = entry
+            _int(ordinal, 1)
+            _need(type(phase) is str and phase in ("D", "E"), "Oracle-B phase must be exact D or E.")
+            _need(previous is None or entry > previous,
+                  "Oracle-B applicability must be unique, chronological and D before E.")
+            previous = entry
+
+
+@dataclass(frozen=True, slots=True)
 class DeterminismAuditRecord:
     """Summary only; selected repeats also require both full I1 semantic streams."""
 
@@ -896,6 +925,426 @@ class DeterminismAuditRecord:
                   "PASS summary needs equal digests and no difference.")
         else:
             _text(self.first_difference_path)
+
+
+def _ordered_cells(value):
+    """A semantic sequence: reject duplicates without changing its order."""
+    _tuple(value)
+    for cell in value:
+        _cell(cell)
+    _need(len(set(value)) == len(value), "Duplicate ordered coordinate.")
+
+
+def _kc_observation_cells(cells, observation):
+    """Bounds for already explicit closed helper fields, never object traversal."""
+    for cell in cells:
+        _cell(cell)
+        _need(cell[0] < len(observation[0]) and cell[1] < len(observation),
+              "K-CONTROL nested coordinate is outside its public observation.")
+
+
+@dataclass(frozen=True, slots=True)
+class KControlV1Decision:
+    """Exactly the Gate-R O-4 V1 fields; no candidate or survivor pool."""
+
+    action: Action
+    target: tuple
+    evidence_kind: str
+    evidence_action: Action
+    evidence_target: tuple
+    constraints: tuple
+    safe_cells: tuple
+    mine_cells: tuple
+    probability_total_worlds: int | None
+    probabilities: tuple
+    frontier_cells: tuple
+    unconstrained_cells: tuple
+    plan_actions: tuple
+    plan_model_us: int | None
+    plan_safe_reveals: int | None
+
+    def __post_init__(self):
+        _enum(self.action, Action)
+        _enum(self.evidence_action, Action)
+        _cell(self.target)
+        _cell(self.evidence_target)
+        _need(type(self.evidence_kind) is str and self.evidence_kind in
+              ("LOCAL_DETERMINISTIC", "GLOBAL_CERTAINTY", "PROBABILITY_GUESS"), "Unknown V1 evidence kind.")
+        _tuple(self.constraints)
+        for entry in self.constraints:
+            _need(type(entry) is tuple and len(entry) == 3, "Expected closed V1 constraint triple.")
+            _cell(entry[0])
+            _int(entry[1])
+            _cells(entry[2])
+        _cells(self.safe_cells)
+        _cells(self.mine_cells)
+        _tuple(self.probabilities)
+        _ordered_cells(self.frontier_cells)
+        _ordered_cells(self.unconstrained_cells)
+        if self.probability_total_worlds is None:
+            _need(not self.probabilities and not self.frontier_cells and not self.unconstrained_cells,
+                  "Absent V1 probabilities cannot carry a probability domain.")
+        else:
+            _int(self.probability_total_worlds, 1, None)
+            coordinates = []
+            for entry in self.probabilities:
+                _need(type(entry) is tuple and len(entry) == 3, "Expected coordinate/mine/total triple.")
+                _cell(entry[0])
+                _int(entry[1], 0, self.probability_total_worlds)
+                _int(entry[2], 1, None)
+                _need(entry[2] == self.probability_total_worlds, "V1 marginal world count differs.")
+                coordinates.append(entry[0])
+            _ordered_cells(tuple(coordinates))
+            _need(not set(self.frontier_cells).intersection(self.unconstrained_cells)
+                  and set(self.frontier_cells) | set(self.unconstrained_cells) == set(coordinates),
+                  "V1 probability domains do not partition its full sequence.")
+        _tuple(self.plan_actions)
+        for entry in self.plan_actions:
+            _need(type(entry) is tuple and len(entry) == 2, "Expected closed V1 plan action pair.")
+            _enum(entry[0], Action)
+            _cell(entry[1])
+        if self.plan_actions:
+            _need(self.plan_actions[0] == (self.action, self.target), "V1 plan does not begin with selected move.")
+            _int(self.plan_model_us, 1)
+            _int(self.plan_safe_reveals, 1)
+        else:
+            _need(self.plan_model_us is self.plan_safe_reveals is None, "Absent V1 plan has no plan metrics.")
+        # The selected move and analysis recommendation intentionally need not
+        # equal each other: O-4 compares each to its counterpart across arms.
+
+
+@dataclass(frozen=True, slots=True)
+class KControlAccounting:
+    P: tuple
+    H: tuple
+    M: tuple
+    J: tuple
+    U: tuple
+    b: int
+    constraints: tuple
+
+    def __post_init__(self):
+        for cells in (self.P, self.H, self.M, self.J, self.U):
+            _cells(cells)
+        _int(self.b, 0, len(self.U))
+        _need(set(self.J) == set(self.P) | set(self.M)
+              and set(self.U) == set(self.H) - set(self.M)
+              and not set(self.P).intersection(self.H)
+              and set(self.M) <= set(self.P) | set(self.H), "Inconsistent shadow accounting domains.")
+        _tuple(self.constraints)
+        for entry in self.constraints:
+            _need(type(entry) is tuple and len(entry) == 5, "Expected closed shadow clue accounting.")
+            _cell(entry[0])
+            _int(entry[1], 0, 8)
+            _cells(entry[2])
+            _cells(entry[3])
+            _int(entry[4], 0, len(entry[3]))
+            _need(entry[4] == entry[1] - len(entry[2]), "Shadow clue residual differs.")
+
+
+@dataclass(frozen=True, slots=True)
+class KControlShadowDecision:
+    """Current detached A-E premises; archival values confer no later authority."""
+
+    observation: tuple
+    num_mines: int
+    local_before: KControlAccounting
+    local_after: KControlAccounting
+    acquired_mines: tuple
+    S_first: tuple
+    S_second_all: tuple
+    S_new: tuple
+    S_current: tuple
+    local_certificates: tuple
+    phase_d: OracleBExactSnapshot | None
+    phase_e: OracleBExactSnapshot | None
+    phase_e_status: str
+    after: KControlAccounting
+    exact_certificates: tuple
+    continuation: str
+    selection_safe_cells: tuple
+    guess_target: tuple | None
+
+    def __post_init__(self):
+        _observation(self.observation)
+        _int(self.num_mines)
+        public_p = tuple((x, y) for y, row in enumerate(self.observation)
+                         for x, value in enumerate(row) if value == -3)
+        public_h = tuple((x, y) for y, row in enumerate(self.observation)
+                         for x, value in enumerate(row) if value == -2)
+        for value in (self.local_before, self.local_after, self.after):
+            _record(value, KControlAccounting)
+            _need(value.P == public_p and value.H == public_h and value.b == self.num_mines - len(value.J),
+                  "Shadow P/H or remaining mine budget differs from its public observation.")
+            for cells in (value.P, value.H, value.M, value.J, value.U):
+                _kc_observation_cells(cells, self.observation)
+            for source, clue, fixed, unresolved, residual in value.constraints:
+                _kc_observation_cells((source,) + fixed + unresolved, self.observation)
+                _need(self.observation[source[1]][source[0]] == clue
+                      and set(fixed) <= set(value.J) and set(unresolved) <= set(value.U),
+                      "Shadow clue source/domains differ from public phase accounting.")
+                _need(all(cell != source and max(abs(cell[0] - source[0]), abs(cell[1] - source[1])) == 1
+                          for cell in fixed + unresolved), "Shadow clue accounting contains a non-neighbor.")
+        for cells in (self.acquired_mines, self.S_first, self.S_second_all, self.S_new,
+                      self.S_current, self.selection_safe_cells):
+            _cells(cells)
+            _kc_observation_cells(cells, self.observation)
+        _need(set(self.local_before.M) <= set(self.local_after.M) <= set(self.after.M)
+              and set(self.acquired_mines) == set(self.local_after.M) - set(self.local_before.M)
+              and set(self.S_first) <= set(self.S_second_all)
+              and set(self.S_new) == set(self.S_second_all) - set(self.S_first)
+              and set(self.S_current) == set(self.S_first) | set(self.S_second_all),
+              "Shadow local phase identities differ.")
+        for values, source, retained in ((self.local_certificates, "LOCAL", self.local_before.M),
+                                         (self.exact_certificates, "EXACT_GLOBAL", self.local_after.M)):
+            _tuple(values)
+            for value in values:
+                p = _certificate_premises(value)
+                _need(p["source"] == source and p["observation"] == self.observation
+                      and p["num_mines"] == self.num_mines and p["retained_mines"] == retained
+                      and p["status"] == "PLAYING", "Shadow certificate premise binding differs.")
+                _kc_observation_cells((p["target"],) + p["retained_mines"], self.observation)
+                _kc_observation_cells((p["clue"],) if source == "LOCAL" else
+                                      tuple(cell for cell, _ in p["mine_worlds"]), self.observation)
+        for value, accounting in ((self.phase_d, self.local_after), (self.phase_e, self.after)):
+            if value is not None:
+                _record(value, OracleBExactSnapshot)
+                for cells in (value.unresolved_cells, value.frontier_cells, value.unconstrained_cells,
+                              value.G0, value.G1, value.minimum_risk_cells,
+                              tuple(cell for cell, _ in value.mine_worlds)):
+                    _kc_observation_cells(cells, self.observation)
+                materialized = tuple(tuple(-3 if cell == -2 and (x, y) in accounting.M else cell
+                                           for x, cell in enumerate(row))
+                                     for y, row in enumerate(self.observation))
+                _need(value.total_worlds > 0 and value.materialized_observation == materialized,
+                      "Shadow exact snapshot differs from its current Q(M).")
+        _need(type(self.phase_e_status) is str and self.phase_e_status in
+              ("NOT_REACHED", "REACHED_CHANGED", "REACHED_NO_CHANGE"), "Unknown shadow Phase-E status.")
+        _need(type(self.continuation) is str and self.continuation in
+              ("LOCAL_SAFE", "EXACT_SAFE", "EXACT_GUESS"), "Unknown shadow continuation.")
+        if self.continuation == "LOCAL_SAFE":
+            _need(self.phase_d is self.phase_e is None and self.phase_e_status == "NOT_REACHED"
+                  and self.guess_target is None, "Local continuation cannot claim exact phases/guess.")
+        else:
+            _need(self.phase_d is not None and self.phase_e is not None
+                  and self.phase_e_status != "NOT_REACHED", "Exact continuation requires full D/E premises.")
+            if self.continuation == "EXACT_GUESS":
+                _cell(self.guess_target)
+                _kc_observation_cells((self.guess_target,), self.observation)
+            else:
+                _need(self.guess_target is None, "Exact safety cannot claim a guess target.")
+
+
+_KC_FAILURE_NAMES = ("failure_class", "detected_boundary", "last_valid_boundary", "detail",
+                     "implicated_boundary", "invalidation_scope")
+_KC_FAILURE_CLASSES = ("SHADOW_TIMEOUT", "SHADOW_SOUNDNESS_VIOLATION", "SHADOW_COMPARISON_EXCEPTION",
+                       "SHADOW_SEMANTIC_EXCEPTION", "SHADOW_EXCEPTION", "SHADOW_MALFORMED_OUTPUT")
+_KC_TIMING_NAMES = ("v1_plan_position_ns", "k_analysis_planning_ns", "k_execution_validation_ns",
+                    "v1_execution_validation_ns", "shadow_ns", "evidence_ns", "comparison_ns",
+                    "oracle_ns", "evaluator_ns")
+_KC_SOUNDNESS_NAMES = ("classification", "boundary", "implicated_boundary", "safe_cells", "detail")
+
+
+@dataclass(frozen=True, slots=True)
+class KControlShadowState:
+    enabled: bool
+    last_valid_M: tuple
+    decision: KControlShadowDecision | None
+    failure: tuple | None
+    last_valid_boundary: int | None
+    evidence_valid: bool
+    v1_continues: bool
+
+    def __post_init__(self):
+        _need(all(type(v) is bool for v in (self.enabled, self.evidence_valid, self.v1_continues))
+              and self.v1_continues, "Shadow state cannot assume V1 action authority.")
+        _cells(self.last_valid_M)
+        if self.last_valid_boundary is not None:
+            _int(self.last_valid_boundary, 1)
+        else:
+            _need(not self.last_valid_M, "No accepted boundary permits no retained M.")
+        _need((self.decision is not None) == self.evidence_valid,
+              "Only current valid shadow evidence may retain a decision; stale attachment is forbidden.")
+        if self.decision is not None:
+            _record(self.decision, KControlShadowDecision)
+            _need(self.enabled and self.failure is None and self.last_valid_boundary is not None
+                  and self.decision.after.M == self.last_valid_M, "Current shadow decision/state binding differs.")
+        if self.failure is not None:
+            f = _named(self.failure, _KC_FAILURE_NAMES)
+            _need(type(f["failure_class"]) is str and f["failure_class"] in _KC_FAILURE_CLASSES,
+                  "Unknown shadow failure class.")
+            _int(f["detected_boundary"], 1)
+            if f["last_valid_boundary"] is not None:
+                _int(f["last_valid_boundary"], 1, f["detected_boundary"] - 1)
+            _text(f["detail"], empty=True)
+            _need(f["last_valid_boundary"] == self.last_valid_boundary
+                  and type(f["invalidation_scope"]) is str
+                  and f["invalidation_scope"] == "WHOLE_SHADOW_STREAM",
+                  "Shadow failure checkpoint/invalidation differs.")
+            _need((f["implicated_boundary"] == f["detected_boundary"])
+                  if f["failure_class"] == "SHADOW_SOUNDNESS_VIOLATION"
+                  else f["implicated_boundary"] is None, "Incorrect implicated shadow boundary.")
+            if f["implicated_boundary"] is not None:
+                _int(f["implicated_boundary"], 1)
+            _need(not self.enabled and not self.evidence_valid and self.decision is None,
+                  "Failed shadow cannot remain enabled/current.")
+        else:
+            _need(self.enabled, "Disabled shadow must retain its explicit failure.")
+
+
+@dataclass(frozen=True, slots=True)
+class KControlMaintenanceRecord:
+    """One selected O-4 reference/actual input, with a closed shadow vocabulary.
+
+    CONTROL carries the full reference projection captured in the primary worker.
+    K_CONTROL carries the separate process's actual projection and shadow state.
+    Other I1 decision schemas and their accepted arm restrictions stay unchanged.
+    """
+
+    arm: ArmIdentity
+    physical: PhysicalInputRecord
+    observation: tuple
+    public_effect: PublicEffectRecord | None
+    terminal_effect: TerminalEffectRecord | None
+    v1_decision: KControlV1Decision | None
+    guess_checkpoint: GuessCheckpointRecord | None
+    timings: tuple
+    logical_m_before: tuple
+    logical_m_preinput: tuple
+    shadow: KControlShadowState | None
+    soundness: tuple | None
+    final_shadow: KControlShadowState | None
+    classification: str
+
+    def __post_init__(self):
+        _record(self.arm, ArmIdentity)
+        _need(self.arm.arm in (Arm.CONTROL, Arm.K_CONTROL), "Maintenance covers only CONTROL/K-CONTROL.")
+        _record(self.physical, PhysicalInputRecord)
+        board, ordinal = self.arm.board, self.physical.action_ordinal
+        for cell in (self.physical.target, self.physical.cursor_before):
+            _cell(cell, board)
+        _observation(self.observation)
+        _need(len(self.observation) == board.height and len(self.observation[0]) == board.width,
+              "Maintenance public observation dimensions differ.")
+        for value, cls in ((self.public_effect, PublicEffectRecord), (self.terminal_effect, TerminalEffectRecord)):
+            if value is not None:
+                _record(value, cls)
+                _need(value.action_ordinal == ordinal, "Maintenance effect boundary differs.")
+                for change in value.changes:
+                    _cell(change.cell, board)
+        if self.public_effect is not None:
+            _need(self.public_effect.after_status is self.physical.after_status, "Public/physical status differs.")
+            for change in self.public_effect.changes:
+                x, y = change.cell
+                old = self.observation[y][x]
+                public_state = "HIDDEN" if old == -2 else "FLAGGED" if old == -3 else "CLUE_" + str(old)
+                _need(change.before == public_state, "Public delta does not bind the preinput observation.")
+        if self.terminal_effect is not None:
+            _need(self.terminal_effect.terminal_status is self.physical.after_status,
+                  "Terminal/physical status differs.")
+        if self.v1_decision is not None:
+            _record(self.v1_decision, KControlV1Decision)
+            _need(ordinal > 0 and (self.v1_decision.action, self.v1_decision.target)
+                  == (self.physical.action, self.physical.target), "V1 decision/physical move differs.")
+            v1 = self.v1_decision
+            for cells in ((v1.target, v1.evidence_target), v1.safe_cells, v1.mine_cells,
+                          v1.frontier_cells, v1.unconstrained_cells,
+                          tuple(cell for cell, _, _ in v1.probabilities),
+                          tuple(cell for _, cell in v1.plan_actions)):
+                _kc_observation_cells(cells, self.observation)
+            for source, remaining, hidden in v1.constraints:
+                _kc_observation_cells((source,) + hidden, self.observation)
+        if self.guess_checkpoint is not None:
+            _record(self.guess_checkpoint, GuessCheckpointRecord)
+            _need(self.guess_checkpoint.arm == self.arm and self.v1_decision is not None
+                  and self.v1_decision.evidence_kind == "PROBABILITY_GUESS"
+                  and self.guess_checkpoint.chosen_target == self.physical.target,
+                  "Maintenance uncertain-guess binding differs.")
+        timings = _named(self.timings, _KC_TIMING_NAMES)
+        for duration in timings.values():
+            if duration is not None:
+                _int(duration)
+        for cells in (self.logical_m_before, self.logical_m_preinput):
+            _cells(cells, board)
+        _need(set(self.logical_m_before) <= set(self.logical_m_preinput), "Maintenance logical M regresses.")
+        if ordinal == 0:
+            _need(self.physical.action is Action.OPEN and self.physical.target == board.first_click
+                  and self.physical.cursor_before == (0, 0) and self.v1_decision is None
+                  and self.guess_checkpoint is None and not self.logical_m_before and not self.logical_m_preinput
+                  and timings["v1_plan_position_ns"] is None
+                  and all(cell == -2 for row in self.observation for cell in row),
+                  "Initial maintenance input cannot claim planning/inference.")
+        if self.arm.arm is Arm.CONTROL:
+            _need(self.shadow is self.soundness is self.final_shadow is None
+                  and not self.logical_m_before and not self.logical_m_preinput,
+                  "CONTROL O-4 reference cannot carry shadow state.")
+            expected = "REFERENCE"
+        else:
+            _record(self.shadow, KControlShadowState)
+            _need(self.shadow.last_valid_M == self.logical_m_preinput, "Shadow retained M differs from input M.")
+            if self.shadow.last_valid_boundary is not None:
+                _need(self.shadow.last_valid_boundary <= ordinal, "Shadow boundary is in the future.")
+            if self.shadow.evidence_valid:
+                decision = self.shadow.decision
+                _need(self.shadow.last_valid_boundary == ordinal and decision.observation == self.observation
+                      and decision.num_mines == board.mines and decision.local_before.M == self.logical_m_before,
+                      "Current shadow evidence is stale or bound to a different input.")
+            if self.soundness is not None:
+                s = _named(self.soundness, _KC_SOUNDNESS_NAMES)
+                _need(type(s["classification"]) is str and s["classification"] in
+                      ("NO_DISCREPANCY", "SHADOW_SOUNDNESS_VIOLATION", "NOT_EVALUATED"),
+                      "Unknown shadow comparison classification.")
+                _int(s["boundary"])
+                _need(s["boundary"] == ordinal, "Soundness boundary differs.")
+                _cells(s["safe_cells"], board)
+                _text(s["detail"], empty=True)
+                if s["implicated_boundary"] is not None:
+                    _int(s["implicated_boundary"])
+                _need(s["implicated_boundary"] == ordinal if s["classification"] == "SHADOW_SOUNDNESS_VIOLATION"
+                      else s["implicated_boundary"] is None, "Soundness implicated boundary differs.")
+                if s["classification"] != "NOT_EVALUATED":
+                    _need(self.v1_decision is not None, "Evaluated soundness requires its full V1 premise.")
+                if s["classification"] == "SHADOW_SOUNDNESS_VIOLATION":
+                    _need(bool(s["safe_cells"]) and self.v1_decision.evidence_kind == "PROBABILITY_GUESS"
+                          and self.shadow.failure is not None
+                          and dict(self.shadow.failure)["failure_class"] == "SHADOW_SOUNDNESS_VIOLATION",
+                          "A diagnosed shadow contradiction cannot be downgraded or detached from its failure.")
+                elif (s["classification"] == "NO_DISCREPANCY"
+                      and self.v1_decision.evidence_kind == "PROBABILITY_GUESS"):
+                    _need(not s["safe_cells"], "Safe-at-guess contradiction cannot become NO_DISCREPANCY.")
+                if self.shadow.evidence_valid:
+                    _need(s["safe_cells"] == self.shadow.decision.selection_safe_cells,
+                          "Soundness safety differs from current shadow decision.")
+            if self.final_shadow is not None:
+                _record(self.final_shadow, KControlShadowState)
+                _need(self.physical.after_status in (Status.WON, Status.LOST)
+                      and not self.final_shadow.evidence_valid and self.final_shadow.decision is None
+                      and self.final_shadow.enabled == self.shadow.enabled
+                      and self.final_shadow.last_valid_M == self.shadow.last_valid_M
+                      and self.final_shadow.last_valid_boundary == self.shadow.last_valid_boundary
+                      and self.final_shadow.failure == self.shadow.failure,
+                      "Final shadow checkpoint must expire the final current decision without changing retained state.")
+            if self.shadow.failure is not None:
+                failure = dict(self.shadow.failure)
+                _need(failure["detected_boundary"] <= ordinal, "Shadow failure occurs after this input.")
+                _need(self.logical_m_before == self.logical_m_preinput,
+                      "Failed shadow cannot acquire or repair retained M.")
+                expected = ("IMPLEMENTATION_IDENTITY_FAIL" if failure["failure_class"] == "SHADOW_SOUNDNESS_VIOLATION"
+                            else "INCOMPLETE")
+            elif self.public_effect is None or timings["v1_execution_validation_ns"] is None or (
+                    ordinal and (self.v1_decision is None or timings["v1_plan_position_ns"] is None
+                    or not self.shadow.evidence_valid or self.soundness is None
+                    or timings["shadow_ns"] is None or timings["comparison_ns"] is None)) or (
+                    self.physical.after_status is not Status.PLAYING and self.final_shadow is None):
+                expected = "INCOMPLETE"
+            elif not ordinal:
+                expected = "NOT_REACHED"
+            elif dict(self.soundness)["classification"] == "NOT_EVALUATED":
+                expected = "NOT_EVALUATED"
+            else:
+                expected = "PASS"
+        _need(type(self.classification) is str and self.classification == expected,
+              "K-CONTROL classification does not retain the exact P-5 diagnosis.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1044,7 +1493,8 @@ def _wire(r):
                   TerminalEffectRecord, DecisionSpanRecord, ActionDecisionRecord, GuessCheckpointRecord,
                   ControlFlagProvenanceRecord, AcquisitionRecord, EvaluatorRecord,
                   PairComparisonRecord, OperationEventRecord, ResourceSampleRecord, CompletionReceipt,
-                  CertificateAuditRecord, OracleBAuditRecord, DeterminismAuditRecord),
+                  CertificateAuditRecord, OracleBAuditRecord, DeterminismAuditRecord, KControlMaintenanceRecord,
+                  OracleBCoverageRecord),
           "Unsupported record type/subclass.")
     cls.__post_init__(r)  # also rejects records corrupted through object.__setattr__
     if cls is ProtocolIdentity:
@@ -1125,6 +1575,19 @@ def _wire(r):
         kind, f = "determinism_audit", dict(
             selected=r.selected, first_digest=r.first_digest, repeat_digest=r.repeat_digest,
             status=None if r.status is None else r.status.value, first_difference_path=r.first_difference_path)
+    elif cls is OracleBCoverageRecord:
+        kind, f = "oracle_b_coverage", dict(arm=_wire(r.arm), selected=r.selected, applicable=r.applicable)
+    elif cls is KControlMaintenanceRecord:
+        kind, f = "k_control_maintenance", dict(
+            arm=_wire(r.arm), physical=_wire(r.physical), observation=r.observation,
+            public_effect=None if r.public_effect is None else _wire(r.public_effect),
+            terminal_effect=None if r.terminal_effect is None else _wire(r.terminal_effect),
+            v1_decision=None if r.v1_decision is None else _w_kc_v1(r.v1_decision),
+            guess_checkpoint=None if r.guess_checkpoint is None else _wire(r.guess_checkpoint),
+            timings=r.timings, logical_m_before=r.logical_m_before, logical_m_preinput=r.logical_m_preinput,
+            shadow=None if r.shadow is None else _w_kc_state(r.shadow), soundness=r.soundness,
+            final_shadow=None if r.final_shadow is None else _w_kc_state(r.final_shadow),
+            classification=r.classification)
     elif cls is EvaluatorRecord:
         kind, f = "evaluator", dict(arm=_wire(r.arm), assertion=r.assertion.value, targets=r.targets, status=r.status.value,
                                    reason_code=r.reason_code, detail=r.detail)
@@ -1198,6 +1661,41 @@ def oracle_b_snapshot_digest(snapshot):
     """Corroborating canonical hash; exact snapshot equality remains mandatory."""
     return sha256(json.dumps(_w_oracle_snapshot(snapshot), sort_keys=True, separators=(",", ":"),
                              ensure_ascii=True, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _w_kc_v1(v):
+    return dict(action=v.action.value, target=v.target, evidence_kind=v.evidence_kind,
+                evidence_action=v.evidence_action.value, evidence_target=v.evidence_target,
+                constraints=v.constraints, safe_cells=v.safe_cells, mine_cells=v.mine_cells,
+                probability_total_worlds=None if v.probability_total_worlds is None else _big(v.probability_total_worlds),
+                probabilities=tuple((cell, _big(mine), _big(total)) for cell, mine, total in v.probabilities),
+                frontier_cells=v.frontier_cells, unconstrained_cells=v.unconstrained_cells,
+                plan_actions=tuple((action.value, cell) for action, cell in v.plan_actions),
+                plan_model_us=v.plan_model_us, plan_safe_reveals=v.plan_safe_reveals)
+
+
+def _w_kc_accounting(v):
+    return dict(P=v.P, H=v.H, M=v.M, J=v.J, U=v.U, b=v.b, constraints=v.constraints)
+
+
+def _w_kc_decision(v):
+    return dict(observation=v.observation, num_mines=v.num_mines,
+                local_before=_w_kc_accounting(v.local_before), local_after=_w_kc_accounting(v.local_after),
+                acquired_mines=v.acquired_mines, S_first=v.S_first, S_second_all=v.S_second_all,
+                S_new=v.S_new, S_current=v.S_current,
+                local_certificates=tuple(_w_certificate_premises(c) for c in v.local_certificates),
+                phase_d=None if v.phase_d is None else _w_oracle_snapshot(v.phase_d),
+                phase_e=None if v.phase_e is None else _w_oracle_snapshot(v.phase_e),
+                phase_e_status=v.phase_e_status, after=_w_kc_accounting(v.after),
+                exact_certificates=tuple(_w_certificate_premises(c) for c in v.exact_certificates),
+                continuation=v.continuation, selection_safe_cells=v.selection_safe_cells, guess_target=v.guess_target)
+
+
+def _w_kc_state(v):
+    return dict(enabled=v.enabled, last_valid_M=v.last_valid_M,
+                decision=None if v.decision is None else _w_kc_decision(v.decision), failure=v.failure,
+                last_valid_boundary=v.last_valid_boundary, evidence_valid=v.evidence_valid,
+                v1_continues=v.v1_continues)
 
 
 def encode(record):
@@ -1330,6 +1828,65 @@ def _d_oracle_snapshot(value):
         f["shared_kernel_evidence"], f["kernel"], _d_observation(f["materialized_observation"]))
 
 
+def _d_kc_v1(value):
+    f = _keys(value, "action target evidence_kind evidence_action evidence_target constraints safe_cells mine_cells probability_total_worlds probabilities frontier_cells unconstrained_cells plan_actions plan_model_us plan_safe_reveals")
+    constraints = []
+    for entry in _list(f["constraints"]):
+        _need(type(entry) is list and len(entry) == 3, "Malformed V1 constraint triple.")
+        constraints.append((_dc(entry[0]), entry[1], _dcs(entry[2])))
+    probabilities = []
+    for entry in _list(f["probabilities"]):
+        _need(type(entry) is list and len(entry) == 3, "Malformed V1 probability triple.")
+        probabilities.append((_dc(entry[0]), _db(entry[1]), _db(entry[2])))
+    actions = []
+    for entry in _list(f["plan_actions"]):
+        _need(type(entry) is list and len(entry) == 2, "Malformed V1 plan action pair.")
+        actions.append((_de(entry[0], Action), _dc(entry[1])))
+    return KControlV1Decision(
+        _de(f["action"], Action), _dc(f["target"]), f["evidence_kind"],
+        _de(f["evidence_action"], Action), _dc(f["evidence_target"]), tuple(constraints),
+        _dcs(f["safe_cells"]), _dcs(f["mine_cells"]),
+        None if f["probability_total_worlds"] is None else _db(f["probability_total_worlds"]),
+        tuple(probabilities), tuple(_dc(c) for c in _list(f["frontier_cells"])),
+        tuple(_dc(c) for c in _list(f["unconstrained_cells"])), tuple(actions),
+        f["plan_model_us"], f["plan_safe_reveals"])
+
+
+def _d_kc_accounting(value):
+    f = _keys(value, "P H M J U b constraints")
+    constraints = []
+    for entry in _list(f["constraints"]):
+        _need(type(entry) is list and len(entry) == 5, "Malformed shadow clue accounting.")
+        constraints.append((_dc(entry[0]), entry[1], _dcs(entry[2]), _dcs(entry[3]), entry[4]))
+    return KControlAccounting(_dcs(f["P"]), _dcs(f["H"]), _dcs(f["M"]), _dcs(f["J"]), _dcs(f["U"]),
+                              f["b"], tuple(constraints))
+
+
+def _d_kc_decision(value):
+    f = _keys(value, "observation num_mines local_before local_after acquired_mines S_first S_second_all S_new S_current local_certificates phase_d phase_e phase_e_status after exact_certificates continuation selection_safe_cells guess_target")
+    return KControlShadowDecision(
+        _d_observation(f["observation"]), f["num_mines"], _d_kc_accounting(f["local_before"]),
+        _d_kc_accounting(f["local_after"]), _dcs(f["acquired_mines"]), _dcs(f["S_first"]),
+        _dcs(f["S_second_all"]), _dcs(f["S_new"]), _dcs(f["S_current"]),
+        tuple(_d_certificate_premises(c) for c in _list(f["local_certificates"])),
+        None if f["phase_d"] is None else _d_oracle_snapshot(f["phase_d"]),
+        None if f["phase_e"] is None else _d_oracle_snapshot(f["phase_e"]), f["phase_e_status"],
+        _d_kc_accounting(f["after"]), tuple(_d_certificate_premises(c) for c in _list(f["exact_certificates"])),
+        f["continuation"], _dcs(f["selection_safe_cells"]),
+        None if f["guess_target"] is None else _dc(f["guess_target"]))
+
+
+def _d_kc_state(value):
+    f = _keys(value, "enabled last_valid_M decision failure last_valid_boundary evidence_valid v1_continues")
+    failure = None
+    if f["failure"] is not None:
+        values = _d_named(f["failure"], _KC_FAILURE_NAMES)
+        failure = tuple((name, values[name]) for name in _KC_FAILURE_NAMES)
+    return KControlShadowState(f["enabled"], _dcs(f["last_valid_M"]),
+                               None if f["decision"] is None else _d_kc_decision(f["decision"]), failure,
+                               f["last_valid_boundary"], f["evidence_valid"], f["v1_continues"])
+
+
 def _from_wire(value):
     _keys(value, "kind version fields")
     _need(type(value["version"]) is int and value["version"] == SCHEMA_VERSION, "Unknown schema version.")
@@ -1428,6 +1985,32 @@ def _from_wire(value):
         return DeterminismAuditRecord(f["selected"], f["first_digest"], f["repeat_digest"],
                                       None if f["status"] is None else _de(f["status"], AuditStatus),
                                       f["first_difference_path"])
+    if k == "oracle_b_coverage":
+        _keys(f, "arm selected applicable")
+        applicable = []
+        for entry in _list(f["applicable"]):
+            _need(type(entry) is list and len(entry) == 2, "Malformed Oracle-B coverage pair.")
+            applicable.append((entry[0], entry[1]))
+        return OracleBCoverageRecord(_nested(f["arm"], ArmIdentity), f["selected"], tuple(applicable))
+    if k == "k_control_maintenance":
+        _keys(f, "arm physical observation public_effect terminal_effect v1_decision guess_checkpoint timings logical_m_before logical_m_preinput shadow soundness final_shadow classification")
+        times = _d_named(f["timings"], _KC_TIMING_NAMES)
+        soundness = None
+        if f["soundness"] is not None:
+            s = _d_named(f["soundness"], _KC_SOUNDNESS_NAMES)
+            soundness = (("classification", s["classification"]), ("boundary", s["boundary"]),
+                         ("implicated_boundary", s["implicated_boundary"]),
+                         ("safe_cells", _dcs(s["safe_cells"])), ("detail", s["detail"]))
+        return KControlMaintenanceRecord(
+            _nested(f["arm"], ArmIdentity), _nested(f["physical"], PhysicalInputRecord),
+            _d_observation(f["observation"]),
+            None if f["public_effect"] is None else _nested(f["public_effect"], PublicEffectRecord),
+            None if f["terminal_effect"] is None else _nested(f["terminal_effect"], TerminalEffectRecord),
+            None if f["v1_decision"] is None else _d_kc_v1(f["v1_decision"]),
+            None if f["guess_checkpoint"] is None else _nested(f["guess_checkpoint"], GuessCheckpointRecord),
+            tuple((name, times[name]) for name in _KC_TIMING_NAMES), _dcs(f["logical_m_before"]),
+            _dcs(f["logical_m_preinput"]), None if f["shadow"] is None else _d_kc_state(f["shadow"]),
+            soundness, None if f["final_shadow"] is None else _d_kc_state(f["final_shadow"]), f["classification"])
     if k == "evaluator":
         _keys(f, "arm assertion targets status reason_code detail")
         return EvaluatorRecord(_nested(f["arm"], ArmIdentity), _de(f["assertion"], AssertionCategory), _dcs(f["targets"]),
