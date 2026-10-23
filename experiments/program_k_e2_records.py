@@ -10,6 +10,7 @@ relationships remain the later validator's responsibility.
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
+from hashlib import sha256
 import json
 
 
@@ -144,6 +145,12 @@ class EvaluationStatus(Enum):
 
 
 class P3Status(Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class AuditStatus(Enum):
     PASS = "PASS"
     FAIL = "FAIL"
     INCOMPLETE = "INCOMPLETE"
@@ -604,6 +611,293 @@ class AcquisitionRecord:
         _hex(self.certificate_sha256)
 
 
+_CERTIFICATE_COMMON = ("source", "observation", "num_mines", "target", "retained_mines", "status")
+_LOCAL_FACTS = ("target", "clue", "clue_value", "physical_flags", "logical_mines",
+                "unresolved", "residual", "antecedents")
+_EXACT_FACTS = ("target", "total_worlds", "mine_worlds", "antecedents", "oracle_a_status",
+                "oracle_a_variable_count", "oracle_a_envelope", "oracle_a_reason", "arithmetic_evidence")
+
+
+def _signed_exact(value):
+    _need(type(value) is int, "Expected an exact signed integer.")
+
+
+def _observation(value):
+    _tuple(value)
+    _need(bool(value), "Expected nonempty public observation.")
+    width = None
+    for row in value:
+        _tuple(row)
+        _need(bool(row) and (width is None or len(row) == width), "Expected rectangular public observation.")
+        width = len(row)
+        for cell in row:
+            _need(type(cell) is int and (cell in (-2, -3) or 0 <= cell <= 8),
+                  "Only exact public hidden/flag/clue glyphs are allowed.")
+
+
+def _named(value, names):
+    _tuple(value)
+    _need(all(type(item) is tuple and len(item) == 2 and type(item[0]) is str for item in value)
+          and tuple(item[0] for item in value) == names, "Unknown/missing/out-of-order named evidence fields.")
+    return dict(value)
+
+
+def _count_map(value):
+    _tuple(value)
+    _need(all(type(item) is tuple and len(item) == 2 for item in value), "Expected immutable cell/count pairs.")
+    _cells(tuple(item[0] for item in value))
+    for _, count in value:
+        _signed_exact(count)
+
+
+def _digests(value):
+    _tuple(value)
+    for digest in value:
+        _hex(digest)
+
+
+def _certificate_premises(value):
+    _tuple(value)
+    _need(bool(value) and type(value[0]) is tuple and len(value[0]) == 2
+          and value[0][0] == "source" and type(value[0][1]) is str
+          and value[0][1] in ("LOCAL", "EXACT_GLOBAL"), "Missing exact certificate source.")
+    source = value[0][1]
+    names = _CERTIFICATE_COMMON + (("clue",) if source == "LOCAL" else
+                                   ("total_worlds", "mine_worlds", "exact_reached"))
+    facts = _named(value, names)
+    _observation(facts["observation"])
+    _int(facts["num_mines"])
+    _cell(facts["target"])
+    _cells(facts["retained_mines"])
+    _need(type(facts["status"]) is str and facts["status"] in ("PLAYING", "WON", "LOST"),
+          "Unknown exact certificate game status.")
+    if source == "LOCAL":
+        _cell(facts["clue"])
+    else:
+        _signed_exact(facts["total_worlds"])
+        _count_map(facts["mine_worlds"])
+        _need(type(facts["exact_reached"]) is bool, "Expected exact reachability bool.")
+    return facts
+
+
+def _certificate_facts(value, premises, verifier_status):
+    _tuple(value)
+    if not value:
+        _need(verifier_status != "PASS", "Passing verifier must retain full public facts.")
+        return
+    local = premises["source"] == "LOCAL"
+    facts = _named(value, _LOCAL_FACTS if local else _EXACT_FACTS)
+    _cell(facts["target"])
+    _need(facts["target"] == premises["target"], "Verifier target differs from certificate.")
+    _cells(facts["antecedents"])
+    if local:
+        _cell(facts["clue"])
+        _need(facts["clue"] == premises["clue"], "Verifier clue differs from certificate.")
+        _int(facts["clue_value"], 0, 8)
+        x, y = facts["clue"]
+        observation = premises["observation"]
+        _need(y < len(observation) and x < len(observation[0])
+              and facts["clue_value"] == observation[y][x],
+              "Verifier clue value differs from the public certificate observation.")
+        for name in ("physical_flags", "logical_mines", "unresolved"):
+            _cells(facts[name])
+        _signed_exact(facts["residual"])
+    else:
+        _signed_exact(facts["total_worlds"])
+        _signed_exact(facts["mine_worlds"])
+        _need(facts["total_worlds"] == facts["mine_worlds"] == premises["total_worlds"],
+              "Verifier exact counts differ from certificate world count.")
+        _text(facts["oracle_a_status"])
+        _int(facts["oracle_a_variable_count"])
+        _int(facts["oracle_a_envelope"])
+        if facts["oracle_a_reason"] is not None:
+            _text(facts["oracle_a_reason"], empty=True)
+        _text(facts["arithmetic_evidence"])
+
+
+def certificate_premises_digest(premises):
+    """Bind exactly the two accepted certificate shapes to their legacy SHA.
+
+    These fixed tags reproduce the existing certificate codec identity without
+    importing its graph registry or admitting arbitrary objects into I1.
+    """
+    p = _certificate_premises(premises)
+    fields = {
+        "observation": {"tuple": [{"tuple": list(row)} for row in p["observation"]]},
+        "num_mines": p["num_mines"], "target": {"tuple": list(p["target"])},
+        "retained_mines": {"coordinate_set": [{"tuple": list(cell)} for cell in p["retained_mines"]]},
+        "status": {"enum": "GameStatus", "name": p["status"]},
+    }
+    if p["source"] == "LOCAL":
+        name = "LocalMineCertificate"
+        fields["clue"] = {"tuple": list(p["clue"])}
+    else:
+        name = "ExactGlobalMineCertificate"
+        fields["total_worlds"] = p["total_worlds"]
+        fields["mine_worlds"] = {"tuple": [
+            {"tuple": [{"tuple": list(cell)}, count]} for cell, count in p["mine_worlds"]]}
+        fields["exact_reached"] = p["exact_reached"]
+    wire = {"record": "experiments.program_k_oracles." + name, "fields": fields}
+    try:
+        encoded = json.dumps(wire, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True, allow_nan=False).encode("ascii")
+    except (ValueError, OverflowError) as error:
+        raise RecordError("Certificate premises exceed the accepted legacy identity codec.") from error
+    return sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateAuditRecord:
+    """Detached public premises and verifier facts, never a live proof object."""
+
+    action_ordinal: int
+    acquisition: AcquisitionRecord
+    certificate_premises: tuple
+    prior_certificate_sha256s: tuple
+    status: AuditStatus
+    verifier_status: str
+    detail: str
+    owned_m_before: tuple
+    owned_m_after: tuple
+    verifier_facts: tuple
+
+    def __post_init__(self):
+        _int(self.action_ordinal, 1)
+        _record(self.acquisition, AcquisitionRecord)
+        _enum(self.status, AuditStatus)
+        _need(type(self.verifier_status) is str and self.verifier_status in ("PASS", "FAIL", "INCOMPLETE"),
+              "Unknown public verifier status.")
+        _text(self.detail)
+        premises = _certificate_premises(self.certificate_premises)
+        _certificate_facts(self.verifier_facts, premises, self.verifier_status)
+        _digests(self.prior_certificate_sha256s)
+        _cells(self.owned_m_before)
+        _cells(self.owned_m_after)
+        _need(self.action_ordinal == self.acquisition.action_ordinal
+              and premises["target"] == self.acquisition.cell
+              and premises["source"] == self.acquisition.source.value
+              and self.acquisition.certificate_ref == "sha256:" + self.acquisition.certificate_sha256
+              and self.acquisition.certificate_sha256 == certificate_premises_digest(self.certificate_premises),
+              "Acquisition boundary/source/target/certificate identity differs.")
+        # The retained SHA is the accepted certificate codec identity, not an I1
+        # record hash. Full named premises remain the evidence for later auditing.
+        _need(self.owned_m_before == premises["retained_mines"]
+              and self.owned_m_after == tuple(sorted(set(self.owned_m_before) | {premises["target"]},
+                                                    key=lambda cell: (cell[1], cell[0]))),
+              "Owned M does not bind the certificate retained set and target.")
+        _need((self.verifier_status == "FAIL") == (self.status is AuditStatus.FAIL),
+              "A failed public verifier cannot be downgraded.")
+        _need(self.status is not AuditStatus.PASS or self.verifier_status == "PASS",
+              "PASS requires the public verifier to PASS.")
+
+
+@dataclass(frozen=True, slots=True)
+class OracleBExactSnapshot:
+    """Nested exact semantic premise; deliberately not a top-level wire kind.
+
+    Exact but erroneous count values can be retained as failed audit evidence.
+    No constructor repairs classifications, kernels or materialized observations.
+    """
+
+    unresolved_cells: tuple
+    frontier_cells: tuple
+    unconstrained_cells: tuple
+    total_worlds: int
+    mine_worlds: tuple
+    G0: tuple
+    G1: tuple
+    minimum_risk: Fraction | None
+    minimum_risk_cells: tuple
+    shared_kernel_evidence: str
+    kernel: str
+    materialized_observation: tuple
+
+    def __post_init__(self):
+        for value in (self.unresolved_cells, self.frontier_cells, self.unconstrained_cells,
+                      self.G0, self.G1, self.minimum_risk_cells):
+            _cells(value)
+        _signed_exact(self.total_worlds)
+        _count_map(self.mine_worlds)
+        if self.minimum_risk is not None:
+            _fraction(self.minimum_risk)
+        _text(self.shared_kernel_evidence)
+        _text(self.kernel)
+        _observation(self.materialized_observation)
+
+
+@dataclass(frozen=True, slots=True)
+class OracleBAuditRecord:
+    action_ordinal: int
+    phase: str
+    logical_mines: tuple
+    public_observation: tuple
+    prior_certificate_sha256s: tuple
+    input_digest: str
+    expected_digest: str
+    actual_digest: str | None
+    status: AuditStatus
+    differences: tuple
+    expected: OracleBExactSnapshot
+    actual: OracleBExactSnapshot | None
+
+    def __post_init__(self):
+        _int(self.action_ordinal, 1)
+        _need(type(self.phase) is str and self.phase in ("D", "E"), "Oracle-B phase must be D or E.")
+        _cells(self.logical_mines)
+        _observation(self.public_observation)
+        _digests(self.prior_certificate_sha256s)
+        _hex(self.input_digest)
+        _hex(self.expected_digest)
+        _enum(self.status, AuditStatus)
+        _tuple(self.differences)
+        for reason in self.differences:
+            _text(reason)
+        _record(self.expected, OracleBExactSnapshot)
+        _need(self.expected_digest == oracle_b_snapshot_digest(self.expected), "Expected semantic digest differs.")
+        _need((self.actual is None) == (self.actual_digest is None), "Actual snapshot/digest presence differs.")
+        if self.actual is not None:
+            _record(self.actual, OracleBExactSnapshot)
+            _hex(self.actual_digest)
+            _need(self.actual_digest == oracle_b_snapshot_digest(self.actual), "Actual semantic digest differs.")
+        exact_pass = (self.actual is not None and self.expected == self.actual and not self.differences
+                      and self.expected.total_worlds > 0 and self.actual.total_worlds > 0)
+        _need((self.status is AuditStatus.PASS) == exact_pass,
+              "Oracle PASS requires exact equal full premises, positive worlds and no differences.")
+        _need(self.status is AuditStatus.PASS or bool(self.differences),
+              "Nonpassing Oracle evidence needs explicit differences/prerequisite reasons.")
+
+
+@dataclass(frozen=True, slots=True)
+class DeterminismAuditRecord:
+    """Summary only; selected repeats also require both full I1 semantic streams."""
+
+    selected: bool
+    first_digest: str | None
+    repeat_digest: str | None
+    status: AuditStatus | None
+    first_difference_path: str | None
+
+    def __post_init__(self):
+        _need(type(self.selected) is bool, "Expected exact determinism selection bool.")
+        if not self.selected:
+            _need(self.first_digest is self.repeat_digest is self.status is self.first_difference_path is None,
+                  "Unselected determinism cannot claim any result.")
+            return
+        _hex(self.first_digest)
+        _enum(self.status, AuditStatus)
+        if self.repeat_digest is None:
+            _need(self.status is AuditStatus.INCOMPLETE and self.first_difference_path is None,
+                  "Missing repeat requires INCOMPLETE and no difference.")
+            return
+        _hex(self.repeat_digest)
+        _need(self.status in (AuditStatus.PASS, AuditStatus.FAIL), "Completed comparison needs PASS or FAIL.")
+        if self.status is AuditStatus.PASS:
+            _need(self.first_digest == self.repeat_digest and self.first_difference_path is None,
+                  "PASS summary needs equal digests and no difference.")
+        else:
+            _text(self.first_difference_path)
+
+
 @dataclass(frozen=True, slots=True)
 class EvaluatorRecord:
     arm: ArmIdentity
@@ -749,7 +1043,8 @@ def _wire(r):
                   BoardIdentity, ArmIdentity, PhysicalInputRecord, PublicEffectRecord,
                   TerminalEffectRecord, DecisionSpanRecord, ActionDecisionRecord, GuessCheckpointRecord,
                   ControlFlagProvenanceRecord, AcquisitionRecord, EvaluatorRecord,
-                  PairComparisonRecord, OperationEventRecord, ResourceSampleRecord, CompletionReceipt),
+                  PairComparisonRecord, OperationEventRecord, ResourceSampleRecord, CompletionReceipt,
+                  CertificateAuditRecord, OracleBAuditRecord, DeterminismAuditRecord),
           "Unsupported record type/subclass.")
     cls.__post_init__(r)  # also rejects records corrupted through object.__setattr__
     if cls is ProtocolIdentity:
@@ -811,6 +1106,25 @@ def _wire(r):
     elif cls is AcquisitionRecord:
         kind, f = "acquisition", dict(action_ordinal=r.action_ordinal, decision_ordinal=r.decision_ordinal, cell=r.cell,
                                      source=r.source.value, certificate_ref=r.certificate_ref, certificate_sha256=r.certificate_sha256)
+    elif cls is CertificateAuditRecord:
+        kind, f = "certificate_audit", dict(
+            action_ordinal=r.action_ordinal, acquisition=_wire(r.acquisition),
+            certificate_premises=_w_certificate_premises(r.certificate_premises),
+            prior_certificate_sha256s=r.prior_certificate_sha256s, status=r.status.value,
+            verifier_status=r.verifier_status, detail=r.detail, owned_m_before=r.owned_m_before,
+            owned_m_after=r.owned_m_after,
+            verifier_facts=_w_certificate_facts(r.verifier_facts, r.acquisition.source))
+    elif cls is OracleBAuditRecord:
+        kind, f = "oracle_b_audit", dict(
+            action_ordinal=r.action_ordinal, phase=r.phase, logical_mines=r.logical_mines,
+            public_observation=r.public_observation, prior_certificate_sha256s=r.prior_certificate_sha256s,
+            input_digest=r.input_digest, expected_digest=r.expected_digest, actual_digest=r.actual_digest,
+            status=r.status.value, differences=r.differences, expected=_w_oracle_snapshot(r.expected),
+            actual=None if r.actual is None else _w_oracle_snapshot(r.actual))
+    elif cls is DeterminismAuditRecord:
+        kind, f = "determinism_audit", dict(
+            selected=r.selected, first_digest=r.first_digest, repeat_digest=r.repeat_digest,
+            status=None if r.status is None else r.status.value, first_difference_path=r.first_difference_path)
     elif cls is EvaluatorRecord:
         kind, f = "evaluator", dict(arm=_wire(r.arm), assertion=r.assertion.value, targets=r.targets, status=r.status.value,
                                    reason_code=r.reason_code, detail=r.detail)
@@ -843,6 +1157,47 @@ def _big(value):
 
 def _wf(value):
     return {"fraction": [_big(value.numerator), _big(value.denominator)]}
+
+
+def _w_certificate_premises(value):
+    p = dict(value)  # Called only after the closed named-field schema is validated.
+    common = (("source", p["source"]), ("observation", p["observation"]),
+              ("num_mines", p["num_mines"]), ("target", p["target"]),
+              ("retained_mines", p["retained_mines"]), ("status", p["status"]))
+    if p["source"] == "LOCAL":
+        return common + (("clue", p["clue"]),)
+    return common + (("total_worlds", _big(p["total_worlds"])),
+                     ("mine_worlds", tuple((cell, _big(count)) for cell, count in p["mine_worlds"])),
+                     ("exact_reached", p["exact_reached"]))
+
+
+def _w_certificate_facts(value, source):
+    if not value or source is AcquisitionSource.LOCAL:
+        return value
+    f = dict(value)
+    return (("target", f["target"]), ("total_worlds", _big(f["total_worlds"])),
+            ("mine_worlds", _big(f["mine_worlds"])), ("antecedents", f["antecedents"]),
+            ("oracle_a_status", f["oracle_a_status"]), ("oracle_a_variable_count", f["oracle_a_variable_count"]),
+            ("oracle_a_envelope", f["oracle_a_envelope"]), ("oracle_a_reason", f["oracle_a_reason"]),
+            ("arithmetic_evidence", f["arithmetic_evidence"]))
+
+
+def _w_oracle_snapshot(value):
+    _record(value, OracleBExactSnapshot)
+    return dict(unresolved_cells=value.unresolved_cells, frontier_cells=value.frontier_cells,
+                unconstrained_cells=value.unconstrained_cells, total_worlds=_big(value.total_worlds),
+                mine_worlds=tuple((cell, _big(count)) for cell, count in value.mine_worlds),
+                G0=value.G0, G1=value.G1,
+                minimum_risk=None if value.minimum_risk is None else _wf(value.minimum_risk),
+                minimum_risk_cells=value.minimum_risk_cells,
+                shared_kernel_evidence=value.shared_kernel_evidence, kernel=value.kernel,
+                materialized_observation=value.materialized_observation)
+
+
+def oracle_b_snapshot_digest(snapshot):
+    """Corroborating canonical hash; exact snapshot equality remains mandatory."""
+    return sha256(json.dumps(_w_oracle_snapshot(snapshot), sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True, allow_nan=False).encode("utf-8")).hexdigest()
 
 
 def encode(record):
@@ -917,6 +1272,62 @@ def _nested(value, cls):
     r = _from_wire(value)
     _record(r, cls)
     return r
+
+
+def _d_observation(value):
+    result = tuple(tuple(_list(row)) for row in _list(value))
+    _observation(result)
+    return result
+
+
+def _d_named(value, names):
+    pairs = _list(value)
+    _need(all(type(item) is list and len(item) == 2 and type(item[0]) is str for item in pairs)
+          and tuple(item[0] for item in pairs) == names, "Unknown/missing/out-of-order named wire fields.")
+    return dict(pairs)
+
+
+def _d_certificate_premises(value):
+    pairs = _list(value)
+    _need(bool(pairs) and type(pairs[0]) is list and len(pairs[0]) == 2
+          and pairs[0][0] == "source" and type(pairs[0][1]) is str
+          and pairs[0][1] in ("LOCAL", "EXACT_GLOBAL"), "Missing certificate wire source.")
+    local = pairs[0][1] == "LOCAL"
+    p = _d_named(value, _CERTIFICATE_COMMON + (("clue",) if local else
+                  ("total_worlds", "mine_worlds", "exact_reached")))
+    common = (("source", p["source"]), ("observation", _d_observation(p["observation"])),
+              ("num_mines", p["num_mines"]), ("target", _dc(p["target"])),
+              ("retained_mines", _dcs(p["retained_mines"])), ("status", p["status"]))
+    if local:
+        return common + (("clue", _dc(p["clue"])),)
+    return common + (("total_worlds", _db(p["total_worlds"])),
+                     ("mine_worlds", _map(p["mine_worlds"], _db)), ("exact_reached", p["exact_reached"]))
+
+
+def _d_certificate_facts(value, source):
+    if not _list(value):
+        return ()
+    local = source is AcquisitionSource.LOCAL
+    f = _d_named(value, _LOCAL_FACTS if local else _EXACT_FACTS)
+    if local:
+        return (("target", _dc(f["target"])), ("clue", _dc(f["clue"])), ("clue_value", f["clue_value"]),
+                ("physical_flags", _dcs(f["physical_flags"])), ("logical_mines", _dcs(f["logical_mines"])),
+                ("unresolved", _dcs(f["unresolved"])), ("residual", f["residual"]),
+                ("antecedents", _dcs(f["antecedents"])))
+    return (("target", _dc(f["target"])), ("total_worlds", _db(f["total_worlds"])),
+            ("mine_worlds", _db(f["mine_worlds"])), ("antecedents", _dcs(f["antecedents"])),
+            ("oracle_a_status", f["oracle_a_status"]), ("oracle_a_variable_count", f["oracle_a_variable_count"]),
+            ("oracle_a_envelope", f["oracle_a_envelope"]), ("oracle_a_reason", f["oracle_a_reason"]),
+            ("arithmetic_evidence", f["arithmetic_evidence"]))
+
+
+def _d_oracle_snapshot(value):
+    f = _keys(value, "unresolved_cells frontier_cells unconstrained_cells total_worlds mine_worlds G0 G1 minimum_risk minimum_risk_cells shared_kernel_evidence kernel materialized_observation")
+    return OracleBExactSnapshot(
+        _dcs(f["unresolved_cells"]), _dcs(f["frontier_cells"]), _dcs(f["unconstrained_cells"]),
+        _db(f["total_worlds"]), _map(f["mine_worlds"], _db), _dcs(f["G0"]), _dcs(f["G1"]),
+        None if f["minimum_risk"] is None else _df(f["minimum_risk"]), _dcs(f["minimum_risk_cells"]),
+        f["shared_kernel_evidence"], f["kernel"], _d_observation(f["materialized_observation"]))
 
 
 def _from_wire(value):
@@ -997,6 +1408,26 @@ def _from_wire(value):
         _keys(f, "action_ordinal decision_ordinal cell source certificate_ref certificate_sha256")
         return AcquisitionRecord(f["action_ordinal"], f["decision_ordinal"], _dc(f["cell"]), _de(f["source"], AcquisitionSource),
                                  f["certificate_ref"], f["certificate_sha256"])
+    if k == "certificate_audit":
+        _keys(f, "action_ordinal acquisition certificate_premises prior_certificate_sha256s status verifier_status detail owned_m_before owned_m_after verifier_facts")
+        acquisition = _nested(f["acquisition"], AcquisitionRecord)
+        return CertificateAuditRecord(
+            f["action_ordinal"], acquisition, _d_certificate_premises(f["certificate_premises"]),
+            tuple(_list(f["prior_certificate_sha256s"])), _de(f["status"], AuditStatus), f["verifier_status"],
+            f["detail"], _dcs(f["owned_m_before"]), _dcs(f["owned_m_after"]),
+            _d_certificate_facts(f["verifier_facts"], acquisition.source))
+    if k == "oracle_b_audit":
+        _keys(f, "action_ordinal phase logical_mines public_observation prior_certificate_sha256s input_digest expected_digest actual_digest status differences expected actual")
+        return OracleBAuditRecord(
+            f["action_ordinal"], f["phase"], _dcs(f["logical_mines"]), _d_observation(f["public_observation"]),
+            tuple(_list(f["prior_certificate_sha256s"])), f["input_digest"], f["expected_digest"], f["actual_digest"],
+            _de(f["status"], AuditStatus), tuple(_list(f["differences"])), _d_oracle_snapshot(f["expected"]),
+            None if f["actual"] is None else _d_oracle_snapshot(f["actual"]))
+    if k == "determinism_audit":
+        _keys(f, "selected first_digest repeat_digest status first_difference_path")
+        return DeterminismAuditRecord(f["selected"], f["first_digest"], f["repeat_digest"],
+                                      None if f["status"] is None else _de(f["status"], AuditStatus),
+                                      f["first_difference_path"])
     if k == "evaluator":
         _keys(f, "arm assertion targets status reason_code detail")
         return EvaluatorRecord(_nested(f["arm"], ArmIdentity), _de(f["assertion"], AssertionCategory), _dcs(f["targets"]),

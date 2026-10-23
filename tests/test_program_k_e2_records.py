@@ -4,18 +4,21 @@ from dataclasses import FrozenInstanceError, dataclass, fields, replace
 from fractions import Fraction
 import hashlib
 import json
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from experiments import program_k_e2_records as r
+from experiments import program_k_e2_store as store
 
 
 SHA = "a" * 64
 OID = "b" * 40
 CELLS = ((1, 0), (2, 0), (0, 1), (1, 1))
 
-# Captured from every pre-existing top-level fixture before the additive I4
-# decision kind was introduced. These fixed digest regressions complement the
-# correction's pre/post comparison of the original encoded byte strings.
+# Captured before the additive I5 audit correction: the original eighteen kinds
+# plus the accepted I4 decision kind. The original fixtures remain unchanged.
 _OLD_RECORD_SHA256 = {
     "ProtocolIdentity": "d0f097aed672b80ba3ea9f7ce551dd52fa1e59cb095f2af1663091ee9363f247",
     "RuntimeIdentity": "a25cc2b34658f0e1efd71349a1521dd846bab4b26be56a970ab68f9e1bfa6902",
@@ -35,6 +38,7 @@ _OLD_RECORD_SHA256 = {
     "OperationEventRecord": "abaebef3991c6ed7cfe67755e3580c6e82edc7a4b8f0b77861d3af619c79f55d",
     "ResourceSampleRecord": "d4a3bacc04064f9020205e1aee4a627b5d3aac4c40df102ba89eed5eb4dd6d2e",
     "CompletionReceipt": "4896a4ad984ce1ea13299c7f48569dc8f2e4e3621ed6ca60ca7f68d714008be3",
+    "ActionDecisionRecord": "d504dfdfcdf76eda70555b18964842d2cf03780559c242064cc45913fc8ba7c1",
 }
 
 
@@ -83,9 +87,9 @@ def _decision_fixture():
 
 class AdditiveDecisionRecordTests(unittest.TestCase):
     def test_all_preexisting_kinds_keep_their_captured_canonical_hashes(self):
-        fixtures = _fixtures()
+        fixtures = _fixtures() + (_decision_fixture(),)
         self.assertEqual({type(value).__name__ for value in fixtures}, set(_OLD_RECORD_SHA256))
-        self.assertEqual(len(fixtures), 18)
+        self.assertEqual(len(fixtures), 19)
         self.assertEqual(r.SCHEMA_VERSION, 1)
         for value in fixtures:
             with self.subTest(kind=type(value).__name__):
@@ -781,6 +785,444 @@ class SchemaInvariantTests(unittest.TestCase):
                 replace(receipt, streams=streams)
         with self.assertRaises(r.RecordError):
             r.StreamDigest("actions", SHA, 1, -1)
+
+
+def _named_change(values, name, value):
+    return tuple((key, value if key == name else current) for key, current in values)
+
+
+def _certificate_audit_fixture(source="LOCAL"):
+    # Literal public evidence only; no certificate verifier, solver or runner.
+    observation = ((1, -2),) if source == "LOCAL" else ((1, -2, -2),)
+    premises = (("source", source), ("observation", observation), ("num_mines", 1),
+                ("target", (1, 0)), ("retained_mines", ()), ("status", "PLAYING"))
+    if source == "LOCAL":
+        premises += (("clue", (0, 0)),)
+        facts = (("target", (1, 0)), ("clue", (0, 0)), ("clue_value", 1),
+                 ("physical_flags", ()), ("logical_mines", ()), ("unresolved", ((1, 0),)),
+                 ("residual", 1), ("antecedents", ()))
+    else:
+        premises += (("total_worlds", 1), ("mine_worlds", (((1, 0), 1), ((2, 0), 0))),
+                     ("exact_reached", True))
+        facts = (("target", (1, 0)), ("total_worlds", 1), ("mine_worlds", 1),
+                 ("antecedents", ()), ("oracle_a_status", "PASS"),
+                 ("oracle_a_variable_count", 2), ("oracle_a_envelope", 18),
+                 ("oracle_a_reason", None), ("arithmetic_evidence", "SYNTHETIC_EXACT_PUBLIC_COUNTS"))
+    digest = r.certificate_premises_digest(premises)
+    acquisition = r.AcquisitionRecord(2, 1, (1, 0), r.AcquisitionSource[source], "sha256:" + digest, digest)
+    return r.CertificateAuditRecord(2, acquisition, premises, (), r.AuditStatus.PASS, "PASS",
+                                    "SYNTHETIC_PUBLIC_PROOF", (), ((1, 0),), facts)
+
+
+def _oracle_snapshot_fixture():
+    cells = ((1, 0), (0, 1), (1, 1))
+    return r.OracleBExactSnapshot(cells, cells, (), 3, tuple((cell, 1) for cell in cells),
+                                  (), (), Fraction(1, 3), cells,
+                                  "SYNTHETIC_SHARED_EVIDENCE", "SYNTHETIC_KERNEL", ((1, -2), (-2, -2)))
+
+
+def _oracle_audit_fixture():
+    snapshot = _oracle_snapshot_fixture()
+    digest = r.oracle_b_snapshot_digest(snapshot)
+    return r.OracleBAuditRecord(2, "D", (), ((1, -2), (-2, -2)), (), SHA, digest, digest,
+                                r.AuditStatus.PASS, (), snapshot, snapshot)
+
+
+def _determinism_summary_fixtures():
+    return (r.DeterminismAuditRecord(False, None, None, None, None),
+            r.DeterminismAuditRecord(True, SHA, None, r.AuditStatus.INCOMPLETE, None),
+            r.DeterminismAuditRecord(True, SHA, SHA, r.AuditStatus.PASS, None),
+            r.DeterminismAuditRecord(True, SHA, "c" * 64, r.AuditStatus.FAIL, "acquisitions[0].cell"))
+
+
+class DurableCertificateAuditTests(unittest.TestCase):
+    def test_local_and_exact_full_named_premises_roundtrip(self):
+        for source in ("LOCAL", "EXACT_GLOBAL"):
+            with self.subTest(source=source):
+                original = _certificate_audit_fixture(source)
+                encoded = r.encode(original)
+                rebuilt = r.decode(encoded)
+                self.assertIs(type(rebuilt), r.CertificateAuditRecord)
+                self.assertEqual(rebuilt, original)
+                self.assertEqual(r.encode(rebuilt), encoded)
+                self.assertEqual(rebuilt.acquisition.certificate_sha256,
+                                 r.certificate_premises_digest(rebuilt.certificate_premises))
+                self.assertEqual(rebuilt.certificate_premises, original.certificate_premises)
+                self.assertEqual(rebuilt.verifier_facts, original.verifier_facts)
+
+    def test_source_specific_named_fields_reject_missing_extra_unknown_and_order(self):
+        for source in ("LOCAL", "EXACT_GLOBAL"):
+            value = _certificate_audit_fixture(source)
+            for field in ("certificate_premises", "verifier_facts"):
+                named = getattr(value, field)
+                bad = [named[:i] + named[i + 1:] for i in range(len(named))]
+                bad += [named + (("extra", 0),), (("unknown", named[0][1]),) + named[1:],
+                        named[::-1], named + (named[-1],)]
+                for candidate in bad:
+                    with self.subTest(source=source, field=field, candidate=candidate), self.assertRaises(r.RecordError):
+                        replace(value, **{field: candidate})
+            foreign = (("total_worlds", 1),) if source == "LOCAL" else (("clue", (0, 0)),)
+            with self.assertRaises(r.RecordError):
+                replace(value, certificate_premises=value.certificate_premises + foreign)
+
+    def test_named_evidence_and_nested_payloads_reject_mutable_containers(self):
+        value = _certificate_audit_fixture()
+        for field in ("certificate_premises", "verifier_facts", "prior_certificate_sha256s",
+                      "owned_m_before", "owned_m_after"):
+            for bad in ([], {}, set()):
+                with self.subTest(field=field, bad=type(bad)), self.assertRaises(r.RecordError):
+                    replace(value, **{field: bad})
+        for name, bad in (("target", [1, 0]), ("observation", [[1, -2]]),
+                          ("observation", ([1, -2],)), ("retained_mines", {(1, 0)}),
+                          ("clue", {"x": 0, "y": 0})):
+            with self.subTest(name=name), self.assertRaises(r.RecordError):
+                replace(value, certificate_premises=_named_change(value.certificate_premises, name, bad))
+        with self.assertRaises(r.RecordError):
+            replace(value, verifier_facts=(list(value.verifier_facts[0]),) + value.verifier_facts[1:])
+
+    def test_certificate_integer_bool_text_and_coordinate_types_are_exact(self):
+        for source in ("LOCAL", "EXACT_GLOBAL"):
+            value = _certificate_audit_fixture(source)
+            cases = (("num_mines", True), ("num_mines", 1.0), ("num_mines", "1"),
+                     ("target", (True, 0)), ("target", (1.0, 0)), ("target", (-1, 0)),
+                     ("status", r.Status.PLAYING), ("source", r.AcquisitionSource.LOCAL))
+            if source == "EXACT_GLOBAL":
+                cases += (("total_worlds", True), ("total_worlds", 1.0),
+                          ("mine_worlds", (((1, 0), True),)), ("exact_reached", 1))
+            for name, bad in cases:
+                with self.subTest(source=source, name=name, bad=bad), self.assertRaises(r.RecordError):
+                    replace(value, certificate_premises=_named_change(value.certificate_premises, name, bad))
+            integer_names = ("clue_value", "residual") if source == "LOCAL" else (
+                "total_worlds", "mine_worlds", "oracle_a_variable_count", "oracle_a_envelope")
+            for name in integer_names:
+                for bad in (True, 1.0, "1"):
+                    with self.subTest(source=source, field=name, bad=bad), self.assertRaises(r.RecordError):
+                        replace(value, verifier_facts=_named_change(value.verifier_facts, name, bad))
+
+    def test_certificate_cells_reject_duplicates_wrong_order_and_bad_observations(self):
+        value = _certificate_audit_fixture()
+        for cells in (((1, 0), (1, 0)), ((0, 1), (1, 0)), ([1, 0],), ((True, 0),)):
+            with self.subTest(cells=cells), self.assertRaises(r.RecordError):
+                replace(value, certificate_premises=_named_change(value.certificate_premises, "retained_mines", cells))
+            for name in ("physical_flags", "logical_mines", "unresolved", "antecedents"):
+                with self.subTest(name=name, cells=cells), self.assertRaises(r.RecordError):
+                    replace(value, verifier_facts=_named_change(value.verifier_facts, name, cells))
+        for observation in ((), ((),), ((1, -2), (1,)), ((True, -2),), ((1.0, -2),),
+                            ((-1, -2),), ((9, -2),), (("1", -2),)):
+            with self.subTest(observation=observation), self.assertRaises(r.RecordError):
+                replace(value, certificate_premises=_named_change(value.certificate_premises, "observation", observation))
+
+    def test_acquisition_boundary_source_target_ref_and_full_premise_digest_are_bound(self):
+        value = _certificate_audit_fixture()
+        for changes in (dict(action_ordinal=3), dict(cell=(2, 0)),
+                        dict(source=r.AcquisitionSource.EXACT_GLOBAL), dict(certificate_ref="unbound"),
+                        dict(certificate_sha256=SHA, certificate_ref="sha256:" + SHA)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value, acquisition=replace(value.acquisition, **changes))
+        changed = _named_change(value.certificate_premises, "num_mines", 2)
+        self.assertNotEqual(r.certificate_premises_digest(changed), value.acquisition.certificate_sha256)
+        with self.assertRaises(r.RecordError):
+            replace(value, certificate_premises=changed)
+        for changes in (dict(action_ordinal=3), dict(owned_m_before=((0, 0),)), dict(owned_m_after=())):
+            with self.assertRaises(r.RecordError):
+                replace(value, **changes)
+
+    def test_verifier_facts_target_clue_counts_and_status_are_bound(self):
+        for source in ("LOCAL", "EXACT_GLOBAL"):
+            value = _certificate_audit_fixture(source)
+            cases = (("target", (2, 0)),)
+            cases += (("clue", (1, 0)), ("clue_value", 2)) if source == "LOCAL" else (
+                ("total_worlds", 2), ("mine_worlds", 2))
+            for name, bad in cases:
+                with self.subTest(source=source, name=name), self.assertRaises(r.RecordError):
+                    replace(value, verifier_facts=_named_change(value.verifier_facts, name, bad))
+        value = _certificate_audit_fixture()
+        failed = replace(value, status=r.AuditStatus.FAIL, verifier_status="FAIL")
+        self.assertEqual(r.decode(r.encode(failed)), failed)
+        missing = replace(failed, verifier_facts=())
+        self.assertEqual(r.decode(r.encode(missing)), missing)
+        for status in (r.AuditStatus.PASS, r.AuditStatus.INCOMPLETE):
+            with self.assertRaises(r.RecordError):
+                replace(failed, status=status)
+        for status in ("FAIL", "INCOMPLETE", "DEFER", True):
+            with self.assertRaises(r.RecordError):
+                replace(value, verifier_status=status)
+        with self.assertRaises(r.RecordError):
+            replace(value, verifier_facts=())
+        incomplete = replace(value, status=r.AuditStatus.INCOMPLETE, detail="PRIOR_AUTHORITY_MISSING")
+        self.assertEqual(r.decode(r.encode(incomplete)), incomplete)
+
+
+class DurableOracleBAuditTests(unittest.TestCase):
+    def test_pass_exact_snapshot_fraction_and_materialized_observation_roundtrip(self):
+        original = _oracle_audit_fixture()
+        encoded = r.encode(original)
+        rebuilt = r.decode(encoded)
+        self.assertIs(type(rebuilt), r.OracleBAuditRecord)
+        self.assertEqual(rebuilt, original)
+        self.assertEqual(r.encode(rebuilt), encoded)
+        self.assertIs(type(rebuilt.expected), r.OracleBExactSnapshot)
+        self.assertIs(type(rebuilt.actual.minimum_risk), Fraction)
+        self.assertEqual(rebuilt.actual.minimum_risk, Fraction(1, 3))
+        self.assertEqual(rebuilt.actual.materialized_observation, ((1, -2), (-2, -2)))
+        self.assertEqual(rebuilt.expected.shared_kernel_evidence, "SYNTHETIC_SHARED_EVIDENCE")
+        self.assertEqual(rebuilt.expected.kernel, "SYNTHETIC_KERNEL")
+        self.assertEqual(len(fields(rebuilt.expected)), 12)
+        self.assertEqual(json.loads(encoded)["fields"]["expected"]["minimum_risk"],
+                         {"fraction": [{"integer_hex": "0x1"}, {"integer_hex": "0x3"}]})
+        with self.assertRaises(r.RecordError):
+            r.encode(rebuilt.expected)
+
+    def test_full_snapshot_mismatch_and_digest_collision_cannot_pass(self):
+        value = _oracle_audit_fixture()
+        changed = replace(value.actual, kernel="DIFFERENT_KERNEL")
+        with self.assertRaises(r.RecordError):
+            replace(value, actual=changed, actual_digest=r.oracle_b_snapshot_digest(changed))
+        with patch.object(r, "oracle_b_snapshot_digest", return_value=SHA):
+            with self.assertRaises(r.RecordError):
+                replace(value, actual=changed, expected_digest=SHA, actual_digest=SHA)
+        failed = replace(value, actual=changed, actual_digest=r.oracle_b_snapshot_digest(changed),
+                         status=r.AuditStatus.FAIL, differences=("kernel",))
+        self.assertEqual(r.decode(r.encode(failed)), failed)
+        self.assertEqual(r.decode(r.encode(failed)).actual.kernel, "DIFFERENT_KERNEL")
+
+    def test_nonpassing_requires_reason_and_actual_presence_matches_digest(self):
+        value = _oracle_audit_fixture()
+        for changes in (dict(actual=None), dict(actual_digest=None),
+                        dict(actual=None, actual_digest=None), dict(status=r.AuditStatus.FAIL),
+                        dict(status=r.AuditStatus.INCOMPLETE)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value, **changes)
+        incomplete = replace(value, actual=None, actual_digest=None, status=r.AuditStatus.INCOMPLETE,
+                             differences=("PUBLIC_PREREQUISITE_MISSING",))
+        self.assertEqual(r.decode(r.encode(incomplete)), incomplete)
+
+    def test_nonpositive_world_counts_retained_only_as_failed_evidence(self):
+        value = _oracle_audit_fixture()
+        for worlds in (0, -1):
+            snapshot = replace(value.expected, total_worlds=worlds)
+            digest = r.oracle_b_snapshot_digest(snapshot)
+            changes = dict(expected=snapshot, actual=snapshot, expected_digest=digest, actual_digest=digest)
+            with self.subTest(worlds=worlds), self.assertRaises(r.RecordError):
+                replace(value, **changes)
+            failed = replace(value, **changes, status=r.AuditStatus.FAIL,
+                             differences=("POSITIVE_EXACT_INTEGER_WORLD_COUNT",))
+            self.assertEqual(r.decode(r.encode(failed)), failed)
+        for worlds in (True, False, 1.0, Fraction(1), "1"):
+            with self.subTest(worlds=worlds), self.assertRaises(r.RecordError):
+                replace(value.expected, total_worlds=worlds)
+
+    def test_snapshot_closed_types_and_order_reject_mutable_float_and_bool(self):
+        value = _oracle_snapshot_fixture()
+        for field in ("unresolved_cells", "frontier_cells", "unconstrained_cells", "G0", "G1", "minimum_risk_cells"):
+            for cells in ([], set(), {}, ((1, 0), (1, 0)), ((0, 1), (1, 0)), ((True, 0),)):
+                with self.subTest(field=field, cells=cells), self.assertRaises(r.RecordError):
+                    replace(value, **{field: cells})
+        for counts in ([], {"cell": 1}, (((1, 0), True),), (((1, 0), 1.0),),
+                       (((1, 0), 1), ((1, 0), 1)), (((0, 1), 1), ((1, 0), 1))):
+            with self.subTest(counts=counts), self.assertRaises(r.RecordError):
+                replace(value, mine_worlds=counts)
+        for risk in (True, 0.5, (1, 2), "1/2", {"fraction": [1, 2]}):
+            with self.assertRaises(r.RecordError):
+                replace(value, minimum_risk=risk)
+        for observation in ([[1, -2]], ((1, -2), (1,)), ((True,),), ((1.0,),), ((-1,),)):
+            with self.assertRaises(r.RecordError):
+                replace(value, materialized_observation=observation)
+        for field in ("shared_kernel_evidence", "kernel"):
+            for bad in (None, "", [], True):
+                with self.assertRaises(r.RecordError):
+                    replace(value, **{field: bad})
+
+    def test_oracle_identity_phase_digests_observation_and_reasons_are_strict(self):
+        value = _oracle_audit_fixture()
+        bad_by_field = {
+            "action_ordinal": (0, -1, True, 2.0), "phase": ("A", "d", None, True),
+            "logical_mines": ([], ((1, 0), (1, 0)), ((0, 1), (1, 0))),
+            "public_observation": ([[1]], (), ((True,),), ((1.0,),)),
+            "prior_certificate_sha256s": ([], ("A" * 64,), (b"a" * 64,)),
+            "status": ("PASS", r.P3Status.PASS, None), "differences": ([], {}, ("",)),
+            "expected": (None, {}, ()), "actual": ({}, ()),
+        }
+        for field, bad_values in bad_by_field.items():
+            for bad in bad_values:
+                with self.subTest(field=field, bad=bad), self.assertRaises(r.RecordError):
+                    replace(value, **{field: bad})
+        for field in ("input_digest", "expected_digest", "actual_digest"):
+            for bad in ("A" * 64, "g" * 64, "a" * 63, b"a" * 64, True):
+                with self.subTest(field=field, bad=bad), self.assertRaises(r.RecordError):
+                    replace(value, **{field: bad})
+        for field in ("expected_digest", "actual_digest"):
+            with self.assertRaises(r.RecordError):
+                replace(value, **{field: SHA})
+
+
+class DurableDeterminismSummaryTests(unittest.TestCase):
+    def test_all_four_states_are_exact_canonical_roundtrips(self):
+        for original in _determinism_summary_fixtures():
+            with self.subTest(status=original.status):
+                encoded = r.encode(original)
+                self.assertEqual(r.decode(encoded), original)
+                self.assertEqual(r.encode(r.decode(encoded)), encoded)
+                self.assertEqual({field.name for field in fields(original)},
+                                 {"selected", "first_digest", "repeat_digest", "status", "first_difference_path"})
+        self.assertEqual(tuple(r.AuditStatus.__members__), ("PASS", "FAIL", "INCOMPLETE"))
+
+    def test_unselected_has_no_status_digests_or_divergence(self):
+        value = _determinism_summary_fixtures()[0]
+        for field, bad in (("first_digest", SHA), ("repeat_digest", SHA),
+                           ("status", r.AuditStatus.PASS), ("first_difference_path", "physical_inputs")):
+            with self.assertRaises(r.RecordError):
+                replace(value, **{field: bad})
+        for selected in (0, 1, None, "yes"):
+            with self.assertRaises(r.RecordError):
+                replace(value, selected=selected)
+
+    def test_selected_missing_repeat_requires_incomplete_first_digest_and_no_path(self):
+        value = _determinism_summary_fixtures()[1]
+        for changes in (dict(first_digest=None), dict(status=None), dict(status=r.AuditStatus.PASS),
+                        dict(status=r.AuditStatus.FAIL), dict(first_difference_path="input"),
+                        dict(repeat_digest=SHA)):
+            with self.subTest(changes=changes), self.assertRaises(r.RecordError):
+                replace(value, **changes)
+
+    def test_complete_pass_requires_equal_digests_fail_requires_explicit_difference(self):
+        passed, failed = _determinism_summary_fixtures()[2:]
+        for changes in (dict(repeat_digest="c" * 64), dict(status=None),
+                        dict(status=r.AuditStatus.INCOMPLETE), dict(first_difference_path="input")):
+            with self.assertRaises(r.RecordError):
+                replace(passed, **changes)
+        for path in (None, "", 0, True, (), {}):
+            with self.assertRaises(r.RecordError):
+                replace(failed, first_difference_path=path)
+        collision = replace(failed, repeat_digest=failed.first_digest)
+        self.assertIs(r.decode(r.encode(collision)).status, r.AuditStatus.FAIL)
+        for value in (passed, failed):
+            for field in ("first_digest", "repeat_digest"):
+                for bad in ("A" * 64, "a" * 63, b"a" * 64, True):
+                    with self.assertRaises(r.RecordError):
+                        replace(value, **{field: bad})
+
+
+class DurableAuditCodecAndTransportTests(unittest.TestCase):
+    def fixtures(self):
+        oracle = _oracle_audit_fixture()
+        incomplete = replace(oracle, actual=None, actual_digest=None, status=r.AuditStatus.INCOMPLETE,
+                             differences=("PUBLIC_PREREQUISITE_MISSING",))
+        changed = replace(oracle.actual, shared_kernel_evidence="DIFFERENT_SHARED_EVIDENCE")
+        failed = replace(oracle, actual=changed, actual_digest=r.oracle_b_snapshot_digest(changed),
+                         status=r.AuditStatus.FAIL, differences=("shared_kernel_evidence",))
+        return (_certificate_audit_fixture(), _certificate_audit_fixture("EXACT_GLOBAL"),
+                oracle, incomplete, failed) + _determinism_summary_fixtures()
+
+    def test_new_top_level_fields_reject_unknown_missing_extra_and_research_verdict(self):
+        for value in self.fixtures():
+            original = r.encode(value)
+            for field in json.loads(original)["fields"]:
+                node = json.loads(original)
+                del node["fields"][field]
+                with self.subTest(kind=type(value).__name__, missing=field), self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+            for field in ("payload", "research_verdict", "e3_trigger", "__class__"):
+                node = json.loads(original)
+                node["fields"][field] = "PASS"
+                with self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+            node = json.loads(original)
+            node["kind"] = "unknown_audit_kind"
+            with self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+
+    def test_nested_snapshot_and_named_evidence_wire_shapes_are_closed(self):
+        original = r.encode(_oracle_audit_fixture())
+        for field in json.loads(original)["fields"]["expected"]:
+            node = json.loads(original)
+            del node["fields"]["expected"][field]
+            with self.subTest(missing=field), self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+        node = json.loads(original)
+        node["fields"]["expected"]["hidden_truth"] = []
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(node))
+        for source in ("LOCAL", "EXACT_GLOBAL"):
+            original = r.encode(_certificate_audit_fixture(source))
+            for field in ("certificate_premises", "verifier_facts"):
+                for mutation in ("missing", "extra", "unknown", "order", "map"):
+                    node = json.loads(original)
+                    named = node["fields"][field]
+                    if mutation == "missing":
+                        named.pop()
+                    elif mutation == "extra":
+                        named.append(["extra", 0])
+                    elif mutation == "unknown":
+                        named[0][0] = "unknown"
+                    elif mutation == "order":
+                        named.reverse()
+                    else:
+                        node["fields"][field] = dict(named)
+                    with self.subTest(source=source, field=field, mutation=mutation), self.assertRaises(r.RecordError):
+                        r.decode(_wire(node))
+
+    def test_wire_fraction_and_exact_count_encodings_reject_bool_float_and_noncanonical(self):
+        original = r.encode(_oracle_audit_fixture())
+        for field in ("total_worlds", "minimum_risk"):
+            for bad in (True, 1.0, {"integer_hex": "0x01"}, {"arbitrary": 1}):
+                node = json.loads(original)
+                node["fields"]["expected"][field] = bad
+                with self.subTest(field=field, bad=bad), self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+        node = json.loads(original)
+        node["fields"]["expected"]["minimum_risk"] = {
+            "fraction": [{"integer_hex": "0x2"}, {"integer_hex": "0x6"}]}
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(node))
+
+    def test_new_records_are_deeply_frozen_and_encoder_revalidates_corruption(self):
+        for value in self.fixtures():
+            self.assertFalse(hasattr(value, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+        oracle = _oracle_audit_fixture()
+        with self.assertRaises(FrozenInstanceError):
+            oracle.expected.kernel = "changed"
+        with self.assertRaises(TypeError):
+            oracle.expected.materialized_observation[0][0] = 0
+        object.__setattr__(oracle.expected, "total_worlds", True)
+        with self.assertRaises(r.RecordError):
+            r.encode(oracle)
+        certificate = _certificate_audit_fixture()
+        object.__setattr__(certificate.acquisition, "certificate_sha256", SHA)
+        with self.assertRaises(r.RecordError):
+            r.encode(certificate)
+
+    def test_unchanged_i2_store_transports_every_new_record_and_all_summary_states(self):
+        values = self.fixtures()
+        canonical = tuple(r.encode(value) for value in values)
+        self.assertEqual({json.loads(data)["kind"] for data in canonical},
+                         {"certificate_audit", "oracle_b_audit", "determinism_audit"})
+        self.assertEqual(tuple(r.decode(data) for data in canonical), values)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            writer = store.StreamWriter(root, "audits")
+            try:
+                for index, value in enumerate(values):
+                    writer.append((index,), value)
+                checkpoint = writer.checkpoint()
+                sealed = writer.seal()
+                self.assertEqual((checkpoint.stream_name, checkpoint.sha256, checkpoint.byte_length, checkpoint.record_count),
+                                 (sealed.name, sealed.sha256, sealed.byte_length, sealed.record_count))
+                self.assertEqual(checkpoint.last_key, (len(values) - 1,))
+                visited = []
+                scanned = store.scan_stream(root, "audits", visit=lambda key, value: visited.append((key, value)))
+                self.assertEqual(scanned, sealed)
+                self.assertEqual(visited, [((index,), value) for index, value in enumerate(values)])
+                self.assertEqual(tuple(r.encode(value) for _, value in visited), canonical)
+                expected = b"".join(_wire([index]) + b"\t" + data + b"\n"
+                                    for index, data in enumerate(canonical))
+                self.assertEqual(writer.path.read_bytes(), expected)
+                self.assertEqual(sealed.sha256, hashlib.sha256(expected).hexdigest())
+                self.assertEqual(sealed.record_count, len(values))
+            finally:
+                writer.close()
 
 
 if __name__ == "__main__":
