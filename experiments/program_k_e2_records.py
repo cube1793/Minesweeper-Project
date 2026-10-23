@@ -410,6 +410,71 @@ class DecisionSpanRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ActionDecisionRecord:
+    """Durable selected decision only; no candidate graph or proof admission.
+
+    Plan actions preserve execution order. Set-like cell tuples are already in
+    reading order. Logical-M snapshots retain K-P0 mechanism facts separately
+    from physical flags and do not assert certificate validity.
+    """
+
+    arm: ArmIdentity
+    action_ordinal: int
+    category: str
+    semantic_kind: str
+    action: Action
+    target: tuple
+    plan_actions: tuple
+    plan_model_us: int | None
+    plan_safe_reveals: int | None
+    setup_cells: tuple
+    reveal_cells: tuple
+    logical_mines_before: tuple
+    logical_mines_after: tuple
+
+    def __post_init__(self):
+        _record(self.arm, ArmIdentity)
+        _need(self.arm.arm in (Arm.CONTROL, Arm.K_P0), "Action decisions currently cover CONTROL/K-P0 only.")
+        _int(self.action_ordinal)
+        _text(self.category)
+        _text(self.semantic_kind)
+        _enum(self.action, Action)
+        board = self.arm.board
+        _cell(self.target, board)
+        _tuple(self.plan_actions)
+        for entry in self.plan_actions:
+            _need(type(entry) is tuple and len(entry) == 2, "Expected a closed (Action, cell) plan entry.")
+            _enum(entry[0], Action)
+            _cell(entry[1], board)
+        for cells in (self.setup_cells, self.reveal_cells, self.logical_mines_before, self.logical_mines_after):
+            _cells(cells, board)
+        _need(set(self.logical_mines_before) <= set(self.logical_mines_after), "Logical M cannot regress.")
+        if self.arm.arm is Arm.CONTROL:
+            _need(not self.logical_mines_before and not self.logical_mines_after,
+                  "CONTROL decisions cannot retain logical M.")
+        if self.action_ordinal == 0:
+            expected_category = "CONTROL_INITIAL_OPEN" if self.arm.arm is Arm.CONTROL else "POLICY_INITIAL_OPEN"
+            _need(self.category == expected_category and self.semantic_kind == "INITIAL"
+                  and self.action is Action.OPEN and self.target == board.first_click,
+                  "Initial decision must retain its arm's initial OPEN identity.")
+            _need(not self.plan_actions and self.plan_model_us is None and self.plan_safe_reveals is None
+                  and not self.setup_cells and not self.reveal_cells
+                  and not self.logical_mines_before and not self.logical_mines_after,
+                  "Initial input cannot carry a plan, inference or logical M.")
+        else:
+            _need(self.semantic_kind != "INITIAL", "Only action zero has INITIAL semantics.")
+        if not self.plan_actions:
+            _need(self.plan_model_us is None and self.plan_safe_reveals is None
+                  and not self.setup_cells and not self.reveal_cells,
+                  "No selected plan permits no plan metrics or candidate cell claims.")
+        else:
+            _need(self.plan_actions[0] == (self.action, self.target),
+                  "Selected plan must begin with the executed input.")
+            _int(self.plan_model_us, 1)
+            _int(self.plan_safe_reveals)
+
+
+@dataclass(frozen=True, slots=True)
 class GuessCheckpointRecord:
     arm: ArmIdentity
     guess_ordinal: int
@@ -682,7 +747,7 @@ def _wire(r):
     cls = type(r)
     _need(cls in (ProtocolIdentity, RuntimeIdentity, SourceBlobIdentity, CorpusIdentity,
                   BoardIdentity, ArmIdentity, PhysicalInputRecord, PublicEffectRecord,
-                  TerminalEffectRecord, DecisionSpanRecord, GuessCheckpointRecord,
+                  TerminalEffectRecord, DecisionSpanRecord, ActionDecisionRecord, GuessCheckpointRecord,
                   ControlFlagProvenanceRecord, AcquisitionRecord, EvaluatorRecord,
                   PairComparisonRecord, OperationEventRecord, ResourceSampleRecord, CompletionReceipt),
           "Unsupported record type/subclass.")
@@ -717,6 +782,15 @@ def _wire(r):
                                          terminal_status=r.terminal_status.value)
     elif cls is DecisionSpanRecord:
         kind, f = "decision_span", dict(action_ordinal=r.action_ordinal, scope=r.scope.value, duration_ns=r.duration_ns)
+    elif cls is ActionDecisionRecord:
+        kind, f = "action_decision", dict(arm=_wire(r.arm), action_ordinal=r.action_ordinal,
+                                          category=r.category, semantic_kind=r.semantic_kind,
+                                          action=r.action.value, target=r.target,
+                                          plan_actions=[(action.value, cell) for action, cell in r.plan_actions],
+                                          plan_model_us=r.plan_model_us, plan_safe_reveals=r.plan_safe_reveals,
+                                          setup_cells=r.setup_cells, reveal_cells=r.reveal_cells,
+                                          logical_mines_before=r.logical_mines_before,
+                                          logical_mines_after=r.logical_mines_after)
     elif cls is GuessCheckpointRecord:
         kind, f = "guess_checkpoint", dict(arm=_wire(r.arm), guess_ordinal=r.guess_ordinal, public_clues=r.public_clues,
                                            physical_p=r.physical_p, effective_p_union_m=r.effective_p_union_m,
@@ -891,6 +965,17 @@ def _from_wire(value):
     if k == "decision_span":
         _keys(f, "action_ordinal scope duration_ns")
         return DecisionSpanRecord(f["action_ordinal"], _de(f["scope"], DecisionScope), f["duration_ns"])
+    if k == "action_decision":
+        _keys(f, "arm action_ordinal category semantic_kind action target plan_actions plan_model_us plan_safe_reveals setup_cells reveal_cells logical_mines_before logical_mines_after")
+        actions = []
+        for entry in _list(f["plan_actions"]):
+            _need(type(entry) is list and len(entry) == 2, "Expected a closed plan action pair.")
+            actions.append((_de(entry[0], Action), _dc(entry[1])))
+        return ActionDecisionRecord(_nested(f["arm"], ArmIdentity), f["action_ordinal"], f["category"],
+                                    f["semantic_kind"], _de(f["action"], Action), _dc(f["target"]), tuple(actions),
+                                    f["plan_model_us"], f["plan_safe_reveals"], _dcs(f["setup_cells"]),
+                                    _dcs(f["reveal_cells"]), _dcs(f["logical_mines_before"]),
+                                    _dcs(f["logical_mines_after"]))
     if k == "guess_checkpoint":
         _keys(f, "arm guess_ordinal public_clues physical_p effective_p_union_m unresolved mine_budget unreduced_z mine_counts probabilities minimum_risk minimum_ties chosen_target eventual_outcome")
         return GuessCheckpointRecord(_nested(f["arm"], ArmIdentity), f["guess_ordinal"], _map(f["public_clues"], lambda x: x),

@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError, dataclass, fields, replace
 from fractions import Fraction
+import hashlib
 import json
 import unittest
 
@@ -11,6 +12,30 @@ from experiments import program_k_e2_records as r
 SHA = "a" * 64
 OID = "b" * 40
 CELLS = ((1, 0), (2, 0), (0, 1), (1, 1))
+
+# Captured from every pre-existing top-level fixture before the additive I4
+# decision kind was introduced. These fixed digest regressions complement the
+# correction's pre/post comparison of the original encoded byte strings.
+_OLD_RECORD_SHA256 = {
+    "ProtocolIdentity": "d0f097aed672b80ba3ea9f7ce551dd52fa1e59cb095f2af1663091ee9363f247",
+    "RuntimeIdentity": "a25cc2b34658f0e1efd71349a1521dd846bab4b26be56a970ab68f9e1bfa6902",
+    "SourceBlobIdentity": "fd9ea14789fd5085d585d61f22ea6dbda654bd57cc5ae8568e06883abc529e1d",
+    "CorpusIdentity": "69e8c2013c09263331093908bad1c32be636af0a07186575df81ab0f54378de6",
+    "BoardIdentity": "bb5dcf9930862dded4bfbbd2f21c7e0484c2c5a181ae61804d37e0e9fb1c38cd",
+    "ArmIdentity": "53eca4884e7e1cf01cba59d9228a3f8361338840c896ebe02d8e05b4175cd477",
+    "PhysicalInputRecord": "f5b3bd591d3d4f83840107528991a616a5db2dd37c8c6abb9831bbea6acda5a1",
+    "PublicEffectRecord": "35cfef25269e2a615b85c85ba4adbe19351a1e0e79109e5f5d11cd5e77acff15",
+    "TerminalEffectRecord": "0f43ee70efca7218970a5b3796c953190d671e576bfde3f095062d0df8792021",
+    "DecisionSpanRecord": "94bf15419caa5c0304a85796be597a22e8e48ca0960d64521db5d542d930fb7f",
+    "GuessCheckpointRecord": "17d8b3cf003fa7a5fdbf3e81c0eccacfc2f1e7d101e77ed16419db0f0f695eeb",
+    "ControlFlagProvenanceRecord": "6bec41f154680f6ca2256a81de1116d5be65fdafe7a8fd0102ad892db48ae1e7",
+    "AcquisitionRecord": "b9d353b82b828f40e4d7529b4f5968231c3a33ee5fde0fdac658bb95f46ca90a",
+    "EvaluatorRecord": "4e97f8f1f7f879e1911457fbafa583b67056df5bb65c4aacd90d182a8b9cecad",
+    "PairComparisonRecord": "fa9a0740e171e2379ffe7659c077c3a341ddb253e18e01f94b2b6b57f1ab6551",
+    "OperationEventRecord": "abaebef3991c6ed7cfe67755e3580c6e82edc7a4b8f0b77861d3af619c79f55d",
+    "ResourceSampleRecord": "d4a3bacc04064f9020205e1aee4a627b5d3aac4c40df102ba89eed5eb4dd6d2e",
+    "CompletionReceipt": "4896a4ad984ce1ea13299c7f48569dc8f2e4e3621ed6ca60ca7f68d714008be3",
+}
 
 
 def _wire(node):
@@ -47,6 +72,192 @@ def _fixtures():
         r.CompletionReceipt(SHA, SHA, SHA, SHA, (r.StreamDigest("actions", SHA, 120, 2),
                                                  r.StreamDigest("public", SHA, 150, 3)), r.CompletionState.COMPLETED),
     )
+
+
+def _decision_fixture():
+    return r.ActionDecisionRecord(
+        _fixtures()[5], 3, "SETUP_CHORD", "LOCAL_SAFE", r.Action.FLAG, (2, 0),
+        ((r.Action.FLAG, (2, 0)), (r.Action.FLAG, (1, 1)), (r.Action.CHORD, (1, 0))),
+        400000, 2, ((2, 0), (1, 1)), ((0, 1), (2, 1)), ((2, 0),), ((2, 0), (1, 1)))
+
+
+class AdditiveDecisionRecordTests(unittest.TestCase):
+    def test_all_preexisting_kinds_keep_their_captured_canonical_hashes(self):
+        fixtures = _fixtures()
+        self.assertEqual({type(value).__name__ for value in fixtures}, set(_OLD_RECORD_SHA256))
+        self.assertEqual(len(fixtures), 18)
+        self.assertEqual(r.SCHEMA_VERSION, 1)
+        for value in fixtures:
+            with self.subTest(kind=type(value).__name__):
+                encoded = r.encode(value)
+                self.assertEqual(hashlib.sha256(encoded).hexdigest(), _OLD_RECORD_SHA256[type(value).__name__])
+                self.assertEqual(r.encode(r.decode(encoded)), encoded)
+
+    def test_initial_control_and_kp0_rules_round_trip(self):
+        for kind, category in ((r.Arm.CONTROL, "CONTROL_INITIAL_OPEN"), (r.Arm.K_P0, "POLICY_INITIAL_OPEN")):
+            arm = replace(_fixtures()[5], arm=kind)
+            value = r.ActionDecisionRecord(arm, 0, category, "INITIAL", r.Action.OPEN,
+                                            arm.board.first_click, (), None, None, (), (), (), ())
+            self.assertEqual(r.decode(r.encode(value)), value)
+            for changes in (dict(category="wrong initial category"), dict(semantic_kind="LOCAL_SAFE"),
+                            dict(action=r.Action.FLAG), dict(target=(1, 0)), dict(plan_model_us=1),
+                            dict(plan_safe_reveals=0), dict(setup_cells=((1, 0),)),
+                            dict(reveal_cells=((1, 0),)), dict(logical_mines_after=((1, 0),)),
+                            dict(plan_actions=((r.Action.OPEN, (0, 0)),), plan_model_us=1, plan_safe_reveals=0)):
+                with self.subTest(kind=kind, changes=changes), self.assertRaises(r.RecordError):
+                    replace(value, **changes)
+
+    def test_postinitial_control_retains_selected_plan_without_logical_m(self):
+        value = _decision_fixture()
+        control = replace(value, arm=replace(value.arm, arm=r.Arm.CONTROL),
+                          category="LOCAL_DETERMINISTIC", semantic_kind="LOCAL_DETERMINISTIC",
+                          setup_cells=(), reveal_cells=(), logical_mines_before=(), logical_mines_after=())
+        self.assertEqual(r.decode(r.encode(control)), control)
+        for changes in (dict(logical_mines_after=((2, 0),)),
+                        dict(logical_mines_before=((2, 0),), logical_mines_after=((2, 0),))):
+            with self.assertRaises(r.RecordError):
+                replace(control, **changes)
+
+    def test_plan_order_is_preserved_without_candidate_graphs(self):
+        value = _decision_fixture()
+        encoded = r.encode(value)
+        self.assertEqual(r.decode(encoded), value)
+        self.assertEqual(json.loads(encoded)["fields"]["plan_actions"],
+                         [["FLAG", [2, 0]], ["FLAG", [1, 1]], ["CHORD", [1, 0]]])
+        changed = replace(value, plan_actions=(value.plan_actions[0], value.plan_actions[2], value.plan_actions[1]))
+        self.assertEqual(r.decode(r.encode(changed)).plan_actions, changed.plan_actions)
+        self.assertNotEqual(r.encode(changed), encoded)
+        self.assertFalse(hasattr(value, "__dict__"))
+        self.assertEqual(tuple(field.name for field in fields(value)), (
+            "arm", "action_ordinal", "category", "semantic_kind", "action", "target", "plan_actions",
+            "plan_model_us", "plan_safe_reveals", "setup_cells", "reveal_cells",
+            "logical_mines_before", "logical_mines_after"))
+        with self.assertRaises(FrozenInstanceError):
+            value.category = "changed"
+
+    def test_no_plan_has_no_metrics_or_candidate_cells(self):
+        value = replace(_decision_fixture(), category="EXACT_MINIMUM_RISK_GUESS", semantic_kind="EXACT_GUESS",
+                        action=r.Action.OPEN, target=(0, 1), plan_actions=(), plan_model_us=None,
+                        plan_safe_reveals=None, setup_cells=(), reveal_cells=())
+        self.assertEqual(r.decode(r.encode(value)), value)
+        for changes in (dict(plan_model_us=1), dict(plan_safe_reveals=0), dict(setup_cells=((2, 0),)),
+                        dict(reveal_cells=((0, 1),)), dict(semantic_kind="INITIAL")):
+            with self.assertRaises(r.RecordError):
+                replace(value, **changes)
+
+    def test_exact_ownership_and_scalar_types(self):
+        class IntSubclass(int):
+            pass
+        class TextSubclass(str):
+            pass
+        class ArmSubclass(r.ArmIdentity):
+            pass
+        class RecordSubclass(r.ActionDecisionRecord):
+            pass
+        value = _decision_fixture()
+        arm_subclass = ArmSubclass(value.arm.arm, value.arm.board, value.arm.run_id, value.arm.unit_id)
+        invalid = {
+            "arm": (None, {}, arm_subclass, replace(value.arm, arm=r.Arm.K_CONTROL)),
+            "action_ordinal": (True, -1, 1.0, IntSubclass(3)),
+            "category": ("", "bad\ncategory", None, {}, TextSubclass("SETUP_CHORD")),
+            "semantic_kind": ("", None, {"kind": "LOCAL_SAFE"}, 1, TextSubclass("LOCAL_SAFE")),
+            "action": ("FLAG", 1, True, None),
+            "target": ([2, 0], (True, 0), (2.0, 0), (3, 0), (0, 2)),
+        }
+        for name, values in invalid.items():
+            for invalid_value in values:
+                with self.subTest(field=name, value=invalid_value), self.assertRaises(r.RecordError):
+                    replace(value, **{name: invalid_value})
+        subclass = RecordSubclass(*(getattr(value, field.name) for field in fields(value)))
+        with self.assertRaises(r.RecordError):
+            r.encode(subclass)
+
+    def test_plan_entries_first_input_and_metrics_are_strict(self):
+        value = _decision_fixture()
+        for plan in (list(value.plan_actions), ([r.Action.FLAG, (2, 0)],),
+                     (("FLAG", (2, 0)),), ((r.Action.FLAG, [2, 0]),),
+                     ((r.Action.FLAG, (3, 0)),), ((r.Action.FLAG, (2, 0), "extra"),),
+                     ((r.Action.OPEN, (2, 0)),), ((r.Action.FLAG, (1, 0)),)):
+            with self.subTest(plan=plan), self.assertRaises(r.RecordError):
+                replace(value, plan_actions=plan)
+        for name, bad_values in (("plan_model_us", (None, 0, -1, True, 1.0, 1 << 64)),
+                                 ("plan_safe_reveals", (None, -1, True, 1.0, 1 << 64))):
+            for bad in bad_values:
+                with self.subTest(field=name, value=bad), self.assertRaises(r.RecordError):
+                    replace(value, **{name: bad})
+        self.assertEqual(replace(value, plan_safe_reveals=0).plan_safe_reveals, 0)
+
+    def test_all_setlike_cells_are_owned_unique_reading_order_and_in_board(self):
+        value = _decision_fixture()
+        for name in ("setup_cells", "reveal_cells", "logical_mines_before", "logical_mines_after"):
+            for cells in ([], {(2, 0)}, ((2, 0), (2, 0)), ((1, 1), (2, 0)),
+                          ((3, 0),), ((0, 2),), ((True, 0),), ([2, 0],)):
+                with self.subTest(field=name, cells=cells), self.assertRaises(r.RecordError):
+                    replace(value, **{name: cells})
+        with self.assertRaises(r.RecordError):
+            replace(value, logical_mines_after=())
+        retained = replace(value, logical_mines_after=value.logical_mines_before)
+        self.assertEqual(r.decode(r.encode(retained)), retained)
+
+    def test_explicit_new_wire_schema_is_canonical(self):
+        value = _decision_fixture()
+        node = {"kind": "action_decision", "version": 1, "fields": {
+            "arm": json.loads(r.encode(value.arm)), "action_ordinal": 3,
+            "category": "SETUP_CHORD", "semantic_kind": "LOCAL_SAFE", "action": "FLAG", "target": [2, 0],
+            "plan_actions": [["FLAG", [2, 0]], ["FLAG", [1, 1]], ["CHORD", [1, 0]]],
+            "plan_model_us": 400000, "plan_safe_reveals": 2,
+            "setup_cells": [[2, 0], [1, 1]], "reveal_cells": [[0, 1], [2, 1]],
+            "logical_mines_before": [[2, 0]], "logical_mines_after": [[2, 0], [1, 1]],
+        }}
+        self.assertEqual(r.encode(value), _wire(node))
+        self.assertEqual(r.decode(_wire(node)), value)
+
+    def test_unknown_missing_extra_and_nested_wrong_record_fields_rejected(self):
+        original = r.encode(_decision_fixture())
+        for field in json.loads(original)["fields"]:
+            node = json.loads(original)
+            del node["fields"][field]
+            with self.subTest(missing=field), self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+        for changes in ({"candidate_graph": []}, {"__class__": "PolicySelection"}, {"hidden_truth": {}}):
+            node = json.loads(original)
+            node["fields"].update(changes)
+            with self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+        node = json.loads(original)
+        node["kind"] = "unregistered_decision"
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(node))
+        node = json.loads(original)
+        node["fields"]["arm"] = json.loads(r.encode(_fixtures()[4]))
+        with self.assertRaises(r.RecordError):
+            r.decode(_wire(node))
+
+    def test_malformed_new_plan_wire_and_float_authority_are_rejected(self):
+        original = r.encode(_decision_fixture())
+        for bad in (None, {}, ["FLAG"], [["FLAG", [2, 0], "extra"]],
+                    [["INVALID", [2, 0]]], [[True, [2, 0]]], [["FLAG", [True, 0]]],
+                    [["FLAG", [2.0, 0]]], [["FLAG", [3, 0]]]):
+            node = json.loads(original)
+            node["fields"]["plan_actions"] = bad
+            with self.subTest(plan=bad), self.assertRaises(r.RecordError):
+                r.decode(_wire(node))
+        for field in ("action_ordinal", "plan_model_us", "plan_safe_reveals"):
+            for bad in (True, 1.0, float("nan"), float("inf")):
+                node = json.loads(original)
+                node["fields"][field] = bad
+                with self.subTest(field=field, value=bad), self.assertRaises(r.RecordError):
+                    r.decode(_wire(node))
+
+    def test_encoder_revalidates_new_record_and_nested_arm(self):
+        value = _decision_fixture()
+        object.__setattr__(value, "plan_actions", list(value.plan_actions))
+        with self.assertRaises(r.RecordError):
+            r.encode(value)
+        value = _decision_fixture()
+        object.__setattr__(value.arm.board, "width", True)
+        with self.assertRaises(r.RecordError):
+            r.encode(value)
 
 
 class CodecRoundTripTests(unittest.TestCase):
