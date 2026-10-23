@@ -61,6 +61,7 @@ Start from:
 - [Program K Gate-R E0/E1 research protocol — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
 - [Program K Gate-R E1 closeout — FINAL PASS / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
   — E0/E1 implementation qualification CLOSED; effectiveness remains an E2 question.
+- [Program K E2 Effectiveness Protocol — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
 - [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
   not an implementation priority list.
 
@@ -103,16 +104,21 @@ envelope, gate results, readback checks and procedural notes. The approximately
 28-hour launcher and limited postprocessing progress visibility are recorded as
 **NONBLOCKING engineering debt**, distinct from the supervised 6,617.328-second job.
 
-**Current next work: Program K E2 effectiveness protocol DESIGN / REVIEW / FREEZE.**
-**Actual E2 is not yet authorized**; a separate protocol and new explicit execution
-authorization are required before any effectiveness corpus runs. E3 remains
-later/separate if required by that protocol. Production modification/integration
-remains **NONE** and production **Gate P remains a separate later decision**.
+The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
+is **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+**Current next work: separate E2 experimental implementation authorization /
+implementation**, then implementation qualification, then separately authorized
+R0 operational readiness. Protocol freeze grants no implementation or execution
+permission. E2 implementation, R0-A/R0-B, Actual E2, E3 and Gate P remain
+**NOT AUTHORIZED**. No E2 effectiveness result exists yet. Production
+modification/integration remains **NONE** and **Gate P remains a separate later decision**.
 
 Recovery order: [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
 [E1 closeout and existing accepted evidence](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
+→ [frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
 → [Extended README](stage3-extended/README.md) → frozen K specification/Gate-R
 protocol → current source/tests only for disputed implementation facts.
+Do not repeat E2-D0, protocol audits or content adjudication merely for recovery.
 Do not repeat the old Gate-R authorization or E1 execution/adjudication decision,
 or invoke execute/assess/persist/readback for recovery. Do not rerun the official
 100k, E/L, accepted P-8/E0/R3/F1/full-source evidence or closed Viewer/Timeline/Polish

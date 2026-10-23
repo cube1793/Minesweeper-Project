@@ -39,12 +39,12 @@ Required execution environment for Program-K qualification/rehearsal work:
 
 `PYTHONDONTWRITEBYTECODE=1`
 
-Live documentation baseline verified at the E1 documentation closeout preflight:
+Live documentation baseline verified at the E2 protocol materialization preflight:
 
 - branch: `main`
 - HEAD / local `origin/main`:
-  `fba3da048d4639dd16cecd41c7f9da21869bd70a`
-- subject: `docs: refresh Program K E1 pre-execution handoff`
+  `c0ba2b55fa49bba1003578360f72fc8447cc73b9`
+- subject: `docs: close Program K Gate-R E1 qualification`
 - ahead/behind: `0 / 0`
 - worktree/index before these documentation edits: clean
 - `git diff --check`: clean; nothing staged
@@ -52,9 +52,12 @@ Live documentation baseline verified at the E1 documentation closeout preflight:
 Accepted technical source baseline remains
 `6106f730320c35e7123a75526f34dbeadeef3c5d`
 (`fix: bound Program K E1 evaluator phase`), an ancestor of that documentation
-HEAD. Only `docs/CURRENT_HANDOFF.md` and `docs/README.md` changed between them.
+HEAD. Only documentation changed between them: `docs/CURRENT_HANDOFF.md`,
+`docs/README.md`, `docs/stage3-extended/README.md` and the E1 closeout.
+There is no source/test delta.
 Its historical final full-source gate was `3359 / 3359 PASS`,
-failures/errors/skips `0 / 0 / 0`, test retries `0`; it was not rerun for closeout.
+failures/errors/skips `0 / 0 / 0`, test retries `0`; it was not rerun for this
+documentation materialization.
 
 Current accepted E1 source/composite identities at that baseline:
 
@@ -197,10 +200,12 @@ Actual E1 state at this handoff:
 [Gate-R E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md):
 **FINAL PASS / ACCEPTED — BLOCKER 0 / REQUIRED 0**. This closes implementation
 qualification; Program K effectiveness is **NOT ESTABLISHED**.
-**NEXT: E2 effectiveness protocol DESIGN / REVIEW / FREEZE.** Actual E2 execution
-is not yet authorized; E3 remains later/separate if the future E2 protocol requires
-it. Production modification/integration remains **NONE**, subject to later Gate P.
-Milestone 10 is **not globally closed**; Extended remains **ACTIVE**.
+The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
+is **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+**NEXT: separate E2 experimental implementation authorization / implementation work.**
+Protocol freeze grants no implementation or execution permission. E2 implementation,
+R0-A/R0-B, Actual E2, E3 and Gate P remain **NOT AUTHORIZED**. Production
+modification/integration remains **NONE**. Milestone 10 and Extended remain **ACTIVE**.
 
 Useful accepted historical identities:
 
@@ -591,14 +596,24 @@ readback call or new run_id is authorized by recovery.
 
 The approximately 28-hour launcher duration versus the recorded 6,617.328-second
 supervised job, and missing authoritative postprocessing progress, are explicit
-**NONBLOCKING performance/observability debt**. They do not reopen E1. E2 protocol
-design must decide whether reuse needs a bounded performance/observability
-requirement before Actual E2. No optimization is authorized by this closeout.
+**NONBLOCKING performance/observability debt**. They do not reopen E1. The frozen
+E2 protocol now requires bounded streaming/postprocessing, progress visibility and
+operational admission checks. These are future implementation/readiness obligations;
+documentation freeze does not repair the debt or authorize optimization.
 
-**NEXT: PROGRAM K E2 EFFECTIVENESS PROTOCOL DESIGN / REVIEW / FREEZE.**
-Effectiveness is not established. Actual E2 requires a new explicit authorization;
-E3 remains later/separate if required by the future E2 protocol. Gate P remains
-a later separate production decision.
+#### E2 Effectiveness Protocol — FROZEN / ACCEPTED
+
+The [frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
+records final content adjudication **CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**
+under `CHATGPT_PROGRAM_K_E2_PROTOCOL_CONTENT_FREEZE_2026-10-23_V2`.
+E2-D0, the v0 audit, the v1 re-audit and the six bounded v2 corrections are complete;
+no further independent v2 audit is claimed. Detailed lineage remains in the protocol.
+
+**NEXT: separate E2 experimental implementation authorization / implementation work.**
+Protocol freeze alone authorizes no E2 implementation, R0-A/R0-B, Actual E2, E3 or
+Gate P. No Program-K effectiveness result exists yet. Implementation qualification
+must precede separately authorized R0 operational readiness; Actual E2 has its own
+later authorization. Gate P remains a separate production decision.
 
 #### Preservation / still forbidden
 
@@ -610,7 +625,7 @@ Do not:
 - access ZiNi holdout `2,010,000 .. 2,010,099`;
 - tune policy using E1 results;
 - execute A-E5 without new authorization;
-- begin E2/E3 without a separate protocol/authorization;
+- begin E2 implementation, R0-A/R0-B, Actual E2 or E3 without separate authorization;
 - perform Gate P / production integration.
 
 Stage-3 Extended remains **ACTIVE** until the later research/production closeout path completes.
@@ -690,20 +705,23 @@ At a new chat or after context loss:
    and its existing final report/artifact references read-only: E0/E1 qualification
    is accepted/closed, so do not repeat the old Gate-R authorization, execution or
    final adjudication sequence;
-4. read the frozen Program-K specification and Gate-R E0/E1 protocol for their
+4. then read the [frozen E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md);
+   content freeze is accepted, so do not repeat E2-D0, protocol audits or final
+   content adjudication merely for recovery;
+5. read the frozen Program-K specification and Gate-R E0/E1 protocol for their
    semantic/protocol authority, preserving historical prerequisite wording;
-5. use current committed source/tests only for disputed implementation facts;
+6. use current committed source/tests only for disputed implementation facts;
    compare live lineage with accepted technical baseline
    `6106f730320c35e7123a75526f34dbeadeef3c5d`, without rerunning accepted evidence;
-6. next is separate **E2 effectiveness protocol DESIGN / REVIEW / FREEZE**,
-   including the closeout's nonblocking postprocessing performance/observability
-   debt; Actual E2 execution is not yet authorized;
-7. E3 remains later/separate if required by the future E2 protocol; production
+7. next is separate **E2 experimental implementation authorization / implementation**
+   under the frozen protocol, followed by implementation qualification; R0-A/R0-B
+   and Actual E2 remain separately unauthorized;
+8. E3 remains later/separate under the frozen E2 protocol; production
    modification/integration remains NONE pending later Gate P authorization;
-8. do not invoke execute/assess/persist/readback, create a new E1 run_id or rerun
+9. do not invoke execute/assess/persist/readback, create a new E1 run_id or rerun
    E1, the official 100k, E/L, accepted P-8/E0/R3/F1/full-source evidence or closed
    Viewer/Timeline/Polish work merely for recovery;
-9. do not open the ZiNi final holdout `2,010,000 .. 2,010,099`.
+10. do not open the ZiNi final holdout `2,010,000 .. 2,010,099`.
 
 Recommended immediate source set only when a current implementation dispute requires it:
 

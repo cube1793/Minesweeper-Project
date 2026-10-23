@@ -34,9 +34,12 @@ Program K now exists; Gate-R E0/E1 implementation qualification is **CLOSED /
 ACCEPTED**. Actual E1 is **E1_PASS / E1_QUALIFIED**, `progression_allowed = true`;
 see the [E1 final closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) (2026-10-23).
 Milestone 10 research remains **ACTIVE**, with effectiveness not established.
-**NEXT: Program K E2 effectiveness protocol DESIGN / REVIEW / FREEZE.**
-Actual E2 execution is not yet authorized; production integration remains NONE
-pending a later, separate Gate P decision.
+The [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) is
+**FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0** (2026-10-23).
+**NEXT: E2 experimental implementation under the frozen protocol, after separate
+explicit authorization.** E2 implementation, R0-A/R0-B and Actual E2 remain
+unauthorized. E3 and Gate P remain separate and unauthorized; production integration
+remains NONE.
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -180,7 +183,10 @@ results retain their original identity and meaning.
     [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
     [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md);
     [accepted Actual E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md).
-    Next: E2 effectiveness protocol design/review/freeze, not Actual E2 execution.
+    [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
+    **FROZEN / ACCEPTED**; no E2 effectiveness result yet.
+    Next: E2 experimental implementation under the frozen protocol, after separate
+    explicit authorization. Implementation/R0/Actual E2 remain unauthorized.
 
 ### Current Program K boundary
 
@@ -191,18 +197,22 @@ zero retries/resumes, and one successful publication/readback each. Final ChatGP
 adjudication: **GATE-R E1 FINAL PASS / ACCEPTED — BLOCKER 0 / REQUIRED 0**.
 G8 remains **NOT_APPLICABLE**: Model-C diagnostics only; effectiveness belongs to E2.
 
-**NEXT: PROGRAM K E2 EFFECTIVENESS PROTOCOL DESIGN / REVIEW / FREEZE.**
-No effectiveness PASS is established. Actual E2 requires a separate protocol and
-new explicit execution authorization; E3 remains later/separate if that protocol
-requires it. Production modification/integration remains **NONE**, pending later
-Gate P. Milestone 10 is not globally closed; Stage-3 Extended remains **ACTIVE**.
+The [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) is
+**FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+**NEXT: E2 experimental implementation under the frozen protocol, after separate
+explicit authorization.** Protocol freeze grants no implementation or execution
+permission: E2 implementation, R0-A/R0-B, Actual E2, E3 and Gate P remain
+**NOT AUTHORIZED**. No effectiveness result exists yet. Production
+modification/integration remains **NONE**. Milestone 10 and Stage-3 Extended
+remain **ACTIVE**.
 
 The [E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) records nonblocking postprocessing
 performance/observability debt: approximately 28 hours for the launcher versus
 6,617.328 seconds for the recorded supervised job, without authoritative percentage
-progress. During E2 design, decide whether any reused persistence/reporting path
-needs bounded performance/observability requirements before Actual E2. This debt
-does not reopen E1 and is not repaired by the documentation closeout.
+progress. The frozen E2 protocol requires bounded streaming/postprocessing,
+progress visibility and operational admission checks before Actual E2. These remain
+future implementation/readiness obligations; this debt does not reopen E1 and is
+not repaired by documentation freeze.
 
 The frozen specification/protocol retain their semantic authority and historical
 prerequisites; recovery must not repeat E0/E1 qualification or the old Gate-R
@@ -212,10 +222,12 @@ not authorized. No A-E5, official 100k or E/L rerun is authorized. The ZiNi fina
 holdout remains unopened/excluded; frozen Stage-3 V1 remains historical authority.
 
 Recovery order: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) →
-[E1 closeout and accepted evidence](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) → this roadmap →
+[E1 closeout and accepted evidence](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) →
+[frozen E2 protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) → this roadmap →
 [frozen K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) →
 [frozen Gate-R protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) → current source/tests
-only when implementation facts are disputed. Read existing evidence; do not
+only when implementation facts are disputed. Do not repeat E2-D0, protocol audits
+or content adjudication merely for recovery. Read existing evidence; do not
 reinvoke execute/assess/persist/readback for recovery.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
@@ -341,9 +353,10 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
 That interpretation is now CLOSED; Program K's research specification and Gate-R
 E0/E1 protocol remain FROZEN / ACCEPTED. Gate-R E0/E1 implementation qualification
-is now CLOSED / ACCEPTED. Current NEXT is E2 effectiveness protocol
-design/review/freeze; Actual E2 execution and later production Gate P remain
-separately unauthorized. The historical polish acceptance is unchanged.
+is now CLOSED / ACCEPTED, and the E2 Effectiveness Protocol is FROZEN / ACCEPTED.
+Current NEXT is E2 experimental implementation after separate explicit authorization;
+implementation, R0, Actual E2, E3 and Gate P remain unauthorized. The historical
+polish acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -683,8 +696,9 @@ The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
 are also CLOSED. Program K's research specification and Gate-R E0/E1 protocol are
 FROZEN / ACCEPTED; its bounded experimental implementation and Gate-R E0/E1
-qualification are now accepted/closed. Current NEXT is separate E2 effectiveness
-protocol design/review/freeze. Actual E2 and production Gate P remain unauthorized;
+qualification are now accepted/closed. The E2 Effectiveness Protocol is FROZEN /
+ACCEPTED. Current NEXT is E2 experimental implementation after separate explicit
+authorization. Implementation, R0, Actual E2, E3 and Gate P remain unauthorized;
 no effectiveness result or global milestone-10 closeout is claimed.
 The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;
