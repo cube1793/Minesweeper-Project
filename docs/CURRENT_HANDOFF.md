@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Durable recovery state for a new chat or context-loss event.
-> Updated: 2026-10-22 (Asia/Seoul)
+> Updated: 2026-10-23 (Asia/Seoul)
 
 ---
 
@@ -39,17 +39,22 @@ Required execution environment for Program-K qualification/rehearsal work:
 
 `PYTHONDONTWRITEBYTECODE=1`
 
-Last verified committed baseline after the post-F1 final full-source gate:
+Live documentation baseline verified at the E1 documentation closeout preflight:
 
 - branch: `main`
 - HEAD / local `origin/main`:
-  `6106f730320c35e7123a75526f34dbeadeef3c5d`
-- subject: `fix: bound Program K E1 evaluator phase`
+  `fba3da048d4639dd16cecd41c7f9da21869bd70a`
+- subject: `docs: refresh Program K E1 pre-execution handoff`
 - ahead/behind: `0 / 0`
-- worktree/index: clean
-- `git diff --check` / `git diff --cached --check`: clean
-- final full-source gate: `3359 / 3359 PASS`, failures/errors/skips `0 / 0 / 0`
-- test retries: `0`
+- worktree/index before these documentation edits: clean
+- `git diff --check`: clean; nothing staged
+
+Accepted technical source baseline remains
+`6106f730320c35e7123a75526f34dbeadeef3c5d`
+(`fix: bound Program K E1 evaluator phase`), an ancestor of that documentation
+HEAD. Only `docs/CURRENT_HANDOFF.md` and `docs/README.md` changed between them.
+Its historical final full-source gate was `3359 / 3359 PASS`,
+failures/errors/skips `0 / 0 / 0`, test retries `0`; it was not rerun for closeout.
 
 Current accepted E1 source/composite identities at that baseline:
 
@@ -78,14 +83,15 @@ Relevant current raw source identities:
   `a7d4bc01220a1cf294909d1a5a02b7ba7cd2ec31687ad499b241e972fb5940c9`
   / `38455 B`
 
-Current host used for accepted E0/R3/F1 readiness work:
+Host used for accepted E0/R3/F1 readiness and Actual E1 work:
 
 - runtime: `Windows-11-10.0.26200-SP0`
 - machine: `DESKTOP-OV6N603`
 - Python: `3.12.10`, 64-bit AMD64
 
-Always verify live Git/runtime again before actual E1. Do not reset to this SHA blindly if
-the repository has legitimately advanced.
+Verify live Git/runtime before separately authorized future work. Actual E1 is
+accepted and must not be rerun for recovery. Do not reset to a remembered SHA
+blindly if the repository has legitimately advanced.
 ---
 
 ## 3. Closed baselines
@@ -177,15 +183,24 @@ Gate R had not yet been authorized are superseded by the current source/evidence
 - Expert-scale compact evaluator rehearsal is **PASS — BLOCKER 0 / REQUIRED 0**;
 - post-F1 full-source gate is **PASS — 3359 / 3359**;
 - final E1 operating envelope is **ACCEPTED**;
-- **Actual E1 is explicitly authorized for ONE attempt, but has not yet run.**
+- **Actual E1 is E1_PASS / E1_QUALIFIED / ACCEPTED; progression_allowed = true.**
+- **Gate-R E0/E1 implementation qualification is CLOSED / ACCEPTED.**
 
 Actual E1 state at this handoff:
 
-- scheduled runs: `0`
-- evaluator runs: `0`
-- durable actual-E1 artifact: `0`
+- one `execute_e1` call; retries/resumes `0 / 0`;
+- scheduled operations: `54 / 54 COMPLETE`; post-hoc evaluators: `18 / 18 COMPLETE`;
+- all 72 operation exit codes: `0`;
+- publication/readback: once each, successful, all ten consistency checks true;
+- durable artifact: `results/program_k_research/e1-20261022T003214Z-fba3da048d46/`.
 
-E2/E3 and Gate P / production integration remain **NOT AUTHORIZED**.
+[Gate-R E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md):
+**FINAL PASS / ACCEPTED — BLOCKER 0 / REQUIRED 0**. This closes implementation
+qualification; Program K effectiveness is **NOT ESTABLISHED**.
+**NEXT: E2 effectiveness protocol DESIGN / REVIEW / FREEZE.** Actual E2 execution
+is not yet authorized; E3 remains later/separate if the future E2 protocol requires
+it. Production modification/integration remains **NONE**, subject to later Gate P.
+Milestone 10 is **not globally closed**; Extended remains **ACTIVE**.
 
 Useful accepted historical identities:
 
@@ -406,6 +421,11 @@ nor refuted by this interpretation**.
 FROZEN / ACCEPTED.** They remain the semantic/protocol authorities; current
 source/tests and accepted execution evidence determine implementation status.
 
+Gate-R E0/E1 implementation qualification is **CLOSED / ACCEPTED**. The
+[E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md) holds the detailed
+accepted execution, receipt, hashes and procedural notes. The readiness records
+below are accepted historical provenance, not instructions to repeat qualification.
+
 #### Accepted P-8 / E0
 
 Full P-8:
@@ -423,7 +443,7 @@ Actual E0:
   `71ee9b3a9dc0a24de7471be996da5069f5c77ed750485a84b298ee74b7065576`
   / `1,762,287 B`
 - COMPLETE SHA-256:
-  `a664e8dfdc5e6aa8a6fe02d6fabe84da3df9018291558d5d874d646eb522`
+  `a664e8dfdc5e6aa8a6fe02d6fabe84da3df901829c8291558d5d874d646eb522`
   / `520 B`
 
 Do not rerun P-8 or E0 absent a real identity invalidation.
@@ -526,7 +546,7 @@ Exactly one isolated class remains:
 
 #### Final E1 operating envelope — ACCEPTED
 
-Use exactly for the authorized actual E1 attempt:
+Historical operating envelope used for the accepted Actual E1:
 
 ```text
 max_decision_wall_ms         = 30000
@@ -544,34 +564,41 @@ F2 is **CLOSED** by widening the provisional case cap from `300 s` to `420 s`.
 This is operational containment, not an effectiveness threshold and never
 action-substitution authority.
 
-#### Actual E1 — AUTHORIZED ONCE / NOT YET EXECUTED
+#### Actual E1 — FINAL PASS / ACCEPTED
 
 Authorization reference:
 
-`CHATGPT_FINAL_E1_AUTHORIZATION_2026-10-22_6106f730_CASE420S`
+`CHATGPT_FINAL_E1_AUTHORIZATION_2026-10-22_FBA3DA0_CASE420S`
 
-Current operator contract:
+Accepted result:
 
-- use a new `e1-<UTC>-6106f730320c` run id;
-- run `preflight_e1(..., repository_root=<absolute repo>)`;
-- require `READY / reasons == ()`;
-- then call `execute_e1(...)` **exactly once**;
-- no retry, no resume, no new run id after execution begins;
-- persist the returned record exactly once even if FAIL/INCOMPLETE;
-- read back through the official persistence API;
-- return the result to ChatGPT for E1/Gate-R adjudication.
+- run_id: `e1-20261022T003214Z-fba3da048d46`;
+- `E1_PASS / E1_QUALIFIED`; `progression_allowed = true`;
+- final ChatGPT adjudication: **GATE-R E1 FINAL PASS / ACCEPTED**,
+  **BLOCKER 0 / REQUIRED 0**;
+- one external READY preflight, one execution, zero retries/resumes;
+- `54` scheduled and `18` post-hoc evaluator operations COMPLETE, all exit `0`;
+- publication/readback once each and successful; all ten consistency checks true;
+- G1–G7/G9/G10 PASS; **G8 NOT_APPLICABLE**: Model-C diagnostics only,
+  effectiveness belongs to E2;
+- final phase `COMPLETED`, STOP `2026-10-23 13:36:14 KST`.
 
-If preflight is not READY, actual E1 does not start.
+Primary report:
+`results/program_k_research/e1-launch-20261022T003214Z-fba3da048d46/final-report.json`.
+The [E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md) preserves the
+durable artifact identities and final adjudication. No new execute/assess/persist/
+readback call or new run_id is authorized by recovery.
 
-If E1 returns `E1_A_E5_REQUIRED`, **no supplement is currently authorized**.
-If it returns `INCOMPLETE` or `IMPLEMENTATION_IDENTITY_FAIL`, **no retry or repair
-is currently authorized**.
+The approximately 28-hour launcher duration versus the recorded 6,617.328-second
+supervised job, and missing authoritative postprocessing progress, are explicit
+**NONBLOCKING performance/observability debt**. They do not reopen E1. E2 protocol
+design must decide whether reuse needs a bounded performance/observability
+requirement before Actual E2. No optimization is authorized by this closeout.
 
-If it returns `E1_PASS / E1_QUALIFIED`, that qualifies the implementation identity
-for E1. It is **not** Program-K research/effectiveness PASS; E2 remains separate.
-
-The approved operator prompt generated for this boundary is:
-`PK_E1_05_ACTUAL_E1.txt`.
+**NEXT: PROGRAM K E2 EFFECTIVENESS PROTOCOL DESIGN / REVIEW / FREEZE.**
+Effectiveness is not established. Actual E2 requires a new explicit authorization;
+E3 remains later/separate if required by the future E2 protocol. Gate P remains
+a later separate production decision.
 
 #### Preservation / still forbidden
 
@@ -659,26 +686,24 @@ At a new chat or after context loss:
    worktree/index; never reset to a remembered SHA blindly;
 2. read this `docs/CURRENT_HANDOFF.md`, then `docs/README.md`, then the
    Stage-3 Extended index;
-3. read the frozen Program-K research specification and frozen Gate-R E0/E1
-   protocol for semantic/protocol authority;
-4. use current committed source/tests for disputed implementation facts;
-5. authenticate whether the last accepted technical baseline is still
-   `6106f730320c35e7123a75526f34dbeadeef3c5d`;
-6. check `results/program_k_research/` **before doing anything**:
-   - if an actual `e1-*` qualification artifact now exists, DO NOT execute E1 again;
-     read/adjudicate that artifact instead;
-   - if no actual E1 artifact exists and live identities still match this handoff,
-     the next authorized operation is the single Actual E1 attempt under the
-     accepted 420 s case-cap envelope;
-7. actual E1 must use READY preflight, one `execute_e1` call, exact persistence
-   and readback; no retry/resume/new run id after execution begins;
-8. if E1 is `E1_A_E5_REQUIRED`, return to ChatGPT; no supplement is implicitly authorized;
-9. if E1 is `E1_PASS / E1_QUALIFIED`, return to ChatGPT for final E1/Gate-R
-   adjudication before any E2 work;
-10. do not begin E2/E3 or Gate P without separate authorization;
-11. do not rerun the official 100k, E/L, accepted P-8/E0/R3/F1 evidence or closed
-    Viewer/Timeline/Polish work merely for recovery;
-12. do not open the ZiNi final holdout `2,010,000 .. 2,010,099`.
+3. read the [Gate-R E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
+   and its existing final report/artifact references read-only: E0/E1 qualification
+   is accepted/closed, so do not repeat the old Gate-R authorization, execution or
+   final adjudication sequence;
+4. read the frozen Program-K specification and Gate-R E0/E1 protocol for their
+   semantic/protocol authority, preserving historical prerequisite wording;
+5. use current committed source/tests only for disputed implementation facts;
+   compare live lineage with accepted technical baseline
+   `6106f730320c35e7123a75526f34dbeadeef3c5d`, without rerunning accepted evidence;
+6. next is separate **E2 effectiveness protocol DESIGN / REVIEW / FREEZE**,
+   including the closeout's nonblocking postprocessing performance/observability
+   debt; Actual E2 execution is not yet authorized;
+7. E3 remains later/separate if required by the future E2 protocol; production
+   modification/integration remains NONE pending later Gate P authorization;
+8. do not invoke execute/assess/persist/readback, create a new E1 run_id or rerun
+   E1, the official 100k, E/L, accepted P-8/E0/R3/F1/full-source evidence or closed
+   Viewer/Timeline/Polish work merely for recovery;
+9. do not open the ZiNi final holdout `2,010,000 .. 2,010,099`.
 
 Recommended immediate source set only when a current implementation dispute requires it:
 

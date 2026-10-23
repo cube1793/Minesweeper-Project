@@ -59,6 +59,8 @@ Start from:
 - [Stage-3 Extended README](stage3-extended/README.md)
 - [Program K research specification — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)
 - [Program K Gate-R E0/E1 research protocol — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
+- [Program K Gate-R E1 closeout — FINAL PASS / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
+  — E0/E1 implementation qualification CLOSED; effectiveness remains an E2 question.
 - [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
   not an implementation priority list.
 
@@ -83,75 +85,39 @@ Closed milestones / durable closeouts:
 
 ### Current Program-K state / next work
 
-Milestones **1–9 remain CLOSED**. Milestone **10** selected
-**Program K — Logical Known-Mine Capability + Selective Physical Materialization**.
+Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
+Capability + Selective Physical Materialization** remains **ACTIVE**, not globally
+closed. Bounded experimental Program K exists; full P-8 and Gate-R E0/E1
+implementation qualification are **ACCEPTED / CLOSED**.
 
-The research specification and Gate-R E0/E1 protocol remain the frozen documentary
-authorities, but the old “UNIMPLEMENTED / Gate R not granted” recovery state is
-superseded by current source/evidence:
+Actual E1 final adjudication: **GATE-R E1 FINAL PASS / ACCEPTED — BLOCKER 0 /
+REQUIRED 0**. The result is **E1_PASS / E1_QUALIFIED**, `progression_allowed = true`:
+one execution, 54 scheduled + 18 post-hoc evaluator COMPLETE, all exit codes 0,
+zero retries/resumes, and one successful publication/readback each. Effectiveness
+is **not established**; G8 remains NOT_APPLICABLE because effectiveness belongs to E2.
 
-- bounded experimental Program-K implementation exists;
-- full P-8 is **PASS / ACCEPTED**;
-- actual E0 is **E0_PASS / E0_QUALIFIED / ACCEPTED**;
-- R-1/R-2 readiness corrections are accepted;
-- R3 Expert-scale non-E1 feasibility and R3-C1 are closed;
-- F1 compact evaluator correction is accepted at current commit
-  `6106f730320c35e7123a75526f34dbeadeef3c5d`
-  (`fix: bound Program K E1 evaluator phase`);
-- independent F1 targeted re-audit:
-  **BLOCKER 0 / REQUIRED 0**;
-- Expert-scale evaluator rehearsal:
-  **PASS / BLOCKER 0 / REQUIRED 0**;
-- final isolation-aware source gate:
-  **3359 / 3359 PASS**, failures/errors/skips `0 / 0 / 0`, retries `0`;
-- final E1 operating envelope is accepted;
-- **Actual E1 is authorized for one attempt and has not yet run.**
+The [E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md) preserves the
+accepted technical baseline `6106f730320c35e7123a75526f34dbeadeef3c5d`, execution
+documentation HEAD `fba3da048d4639dd16cecd41c7f9da21869bd70a`, run/artifact identities,
+envelope, gate results, readback checks and procedural notes. The approximately
+28-hour launcher and limited postprocessing progress visibility are recorded as
+**NONBLOCKING engineering debt**, distinct from the supervised 6,617.328-second job.
 
-Current actual-E1 state at this documentation update:
+**Current next work: Program K E2 effectiveness protocol DESIGN / REVIEW / FREEZE.**
+**Actual E2 is not yet authorized**; a separate protocol and new explicit execution
+authorization are required before any effectiveness corpus runs. E3 remains
+later/separate if required by that protocol. Production modification/integration
+remains **NONE** and production **Gate P remains a separate later decision**.
 
-- scheduled operations: `0`
-- evaluator operations: `0`
-- durable actual-E1 artifacts: `0`
+Recovery order: [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
+[E1 closeout and existing accepted evidence](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md)
+→ [Extended README](stage3-extended/README.md) → frozen K specification/Gate-R
+protocol → current source/tests only for disputed implementation facts.
+Do not repeat the old Gate-R authorization or E1 execution/adjudication decision,
+or invoke execute/assess/persist/readback for recovery. Do not rerun the official
+100k, E/L, accepted P-8/E0/R3/F1/full-source evidence or closed Viewer/Timeline/Polish
+work. The ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
 
-Final E1 operating envelope:
-
-```text
-decision = 30 s
-case     = 420 s
-job      = 4 h
-shadow   = 1 s
-inputs   = 1000
-memory   = 4 GiB
-archive  = 512 MiB
-monitor  = 25 ms
-policy   = WINDOWS_JOB_MEMORY_AND_STACK_SAMPLING_WATCHDOG_V1
-```
-
-The provisional F2 concern is **CLOSED** by the `420 s` case containment decision.
-These limits are operational containment, not effectiveness thresholds.
-
-Actual E1 authorization reference:
-
-`CHATGPT_FINAL_E1_AUTHORIZATION_2026-10-22_6106f730_CASE420S`
-
-**NEXT:** on the exact accepted source/runtime, run a READY preflight and then
-**one and only one** `execute_e1` attempt. No retry/resume/new run id is authorized
-after execution begins. Persist/read back the resulting record whether it is PASS,
-INCOMPLETE or implementation-identity FAIL, then return to ChatGPT for E1/Gate-R
-adjudication.
-
-If the result is `E1_A_E5_REQUIRED`, no supplement is automatically authorized.
-E2/E3 and later Gate P / production integration remain separate and unauthorized.
-
-Do not rerun the official 100k, E/L, accepted P-8/E0/R3/F1 evidence or closed
-Viewer/Timeline/Polish work. The ZiNi final holdout
-`2,010,000 .. 2,010,099` remains unopened/excluded.
-
-Recovery order:
-[CURRENT_HANDOFF](CURRENT_HANDOFF.md) → [Extended README](stage3-extended/README.md)
-→ frozen K specification → frozen Gate-R protocol → current source/tests/evidence.
-If an actual `e1-*` artifact exists at recovery time, that artifact supersedes this
-“not yet executed” status and E1 must **not** be run again.
 ## Experiments
 
 - [E/L policy pilot](../experiments/STAGE3_E_L_POLICY_PILOT.md)

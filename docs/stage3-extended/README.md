@@ -29,9 +29,14 @@ Milestones **1–9 remain CLOSED**. Milestone **10** selected **Program K**; its
 [research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) is **FROZEN / ACCEPTED**
 (2026-10-20). The [Gate-R E0/E1 research protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
 is now also **FROZEN / ACCEPTED**. Independent protocol audit/re-audit concluded
-**BLOCKER 0 / REQUIRED 0**, with final **CONTENT FREEZE PASS**. Program K remains
-**UNIMPLEMENTED** and **Gate R is NOT GRANTED**. **NEXT: explicit Gate R
-authorization decision for the bounded experimental implementation scope.**
+**BLOCKER 0 / REQUIRED 0**, with final **CONTENT FREEZE PASS**. Bounded experimental
+Program K now exists; Gate-R E0/E1 implementation qualification is **CLOSED /
+ACCEPTED**. Actual E1 is **E1_PASS / E1_QUALIFIED**, `progression_allowed = true`;
+see the [E1 final closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) (2026-10-23).
+Milestone 10 research remains **ACTIVE**, with effectiveness not established.
+**NEXT: Program K E2 effectiveness protocol DESIGN / REVIEW / FREEZE.**
+Actual E2 execution is not yet authorized; production integration remains NONE
+pending a later, separate Gate P decision.
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -171,30 +176,47 @@ results retain their original identity and meaning.
    Stage-3 Visualizer; qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`.
 9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation;
    [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
-10. **Program K selected / research specification FROZEN / ACCEPTED** —
-    Algorithm-research direction/specification decision;
+10. **ACTIVE — Program K research; Gate-R E0/E1 implementation qualification CLOSED / ACCEPTED** —
     [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
-    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md).
+    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md);
+    [accepted Actual E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md).
+    Next: E2 effectiveness protocol design/review/freeze, not Actual E2 execution.
 
-**NEXT: explicit Gate R authorization decision for the bounded experimental
-implementation scope.** The frozen specification and frozen protocol are the two
-current Program-K documentary authorities. Program K remains **UNIMPLEMENTED**;
-**Gate R is NOT GRANTED**. Proposed production modifications remain **NONE**.
-**P-1 through P-8 remain mandatory**; **O-4/O-7 are protocol-required** and
-**O-5 remains OPTIONAL / DEFER**. A-E1..A-E4 remain prospective execution
-prerequisites; A-E5 remains conditional on missing mandatory E1 mechanism coverage.
-No implementation, E0/E1 execution or E2/E3 is authorized, and no research PASS is
-claimed. **Program L** remains fallback if K itself fails under the frozen contract,
+### Current Program K boundary
+
+The bounded experimental implementation, full P-8 and Actual E0 are accepted.
+Actual E1 is **E1_PASS / E1_QUALIFIED / ACCEPTED** with `progression_allowed = true`:
+one execution, 54 scheduled + 18 post-hoc evaluator COMPLETE, all exit codes 0,
+zero retries/resumes, and one successful publication/readback each. Final ChatGPT
+adjudication: **GATE-R E1 FINAL PASS / ACCEPTED — BLOCKER 0 / REQUIRED 0**.
+G8 remains **NOT_APPLICABLE**: Model-C diagnostics only; effectiveness belongs to E2.
+
+**NEXT: PROGRAM K E2 EFFECTIVENESS PROTOCOL DESIGN / REVIEW / FREEZE.**
+No effectiveness PASS is established. Actual E2 requires a separate protocol and
+new explicit execution authorization; E3 remains later/separate if that protocol
+requires it. Production modification/integration remains **NONE**, pending later
+Gate P. Milestone 10 is not globally closed; Stage-3 Extended remains **ACTIVE**.
+
+The [E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) records nonblocking postprocessing
+performance/observability debt: approximately 28 hours for the launcher versus
+6,617.328 seconds for the recorded supervised job, without authoritative percentage
+progress. During E2 design, decide whether any reused persistence/reporting path
+needs bounded performance/observability requirements before Actual E2. This debt
+does not reopen E1 and is not repaired by the documentation closeout.
+
+The frozen specification/protocol retain their semantic authority and historical
+prerequisites; recovery must not repeat E0/E1 qualification or the old Gate-R
+authorization decision. **Program L** remains a fallback under the frozen contract,
 restricted to existing V1-admissible certainty alternatives; L implementation is
-not authorized. Production integration requires later, separate Gate P authorization.
-No official 100k rerun; the ZiNi final holdout remains unopened/excluded.
-Frozen Stage-3 V1 remains historical authority. Extended remains ACTIVE.
+not authorized. No A-E5, official 100k or E/L rerun is authorized. The ZiNi final
+holdout remains unopened/excluded; frozen Stage-3 V1 remains historical authority.
 
-Recovery order: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this Extended README →
+Recovery order: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) →
+[E1 closeout and accepted evidence](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) → this roadmap →
 [frozen K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) →
 [frozen Gate-R protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) → current source/tests
-when implementation facts are disputed. The protocol records the completed audit
-chain and preserves all execution prerequisites as future obligations.
+only when implementation facts are disputed. Read existing evidence; do not
+reinvoke execute/assess/persist/readback for recovery.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
@@ -318,9 +340,10 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
 
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
 That interpretation is now CLOSED; Program K's research specification and Gate-R
-E0/E1 protocol are now FROZEN / ACCEPTED. Current NEXT is the explicit Gate R
-authorization decision as recorded above; neither freeze authorizes implementation
-or experiment execution.
+E0/E1 protocol remain FROZEN / ACCEPTED. Gate-R E0/E1 implementation qualification
+is now CLOSED / ACCEPTED. Current NEXT is E2 effectiveness protocol
+design/review/freeze; Actual E2 execution and later production Gate P remain
+separately unauthorized. The historical polish acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -659,8 +682,10 @@ source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
 are also CLOSED. Program K's research specification and Gate-R E0/E1 protocol are
-FROZEN / ACCEPTED; current NEXT is the explicit Gate R authorization decision.
-Implementation and experiment execution remain unauthorized.
+FROZEN / ACCEPTED; its bounded experimental implementation and Gate-R E0/E1
+qualification are now accepted/closed. Current NEXT is separate E2 effectiveness
+protocol design/review/freeze. Actual E2 and production Gate P remain unauthorized;
+no effectiveness result or global milestone-10 closeout is claimed.
 The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;
 its dated record remains unchanged. No historical acceptance is reopened.
@@ -681,8 +706,8 @@ the current state.
 - Action-specific OPEN / FLAG / CHORD timing and physical CHORD variants.
 - CPS / burst / minimum inter-action constraints, anisotropy and human cognitive timing.
 - Built-in screen recording unless later justified.
-- Program K implementation remains unauthorized pending Gate R; broader selective
-  flagging and richer / longer planning remain deferred.
+- Broader Program K selective flagging and richer / longer planning remain deferred;
+  accepted E0/E1 qualification does not authorize extensions or production Gate P.
 
 Revisit only with evidence and a separate specification/evaluation contract.
 In the Stage-3 Visualizer, incremental forward is implemented; arbitrary seeks
