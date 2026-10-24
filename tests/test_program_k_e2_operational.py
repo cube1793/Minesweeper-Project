@@ -1042,6 +1042,260 @@ class R0ComponentTests(unittest.TestCase):
         self.assertGreater(value.wall_ns, 0)
         self.assertEqual(value.units[0].durable_bytes, 0)
 
+    def test_setup_intervals_include_admission_readback_and_close_before_target(self):
+        routes = ((op.R0Component.K_CONTROL, "K", False),
+                  (op.R0Component.DETERMINISM, "D", False),
+                  (op.R0Component.ORACLE_K_BIND, "O_K_SETUP", True),
+                  (op.R0Component.ORACLE_D_REPEAT, "O_D_SETUP", True))
+        for component, route, oracle in routes:
+            clock, events = [10], []
+            original_readback, original_close = op.readback_streams, store.StreamWriter.close
+            original_persist, original_encode = op._persist_r0, execution.encode_bundle
+
+            def tick(name, amount):
+                events.append((name, clock[0], clock[0] + amount))
+                clock[0] += amount
+
+            def supervise(work, kind, *args, **kwargs):
+                if kind is execution.WorkerKind.PRIMARY:
+                    self.assertIs(work.oracle_b_selected, oracle)
+                    tick("setup_launch_execution_decode", 11)
+                    tick("setup_worker_reap", 13)
+                else:
+                    tick("target_work", 10000)
+                return self.result(work, kind, elapsed=24)
+
+            def admit(bundle, *args, **kwargs):
+                tick("setup_admission" if bundle.kind is execution.WorkerKind.PRIMARY else "target_admission", 17)
+
+            def persist(root, *args, **kwargs):
+                tick(root.name + "_persistence", 19)
+                return original_persist(root, *args, **kwargs)
+
+            def readback(root, *args, **kwargs):
+                result = original_readback(root, *args, **kwargs)
+                tick(root.name + "_readback", 23)
+                return result
+
+            def close(writer):
+                result = original_close(writer)
+                tick(writer.path.parent.name + "_writer_close", 1)
+                return result
+
+            def encode(bundle):
+                tick("prior_encoding" if bundle.kind is execution.WorkerKind.PRIMARY else "target_encoding", 29)
+                return original_encode(bundle)
+
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(op.time, "perf_counter_ns", side_effect=lambda: clock[0]), \
+                    patch.object(op, "_supervise_operation", side_effect=supervise), \
+                    patch.object(execution, "revalidate_bundle", side_effect=admit), \
+                    patch.object(execution, "encode_bundle", side_effect=encode), \
+                    patch.object(op, "_persist_r0", side_effect=persist), \
+                    patch.object(op, "readback_streams", side_effect=readback), \
+                    patch.object(store.StreamWriter, "close", new=close), \
+                    patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+                value = op.measure_r0_component(self.plan(), component, Path(directory) / "r0",
+                                                _envelope(concurrency=1))
+            setup, = value.setup_measurements
+            setup_events = tuple(event for event in events if event[0].startswith("setup_"))
+            self.assertEqual(setup.route, route)
+            self.assertEqual(setup.positions, (0,))
+            self.assertEqual(setup.started_ns, setup_events[0][1])
+            self.assertEqual(setup.finished_ns, setup_events[-1][2])
+            self.assertEqual(setup.wall_ns, sum(end - start for _, start, end in setup_events))
+            self.assertLess(setup.wall_ns, 10000)
+            self.assertEqual(setup.finished_ns, next(start for name, start, _ in events if name == "prior_encoding"))
+            self.assertLess(setup.finished_ns, next(start for name, start, _ in events if name == "target_work"))
+            self.assertTrue({"setup_launch_execution_decode", "setup_worker_reap", "setup_admission",
+                             "setup_persistence", "setup_readback", "setup_writer_close"}
+                            <= {name for name, _, _ in setup_events})
+            self.assertTrue(setup.readback_complete and setup.cleanup_complete and setup.resources_complete
+                            and setup.watchdogs_complete and setup.progress_complete)
+            self.assertGreater(setup.max_payload_bytes, 0)
+            self.assertEqual(setup.max_case_wall_ns, 24)
+
+    def test_setup_waves_are_disjoint_and_cover_each_position_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_D_REPEAT, plan=self.plan(3),
+                                       envelope=_envelope(concurrency=2))
+        first, second = value.setup_measurements
+        self.assertEqual((first.positions, second.positions), ((0, 1), (2,)))
+        self.assertLessEqual(first.finished_ns, second.started_ns)
+        self.assertLessEqual(first.wall_ns + second.wall_ns, value.complete_wall_ns)
+        self.assertEqual(value.setup_wall_ns, first.wall_ns + second.wall_ns)
+        for setup in value.setup_measurements:
+            self.assertEqual(setup.route, "O_D_SETUP")
+            self.assertEqual(setup.completed_units, len(setup.positions))
+        with self.assertRaisesRegex(ValueError, "R0_SETUP_COVERAGE"):
+            replace(value, setup_measurements=(first,))
+        with self.assertRaises(ValueError):
+            replace(value, setup_measurements=(second, first))
+        with self.assertRaisesRegex(ValueError, "R0_SETUP_ROUTE_OR_ORDER"):
+            replace(value, setup_measurements=(replace(first, route="D"), second))
+
+    def test_setup_observer_preserves_exact_oracle_bind_wall_without_solver_reattribution(self):
+        clock = [1]
+        original_persist, original_encode = op._persist_r0, execution.encode_bundle
+
+        def supervise(work, kind, *args, **kwargs):
+            if kind is execution.WorkerKind.PRIMARY:
+                clock[0] += 1000
+                return self.result(work, kind)
+            start = clock[0]
+            clock[0] += 20 + 10000 + 30  # Binding, ordinary K solver, binding cleanup.
+            result = self.result(work, kind)
+            return replace(result, observation=replace(result.observation,
+                prior_binding_intervals=((start, start + 20), (start + 10020, start + 10050))))
+
+        def admit(bundle, *args, **kwargs):
+            clock[0] += 100 if bundle.kind is execution.WorkerKind.PRIMARY else 40
+
+        def persist(root, *args, **kwargs):
+            result = original_persist(root, *args, **kwargs)
+            clock[0] += 300 if root.name == "setup" else 400
+            return result
+
+        def encode(bundle):
+            clock[0] += 10
+            return original_encode(bundle)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.time, "perf_counter_ns", side_effect=lambda: clock[0]), \
+                patch.object(op, "_supervise_operation", side_effect=supervise), \
+                patch.object(execution, "revalidate_bundle", side_effect=admit), \
+                patch.object(execution, "encode_bundle", side_effect=encode), \
+                patch.object(op, "_persist_r0", side_effect=persist), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+            value = op.measure_r0_component(self.plan(), op.R0Component.ORACLE_K_BIND,
+                                            Path(directory) / "r0", _envelope(concurrency=1))
+        self.assertEqual(value.wall_ns, 10 + 20 + 30 + 40)
+        self.assertEqual(value.units[0].wall_ns, value.wall_ns)
+        self.assertEqual(value.setup_wall_ns, 1000 + 100 + 300)
+        self.assertEqual(value.units[0].durable_bytes, 0)
+        self.assertGreater(value.complete_wall_ns, 10000)
+
+    def test_setup_memory_is_independent_through_persistence_and_readback(self):
+        for component in (op.R0Component.ORACLE_K_BIND, op.R0Component.ORACLE_D_REPEAT):
+            for setup_peak, target_peak in ((2000, 9000), (9000, 2000)):
+                memory, sampled = [200], threading.Event()
+                original_persist, original_readback = op._persist_r0, op.readback_streams
+
+                def coordinator():
+                    if memory[0] != 200:
+                        sampled.set()
+                    return memory[0]
+
+                def spike(value):
+                    sampled.clear()
+                    memory[0] = value
+                    self.assertTrue(sampled.wait(1), "Production monitor did not sample setup/target phase")
+
+                def persist(root, *args, **kwargs):
+                    spike((setup_peak if root.name == "setup" else target_peak) - 100)
+                    result = original_persist(root, *args, **kwargs)
+                    memory[0] = 200
+                    return result
+
+                def readback(root, *args, **kwargs):
+                    spike(setup_peak if root.name == "setup" else target_peak)
+                    return original_readback(root, *args, **kwargs)
+
+                def supervise(work, kind, *args, **kwargs):
+                    result = self.result(work, kind)
+                    if kind is not execution.WorkerKind.PRIMARY:
+                        result = replace(result, observation=replace(result.observation,
+                            worker_memory=500, combined_memory=700, decision_wall=20,
+                            arm_wall=50, shadow_wall=10, physical_inputs=5),
+                            receipt=replace(result.receipt, elapsed_ns=80))
+                    return result
+
+                with self.subTest(component=component, setup=setup_peak, target=target_peak), \
+                        tempfile.TemporaryDirectory() as directory, \
+                        patch.object(op.harness, "_coordinator_private_bytes", side_effect=coordinator), \
+                        patch.object(op, "_supervise_operation", side_effect=supervise), \
+                        patch.object(execution, "revalidate_bundle"), \
+                        patch.object(op, "_persist_r0", side_effect=persist), \
+                        patch.object(op, "readback_streams", side_effect=readback):
+                    value = op.measure_r0_component(self.plan(), component, Path(directory) / "r0", _envelope())
+                setup, = value.setup_measurements
+                self.assertEqual(setup.max_coordinator_memory_bytes, setup_peak)
+                self.assertEqual(setup.max_combined_memory_bytes, setup_peak)
+                self.assertEqual(value.coordinator_memory_bytes, max(setup_peak, target_peak))
+                self.assertEqual(value.combined_memory_bytes, max(setup_peak, target_peak))
+                self.assertEqual((setup.max_worker_memory_bytes, setup.max_decision_wall_ns,
+                    setup.max_arm_wall_ns, setup.max_case_wall_ns, setup.max_shadow_wall_ns,
+                    setup.max_physical_inputs), (100, 2, 5, 3, 1, 1))
+                self.assertFalse(any(thread.name == "program-k-r0-memory" and thread.is_alive()
+                                     for thread in threading.enumerate()))
+
+    def test_setup_inapplicability_zero_payload_and_incomplete_observations_are_distinct(self):
+        for component in (op.R0Component.PRIMARY, op.R0Component.ORACLE_B):
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, component)
+            self.assertEqual(value.setup_measurements, ())
+            self.assertIsNone(value.setup_wall_ns)
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.K_CONTROL)
+        setup, = value.setup_measurements
+        zero = replace(setup, payload_bytes=(0,))
+        self.assertEqual(zero.max_payload_bytes, 0)
+        self.assertTrue(zero.progress_complete)
+        self.assertTrue(zero.resources_complete)
+        missing = replace(setup, observations=(None,))
+        self.assertFalse(missing.resources_complete)
+        self.assertFalse(missing.watchdogs_complete)
+        self.assertFalse(missing.cleanup_complete)
+        self.assertFalse(replace(setup, memory_sample_count=0).resources_complete)
+        self.assertFalse(replace(setup, readback_complete=False).progress_complete)
+        for name in ("resources_complete", "watchdogs_complete", "cleanup_complete"):
+            changed = replace(setup, observations=(replace(setup.observations[0], **{name: False}),))
+            self.assertFalse(getattr(changed, name))
+
+    def test_setup_facts_are_deeply_immutable_and_validate_exact_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_K_BIND)
+        setup, = value.setup_measurements
+        for item in (setup,) + setup.receipts + setup.observations:
+            self.assertFalse(hasattr(item, "__dict__"))
+            for field in fields(item):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(item, field.name, None)
+        invalid = (("route", "O_K_BIND"), ("receipts", list(setup.receipts)),
+                   ("observations", []), ("payload_bytes", [0]), ("payload_bytes", (True,)),
+                   ("started_ns", True), ("finished_ns", setup.started_ns - 1),
+                   ("coordinator_memory_bytes", 1.5), ("combined_memory_bytes", 0),
+                   ("memory_sample_count", -1), ("readback_complete", 1),
+                   ("receipts", (replace(setup.receipts[0], kind=execution.WorkerKind.K_CONTROL),)))
+        for name, field_value in invalid:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                replace(setup, **{name: field_value})
+
+    def test_setup_readback_or_close_failure_never_launches_target(self):
+        for boundary in ("readback", "close"):
+            calls = []
+            original_close = store.StreamWriter.close
+
+            def supervise(work, kind, *args, **kwargs):
+                calls.append(kind)
+                return self.result(work, kind)
+
+            def close(writer):
+                original_close(writer)
+                if writer.path.parent.name == "setup":
+                    raise OSError("setup close failed")
+
+            failure = (patch.object(op, "readback_streams", side_effect=OSError("setup readback failed"))
+                       if boundary == "readback" else patch.object(store.StreamWriter, "close", new=close))
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as directory, \
+                    failure:
+                with self.assertRaises(OSError):
+                    self.run_component(directory, op.R0Component.ORACLE_D_REPEAT, supervise=supervise)
+                self.assertEqual(calls, [execution.WorkerKind.PRIMARY])
+                self.assertFalse((Path(directory) / "r0" / "0" / "target").exists())
+                self.assertFalse(any(thread.name == "program-k-r0-memory" and thread.is_alive()
+                                     for thread in threading.enumerate()))
+
     def test_exact_store_framing_and_rank_specific_ownership(self):
         work = op._r0_work(self.plan()[0], op.R0Component.K_CONTROL)
         for kind, component in ((execution.WorkerKind.PRIMARY, op.R0Component.PRIMARY),
@@ -1104,6 +1358,11 @@ class R0ComponentTests(unittest.TestCase):
                 self.assertEqual(calls, [execution.WorkerKind.PRIMARY])
                 self.assertIs(value.units[0].status, records.AuditStatus.FAIL)
                 self.assertEqual(value.units[0].reasons, ("AUDIT_FAIL", "PRIMARY_PREMISES_MISSING"))
+                setup, = value.setup_measurements
+                self.assertEqual(setup.completed_units, 0)
+                self.assertFalse(setup.progress_complete)
+                self.assertTrue(setup.readback_complete)
+                self.assertIs(setup.receipts[0].status, records.AuditStatus.FAIL)
                 self.assertTrue((Path(directory) / "r0" / "0" / "setup" / "boards.jsonl").is_file())
                 self.assertTrue((Path(directory) / "r0" / "0" / "target" / "operations.jsonl").is_file())
 
@@ -1376,6 +1635,19 @@ class R0ComponentTests(unittest.TestCase):
                 setup_root = target_root.parent / "setup"
                 self.assertEqual(unit.reference_bytes, (setup_root / "control_maintenance.jsonl").stat().st_size
                                  if setup_root.exists() else 0)
+                if setup_root.exists():
+                    setup, = value.setup_measurements
+                    self.assertEqual(setup.positions, (0,))
+                    self.assertEqual(setup.observations, (unit.observations[0],))
+                    self.assertEqual(setup.max_case_wall_ns, unit.setup_wall_ns)
+                    self.assertGreater(setup.wall_ns, setup.max_case_wall_ns)
+                    self.assertTrue(setup.resources_complete and setup.cleanup_complete
+                                    and setup.readback_complete and setup.watchdogs_complete
+                                    and setup.progress_complete)
+                    self.assertGreater(setup.max_worker_memory_bytes, 0)
+                    self.assertLessEqual(setup.max_payload_bytes, unit.max_payload_bytes)
+                else:
+                    self.assertEqual(value.setup_measurements, ())
                 self.assertEqual(unit.supporting_bytes, sum(path.stat().st_size
                     for path in target_root.parent.rglob("*.jsonl") if path.stem in ("operations", "resources")))
                 self.assertTrue(all(item.resources_complete and item.cleanup_complete and item.watchdogs_complete
@@ -1411,6 +1683,70 @@ class R0ComponentTests(unittest.TestCase):
             self.assertIn("MALFORMED_IPC_OR_IDENTITY", value.units[0].reasons)
             self.assertFalse(any(thread.name == "program-k-e2-ipc-reader" and thread.is_alive()
                                  for thread in threading.enumerate()))
+
+
+class R0SetupMonitorTests(unittest.TestCase):
+    def test_interval_samples_reset_independently_without_changing_global_peaks_or_cadence(self):
+        ledger = op._MemoryLedger(_envelope())
+        monitor = op._R0MemoryMonitor(ledger, threading.Event(), _envelope())
+        memory, clock, calls = [10], [1], []
+
+        def coordinator():
+            calls.append(memory[0])
+            return memory[0]
+
+        with patch.object(op.harness, "_coordinator_private_bytes", side_effect=coordinator), \
+                patch.object(op.time, "perf_counter_ns", side_effect=lambda: clock[0]):
+            ledger.values["worker"] = 20
+            monitor.sample()
+            monitor.begin_setup()
+            memory[0], clock[0] = 100, 2
+            ledger.values["worker"] = 300
+            monitor.sample()
+            memory[0], clock[0] = 40, 3
+            ledger.values["worker"] = 50
+            monitor.sample()
+            first = monitor.end_setup()
+            memory[0] = 900
+            ledger.values["worker"] = 1000
+            monitor.sample()  # Target-only spike.
+            clock[0] = 4
+            monitor.begin_setup()
+            memory[0], clock[0] = 50, 5
+            ledger.values["worker"] = 60
+            monitor.sample()
+            second = monitor.end_setup()
+        self.assertEqual(first, (1, 3, 100, 400, 2))
+        self.assertEqual(second, (4, 5, 50, 110, 1))
+        self.assertEqual((monitor.coordinator, monitor.combined), (900, 1900))
+        self.assertEqual(calls, [10, 100, 40, 900, 50])  # Boundaries never add sampling calls.
+        self.assertIsNone(monitor.setup)
+
+    def test_setup_observation_preserves_cap_and_sampling_failure_behavior(self):
+        for reason in ("MEMORY_CAP", "MEMORY_MONITOR_INCOMPLETE"):
+            cancel = threading.Event()
+            monitor = op._R0MemoryMonitor(op._MemoryLedger(_envelope()), cancel, _envelope())
+            monitor.begin_setup()
+            options = ({"return_value": 100_000_001} if reason == "MEMORY_CAP" else
+                       {"side_effect": OSError("synthetic sampling failure")})
+            with self.subTest(reason=reason), \
+                    patch.object(op.harness, "_coordinator_private_bytes", **options):
+                with self.assertRaisesRegex(op.OperationalAbort, reason):
+                    monitor.check()
+            self.assertTrue(cancel.is_set())
+            self.assertEqual(monitor.reason, reason)
+            snapshot = monitor.end_setup()
+            self.assertEqual(snapshot[-1], 1 if reason == "MEMORY_CAP" else 0)
+            self.assertEqual(monitor.coordinator, 100_000_001 if reason == "MEMORY_CAP" else 0)
+
+    def test_setup_interval_lifecycle_is_closed(self):
+        monitor = op._R0MemoryMonitor(op._MemoryLedger(_envelope()), threading.Event(), _envelope())
+        with self.assertRaisesRegex(ValueError, "R0_SETUP_NOT_ACTIVE"):
+            monitor.end_setup()
+        monitor.begin_setup()
+        with self.assertRaisesRegex(ValueError, "R0_SETUP_ALREADY_ACTIVE"):
+            monitor.begin_setup()
+        monitor.end_setup()
 
 
 class OperationalPurityTests(unittest.TestCase):

@@ -999,6 +999,133 @@ class R0Component(Enum):
     ORACLE_D_REPEAT = "O_D_REPEAT"
 
 
+_R0_SETUP_ROUTES = {
+    R0Component.K_CONTROL: "K", R0Component.DETERMINISM: "D",
+    R0Component.ORACLE_K_BIND: "O_K_SETUP", R0Component.ORACLE_D_REPEAT: "O_D_SETUP",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class R0SetupMeasurement:
+    """One prerequisite wave, directly observed before its target boundary.
+
+    The interval includes preparation, PRIMARY supervision/reap, admission,
+    persistence, strict readback, writer close and the setup checkpoint. Prior
+    encoding retains its existing target-route timing ownership; payload_bytes
+    records those setup bundles' encoded sizes without moving that work.
+
+    Receipts/observations/payloads correspond by position. A missing worker
+    observation is None, whereas a measured zero payload remains zero. Monitor
+    peaks cover only this interval; worker observations also cover short peaks
+    between monitor ticks. All values are detached from the live monitor.
+    """
+
+    route: str
+    started_ns: int
+    finished_ns: int
+    receipts: tuple
+    observations: tuple
+    payload_bytes: tuple
+    coordinator_memory_bytes: int
+    combined_memory_bytes: int
+    memory_sample_count: int
+    readback_complete: bool
+
+    def __post_init__(self):
+        _need(type(self.route) is str and self.route in _R0_SETUP_ROUTES.values(), "R0_SETUP_ROUTE")
+        for value in (self.started_ns, self.finished_ns, self.coordinator_memory_bytes,
+                      self.combined_memory_bytes, self.memory_sample_count):
+            _integer(value)
+        _need(self.started_ns <= self.finished_ns, "R0_SETUP_INTERVAL")
+        _need(type(self.receipts) is tuple and bool(self.receipts)
+              and type(self.observations) is tuple and type(self.payload_bytes) is tuple
+              and len(self.receipts) == len(self.observations) == len(self.payload_bytes),
+              "R0_SETUP_COVERAGE")
+        for receipt, observation, payload in zip(self.receipts, self.observations, self.payload_bytes):
+            _need(type(receipt) is UnitReceipt and receipt.kind is execution.WorkerKind.PRIMARY,
+                  "R0_SETUP_PRIMARY_REQUIRED")
+            UnitReceipt.__post_init__(receipt)
+            _need(observation is None or type(observation) is _R0Observation, "R0_OBSERVATION_TYPE")
+            if observation is not None:
+                _R0Observation.__post_init__(observation)
+            _integer(payload)
+        _need(self.positions == tuple(range(self.positions[0], self.positions[0] + len(self.receipts))),
+              "R0_SETUP_POSITION_ORDER")
+        _need(self.combined_memory_bytes >= self.coordinator_memory_bytes, "R0_MEMORY_ACCOUNTING")
+        _need(type(self.readback_complete) is bool, "EXACT_COMPLETION_FLAG")
+
+    @property
+    def positions(self):
+        return tuple(receipt.position for receipt in self.receipts)
+
+    @property
+    def wall_ns(self):
+        return self.finished_ns - self.started_ns
+
+    def _maximum(self, name):
+        return max((getattr(value, name) for value in self.observations if value is not None), default=0)
+
+    def _complete(self, name):
+        return all(value is not None and getattr(value, name) for value in self.observations)
+
+    @property
+    def max_worker_memory_bytes(self):
+        return self._maximum("worker_memory")
+
+    @property
+    def max_coordinator_memory_bytes(self):
+        return max(self.coordinator_memory_bytes, self._maximum("coordinator_memory"))
+
+    @property
+    def max_combined_memory_bytes(self):
+        return max(self.combined_memory_bytes, self._maximum("combined_memory"))
+
+    @property
+    def max_decision_wall_ns(self):
+        return self._maximum("decision_wall")
+
+    @property
+    def max_arm_wall_ns(self):
+        return self._maximum("arm_wall")
+
+    @property
+    def max_case_wall_ns(self):
+        return max(receipt.elapsed_ns for receipt in self.receipts)
+
+    @property
+    def max_shadow_wall_ns(self):
+        return self._maximum("shadow_wall")
+
+    @property
+    def max_physical_inputs(self):
+        return self._maximum("physical_inputs")
+
+    @property
+    def max_payload_bytes(self):
+        return max(self.payload_bytes)
+
+    @property
+    def resources_complete(self):
+        return self.memory_sample_count > 0 and self._complete("resources_complete")
+
+    @property
+    def watchdogs_complete(self):
+        return self._complete("watchdogs_complete")
+
+    @property
+    def cleanup_complete(self):
+        # A returned _persist_r0 call has also closed all setup writers.
+        return self._complete("cleanup_complete")
+
+    @property
+    def completed_units(self):
+        return sum(receipt.status is records.AuditStatus.PASS for receipt in self.receipts)
+
+    @property
+    def progress_complete(self):
+        return self.completed_units == len(self.receipts) and self.readback_complete
+
+
 @dataclass(frozen=True, slots=True)
 class R0Work:
     """Explicit operational-only identity, never an accepted E2 BoardWork plan.
@@ -1067,6 +1194,10 @@ class R0ComponentMeasurement:
     duplicate wall inclusion. O K-bind unions only directly observed prior
     preparation/transport/binding/validation phases, excluding the K solver.
     All six routes retain every prerequisite observation for containment.
+    setup_measurements retains each disjoint prerequisite wave, in plan order;
+    it is empty only for P/O-primary. setup_wall_ns sums these directly timed
+    waves, excluding all intervening target work. It is additional containment
+    evidence and never replaces any existing component wall.
     """
 
     component: R0Component
@@ -1076,6 +1207,7 @@ class R0ComponentMeasurement:
     coordinator_memory_bytes: int
     complete_wall_ns: int
     combined_memory_bytes: int
+    setup_measurements: tuple = ()
 
     def __post_init__(self):
         _need(type(self.component) is R0Component and type(self.concurrency) is int
@@ -1093,6 +1225,26 @@ class R0ComponentMeasurement:
             _integer(value)
         _need(self.complete_wall_ns >= self.wall_ns, "R0_WALL_ACCOUNTING")
         _need(self.combined_memory_bytes >= self.coordinator_memory_bytes, "R0_MEMORY_ACCOUNTING")
+        _need(type(self.setup_measurements) is tuple, "R0_SETUP_MEASUREMENTS_TUPLE")
+        route = _R0_SETUP_ROUTES.get(self.component)
+        positions, previous = (), 0
+        for setup in self.setup_measurements:
+            _need(type(setup) is R0SetupMeasurement, "R0_SETUP_MEASUREMENT_TYPE")
+            R0SetupMeasurement.__post_init__(setup)
+            _need(setup.route == route and setup.started_ns >= previous, "R0_SETUP_ROUTE_OR_ORDER")
+            _need(setup.max_coordinator_memory_bytes <= self.coordinator_memory_bytes
+                  and setup.max_combined_memory_bytes <= self.combined_memory_bytes,
+                  "R0_SETUP_GLOBAL_MEMORY_ACCOUNTING")
+            positions += setup.positions
+            previous = setup.finished_ns
+        _need(positions == (() if route is None else tuple(range(len(self.units)))), "R0_SETUP_COVERAGE")
+        _need(sum(value.wall_ns for value in self.setup_measurements) <= self.complete_wall_ns,
+              "R0_SETUP_WALL_ACCOUNTING")
+
+    @property
+    def setup_wall_ns(self):
+        return None if self.component not in _R0_SETUP_ROUTES else sum(
+            value.wall_ns for value in self.setup_measurements)
 
 
 def _r0_work(work, component):
@@ -1141,6 +1293,7 @@ class _R0MemoryMonitor:
         self.lock = threading.Lock()
         self.coordinator = self.combined = 0
         self.reason = None
+        self.setup = None
         self.thread = threading.Thread(target=self.run, daemon=True, name="program-k-r0-memory")
 
     def sample(self):
@@ -1149,12 +1302,31 @@ class _R0MemoryMonitor:
                 value, breached = self.ledger.sample("r0-coordinator", 0, "R0", 0)
                 self.coordinator = max(self.coordinator, value.coordinator_bytes)
                 self.combined = max(self.combined, value.combined_bytes)
+                if self.setup is not None:
+                    self.setup[1] = max(self.setup[1], value.coordinator_bytes)
+                    self.setup[2] = max(self.setup[2], value.combined_bytes)
+                    self.setup[3] += 1
                 if breached:
                     self.reason = self.reason or "MEMORY_CAP"
             except Exception:
                 self.reason = self.reason or "MEMORY_MONITOR_INCOMPLETE"
             if self.reason is not None:
                 self.cancel.set()
+
+    def begin_setup(self):
+        # Use the same lock as sampling: no in-flight sample crosses attribution
+        # boundaries. No extra samples, resets of global peaks or cap changes.
+        with self.lock:
+            _need(self.setup is None, "R0_SETUP_ALREADY_ACTIVE")
+            self.setup = [time.perf_counter_ns(), 0, 0, 0]
+
+    def end_setup(self):
+        with self.lock:
+            _need(self.setup is not None, "R0_SETUP_NOT_ACTIVE")
+            started, coordinator, combined, count = self.setup
+            finished = time.perf_counter_ns()
+            self.setup = None
+            return started, finished, coordinator, combined, count
 
     def check(self):
         self.sample()
@@ -1276,6 +1448,7 @@ def measure_r0_component(plan, component, root, envelope, *, cancel=None, progre
     started = time.monotonic_ns()
     ledger = _MemoryLedger(envelope)
     units, measured_wall, all_intervals = [], 0, []
+    setup_measurements = []
     archive_bytes = 0
     target_kind = {R0Component.PRIMARY: execution.WorkerKind.PRIMARY,
                    R0Component.ORACLE_B: execution.WorkerKind.PRIMARY,
@@ -1323,6 +1496,8 @@ def measure_r0_component(plan, component, root, envelope, *, cancel=None, progre
             checkpoint()
             batch = plan[offset:offset + envelope.concurrency]
             standalone_started = time.perf_counter_ns()
+            if needs_setup:
+                monitor.begin_setup()
             works = tuple(_r0_work(work, component) for work in batch)
             roots = tuple(root / str(work.position) for work in batch)
             for directory in roots:
@@ -1346,6 +1521,7 @@ def measure_r0_component(plan, component, root, envelope, *, cancel=None, progre
                                               if persisted else 0)
                     archive_bytes += size
                 checkpoint()
+                setup_interval = monitor.end_setup()
             # K/D include their complete setup; Oracle downstream routes begin
             # after setup, but include directly timed prior encoding/preparation.
             target_started = time.perf_counter_ns()
@@ -1355,6 +1531,12 @@ def measure_r0_component(plan, component, root, envelope, *, cancel=None, progre
                            execution.encode_bundle(setup.bundle) for setup in setups)
             encoding_interval = (encoding_started, time.perf_counter_ns())
             setup_payloads = [0 if prior is None else len(prior) for prior in priors]
+            if needs_setup:
+                setup_start, setup_end, coordinator, combined, samples = setup_interval
+                setup_measurements.append(R0SetupMeasurement(_R0_SETUP_ROUTES[component],
+                    setup_start, setup_end, tuple(value.receipt for value in setups),
+                    tuple(value.observation for value in setups), tuple(setup_payloads),
+                    coordinator, combined, samples, True))
             if component is R0Component.ORACLE_K_BIND:
                 all_intervals.append(encoding_interval)
             futures = []
@@ -1445,7 +1627,8 @@ def measure_r0_component(plan, component, root, envelope, *, cancel=None, progre
         measured_wall = complete_wall
     return R0ComponentMeasurement(component, envelope.concurrency, tuple(units), measured_wall,
                                    max(monitor.coordinator, coordinator_peak),
-                                   complete_wall, max(monitor.combined, combined_peak))
+                                   complete_wall, max(monitor.combined, combined_peak),
+                                   tuple(setup_measurements))
 
 
 def coordinate(plan, root, envelope, *, cancel=None, launcher_started_ns=None):
