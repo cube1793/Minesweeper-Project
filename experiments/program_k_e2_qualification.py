@@ -59,7 +59,8 @@ _CANDIDATES = (_E2[-1], "tests/test_program_k_e2_qualification.py")
 _AMENDMENT = "docs/stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md"
 _AMENDMENT_SHA256 = "5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf"
 _AMENDMENT_BYTE_LENGTH = 58_052
-_R0_SOURCE_PATHS = ("experiments/program_k_e2_readiness.py", _AMENDMENT)
+_R0_SOURCE_PATHS = ("experiments/program_k_e2_readiness.py",
+                    "experiments/program_k_e2_r0_harness.py", _AMENDMENT)
 _REPAIR_TEST = "tests/test_program_k_e2_operational.py"
 IDENTITY_STREAM = "qualification_identity"
 _STREAMS = execution.STREAM_NAMES + ("operations", "resources")

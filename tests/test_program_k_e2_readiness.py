@@ -737,6 +737,11 @@ class SourceReviewTests(unittest.TestCase):
 
     @contextmanager
     def source_capture(self, *, status=None, branch=b'main\n', drift=None, race=None):
+        """Explicit historical amendment-review state, never today's worktree.
+
+        The accepted guard owns AMENDMENT_REVIEW_PATHS and I8 ancestry. Later
+        harness candidates belong to a separate source-capture responsibility.
+        """
         state = ''.join(' M ' + p + '\n' for p in _CANDIDATES) if status is None else status
         calls, reads = {}, {}
         def git(*args, data=None):
@@ -746,7 +751,8 @@ class SourceReviewTests(unittest.TestCase):
             if args == ('branch', '--show-current'):
                 return branch
             if args == ('status', '--porcelain=v1', '--untracked-files=all'):
-                return state.encode()
+                return (state + '?? unrelated.py\n' if race == 'status' and calls[args] > 1
+                        else state).encode()
             if args in (('rev-parse', 'HEAD'), ('rev-parse', 'origin/main')):
                 return (b'f'*40 if race == 'head' and calls[args] > 1 else b'e'*40) + b'\n'
             raise AssertionError(args)
@@ -779,13 +785,29 @@ class SourceReviewTests(unittest.TestCase):
                 patch.object(Path, 'read_bytes', new=read):
             yield
 
-    def test_live_review_binds_exact_candidates_and_amendment_without_git_mutation(self):
-        value = r.capture_review_sources()
-        self.assertEqual(value.provenance, r.AmendmentProvenance())
-        self.assertEqual(tuple(v.path for v in value.candidates), tuple(sorted(_CANDIDATES)))
-        for candidate in value.candidates:
-            data = (r._ROOT / candidate.path).read_bytes()
-            self.assertEqual((candidate.sha256, candidate.byte_length), (sha256(data).hexdigest(), len(data)))
+    def test_historical_review_fixture_binds_exact_candidates_and_amendment_without_git_mutation(self):
+        with self.source_capture():
+            value = r.capture_review_sources()
+            self.assertEqual(value.status, ''.join(' M ' + p + '\n' for p in _CANDIDATES))
+            self.assertEqual(value.provenance, r.AmendmentProvenance())
+            self.assertEqual(tuple(v.path for v in value.candidates), tuple(sorted(_CANDIDATES)))
+            for candidate in value.candidates:
+                data = (r._ROOT / candidate.path).read_bytes()
+                self.assertEqual((candidate.sha256, candidate.byte_length), (sha256(data).hexdigest(), len(data)))
+
+    def test_later_harness_worktree_is_rejected_by_historical_guard(self):
+        historical = ''.join(' M ' + p + '\n' for p in _CANDIDATES)
+        harness_paths = ('experiments/program_k_e2_r0_harness.py',
+                         'tests/test_program_k_e2_r0_harness.py')
+        current_candidate = (' M experiments/program_k_e2_qualification.py\n'
+                             ' M tests/test_program_k_e2_qualification.py\n'
+                             + ''.join('?? ' + p + '\n' for p in harness_paths))
+        states = (current_candidate,) + tuple(historical + status + ' ' + path + '\n'
+            for path in harness_paths for status in ('??', ' M', 'M '))
+        for status in states:
+            with self.subTest(status=status), self.source_capture(status=status), \
+                    self.assertRaisesRegex(ValueError, 'UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE'):
+                r.capture_review_sources()
 
     def test_later_descendant_head_and_clean_committed_state_are_supported(self):
         with self.source_capture(status=''):
@@ -808,7 +830,7 @@ class SourceReviewTests(unittest.TestCase):
             r.capture_review_sources()
 
     def test_source_and_head_races_rejected(self):
-        for race in ('head', r.AMENDMENT_PATH, *_CANDIDATES):
+        for race in ('head', 'status', r.AMENDMENT_PATH, *_CANDIDATES):
             with self.subTest(race=race), self.source_capture(race=race), self.assertRaises(ValueError):
                 r.capture_review_sources()
 

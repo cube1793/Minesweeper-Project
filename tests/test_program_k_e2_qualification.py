@@ -41,8 +41,13 @@ def _committed_fixture_sources():
     its separate live-worktree rejection tests retain their original authority.
     """
     head = q._git("rev-parse", "HEAD").strip().decode("ascii")
+    harness_path = "experiments/program_k_e2_r0_harness.py"
+    harness_tracked = bool(q._git("ls-files", "--", harness_path).strip())
     paths = tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL,
                                              q._REPAIR_TEST) + q._E2 + q._R0_SOURCE_PATHS)))
+    # This fixture reads HEAD only. The sole newly authored harness has no
+    # committed blob until tracked; production admission has no such exception.
+    paths = tuple(path for path in paths if path != harness_path or harness_tracked)
     refs = tuple(head + ":" + path for path in paths)
     refs += tuple(q._E1 + ":" + path for path in q._PROTECTED)
     refs += (q._FREEZE + ":" + q._PROTOCOL,)
@@ -627,7 +632,8 @@ class QualificationTests(unittest.TestCase):
             self.assertIn("RUNTIME_IDENTITY_MISMATCH", result.reason_codes)
 
     @contextmanager
-    def source_capture(self, *, drift=None, statuses=(b"",), heads=None, tracked=False):
+    def source_capture(self, *, drift=None, statuses=(b"",), heads=None, tracked=False,
+                       harness_tracked=True):
         """Mock only Git observations; exercise the production source guard."""
         head = "a" * 40
         heads = (head,) if heads is None else heads
@@ -644,6 +650,8 @@ class QualificationTests(unittest.TestCase):
                 return statuses[min(index, len(statuses) - 1)]
             if args == ("ls-files", "--", q._E2[-1]):
                 return q._E2[-1].encode("ascii") + b"\n" if tracked else b""
+            if args == ("ls-files", "--", "experiments/program_k_e2_r0_harness.py"):
+                return b"experiments/program_k_e2_r0_harness.py\n" if harness_tracked else b""
             raise AssertionError("Unexpected source-guard Git query: " + repr(args))
 
         def blobs(refs):
@@ -679,6 +687,7 @@ class QualificationTests(unittest.TestCase):
         for status in (b" M core_engine.py\n", b"M  experiments/program_k_e2_qualification.py\n",
                        b"?? unrelated.py\n", b" M experiments/program_k_e2_qualification.py\n",
                        b"?? experiments/program_k_e2_readiness.py\n",
+                       b"?? experiments/program_k_e2_r0_harness.py\n",
                        b"?? tests/test_program_k_e2_readiness.py\n",
                        b" M tests/test_program_k_e2_qualification.py\n"):
             with self.source_capture(statuses=(status,)), self.subTest(status=status):
@@ -707,6 +716,23 @@ class QualificationTests(unittest.TestCase):
         with self.source_capture(heads=("a" * 40, "b" * 40)):
             with self.assertRaisesRegex(AssertionError, "FIXTURE_HEAD_CHANGED_DURING_CAPTURE"):
                 _committed_fixture_sources()
+
+    def test_committed_fixture_omits_only_untracked_harness(self):
+        with self.source_capture(tracked=True, harness_tracked=True):
+            committed = _committed_fixture_sources()
+        with self.source_capture(tracked=True, harness_tracked=False):
+            pending = _committed_fixture_sources()
+        harness_path = "experiments/program_k_e2_r0_harness.py"
+        self.assertEqual(pending, tuple(value for value in committed if value.path != harness_path))
+        self.assertEqual(sum(value.path == harness_path for value in committed), 1)
+
+    def test_source_capture_binds_committed_harness_identity(self):
+        with self.source_capture(tracked=True):
+            values = q.capture_sources()
+        harness_path = "experiments/program_k_e2_r0_harness.py"
+        harness, = tuple(value for value in values if value.path == harness_path)
+        self.assertEqual(harness, records.SourceBlobIdentity(harness_path, "1" * 40,
+            sha256(b"mock committed source\n").hexdigest(), len(b"mock committed source\n")))
 
     def test_source_guard_detects_head_and_status_races(self):
         for changes in ({"heads": ("a" * 40, "b" * 40)},

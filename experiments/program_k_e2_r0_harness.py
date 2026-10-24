@@ -1,0 +1,1898 @@
+"""Program-K E2 R0 orchestration and non-effectiveness evidence.
+
+Actual launch entry points require explicit mode authorization and committed,
+clean source. Importing, planning and decoding evidence never launch workers.
+The accepted E2 owners retain all selection, worker, record/store, readiness and
+bootstrap semantics. R0 operator evidence describes a closed synthetic experiment
+archive; every archive-local supporting file counts toward its fixed allowance.
+"""
+
+from dataclasses import dataclass, fields, replace
+from enum import Enum
+from fractions import Fraction
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import platform
+import sys
+import threading
+import time
+import uuid
+
+from experiments import program_k_e2_identity as identity
+from experiments import program_k_e2_records as records
+from experiments import program_k_e2_store as store
+from experiments import program_k_e2_execution as execution
+from experiments import program_k_e2_operational as operational
+from experiments import program_k_e2_qualification as qualification
+from experiments import program_k_e2_readiness as readiness
+from experiments import program_k_e2_analysis as analysis
+from experiments import program_k_e2_report as report
+from experiments import program_k_e2_game as game
+from experiments import program_k_e2_audit as audit
+
+
+class HarnessError(ValueError):
+    """Closed operational failure; never an effectiveness verdict."""
+
+
+def _need(condition, reason):
+    if not condition:
+        raise HarnessError(reason)
+
+
+def _integer(value, minimum=0):
+    _need(type(value) is int and minimum <= value <= identity.UINT64_MAX, "EXACT_INTEGER_REQUIRED")
+
+
+def _canonical(node):
+    return json.dumps(node, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                      allow_nan=False).encode("ascii") + b"\n"
+
+
+def _exclusive_bytes(path, data):
+    _need(type(data) is bytes, "EXACT_BYTES_REQUIRED")
+    path = Path(path)
+    with path.open("xb") as stream:
+        _need(stream.write(data) == len(data), "SHORT_EVIDENCE_WRITE")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _need(path.read_bytes() == data, "EVIDENCE_READBACK_MISMATCH")
+    return path
+
+
+# RECEIPT_PROVENANCE_BEGIN
+SELECTION_SOURCE_HEAD = "cdba3513c23df77ba44449af1e551889a6954768"
+SETUP_REPAIR_HEAD = "e6593f7a99af2f0dd941eda7ee53a5164c79a2bd"
+SELECTION_RECEIPT_BYTES = 7364
+SELECTION_RECEIPT_SHA256 = "72ea48582d3eb2c4eff82172b58fe88460a8a3747eee910efe5fc8a2deb6337c"
+_REAL_DIGEST = "b712aa0733c5ad458ea01838b35589926184cc0892da6a33844df60b6ae31167"
+_SYNTHETIC_DIGEST = "b78485dc50dc051d42645059bb86c39c1d4ca9db6cc3ba3be9d9290413831efb"
+_HARNESS_PATH = "experiments/program_k_e2_r0_harness.py"
+_SELECTION_SCHEMA = "program-k-e2-r0-synthetic-selection-receipt/v1"
+_RECEIPT_KEYS = frozenset("""accepted_i8_ancestor actual_e2_run ahead amendment_byte_length
+amendment_sha256 base_protocol_blob base_protocol_byte_length base_protocol_freeze_commit
+base_protocol_sha256 behind board_generation classification committed_candidate_blobs
+committed_readiness_blob domain_hygiene dominance_margins fact_scope fingerprints_generated
+git_branch git_head git_parent git_parents git_subject git_tree holdout_accessed
+observational_search_timing open_findings origin_main other_real_n_computed outcomes_read
+project_git_mutation protocol_seed purpose real_candidate_identity real_corpus_digest
+real_r0_run real_target_count_invocations real_target_counts real_target_n repository_preservation
+schema selector_identity solver_execution static_call_path status structural_coverage
+synthetic_corpus_digest synthetic_counts synthetic_rule synthetic_search tracked_source_changes
+work_plan_validation""".split())
+
+
+def _json_bytes(data):
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            _need(key not in value, "DUPLICATE_JSON_FIELD")
+            value[key] = item
+        return value
+    def illegal(_):
+        raise HarnessError("NONINTEGER_JSON_NUMBER")
+    _need(type(data) is bytes, "EXACT_BYTES_REQUIRED")
+    try:
+        value = json.loads(data.decode("ascii"), object_pairs_hook=pairs,
+                           parse_float=illegal, parse_constant=illegal)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise HarnessError("INVALID_JSON") from error
+    _need(_canonical(value) == data, "NONCANONICAL_JSON")
+    return value
+
+
+def _exact_fields(node, expected, reason):
+    _need(type(node) is dict and set(node) == set(expected), reason)
+    for key, value in expected.items():
+        _need(type(node[key]) is type(value) and node[key] == value, reason)
+
+
+def _selection_semantics(node):
+    _need(type(node) is dict and set(node) == _RECEIPT_KEYS, "SELECTION_FIELDS")
+    scalar = {
+        "schema": _SELECTION_SCHEMA,
+        "purpose": "Program K E2 R0 synthetic-corpus selection",
+        "classification": "non-research operational evidence",
+        "fact_scope": "OUTCOME-BLIND SELECTOR-MEMBERSHIP FACTS ONLY",
+        "status": "SELECTION_CANDIDATE_PENDING_CHATGPT_ADJUDICATION",
+        "git_head": SELECTION_SOURCE_HEAD, "origin_main": SELECTION_SOURCE_HEAD,
+        "git_branch": "main", "ahead": 0, "behind": 0,
+        "amendment_byte_length": qualification._AMENDMENT_BYTE_LENGTH,
+        "amendment_sha256": qualification._AMENDMENT_SHA256,
+        "base_protocol_sha256": identity.PROTOCOL_SHA256,
+        "base_protocol_blob": qualification._BLOB, "base_protocol_byte_length": 57841,
+        "base_protocol_freeze_commit": qualification._FREEZE,
+        "protocol_seed": identity.PROTOCOL_SHA256,
+        "committed_readiness_blob": "5fea5c48b7ce4dfdbdc1de04df95d3e27180042f",
+        "real_target_n": identity.CANDIDATE_MAX, "real_corpus_digest": _REAL_DIGEST,
+        "synthetic_corpus_digest": _SYNTHETIC_DIGEST, "real_target_count_invocations": 1,
+    }
+    for key, expected in scalar.items():
+        _need(type(node[key]) is type(expected) and node[key] == expected,
+              "SELECTION_" + key.upper())
+    for key in ("actual_e2_run", "real_r0_run", "board_generation", "fingerprints_generated",
+                "outcomes_read", "solver_execution", "holdout_accessed", "project_git_mutation",
+                "tracked_source_changes"):
+        _need(node[key] is False, "SELECTION_FORBIDDEN_ACTIVITY")
+    _need(node["other_real_n_computed"] == [], "SELECTION_OTHER_TARGETS")
+    _exact_fields(node["real_target_counts"], {"u_kd": 505, "i_od": 2, "i_ok": 3}, "SELECTION_REAL_COUNTS")
+    _exact_fields(node["synthetic_counts"], {"u_kd": 506, "i_od": 4, "i_ok": 4}, "SELECTION_SYNTHETIC_COUNTS")
+    _exact_fields(node["dominance_margins"], {"u_kd": 1, "i_od": 2, "i_ok": 1}, "SELECTION_DOMINANCE")
+    _exact_fields(node["structural_coverage"], {"o_intersect_d": 4, "o_intersect_k": 4}, "SELECTION_STRUCTURE")
+    _exact_fields(node["synthetic_rule"], {
+        "domain_low": readiness.SYNTHETIC_INDEX_LOW,
+        "domain_high_exclusive": readiness.SYNTHETIC_INDEX_HIGH,
+        "corpus_size": identity.CANDIDATE_MAX, "production_search_limit": readiness.SYNTHETIC_SEARCH_LIMIT,
+        "selected_ordinal": 5, "selected_start": 2000000050000,
+        "selected_end_exclusive": 2000000060000,
+        "enumeration": "contiguous non-overlapping blocks, ordinal zero first",
+        "selection": "first match", "auxiliary_d_repeat": False, "auxiliary_k_bind": False,
+    }, "SELECTION_SYNTHETIC_RULE")
+    _need(type(node["committed_candidate_blobs"]) is dict and
+          node["committed_candidate_blobs"].get("experiments/program_k_e2_readiness.py")
+          == node["committed_readiness_blob"], "SELECTION_READINESS_BINDING")
+    _need(node["domain_hygiene"].get("status") == node["work_plan_validation"].get("status") == "PASS",
+          "SELECTION_HYGIENE")
+    return node
+
+
+def _decode_selection(data):
+    _need(type(data) is bytes and len(data) == SELECTION_RECEIPT_BYTES, "SELECTION_RECEIPT_SIZE")
+    _need(sha256(data).hexdigest() == SELECTION_RECEIPT_SHA256, "SELECTION_RECEIPT_SHA256")
+    return _selection_semantics(_json_bytes(data))
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedSelectionReceipt:
+    path: str
+    canonical_bytes: bytes
+
+    def __post_init__(self):
+        _need(type(self.path) is str and Path(self.path).is_absolute(), "ABSOLUTE_RECEIPT_PATH_REQUIRED")
+        _decode_selection(self.canonical_bytes)
+
+    @property
+    def selection_source_head(self):
+        return SELECTION_SOURCE_HEAD
+
+    @property
+    def target(self):
+        return readiness.SubsetCounts(identity.CANDIDATE_MAX, 505, 2, 3, bytes.fromhex(_REAL_DIGEST))
+
+    @property
+    def selection(self):
+        return readiness.SyntheticCorpusSelection(bytes.fromhex(identity.PROTOCOL_SHA256), 5,
+            readiness.SubsetCounts(identity.CANDIDATE_MAX, 506, 4, 4, bytes.fromhex(_SYNTHETIC_DIGEST)))
+
+    @property
+    def workload(self):
+        return readiness.SyntheticWorkload(self.selection, self.target)
+
+
+def load_selection_receipt(path):
+    """Authenticate the operator-supplied file; never search or rewrite it."""
+    path = Path(path).resolve(strict=True)
+    _need(path.is_file(), "SELECTION_RECEIPT_FILE_REQUIRED")
+    return AcceptedSelectionReceipt(str(path), path.read_bytes())
+
+
+def _runtime_identity():
+    return records.RuntimeIdentity(platform.python_implementation(), platform.python_version(),
+        os.name, platform.platform(), platform.machine(), None)
+
+
+@dataclass(frozen=True, slots=True)
+class RunProvenance:
+    selection_source_head: str
+    r0_harness_source_head: str
+    sources: tuple
+    working_files: tuple
+    runtime: records.RuntimeIdentity
+    executable: str
+    dont_write_bytecode: bool
+
+    def __post_init__(self):
+        _need(self.selection_source_head == SELECTION_SOURCE_HEAD, "SELECTION_SOURCE_BINDING")
+        _need(type(self.r0_harness_source_head) is str and len(self.r0_harness_source_head) == 40
+              and all(c in "0123456789abcdef" for c in self.r0_harness_source_head), "HARNESS_HEAD_REQUIRED")
+        _need(type(self.sources) is tuple and bool(self.sources), "SOURCE_IDENTITIES_REQUIRED")
+        _need(all(type(s) is records.SourceBlobIdentity for s in self.sources), "SOURCE_IDENTITY_TYPE")
+        for source in self.sources:
+            records.SourceBlobIdentity.__post_init__(source)
+        _need(tuple(s.path for s in self.sources) == tuple(sorted(set(s.path for s in self.sources)))
+              and _HARNESS_PATH in {s.path for s in self.sources}, "HARNESS_SOURCE_NOT_BOUND")
+        _need(type(self.working_files) is tuple and len(self.working_files) == len(self.sources)
+              and all(type(v) is tuple and len(v) == 4 and type(v[0]) is str and type(v[1]) is str
+                      and type(v[2]) is int and type(v[3]) is bool for v in self.working_files),
+              "WORKING_FILE_IDENTITIES_REQUIRED")
+        _need(tuple(v[0] for v in self.working_files) == tuple(s.path for s in self.sources),
+              "WORKING_SOURCE_PATH_MISMATCH")
+        for _, digest, length, normalized in self.working_files:
+            _integer(length)
+            _need(len(digest) == 64 and all(c in "0123456789abcdef" for c in digest), "WORKING_SOURCE_HASH")
+        _need(type(self.runtime) is records.RuntimeIdentity, "RUNTIME_REQUIRED")
+        records.RuntimeIdentity.__post_init__(self.runtime)
+        _need(type(self.executable) is str and bool(self.executable) and self.dont_write_bytecode is True,
+              "PYTHON_ENVIRONMENT_REQUIRED")
+
+
+def capture_run_provenance(receipt):
+    """Committed live source is independent of the receipt's historical HEAD."""
+    _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+    _need(load_selection_receipt(receipt.path) == receipt, "SELECTION_RECEIPT_CHANGED")
+    _need(sys.dont_write_bytecode and os.environ.get("PYTHONDONTWRITEBYTECODE") == "1",
+          "PYTHONDONTWRITEBYTECODE_REQUIRED")
+    head = qualification._git("rev-parse", "HEAD").strip().decode("ascii")
+    _need(not qualification._git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "COMMITTED_CLEAN_SOURCE_REQUIRED")
+    for ancestor in (SELECTION_SOURCE_HEAD, SETUP_REPAIR_HEAD):
+        qualification._git("merge-base", "--is-ancestor", ancestor, head)
+    sources = qualification.capture_sources()
+    _need(_HARNESS_PATH in {v.path for v in sources}, "HARNESS_SOURCE_NOT_BOUND")
+    blobs = qualification._blobs(tuple(head + ":" + v.path for v in sources))
+    working = []
+    for source, (blob, data) in zip(sources, blobs):
+        _need((blob, sha256(data).hexdigest(), len(data)) ==
+              (source.blob_id, source.sha256, source.byte_length), "SOURCE_BLOB_CHANGED")
+        raw = (qualification._ROOT / source.path).read_bytes()
+        if source.path == qualification._AMENDMENT:
+            _need(len(raw) == qualification._AMENDMENT_BYTE_LENGTH
+                  and sha256(raw).hexdigest() == qualification._AMENDMENT_SHA256,
+                  "FROZEN_WORKING_AMENDMENT_DRIFT")
+        elif source.path == qualification._PROTOCOL:
+            identity.validate_protocol_bytes(raw)
+        # The only allowed raw/blob distinction is proven CRLF normalization.
+        _need(raw == data or raw.replace(b"\r\n", b"\n") == data, "WORKING_SOURCE_IDENTITY_DRIFT")
+        working.append((source.path, sha256(raw).hexdigest(), len(raw), raw != data))
+    _need(qualification._git("rev-parse", "HEAD").strip().decode("ascii") == head
+          and not qualification._git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "SOURCE_CHANGED_DURING_CAPTURE")
+    _need(load_selection_receipt(receipt.path) == receipt, "SELECTION_RECEIPT_CHANGED")
+    return RunProvenance(SELECTION_SOURCE_HEAD, head, sources, tuple(working),
+                         _runtime_identity(), sys.executable, sys.dont_write_bytecode)
+
+
+def _recheck_provenance(receipt, provenance):
+    _need(capture_run_provenance(receipt) == provenance, "SOURCE_CHANGED_DURING_RUN")
+    return provenance
+
+
+def build_selected_work_plan(receipt, run_id):
+    """Pure own-corpus validation; no board generation or corpus search."""
+    _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+    AcceptedSelectionReceipt.__post_init__(receipt)
+    workload = receipt.workload
+    boards = tuple(synthetic_board_identity(index) for index in workload.selection.ordered_indices)
+    plan = execution.make_work_plan(boards, protocol_seed=workload.selection.protocol_seed,
+                                    run_id=run_id, runtime=_runtime_identity())
+    execution.revalidate_work_plan(plan)
+    return readiness.validate_synthetic_work_plan(plan, workload)
+# RECEIPT_PROVENANCE_END
+
+
+# R0A_BEGIN
+_R0A_REFERENCE_COMPONENTS = (
+    ("K", operational.R0Component.K_CONTROL),
+    ("D", operational.R0Component.DETERMINISM),
+    ("O_K_SETUP", operational.R0Component.ORACLE_K_BIND),
+    ("O_D_SETUP", operational.R0Component.ORACLE_D_REPEAT),
+)
+_R0A_OBSERVATION_FIELDS = (
+    ("max_worker_memory_bytes", "worker_memory"),
+    ("max_decision_wall_ns", "decision_wall"),
+    ("max_arm_wall_ns", "arm_wall"),
+    ("max_shadow_wall_ns", "shadow_wall"),
+    ("max_physical_inputs", "physical_inputs"),
+)
+_R0A_MAXIMA = (
+    "max_worker_memory_bytes", "max_coordinator_memory_bytes", "max_combined_memory_bytes",
+    "max_decision_wall_ns", "max_arm_wall_ns", "max_case_wall_ns", "max_shadow_wall_ns",
+    "max_physical_inputs",
+)
+_R0A_COMPLETENESS = ("watchdogs_complete", "resources_complete", "cleanup_complete")
+
+
+def _r0a_work(plan, envelope, work):
+    """Authenticate supplied rehearsal identities without generating any board."""
+    _need(type(plan) is readiness.R0APlan, "R0A_PLAN_REQUIRED")
+    readiness.R0APlan.__post_init__(plan)
+    _need(type(envelope) is operational.OperatingEnvelope, "R0A_ENVELOPE_REQUIRED")
+    operational.OperatingEnvelope.__post_init__(envelope)
+    _need(type(work) is tuple and len(work) == len(plan.ordered_indices), "R0A_WORK_COVERAGE")
+    for position, (item, index) in enumerate(zip(work, plan.ordered_indices)):
+        _need(type(item) is operational.R0Work, "R0A_WORK_REQUIRED")
+        operational.R0Work.__post_init__(item)
+        _need((item.position, item.board.game_index, item.protocol_seed)
+              == (position, index, plan.protocol_seed), "R0A_WORK_IDENTITY")
+        _need((item.run_id, item.runtime) == (work[0].run_id, work[0].runtime),
+              "R0A_WORK_IDENTITY")
+    return work
+
+
+def _r0a_component_containment(component):
+    observations = tuple(observation for unit in component.units for observation in unit.observations)
+    setup = component.setup_measurements
+    maxima = {name: max(getattr(value, field) for value in observations)
+              for name, field in _R0A_OBSERVATION_FIELDS}
+    maxima.update(
+        max_coordinator_memory_bytes=component.coordinator_memory_bytes,
+        max_combined_memory_bytes=component.combined_memory_bytes,
+        max_case_wall_ns=max(unit.max_case_wall_ns for unit in component.units),
+        max_payload_bytes=max(unit.max_payload_bytes for unit in component.units),
+        launcher_wall_ns=component.complete_wall_ns,
+    )
+    complete = {name: all(getattr(value, name) for value in observations)
+                and all(getattr(value, name) for value in setup) for name in _R0A_COMPLETENESS}
+    # The accepted return boundary has persisted, read back and closed every
+    # target archive. Setup additionally carries its independent explicit flag.
+    readback = all(value.readback_complete for value in setup)
+    return readiness.RouteContainment(component.component.value, **maxima, **complete,
+        progress_complete=all(unit.status is records.AuditStatus.PASS for unit in component.units)
+                          and all(value.progress_complete for value in setup),
+        readback_complete=readback)
+
+
+def _r0a_setup_containment(component):
+    """Aggregate disjoint setup waves; no target/parent peak is a setup fact."""
+    setup = component.setup_measurements
+    _need(bool(setup), "R0A_SETUP_REQUIRED")
+    maxima = {name: max(getattr(value, name) for value in setup)
+              for name in _R0A_MAXIMA + ("max_payload_bytes",)}
+    complete = {name: all(getattr(value, name) for value in setup)
+                for name in _R0A_COMPLETENESS + ("progress_complete", "readback_complete")}
+    return readiness.RouteContainment(setup[0].route, **maxima,
+        launcher_wall_ns=component.setup_wall_ns, **complete)
+
+
+def adapt_r0a_concurrency(plan, envelope, work, components, progress_traces):
+    """Adapt accepted, complete operational facts without reattributing walls.
+
+    Inputs retain all six original measurements and their actual progress traces.
+    Failed raw evidence remains owned by the launcher and cannot become a
+    readiness input. No source authentication, generation or execution occurs.
+    """
+    _r0a_work(plan, envelope, work)
+    kinds = tuple(operational.R0Component)
+    _need(type(components) is tuple and len(components) == len(kinds), "R0A_COMPONENT_COVERAGE")
+    _need(type(progress_traces) is tuple and len(progress_traces) == len(kinds), "R0A_PROGRESS_COVERAGE")
+    by_kind = {}
+    for kind, component, trace in zip(kinds, components, progress_traces):
+        _need(type(component) is operational.R0ComponentMeasurement, "R0A_COMPONENT_REQUIRED")
+        operational.R0ComponentMeasurement.__post_init__(component)
+        _need(component.component is kind and component.concurrency == envelope.concurrency,
+              "R0A_COMPONENT_IDENTITY")
+        _need(tuple(unit.work for unit in component.units) == work, "R0A_COMPONENT_WORK_IDENTITY")
+        _need(type(trace) is tuple and len(trace) == len(work), "R0A_PROGRESS_INCOMPLETE")
+        has_setup = kind in dict(_R0A_REFERENCE_COMPONENTS).values()
+        for position, (unit, progress) in enumerate(zip(component.units, trace)):
+            _need(type(progress) is tuple and len(progress) == 3, "R0A_PROGRESS_SHAPE")
+            observed, done, total = progress
+            _integer(done, 1)
+            _integer(total, 1)
+            _need(type(observed) is operational.R0UnitMeasurement and observed == unit
+                  and (done, total) == (position + 1, len(work)), "R0A_PROGRESS_IDENTITY")
+            _need(unit.status is records.AuditStatus.PASS and not unit.reasons,
+                  "R0A_COMPONENT_INCOMPLETE")
+            _need(len(unit.observations) == (2 if has_setup else 1), "R0A_OBSERVATION_COVERAGE")
+            _need(all(all(getattr(value, name) for name in _R0A_COMPLETENESS)
+                      for value in unit.observations), "R0A_OBSERVATION_INCOMPLETE")
+            _need(all(value.coordinator_memory <= component.coordinator_memory_bytes
+                      and value.combined_memory <= component.combined_memory_bytes
+                      for value in unit.observations), "R0A_COMPONENT_MEMORY_OMITTED")
+            _need(kind is not operational.R0Component.ORACLE_K_BIND
+                  or bool(unit.observations[-1].prior_binding_intervals), "R0A_BINDING_OBSERVATION_MISSING")
+            if not has_setup:
+                _need(unit.setup_wall_ns == unit.setup_bytes == unit.reference_bytes == 0,
+                      "R0A_UNEXPECTED_SETUP")
+        for setup in component.setup_measurements:
+            _need(setup.completed_units == len(setup.positions)
+                  and all(getattr(setup, name) for name in _R0A_COMPLETENESS
+                          + ("progress_complete", "readback_complete")), "R0A_SETUP_INCOMPLETE")
+            for receipt, observation, payload in zip(setup.receipts, setup.observations, setup.payload_bytes):
+                unit = component.units[receipt.position]
+                _need(receipt.reason == "ADMITTED" and observation == unit.observations[0]
+                      and receipt.elapsed_ns == unit.setup_wall_ns
+                      and payload <= unit.max_payload_bytes, "R0A_SETUP_UNIT_IDENTITY")
+        by_kind[kind] = component
+
+    def measured(kind, cls):
+        component = by_kind[kind]
+        completed = sum(unit.status is records.AuditStatus.PASS for unit in component.units)
+        if cls is readiness.WallRouteMeasurement:
+            _need(all(unit.durable_bytes == 0 for unit in component.units), "R0A_BIND_HAS_NO_BYTE_FAMILY")
+            return cls(component.wall_ns, completed)
+        return cls(component.wall_ns, sum(unit.durable_bytes for unit in component.units),
+                   max(unit.durable_bytes for unit in component.units), completed)
+
+    references = tuple(readiness.ReferenceMeasurement(route,
+        sum(unit.reference_bytes for unit in by_kind[kind].units),
+        max(unit.reference_bytes for unit in by_kind[kind].units),
+        sum(value.completed_units for value in by_kind[kind].setup_measurements))
+        for route, kind in _R0A_REFERENCE_COMPONENTS)
+    routes = {kind.value: _r0a_component_containment(component) for kind, component in by_kind.items()}
+    for kind in (operational.R0Component.ORACLE_K_BIND, operational.R0Component.ORACLE_D_REPEAT):
+        value = _r0a_setup_containment(by_kind[kind])
+        routes[value.route] = value
+    containment = tuple(routes[name] for name in readiness.CALIBRATION_ROUTES)
+    return readiness.R0AConcurrencyMeasurement(
+        concurrency=envelope.concurrency, plan=plan,
+        primary=measured(operational.R0Component.PRIMARY, readiness.ComponentMeasurement),
+        k_control=measured(operational.R0Component.K_CONTROL, readiness.ComponentMeasurement),
+        determinism=measured(operational.R0Component.DETERMINISM, readiness.ComponentMeasurement),
+        oracle_primary=measured(operational.R0Component.ORACLE_B, readiness.OracleMeasurement),
+        oracle_k_bind=measured(operational.R0Component.ORACLE_K_BIND, readiness.WallRouteMeasurement),
+        oracle_d_repeat=measured(operational.R0Component.ORACLE_D_REPEAT, readiness.OracleMeasurement),
+        references=references, containment=containment,
+        wall_accounting=readiness.WallAccounting.CONSERVATIVE_STANDALONE,
+        byte_accounting=readiness.ByteAccounting.NON_OVERLAPPING, envelope=envelope,
+        **{name: max(getattr(value, name) for value in containment) for name in _R0A_MAXIMA},
+        **{name: all(getattr(value, name) for value in containment)
+           for name in _R0A_COMPLETENESS + ("progress_complete",)})
+
+
+def _measure_r0a(plan, work_by_concurrency, envelopes, root, *, measure=operational.measure_r0_component):
+    """Private orchestration seam; the public launcher owns authorization.
+
+    Return readiness inputs together with every raw measurement and progress
+    trace, so evidence publication can retain and independently adapt them.
+    """
+    _need(type(work_by_concurrency) is tuple and type(envelopes) is tuple
+          and len(work_by_concurrency) == len(envelopes) == 3, "R0A_CONCURRENCY_COVERAGE")
+    for concurrency, work, envelope in zip(identity.R0_A_CONCURRENCY_CANDIDATES,
+                                           work_by_concurrency, envelopes):
+        _r0a_work(plan, envelope, work)
+        _need(envelope.concurrency == concurrency, "R0A_CONCURRENCY_ORDER")
+        _need(tuple((value.board, value.protocol_seed, value.runtime) for value in work)
+              == tuple((value.board, value.protocol_seed, value.runtime)
+                       for value in work_by_concurrency[0]), "R0A_CROSS_CONCURRENCY_IDENTITY")
+    _need(len({work[0].run_id for work in work_by_concurrency}) == 3, "R0A_DISTINCT_RUN_IDS_REQUIRED")
+    _need(callable(measure), "R0A_MEASUREMENT_CALLABLE")
+    root = Path(root)
+    root.mkdir()
+    values, raw, traces = [], [], []
+    for work, envelope in zip(work_by_concurrency, envelopes):
+        directory = root / ("c" + str(envelope.concurrency))
+        directory.mkdir()
+        components, progress_traces = [], []
+        for kind in operational.R0Component:
+            progress = []
+            def observe(unit, done, total):
+                progress.append((unit, done, total))
+            components.append(measure(work, kind, directory / kind.value, envelope, progress=observe))
+            progress_traces.append(tuple(progress))
+        components, progress_traces = tuple(components), tuple(progress_traces)
+        values.append(adapt_r0a_concurrency(plan, envelope, work, components, progress_traces))
+        raw.append(components)
+        traces.append(progress_traces)
+    return readiness.validate_r0a_measurements(tuple(values)), tuple(raw), tuple(traces)
+# R0A_END
+
+
+# SYNTHETIC_BEGIN
+_SYNTHETIC_FAMILIES = tuple(field.name for field in fields(readiness.ComponentSizes))
+_SYNTHETIC_LABEL = "SYNTHETIC_NON_EVIDENCE"
+
+
+def synthetic_board_identity(index):
+    """Public schema identity only: no indexed board or answer layout exists."""
+    _integer(index)
+    return records.BoardIdentity(index, "UNMATERIALIZED_SYNTHETIC_R0B:" + str(index),
+        2, 1, 0, (0, 0), "SYNTHETIC_NON_BOARD", "R0B_SCHEMA_FIXTURE")
+
+
+def _synthetic_projection(work, kind, *, repeat=False, exact=False):
+    from stage3_physical import action_cost, load_timing_table
+    arm = execution._arm(work, kind, repeat=repeat)
+    table, origin, target = load_timing_table(), (0, 0), (1, 0)
+    first, second = action_cost(table, origin, origin), action_cost(table, origin, target)
+    physical = (
+        records.PhysicalInputRecord(0, records.Action.OPEN, origin, origin,
+                                    first, first, records.Status.PLAYING),
+        records.PhysicalInputRecord(1, records.Action.OPEN, target, origin,
+                                    second, first + second, records.Status.WON))
+    public = tuple(records.PublicEffectRecord(i,
+        (records.PublicCellChange(cell, "HIDDEN", "CLUE_0"),), records.Status.PLAYING, status)
+        for i, cell, status in ((0, origin, records.Status.PLAYING), (1, target, records.Status.WON)))
+    initial = records.ActionDecisionRecord(arm, 0,
+        "CONTROL_INITIAL_OPEN" if kind is records.Arm.CONTROL else "POLICY_INITIAL_OPEN",
+        "INITIAL", records.Action.OPEN, origin, (), None, None, (), (), (), ())
+    if kind is records.Arm.CONTROL:
+        selected = records.ActionDecisionRecord(arm, 1, "local_deterministic", "local_deterministic",
+            records.Action.OPEN, target, (), None, None, (), (), (), ())
+        scope = records.DecisionScope.CONTROL_PLAN_POSITION
+    else:
+        selected = records.ActionDecisionRecord(arm, 1, "DIRECT_SAFE_OPEN",
+            "EXACT_SAFE" if exact else "LOCAL_SAFE", records.Action.OPEN, target,
+            ((records.Action.OPEN, target),), second, 1, (), (target,), (), ())
+        scope = records.DecisionScope.K_ANALYZE_DECISION_THROUGH_SELECT_POLICY
+    return game.GameProjection(arm, records.Outcome.WIN, physical, public,
+        (records.TerminalEffectRecord(1, (), records.Status.WON),),
+        (records.DecisionSpanRecord(1, scope, 1),), (), (), (), (initial, selected),
+        first + second, 1, True, True, True, ())
+
+
+def _synthetic_reference(projection, constraint_copies=1):
+    v1 = records.KControlV1Decision(records.Action.OPEN, (1, 0), "LOCAL_DETERMINISTIC",
+        records.Action.OPEN, (1, 0), (((0, 0), 0, ((1, 0),)),) * constraint_copies,
+        ((1, 0),), (), None, (), (), (), (), None, None)
+    return tuple(records.KControlMaintenanceRecord(projection.arm, physical,
+        ((-2, -2),) if i == 0 else ((0, -2),), projection.public_effects[i],
+        None if i == 0 else projection.terminal_effects[0], None if i == 0 else v1, None,
+        tuple((name, None if i == 0 and name == "v1_plan_position_ns" else 1)
+              for name in execution._TIMINGS), (), (), None, None, None, "REFERENCE")
+        for i, physical in enumerate(projection.physical_inputs))
+
+
+def _synthetic_k_actual(work, reference):
+    arm = execution._arm(work, records.Arm.K_CONTROL)
+    accounting = records.KControlAccounting((), ((1, 0),), (), (), ((1, 0),), 0,
+        (((0, 0), 0, (), ((1, 0),), 0),))
+    decision = records.KControlShadowDecision(((0, -2),), 0, accounting, accounting,
+        (), ((1, 0),), ((1, 0),), (), ((1, 0),), (), None, None, "NOT_REACHED",
+        accounting, (), "LOCAL_SAFE", ((1, 0),), None)
+    initial = records.KControlShadowState(True, (), None, None, None, False, True)
+    current = records.KControlShadowState(True, (), decision, None, 1, True, True)
+    final = records.KControlShadowState(True, (), None, None, 1, False, True)
+    soundness = (("classification", "NO_DISCREPANCY"), ("boundary", 1),
+        ("implicated_boundary", None), ("safe_cells", ((1, 0),)), ("detail", _SYNTHETIC_LABEL))
+    return (replace(reference[0], arm=arm, shadow=initial, classification="NOT_REACHED"),
+            replace(reference[1], arm=arm, shadow=current, soundness=soundness,
+                    final_shadow=final, classification="PASS"))
+
+
+def _synthetic_oracle_rows(padding=0):
+    # These detached premises exercise codec/joins; no exact kernel is invoked.
+    from experiments import program_k_oracles
+    observation, target = ((0, -2),), ((1, 0),)
+    snapshot = records.OracleBExactSnapshot(target, target, (), 1, (((1, 0), 0),),
+        target, (), Fraction(0), target, _SYNTHETIC_LABEL + "x" * padding,
+        _SYNTHETIC_LABEL, observation)
+    digest = records.oracle_b_snapshot_digest(snapshot)
+    input_digest = program_k_oracles.oracle_b_input_digest(observation, 0, frozenset())
+    return tuple(records.OracleBAuditRecord(1, phase, (), observation, (), input_digest,
+        digest, digest, records.AuditStatus.PASS, (), snapshot, snapshot) for phase in ("D", "E"))
+
+
+def _synthetic_children(projection, selected, oracle_bytes, prefix=""):
+    oracle = _synthetic_oracle_rows() if selected and oracle_bytes else ()
+    values = {prefix + "certificate_audits": (),
+        prefix + "oracle_b_audits": tuple(records.encode(v) for v in oracle),
+        prefix + "oracle_b_coverage": (records.encode(records.OracleBCoverageRecord(
+            projection.arm, selected, tuple((v.action_ordinal, v.phase) for v in oracle))),),
+        prefix + "evaluators": tuple(records.encode(records.EvaluatorRecord(projection.arm, category,
+            ((1, 0),) if category is records.AssertionCategory.CERTAINTY_OPEN else (),
+            records.EvaluationStatus.PASS if category is records.AssertionCategory.CERTAINTY_OPEN
+            else records.EvaluationStatus.NOT_EVALUATED, _SYNTHETIC_LABEL, _SYNTHETIC_LABEL))
+            for category in records.AssertionCategory)}
+    return values
+
+
+def _synthetic_operation(bundle, elapsed_ns=0, samples=()):
+    receipt = operational.UnitReceipt(bundle.work_position, bundle.kind, bundle.status,
+                                     "SYNTHETIC_MATERIALIZED", elapsed_ns, 0)
+    return operational._OperationResult(receipt, bundle, samples)
+
+
+def synthetic_bundle_family_bytes(bundle):
+    """Exact durable attribution with accepted position/rank/key/TAB/LF framing."""
+    execution.WorkerBundle.__post_init__(bundle)
+    operation = _synthetic_operation(bundle)
+    if bundle.kind is execution.WorkerKind.PRIMARY:
+        result = [("primary", operational._r0_attributable_bytes(operation, operational.R0Component.PRIMARY))]
+        if "control_maintenance" in dict(bundle.streams):
+            result.append(("reference", operational._bundle_stream_bytes(operation, {"control_maintenance"})))
+        coverage = records.decode(dict(bundle.streams)["oracle_b_coverage"][0])
+        if coverage.selected:
+            result.append(("oracle_primary", operational._r0_attributable_bytes(operation,
+                operational.R0Component.ORACLE_B)))
+    elif bundle.kind is execution.WorkerKind.DETERMINISM:
+        result = [("determinism", operational._r0_attributable_bytes(operation,
+            operational.R0Component.DETERMINISM))]
+        coverage = records.decode(dict(bundle.streams)["repeat_oracle_b_coverage"][0])
+        if coverage.selected:
+            result.append(("oracle_repeat", operational._r0_attributable_bytes(operation,
+                operational.R0Component.ORACLE_D_REPEAT)))
+    else:
+        result = [("k_control", operational._r0_attributable_bytes(operation,
+            operational.R0Component.K_CONTROL))]
+    _need(sum(size for _, size in result) == operational._bundle_stream_bytes(operation),
+          "SYNTHETIC_BYTE_PARTITION")
+    return tuple(result)
+
+
+def _synthetic_finish_bundle(work, kind, streams, headers, max_payload_bytes):
+    bundle = execution._bundle(work, kind, streams, headers, records.AuditStatus.PASS, ())
+    execution.revalidate_bundle(bundle, work, kind, max_payload_bytes=max_payload_bytes)
+    _need(sum(size for _, size in synthetic_bundle_family_bytes(bundle)) <= max_payload_bytes,
+          "SYNTHETIC_DURABLE_PAYLOAD_CAP")
+    return bundle
+
+
+def build_synthetic_bundle(work, kind, sizes, primary=None, *, max_payload_bytes):
+    """Build one bounded schema-valid non-board unit without a worker or solver.
+
+    Synthetic detail text and redundant identical public constraints provide
+    byte load within existing I1 fields. Every copied reference remains exact.
+    """
+    execution.BoardWork.__post_init__(work)
+    _need(work.board == synthetic_board_identity(work.board.game_index), "SYNTHETIC_NON_BOARD_IDENTITY_REQUIRED")
+    _need(type(kind) is execution.WorkerKind and kind in operational._kinds(work), "SYNTHETIC_KIND_NOT_SCHEDULED")
+    _need(type(sizes) is readiness.ComponentSizes, "SYNTHETIC_SIZING_REQUIRED")
+    readiness.ComponentSizes.__post_init__(sizes)
+    _integer(max_payload_bytes, 1)
+    present = (("primary",) + (("reference",) if work.k_control_selected or work.determinism_selected else ())
+               + (("oracle_primary",) if work.oracle_b_selected else ()) if kind is execution.WorkerKind.PRIMARY
+               else ("determinism",) + (("oracle_repeat",) if work.oracle_b_selected else ())
+               if kind is execution.WorkerKind.DETERMINISM else ("k_control",))
+    _need(sum(getattr(sizes, name) for name in present) <= max_payload_bytes, "SYNTHETIC_MINIMUM_PAYLOAD_CAP")
+    streams, headers = {}, []
+    if kind is execution.WorkerKind.PRIMARY:
+        _need(primary is None, "SYNTHETIC_PRIMARY_HAS_PRIOR")
+        projections = tuple(_synthetic_projection(work, arm,
+            exact=bool(sizes.oracle_primary or sizes.oracle_repeat)) for arm in (records.Arm.CONTROL, records.Arm.K_P0))
+        for projection, role in zip(projections, ("control", "kp0")):
+            header, values = execution._projection_streams(projection, role)
+            headers.append(header)
+            streams.update(values)
+        streams.update(_synthetic_children(projections[1], work.oracle_b_selected, sizes.oracle_primary))
+        streams["pairs"] = (records.encode(game.pair_projections(*projections).pair),)
+        if work.k_control_selected or work.determinism_selected:
+            reference = _synthetic_reference(projections[0])
+            streams["control_maintenance"] = tuple(records.encode(v) for v in reference)
+            # A redundant identical constraint does not alter its logical premise.
+            def reference_size(values):
+                return sum(operational._EvidenceSink._size((work.position, 0, i), records.encode(v))
+                           for i, v in enumerate(values))
+            current = reference_size(reference)
+            if current < sizes.reference:
+                step = reference_size(_synthetic_reference(projections[0], 2)) - current
+                copies = 1 + (sizes.reference - current + step - 1) // step
+                streams["control_maintenance"] = tuple(records.encode(v)
+                    for v in _synthetic_reference(projections[0], copies))
+    else:
+        _need(type(primary) is execution.WorkerBundle, "SYNTHETIC_PRIOR_REQUIRED")
+        execution.revalidate_bundle(primary, work, execution.WorkerKind.PRIMARY, max_payload_bytes=max_payload_bytes)
+        first_streams = dict(primary.streams)
+        reference = tuple(records.decode(v) for v in first_streams["control_maintenance"])
+        if kind is execution.WorkerKind.K_CONTROL:
+            actual = _synthetic_k_actual(work, reference)
+            status, reasons = execution.compare_k_control(reference, actual)
+            _need(status is records.AuditStatus.PASS and not reasons, "SYNTHETIC_K_CONTROL_MISMATCH")
+            streams = {"control_maintenance": first_streams["control_maintenance"],
+                "kcontrol_arms": (records.encode(execution._arm(work, records.Arm.K_CONTROL)),),
+                "kcontrol_maintenance": tuple(records.encode(v) for v in actual)}
+        else:
+            first = tuple(execution.restore_projection(primary, role) for role in ("control", "kp0"))
+            streams = {name: values for name, values in primary.streams
+                       if name.startswith("control_") or name.startswith("kp0_")}
+            headers.extend(primary.projection_headers)
+            repeated = tuple(_synthetic_projection(work, arm, repeat=True,
+                exact=bool(sizes.oracle_primary or sizes.oracle_repeat)) for arm in (records.Arm.CONTROL, records.Arm.K_P0))
+            for projection, role in zip(repeated, ("repeat_control", "repeat_kp0")):
+                header, values = execution._projection_streams(projection, role)
+                headers.append(header)
+                streams.update(values)
+            repeated_reference = tuple(replace(v, arm=repeated[0].arm) for v in reference)
+            streams["repeat_control_maintenance"] = tuple(records.encode(v) for v in repeated_reference)
+            streams.update(_synthetic_children(repeated[1], work.oracle_b_selected, sizes.oracle_repeat, "repeat_"))
+            streams["control_determinism"] = (records.encode(execution._control_determinism(first[0], repeated[0],
+                first_streams["control_maintenance"], streams["repeat_control_maintenance"])),)
+            streams["kp0_determinism"] = (records.encode(audit.determinism_record(
+                audit.compare_determinism(first[1], repeated[1], selected=True))),)
+    # Attribution is measured through the same accepted durable-row helpers used
+    # for R0-A. Only the relevant family's own existing field is enlarged.
+    bundle = _synthetic_finish_bundle(work, kind, streams, headers, max_payload_bytes)
+    for family, measured in synthetic_bundle_family_bytes(bundle):
+        deficit = getattr(sizes, family) - measured
+        if deficit <= 0 or family == "reference":
+            continue
+        if family in ("primary", "determinism"):
+            name = "evaluators" if family == "primary" else "repeat_evaluators"
+            values = list(streams[name])
+            item = records.decode(values[0])
+            values[0] = records.encode(replace(item, detail=item.detail + "x" * deficit))
+            streams[name] = tuple(values)
+        elif family == "k_control":
+            values = list(streams["kcontrol_maintenance"])
+            item = records.decode(values[-1])
+            soundness = tuple((name, value + "x" * deficit if name == "detail" else value)
+                              for name, value in item.soundness)
+            values[-1] = records.encode(replace(item, soundness=soundness))
+            streams["kcontrol_maintenance"] = tuple(values)
+        else:
+            name = "oracle_b_audits" if family == "oracle_primary" else "repeat_oracle_b_audits"
+            # Two phases, each with equal expected/actual snapshot text.
+            streams[name] = tuple(records.encode(v) for v in _synthetic_oracle_rows((deficit + 3) // 4))
+        bundle = _synthetic_finish_bundle(work, kind, streams, headers, max_payload_bytes)
+    _need(all(size >= getattr(sizes, name) for name, size in synthetic_bundle_family_bytes(bundle)),
+          "SYNTHETIC_PAYLOAD_UNDERSIZED")
+    if primary is not None:
+        # Bind copied first-run premises using the accepted lower validator.
+        class PayloadCap:
+            pass
+        cap = PayloadCap()
+        cap.max_payload_bytes = max_payload_bytes
+        operational._bind_prior_bundle(bundle, execution.encode_bundle(primary), work, kind, cap)
+    return bundle
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticMaterialization:
+    coordinator: operational.CoordinatorResult
+    identity_seal: records.StreamDigest
+    family_min_bytes: readiness.ComponentSizes
+    family_totals: tuple
+    family_counts: tuple
+    max_unit_payload_bytes: int
+    max_coordinator_memory_bytes: int
+    readback_complete: bool
+    cleanup_complete: bool
+    synthetic_non_evidence: bool = True
+
+
+def materialize_synthetic(plan, sizes, envelope, streams_root, identity_seal, *, progress=None):
+    """Serial non-board materialization over an already validated synthetic plan.
+
+    The only preexisting file is its authenticated I7 identity stream. Failure
+    leaves partial evidence and closes every writer; it never returns success.
+    """
+    qualification._plan(plan)
+    operational._envelope(envelope)
+    _need(type(sizes) is readiness.ComponentSizes, "SYNTHETIC_SIZING_REQUIRED")
+    readiness.ComponentSizes.__post_init__(sizes)
+    _need(progress is None or callable(progress), "SYNTHETIC_PROGRESS_CALLBACK")
+    root = Path(streams_root)
+    _need(type(identity_seal) is records.StreamDigest
+          and identity_seal.name == qualification.IDENTITY_STREAM, "SYNTHETIC_IDENTITY_SEAL_REQUIRED")
+    records.StreamDigest.__post_init__(identity_seal)
+    _need(root.is_dir() and {p.name for p in root.iterdir()} == {qualification.IDENTITY_STREAM + ".jsonl"},
+          "SYNTHETIC_FRESH_STREAM_ROOT_REQUIRED")
+    _need(store.scan_stream(root, qualification.IDENTITY_STREAM) == identity_seal, "SYNTHETIC_IDENTITY_READBACK")
+    total = sum(len(operational._kinds(work)) for work in plan)
+    totals = dict.fromkeys(_SYNTHETIC_FAMILIES, 0)
+    counts = dict.fromkeys(_SYNTHETIC_FAMILIES, 0)
+    minima, receipts, max_payload, max_memory = {}, [], 0, 0
+    sink = operational._EvidenceSink(root, envelope, total)
+    ledger = operational._MemoryLedger(envelope)
+    started = time.monotonic_ns()
+    try:
+        sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING)
+        if progress is not None:
+            progress(0, total)
+        for work in plan:
+            primary = None
+            for kind in operational._kinds(work):
+                unit = operational._unit_id(work.position, kind)
+                sink.event(unit, records.EventKind.START, records.OperationStatus.RUNNING)
+                unit_started = time.monotonic_ns()
+                bundle = build_synthetic_bundle(work, kind, sizes, primary,
+                                                max_payload_bytes=envelope.max_payload_bytes)
+                if kind is execution.WorkerKind.PRIMARY:
+                    primary = bundle
+                now = time.monotonic_ns()
+                sample, breached = ledger.sample("synthetic-coordinator", 0, unit, now - started)
+                _integer(sample.coordinator_bytes, 1)
+                _need(not breached, "SYNTHETIC_COORDINATOR_MEMORY_CAP")
+                max_memory = max(max_memory, sample.coordinator_bytes)
+                operation = _synthetic_operation(bundle, now - unit_started, (sample,))
+                receipt = sink.admit(operation)
+                _need(receipt == operation.receipt and receipt.status is records.AuditStatus.PASS,
+                      "SYNTHETIC_PERSISTENCE_INCOMPLETE")
+                receipts.append(receipt)
+                family_bytes = synthetic_bundle_family_bytes(bundle)
+                for name, size in family_bytes:
+                    totals[name] += size
+                    counts[name] += 1
+                    minima[name] = min(minima.get(name, size), size)
+                max_payload = max(max_payload, sum(size for _, size in family_bytes),
+                                  len(execution.encode_bundle(bundle)))
+                _need(time.monotonic_ns() - started < envelope.max_launcher_wall_ms * 1_000_000,
+                      "SYNTHETIC_MATERIALIZATION_TIMEOUT")
+                if progress is not None:
+                    progress(len(receipts), total)
+        sink.event("coordinator:ADMISSION_END", records.EventKind.END, records.OperationStatus.COMPLETED)
+        seals = sink.seal()
+        result = operational.CoordinatorResult(tuple(receipts), seals, sink.durable_units,
+            sink.durable_boards, sum(v.byte_length for v in seals), records.AuditStatus.PASS)
+        operational.readback_streams(root, seals, envelope)
+        _need(store.scan_stream(root, qualification.IDENTITY_STREAM) == identity_seal,
+              "SYNTHETIC_IDENTITY_READBACK")
+        _need(sum(totals.values()) == sum(v.byte_length for v in seals if v.name in execution.STREAM_NAMES),
+              "SYNTHETIC_ARCHIVE_PARTITION")
+        # Production contains every family; bounded fixture plans may omit some.
+        actual_minima = readiness.ComponentSizes(*(minima.get(name, getattr(sizes, name))
+                                                   for name in _SYNTHETIC_FAMILIES))
+        return SyntheticMaterialization(result, identity_seal, actual_minima,
+            tuple((name, totals[name]) for name in _SYNTHETIC_FAMILIES),
+            tuple((name, counts[name]) for name in _SYNTHETIC_FAMILIES),
+            max_payload, max_memory, True, True)
+    except BaseException:
+        # An open, writable partial stream receives an explicit failure marker.
+        # A poisoned/sealed writer is never repaired or reopened to add it.
+        try:
+            if not sink.sealed:
+                sink.event("coordinator:SYNTHETIC_MATERIALIZATION_INCOMPLETE", records.EventKind.ERROR,
+                           records.OperationStatus.INCOMPLETE)
+                sink.checkpoint()
+        except Exception:
+            pass
+        raise
+    finally:
+        ledger.remove("synthetic-coordinator")
+        sink.close()
+# SYNTHETIC_END
+
+
+# POSTPROCESS_BEGIN
+@dataclass(frozen=True, slots=True)
+class PostprocessProgress:
+    phase: records.Phase
+    stage: str
+    processed: int
+    total: int
+    elapsed_ns: int
+    output_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class PostprocessArtifact:
+    name: str
+    sha256: str
+    byte_length: int
+
+
+@dataclass(frozen=True, slots=True)
+class PostprocessingResult:
+    phases: tuple
+    analysis_result: analysis.AnalysisResult
+    streams: tuple
+    artifacts: tuple
+    progress_stream: records.StreamDigest
+    complete_wall_ns: int
+    bootstrap_replicates: int
+    bootstrap_n: int
+    bootstrap_progress_count: int
+    shared_bootstrap_complete: bool
+    compact_scalar_bootstrap: bool
+    streaming_reconstruction: bool
+    readback_complete: bool
+    progress_bounded: bool
+    qualification_complete: bool
+    cleanup_complete: bool
+
+
+class _PostprocessClock:
+    """Direct phase intervals; progress observes work and never supplies results."""
+
+    def __init__(self, envelope, clock, progress, writer):
+        self.envelope, self.clock, self.progress, self.writer = envelope, clock, progress, writer
+        self.started = self.last = self.now()
+        self.phase, self.phase_started, self.ordinal = None, self.started, 0
+        self.processed = self.total = self.output_bytes = 0
+        self.stage, self.measurements = "", {}
+        self.recorded_stage, self.recorded_processed, self.recorded_ns = None, 0, self.started
+
+    def now(self):
+        value = self.clock()
+        _integer(value)
+        _need(not hasattr(self, "last") or value >= self.last, "POSTPROCESS_CLOCK_REGRESSION")
+        self.last = value
+        return value
+
+    def check(self):
+        now = self.now()
+        _need(now - self.started < self.envelope.max_launcher_wall_ms * 1_000_000,
+              "POSTPROCESS_LAUNCHER_TIMEOUT")
+        if self.phase is not None:
+            cap = getattr(self.envelope, self.phase.value.lower() + "_wall_ms")
+            _need(now - self.phase_started < cap * 1_000_000, "POSTPROCESS_PHASE_TIMEOUT")
+        return now
+
+    def emit(self, stage, processed, total, output_bytes=0, *, event=records.EventKind.PROGRESS):
+        for value in (processed, total, output_bytes):
+            _integer(value)
+        _need(total > 0 and processed <= total, "POSTPROCESS_PROGRESS_RANGE")
+        if stage == self.stage:
+            _need(total == self.total and processed >= self.processed
+                  and output_bytes >= self.output_bytes, "POSTPROCESS_PROGRESS_REGRESSION")
+        now = self.check()
+        self.stage, self.processed, self.total, self.output_bytes = stage, processed, total, output_bytes
+        fact = PostprocessProgress(self.phase, stage, processed, total,
+                                  now - self.phase_started, output_bytes)
+        # Every completed unit is observed and checked. Durable snapshots are
+        # bounded in work/time so telemetry does not mirror the entire archive.
+        stage_key = (self.phase, stage)
+        snapshot_step = 65_536 if stage == "bytes" else 128
+        if (event is not records.EventKind.PROGRESS or stage_key != self.recorded_stage
+                or processed == total or processed - self.recorded_processed >= snapshot_step
+                or now - self.recorded_ns >= 1_000_000_000):
+            self.writer.append((self.ordinal,), records.OperationEventRecord(self.phase,
+                stage + ":" + str(processed) + "/" + str(total) + ":bytes=" + str(output_bytes),
+                event, now - self.started, self.ordinal,
+                records.OperationStatus.COMPLETED if event is records.EventKind.END
+                else records.OperationStatus.RUNNING))
+            self.ordinal += 1
+            self.recorded_stage, self.recorded_processed, self.recorded_ns = stage_key, processed, now
+        if self.progress is not None:
+            self.progress(fact)
+        self.check()
+
+    def begin(self, phase, stage, total):
+        _need(self.phase is None and phase not in self.measurements, "POSTPROCESS_PHASE_OVERLAP")
+        self.phase, self.phase_started, self.stage = phase, self.check(), ""
+        self.emit(stage, 0, total, event=records.EventKind.START)
+
+    def finish(self):
+        _need(self.processed == self.total, "POSTPROCESS_PROGRESS_INCOMPLETE")
+        self.emit(self.stage, self.processed, self.total, self.output_bytes, event=records.EventKind.END)
+        wall = self.check() - self.phase_started
+        self.measurements[self.phase] = readiness.PhaseMeasurement(self.phase, wall,
+            self.processed, self.total, self.output_bytes, True, True)
+        self.phase = None
+
+
+class _PostprocessLane:
+    """Delegate scanner/merge ownership and count only consumed canonical rows."""
+
+    def __init__(self, lane, consumed):
+        self.lane, self.consumed = lane, consumed
+
+    def peek(self):
+        return self.lane.peek()
+
+    def pop(self):
+        value = self.lane.pop()
+        if value is not None:
+            self.consumed()
+        return value
+
+
+def _postprocess_validate(root, plan, result, identity_seal, envelope, expected_identity,
+                          source_recheck, meter):
+    """One accepted I2 scan per stream; all I7 semantic helpers stay authoritative."""
+    from stage3_physical import load_timing_table
+    failed, incomplete, cancel = threading.Event(), threading.Event(), threading.Event()
+    raw_lanes, lanes, rows = [], {}, []
+    if result.status is records.AuditStatus.FAIL:
+        failed.set()
+    elif result.status is records.AuditStatus.INCOMPLETE:
+        incomplete.set()
+    for receipt in result.receipts:
+        if receipt.status is records.AuditStatus.FAIL:
+            failed.set()
+        elif receipt.status is records.AuditStatus.INCOMPLETE:
+            incomplete.set()
+    if result.reason_codes:
+        incomplete.set()
+    seals = result.streams + (identity_seal,)
+    names = qualification._STREAMS + (qualification.IDENTITY_STREAM,)
+    _need({p.name for p in root.iterdir()} == {name + ".jsonl" for name in names},
+          "DURABLE_STREAM_DIRECTORY_COVERAGE_MISMATCH")
+    _need(len(seals) == len(names) and tuple(v.name for v in seals) == names,
+          "STREAM_SEAL_IDENTITY_MISMATCH")
+    for seal in seals:
+        _need(type(seal) is records.StreamDigest, "EXACT_STREAM_SEAL_REQUIRED")
+        records.StreamDigest.__post_init__(seal)
+    total, consumed_count = sum(value.record_count for value in seals), 0
+    meter.begin(records.Phase.VALIDATION, "records", total)
+
+    def consumed():
+        nonlocal consumed_count
+        consumed_count += 1
+        meter.emit("records", consumed_count, total)
+
+    try:
+        # The accepted lane owns its real monotonic deadline; the injectable
+        # outer clock independently checks every consumed record and phase.
+        deadline = time.monotonic_ns() + envelope.validation_wall_ms * 1_000_000
+        for seal in seals:
+            raw = qualification._Lane(root, seal, cancel, deadline, failed, incomplete)
+            raw_lanes.append(raw)
+            lanes[seal.name] = _PostprocessLane(raw, consumed)
+        for ordinal, expected in enumerate(expected_identity):
+            _need(lanes[qualification.IDENTITY_STREAM].pop() == ((ordinal,), expected),
+                  "DURABLE_IDENTITY_MISMATCH")
+        _need(lanes[qualification.IDENTITY_STREAM].peek() is None, "EXTRA_IDENTITY_RECORD")
+        table, receipt_index, admitted = load_timing_table(), 0, set()
+        for work in plan:
+            primary = None
+            for kind in operational._kinds(work):
+                rank, values, payload_size = operational._kind_rank(kind), {}, 0
+                for name in execution.STREAM_NAMES:
+                    data, lane = [], lanes[name]
+                    while lane.peek() is not None:
+                        key, value = lane.peek()
+                        _need(len(key) == 3 and key[:2] >= (work.position, rank), "UNIT_KEY_ORDER_MISMATCH")
+                        if key[:2] != (work.position, rank):
+                            break
+                        _need(key == (work.position, rank, len(data))
+                              and type(value) is execution._family(name), "UNIT_KEY_OR_RECORD_FAMILY_MISMATCH")
+                        encoded = records.encode(value)
+                        payload_size += len(encoded)
+                        _need(payload_size <= envelope.max_payload_bytes, "QUALIFICATION_UNIT_PAYLOAD_CAP")
+                        data.append(encoded)
+                        lane.pop()
+                    values[name] = tuple(data)
+                receipt = result.receipts[receipt_index]
+                receipt_index += 1
+                if kind is execution.WorkerKind.PRIMARY and values["boards"]:
+                    admitted.add(work.position)
+                if receipt.status is not records.AuditStatus.PASS:
+                    continue
+                bundle = qualification._reconstruct(work, kind, values, table, envelope)
+                if kind is execution.WorkerKind.PRIMARY:
+                    primary = bundle
+                    control, kp0 = (execution.restore_projection(bundle, role) for role in ("control", "kp0"))
+                    rows.append(analysis.BoardAnalysisRow(work.position, game.pair_projections(control, kp0).pair,
+                        control.total_model_us, kp0.total_model_us,
+                        control.comparable_compute_ns, kp0.comparable_compute_ns))
+                else:
+                    _need(primary is not None, "MISSING_PRIMARY_PREMISE")
+                    operational._bind_prior_bundle(bundle, execution.encode_bundle(primary), work, kind, envelope)
+                meter.check()
+        for name in execution.STREAM_NAMES:
+            _need(lanes[name].peek() is None, "UNSCHEDULED_OR_EXTRA_UNIT")
+        _need(len(admitted) == result.durable_primary_boards, "ADMITTED_PRIMARY_COUNT_MISMATCH")
+        qualification._events(lanes["operations"], result, admitted)
+        ordinal = 0
+        sample_counts = dict.fromkeys((operational._unit_id(v.position, v.kind) for v in result.receipts), 0)
+        while lanes["resources"].peek() is not None:
+            key, value = lanes["resources"].pop()
+            _need(type(value) is records.ResourceSampleRecord and key == (ordinal,)
+                  and value.unit_id in sample_counts and value.method is records.MemoryMethod.PRIVATE_BYTES
+                  and value.process_role is records.ProcessRole.COMBINED, "RESOURCE_IDENTITY_MISMATCH")
+            sample_counts[value.unit_id] += 1
+            _need(sample_counts[value.unit_id] <= 3, "EXTRA_RESOURCE_SAMPLE")
+            if (value.combined_bytes > envelope.memory_cap_bytes
+                    or value.coordinator_bytes > envelope.coordinator_memory_cap_bytes):
+                incomplete.set()
+            ordinal += 1
+        _need(all(sample_counts[operational._unit_id(v.position, v.kind)] > 0
+                  for v in result.receipts if v.status is records.AuditStatus.PASS), "MISSING_RESOURCE_EVIDENCE")
+        _need(source_recheck() == expected_identity, "SOURCE_CHANGED_DURING_QUALIFICATION")
+        meter.check()
+    except BaseException as error:
+        if failed.is_set():
+            raise HarnessError("POSTPROCESS_PRIOR_OR_DURABLE_FAILURE") from error
+        raise
+    finally:
+        cancel.set()
+        for lane in raw_lanes:
+            lane.thread.join()
+    _need(not failed.is_set(), "POSTPROCESS_PRIOR_OR_DURABLE_FAILURE")
+    _need(not incomplete.is_set() and len(rows) == len(plan), "POSTPROCESS_REQUIRED_EVIDENCE_INCOMPLETE")
+    meter.finish()
+    return tuple(rows), seals
+
+
+def _postprocess_publish(path, data, meter):
+    """Publish renderer-owned bytes without another codec or implicit readback."""
+    _need(type(data) is bytes and bool(data), "POSTPROCESS_ARTIFACT_BYTES_REQUIRED")
+    with store._exclusive(path) as stream:
+        for offset in range(0, len(data), 65_536):
+            piece = data[offset:offset + 65_536]
+            store._write_complete(stream, piece)
+            done = offset + len(piece)
+            meter.emit("bytes", done, len(data), done)
+        stream.flush()
+        os.fsync(stream.fileno())
+    meter.check()
+    return PostprocessArtifact(path.name, sha256(data).hexdigest(), len(data))
+
+
+def _postprocess_artifact_readback(path, artifact, visit):
+    digest, size = sha256(), 0
+    with store._reader(path) as stream:
+        while True:
+            data = stream.read(65_536)
+            if not data:
+                break
+            digest.update(data)
+            size += len(data)
+            visit(len(data))
+    _need(size == artifact.byte_length and digest.hexdigest() == artifact.sha256,
+          "POSTPROCESS_ARTIFACT_READBACK_MISMATCH")
+
+
+def _postprocess_r0b(plan, coordinator_result, identity_seal, root, envelope, output_root, *,
+                     expected_identity=None, source_recheck=None, clock=time.perf_counter_ns,
+                     progress=None, _analyze=None):
+    """Private postprocessing seam; authenticated launchers own authorization.
+
+    Validation precedes aggregation exactly as in accepted I7. Returned phase
+    facts use readiness's canonical order, not a fabricated chronological order.
+    _analyze is a bounded fixture injection; production launchers never expose it.
+    The enclosing launcher owns independent whole-process memory containment.
+    """
+    qualification._plan(plan)
+    readiness._constants()
+    operational._envelope(envelope)
+    qualification._receipt_plan(plan, coordinator_result)
+    _need(callable(clock) and (progress is None or callable(progress)), "POSTPROCESS_OBSERVER_REQUIRED")
+    _need(_analyze is None or callable(_analyze), "POSTPROCESS_ANALYZER_REQUIRED")
+    _need(source_recheck is None or callable(source_recheck), "POSTPROCESS_SOURCE_RECHECK_REQUIRED")
+    if expected_identity is None:
+        expected_identity = qualification._identity_records(plan)
+    else:
+        _need(source_recheck is not None, "POSTPROCESS_SOURCE_RECHECK_REQUIRED")
+    _need(type(expected_identity) is tuple and len(expected_identity) >= 3
+          and tuple(type(v) for v in expected_identity[:3])
+          == (records.ProtocolIdentity, records.CorpusIdentity, records.RuntimeIdentity)
+          and all(type(v) is records.SourceBlobIdentity for v in expected_identity[3:]),
+          "POSTPROCESS_EXPECTED_IDENTITY_REQUIRED")
+    for value in expected_identity:
+        records.encode(value)
+    indices = tuple(v.board.game_index for v in plan)
+    expected_prefix = (
+        records.ProtocolIdentity(qualification._PROTOCOL, identity.PROTOCOL_SHA256,
+                                 qualification._BLOB, qualification._FREEZE),
+        records.CorpusIdentity("SYNTHETIC_I7", min(indices), max(indices) + 1, len(indices), indices,
+            identity.corpus_digest(plan[0].protocol_seed, len(plan), indices).hex(), ()), plan[0].runtime)
+    _need(expected_identity[:3] == expected_prefix, "POSTPROCESS_PLAN_IDENTITY_MISMATCH")
+    recheck = (lambda: qualification._identity_records(plan)) if source_recheck is None else source_recheck
+    _need(recheck() == expected_identity, "SOURCE_CHANGED_BEFORE_POSTPROCESSING")
+    root, output_root = Path(root).resolve(strict=True), Path(output_root).resolve()
+    _need(root.is_dir() and output_root != root and root not in output_root.parents,
+          "POSTPROCESS_SEPARATE_OUTPUT_ROOT_REQUIRED")
+    output_root.mkdir()
+    writer = store.StreamWriter(output_root, "postprocessing_operations")
+    meter = None
+    try:
+        meter = _PostprocessClock(envelope, clock, progress, writer)
+        rows, seals = _postprocess_validate(root, plan, coordinator_result, identity_seal,
+            envelope, expected_identity, recheck, meter)
+        replicates, seen = identity.BOOTSTRAP_REPLICATES, -1
+        readiness._constants()
+        meter.begin(records.Phase.AGGREGATION, "replicates", replicates)
+
+        def observe(done, total):
+            nonlocal seen
+            _need(type(done) is int and type(total) is int and total == replicates
+                  and done == seen + 1 and 0 <= done <= total, "POSTPROCESS_BOOTSTRAP_PROGRESS_MISMATCH")
+            seen = done
+            meter.emit("replicates", done, total)
+
+        digest = identity.corpus_digest(plan[0].protocol_seed, len(plan), tuple(v.board.game_index for v in plan))
+        analyze = analysis.analyze_effectiveness if _analyze is None else _analyze
+        result = analyze(rows, protocol_seed=plan[0].protocol_seed, corpus_digest=digest,
+            concurrency=envelope.concurrency, gate_statuses=None,
+            context=("SYNTHETIC_R0B_OPERATIONAL_ONLY_NOT_EFFECTIVENESS_EVIDENCE",), bootstrap_progress=observe)
+        _need(type(result) is analysis.AnalysisResult, "POSTPROCESS_ANALYSIS_RESULT_REQUIRED")
+        analysis.AnalysisResult.__post_init__(result)
+        _need(seen == replicates and result.n == len(plan) and result.overall is None
+              and result.concurrency == envelope.concurrency
+              and result.bootstrap.replicates == replicates
+              and result.bootstrap.accepted_draws == len(plan) * replicates
+              and result.bootstrap.seed_hex == analysis.bootstrap_seed(plan[0].protocol_seed, digest).hex(),
+              "POSTPROCESS_FULL_SHARED_BOOTSTRAP_REQUIRED")
+        meter.finish()
+
+        meter.begin(records.Phase.PUBLICATION, "analysis", 1)
+        analysis_bytes = report.render_analysis_json(result)
+        meter.emit("bytes", 0, len(analysis_bytes))
+        analysis_artifact = _postprocess_publish(output_root / "analysis.json", analysis_bytes, meter)
+        meter.finish()
+
+        total = sum(v.byte_length for v in seals) + analysis_artifact.byte_length
+        meter.begin(records.Phase.READBACK, "bytes", total)
+        read = 0
+        def read_visit(count=1):
+            nonlocal read
+            read += count
+            meter.emit("bytes", read, total)
+        for seal in seals:
+            observed = store.scan_stream(root, seal.name, visit=lambda key, value:
+                read_visit(len(store._key_bytes(key)) + len(records.encode(value)) + 2))
+            _need(observed == seal, "POSTPROCESS_STREAM_READBACK_MISMATCH")
+            meter.check()
+        _postprocess_artifact_readback(output_root / analysis_artifact.name, analysis_artifact, read_visit)
+        meter.finish()
+
+        meter.begin(records.Phase.REPORT, "analysis", 1)
+        html = report.render_report_html(result).encode("utf-8")
+        meter.emit("bytes", 0, len(html))
+        html_artifact = _postprocess_publish(output_root / "report.html", html, meter)
+        _postprocess_artifact_readback(output_root / html_artifact.name, html_artifact,
+                                      lambda _: meter.check())
+        _need(recheck() == expected_identity, "SOURCE_CHANGED_DURING_POSTPROCESSING")
+        meter.finish()
+        event_seal = writer.seal()
+        # Final telemetry is finite, separately included in the complete wall,
+        # and scanned once without appending to its already sealed stream.
+        telemetry_count = 0
+        def telemetry_visit(*_):
+            nonlocal telemetry_count
+            telemetry_count += 1
+            now = meter.check()
+            if progress is not None:
+                progress(PostprocessProgress(records.Phase.READBACK, "telemetry_records", telemetry_count,
+                    event_seal.record_count, now - meter.started, 0))
+            meter.check()
+        observed = store.scan_stream(output_root, event_seal.name, visit=telemetry_visit)
+        _need(observed == event_seal, "POSTPROCESS_PROGRESS_READBACK_MISMATCH")
+        complete_wall = meter.check() - meter.started
+        phases = tuple(meter.measurements[phase] for phase in readiness.POSTPROCESS_PHASES)
+        _need(complete_wall >= sum(v.wall_ns for v in phases), "POSTPROCESS_WALL_ACCOUNTING")
+        return PostprocessingResult(phases, result, seals, (analysis_artifact, html_artifact), event_seal,
+            complete_wall, replicates, len(plan), seen + 1, True, True, True, True, True, True, True)
+    except BaseException:
+        # Root's fail-closed launcher owns the failure receipt. An unfinished
+        # stream is retained; neither a partial artifact nor a file name is PASS.
+        raise
+    finally:
+        writer.close()
+# POSTPROCESS_END
+
+
+# EVIDENCE_LAUNCH_BEGIN
+class ActualRunAuthorization(Enum):
+    R0_A = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_A"
+    R0_B = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_B"
+
+
+@dataclass(frozen=True, slots=True)
+class FileFact:
+    path: str
+    byte_length: int
+    sha256: str
+
+    def __post_init__(self):
+        _need(type(self.path) is str and self.path and "\\" not in self.path
+              and not Path(self.path).is_absolute() and ".." not in Path(self.path).parts,
+              "RELATIVE_ARCHIVE_PATH_REQUIRED")
+        _integer(self.byte_length)
+        _need(type(self.sha256) is str and len(self.sha256) == 64
+              and all(c in "0123456789abcdef" for c in self.sha256), "ARTIFACT_HASH_REQUIRED")
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveAccounting:
+    files: tuple
+    attributable_bytes: int
+    fixed_allowance_bytes: int
+    archive_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.files) is tuple and all(type(v) is FileFact for v in self.files), "ARCHIVE_FILES_REQUIRED")
+        for value in self.files:
+            FileFact.__post_init__(value)
+        _need(tuple(v.path for v in self.files) == tuple(sorted(set(v.path for v in self.files))),
+              "ARCHIVE_PATH_ORDER")
+        for value in (self.attributable_bytes, self.fixed_allowance_bytes, self.archive_bytes):
+            _integer(value)
+        _need(self.attributable_bytes + self.fixed_allowance_bytes == self.archive_bytes
+              == sum(v.byte_length for v in self.files), "ARCHIVE_EXACT_PARTITION")
+
+
+_FINALIZATION_STAGES = ("writes", "manifest_inventory", "accounting_inventory", "source_recheck", "cleanup")
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizationFact:
+    """External operator observation of closing an already measured archive."""
+    stages: tuple
+    wall_ns: int
+    max_progress_gap_ns: int
+    progress_events: int
+    complete: bool
+
+    def __post_init__(self):
+        _need(type(self.stages) is tuple and len(self.stages) == len(_FINALIZATION_STAGES),
+              "FINALIZATION_STAGE_COVERAGE")
+        for expected, value in zip(_FINALIZATION_STAGES, self.stages):
+            _need(type(value) is tuple and len(value) == 3 and value[0] == expected,
+                  "FINALIZATION_STAGE_COVERAGE")
+            _integer(value[1])
+            _integer(value[2], 1)
+            _need(value[1] <= value[2], "FINALIZATION_PROGRESS_RANGE")
+        _need(self.stages[0][2] == 4 and self.stages[-2][2] == self.stages[-1][2] == 1,
+              "FINALIZATION_WORK_COVERAGE")
+        _integer(self.wall_ns, 1)
+        _integer(self.max_progress_gap_ns)
+        _integer(self.progress_events)
+        _need(self.max_progress_gap_ns <= self.wall_ns and type(self.complete) is bool,
+              "FINALIZATION_WALL_ACCOUNTING")
+        if self.complete:
+            _need(all(done == total for _, done, total in self.stages)
+                  and self.progress_events >= 2 * len(self.stages), "FINALIZATION_PROGRESS_INCOMPLETE")
+
+
+class _FinalizationObserver:
+    """Fixed archive-closing counters, without writing into the measured tree."""
+
+    def __init__(self, check, *, clock=time.perf_counter_ns):
+        self.check, self.clock = check, clock
+        self.started = self.last = clock()
+        _integer(self.started)
+        self.max_gap, self.events, self.stages = 0, 0, {}
+
+    def observe(self, stage, done, total):
+        _need(stage in _FINALIZATION_STAGES, "FINALIZATION_STAGE_REQUIRED")
+        _integer(done)
+        _integer(total, 1)
+        _need(done <= total, "FINALIZATION_PROGRESS_RANGE")
+        prior = self.stages.get(stage)
+        _need((prior is None and done == 0) or (prior is not None
+              and total == prior[1] and done >= prior[0]), "FINALIZATION_PROGRESS_REGRESSION")
+        self.check()
+        now = self.clock()
+        _integer(now)
+        _need(now >= self.last, "FINALIZATION_CLOCK_REGRESSION")
+        self.max_gap = max(self.max_gap, now - self.last)
+        self.last, self.stages[stage], self.events = now, (done, total), self.events + 1
+
+    def finish(self):
+        self.check()
+        now = self.clock()
+        _integer(now)
+        _need(now >= self.last and set(self.stages) == set(_FINALIZATION_STAGES),
+              "FINALIZATION_PROGRESS_INCOMPLETE")
+        return FinalizationFact(tuple((stage, *self.stages[stage]) for stage in _FINALIZATION_STAGES),
+            now - self.started, max(self.max_gap, now - self.last), self.events, True)
+
+
+# Closed metadata vocabulary for the requested R0 manifest. I2 records always
+# use their existing codec. No arbitrary imports or generic dataclass discovery.
+_FACT_TYPES = {cls.__name__: cls for cls in (
+    RunProvenance, FileFact, ArchiveAccounting, FinalizationFact, operational.OperatingEnvelope,
+    operational.R0Work, operational.R0UnitMeasurement, operational.R0ComponentMeasurement,
+    operational.R0SetupMeasurement, operational._R0Observation, operational.UnitReceipt, operational.CoordinatorResult,
+    readiness.AmendmentProvenance, readiness.SubsetCounts, readiness.SyntheticCorpusSelection,
+    readiness.SyntheticWorkload, readiness.R0APlan, readiness.ComponentMeasurement,
+    readiness.OracleMeasurement, readiness.WallRouteMeasurement, readiness.ReferenceMeasurement,
+    readiness.RouteContainment, readiness.R0AConcurrencyMeasurement, readiness.ComponentSizes,
+    readiness.SupportingStreams, readiness.PhaseMeasurement, readiness.R0BMeasurement,
+)}
+_FACT_ENUMS = {cls.__name__: cls for cls in (operational.R0Component, execution.WorkerKind,
+    records.AuditStatus, records.Phase, readiness.WallAccounting, readiness.ByteAccounting)}
+_FACT_RECORDS = (records.BoardIdentity, records.RuntimeIdentity, records.SourceBlobIdentity,
+                 records.StreamDigest)
+
+
+def _fact_node(value):
+    if value is None or type(value) in (str, int, bool):
+        return value
+    if type(value) is bytes:
+        return {"bytes": value.hex()}
+    if type(value) is Fraction:
+        return {"fraction": [value.numerator, value.denominator]}
+    if type(value) is tuple:
+        return [_fact_node(v) for v in value]
+    if type(value) is records.StreamDigest:
+        records.StreamDigest.__post_init__(value)
+        return {"stream": [value.name, value.sha256, value.byte_length, value.record_count]}
+    if type(value) in _FACT_RECORDS:
+        return {"record": records.encode(value).decode("ascii")}
+    if type(value) in _FACT_ENUMS.values():
+        return {"enum": type(value).__name__, "value": value.value}
+    _need(type(value) in _FACT_TYPES.values(), "UNSUPPORTED_R0_METADATA")
+    if hasattr(type(value), "__post_init__"):
+        type(value).__post_init__(value)
+    return {"fact": type(value).__name__, "fields":
+            {field.name: _fact_node(getattr(value, field.name)) for field in fields(value)}}
+
+
+def _fact_read(node):
+    if node is None or type(node) in (str, int, bool):
+        return node
+    if type(node) is list:
+        return tuple(_fact_read(v) for v in node)
+    _need(type(node) is dict, "INVALID_R0_METADATA")
+    if set(node) == {"bytes"}:
+        _need(type(node["bytes"]) is str, "INVALID_R0_BYTES")
+        value = bytes.fromhex(node["bytes"])
+        _need(value.hex() == node["bytes"], "NONCANONICAL_R0_BYTES")
+        return value
+    if set(node) == {"fraction"}:
+        a, b = node["fraction"]
+        _need(type(a) is int and type(b) is int and b > 0, "INVALID_R0_FRACTION")
+        value = Fraction(a, b)
+        _need((value.numerator, value.denominator) == (a, b), "NONCANONICAL_R0_FRACTION")
+        return value
+    if set(node) == {"stream"}:
+        return records.StreamDigest(*node["stream"])
+    if set(node) == {"record"}:
+        value = records.decode(node["record"].encode("ascii"))
+        _need(type(value) in _FACT_RECORDS, "UNSUPPORTED_METADATA_RECORD")
+        return value
+    if set(node) == {"enum", "value"}:
+        _need(node["enum"] in _FACT_ENUMS, "UNSUPPORTED_METADATA_ENUM")
+        return _FACT_ENUMS[node["enum"]](node["value"])
+    _need(set(node) == {"fact", "fields"} and node["fact"] in _FACT_TYPES, "UNSUPPORTED_METADATA_FACT")
+    cls = _FACT_TYPES[node["fact"]]
+    _need(type(node["fields"]) is dict and set(node["fields"]) == {f.name for f in fields(cls)},
+          "METADATA_FIELDS_MISMATCH")
+    return cls(**{name: _fact_read(value) for name, value in node["fields"].items()})
+
+
+def _inventory(root, *, exclude=(), check=lambda: None, progress=None):
+    root = Path(root).resolve(strict=True)
+    _need(progress is None or callable(progress), "INVENTORY_PROGRESS_CALLBACK")
+    pending, result = [], []
+    for path in sorted(root.rglob("*")):
+        _need(not path.is_symlink() and not path.is_junction(), "ARCHIVE_LINK_FORBIDDEN")
+        if path.is_dir():
+            continue
+        _need(path.is_file() and root in path.resolve(strict=True).parents, "ARCHIVE_FILE_REQUIRED")
+        relative = path.relative_to(root).as_posix()
+        if relative in exclude:
+            continue
+        pending.append((path, relative, path.stat().st_size))
+        check()
+    total, processed = sum(size for _, _, size in pending), 0
+    if progress is not None:
+        progress(0, total)
+    for path, relative, expected_size in pending:
+        digest, length = sha256(), 0
+        with path.open("rb") as stream:
+            while True:
+                data = stream.read(65536)
+                if not data:
+                    break
+                digest.update(data)
+                length += len(data)
+                processed += len(data)
+                _need(length <= expected_size and processed <= total, "ARCHIVE_CHANGED_DURING_INVENTORY")
+                check()
+                if progress is not None:
+                    progress(processed, total)
+        _need(length == expected_size, "ARCHIVE_CHANGED_DURING_INVENTORY")
+        result.append(FileFact(relative, length, digest.hexdigest()))
+        check()
+    _need(processed == total, "ARCHIVE_CHANGED_DURING_INVENTORY")
+    if progress is not None:
+        progress(processed, total)
+    return tuple(sorted(result, key=lambda value: value.path))
+
+
+def account_experiment_archive(root, materialization, *, check=lambda: None, progress=None):
+    """Every archive-local byte belongs once to a family or the fixed allowance."""
+    _need(type(materialization) is SyntheticMaterialization, "SYNTHETIC_MATERIALIZATION_REQUIRED")
+    files = _inventory(root, check=check, progress=progress)
+    attributable_names = {"streams/" + name + ".jsonl" for name in execution.STREAM_NAMES}
+    by_path = {v.path: v for v in files}
+    required = {"coordinator.json", "status.json", "manifest.json", "COMPLETE.json",
+                "postprocessing/analysis.json", "postprocessing/report.html",
+                "postprocessing/postprocessing_operations.jsonl", "streams/operations.jsonl",
+                "streams/resources.jsonl", "streams/qualification_identity.jsonl"}
+    _need(required <= set(by_path), "R0B_SUPPORTING_FILE_OMISSION")
+    all_seals = materialization.coordinator.streams + (materialization.identity_seal,)
+    for seal in all_seals:
+        _need("streams/" + seal.name + ".jsonl" in by_path, "R0B_SUPPORTING_STREAM_OMISSION")
+        fact = by_path["streams/" + seal.name + ".jsonl"]
+        _need((fact.byte_length, fact.sha256) == (seal.byte_length, seal.sha256), "R0B_SEALED_STREAM_DRIFT")
+    closed = store.read_completion_receipt(root)
+    _need(closed.state is records.CompletionState.COMPLETED
+          and closed.manifest_sha256 == by_path["manifest.json"].sha256,
+          "R0B_ARCHIVE_NOT_CLOSED")
+    manifest = _json_bytes((Path(root) / "manifest.json").read_bytes())
+    _need(manifest.get("schema") == "program-k-e2-r0b-experiment/v1"
+          and manifest.get("classification") == "SYNTHETIC_NON_EFFECTIVENESS"
+          and _fact_read(manifest["inventory_before_manifest_receipt"])
+              == tuple(v for v in files if v.path not in ("manifest.json", "COMPLETE.json")),
+          "R0B_CLOSED_ARCHIVE_DRIFT")
+    _need(_fact_read(manifest["family_totals"]) == materialization.family_totals
+          and _fact_read(manifest["family_counts"]) == materialization.family_counts
+          and _fact_read(manifest["family_min_bytes"]) == materialization.family_min_bytes,
+          "R0B_FAMILY_MANIFEST_BINDING")
+    _need(_fact_read(_json_bytes((Path(root) / "coordinator.json").read_bytes())) == materialization.coordinator,
+          "R0B_COORDINATOR_MANIFEST_BINDING")
+    provenance = _fact_read(manifest["provenance"])
+    workload = _fact_read(manifest["workload"])
+    declared_streams = _fact_read(manifest["streams"])
+    _need(closed.protocol_sha256 == identity.PROTOCOL_SHA256
+          and closed.source_sha256 == _source_digest(provenance)
+          and closed.corpus_sha256 == workload.selection.counts.corpus_digest.hex()
+          and closed.streams == declared_streams, "R0B_COMPLETION_BINDING")
+    _need(tuple(v for v in declared_streams if v.name != "postprocessing_operations")
+          == tuple(sorted(all_seals, key=lambda v: v.name)), "R0B_COMPLETION_STREAM_COVERAGE")
+    progress_seals = tuple(v for v in declared_streams if v.name == "postprocessing_operations")
+    _need(len(progress_seals) == 1 and (progress_seals[0].byte_length, progress_seals[0].sha256)
+          == (by_path["postprocessing/postprocessing_operations.jsonl"].byte_length,
+              by_path["postprocessing/postprocessing_operations.jsonl"].sha256), "R0B_PROGRESS_SEAL_BINDING")
+    _need(attributable_names <= set(by_path), "ATTRIBUTABLE_STREAM_OMISSION")
+    attributable = sum(by_path[name].byte_length for name in attributable_names)
+    _need(attributable == sum(size for _, size in materialization.family_totals), "ATTRIBUTABLE_BYTE_MISMATCH")
+    fixed = sum(v.byte_length for v in files if v.path not in attributable_names)
+    _need(fixed <= identity.FIXED_REPORT_RECEIPT_ALLOWANCE, "R0B_FIXED_ALLOWANCE_CAP")
+    total = attributable + fixed
+    _need(total <= identity.MAX_ARCHIVE_BYTES, "R0B_ARCHIVE_CAP")
+    return ArchiveAccounting(files, attributable, fixed, total)
+
+
+def _r0a_evidence_node(measurements, components, traces):
+    values = readiness.validate_r0a_measurements(measurements)
+    _need(type(components) is tuple and type(traces) is tuple and len(components) == len(traces) == 3,
+          "R0A_EVIDENCE_COVERAGE")
+    for measured, raw, progress in zip(values, components, traces):
+        work = tuple(unit.work for unit in raw[0].units)
+        _need(adapt_r0a_concurrency(measured.plan, measured.envelope, work, raw, progress) == measured,
+              "R0A_EVIDENCE_ADAPTER_MISMATCH")
+    return {"schema": "program-k-e2-r0a-observations/v1", "readiness": _fact_node(values),
+            "operational": _fact_node(components), "progress": _fact_node(traces)}
+
+
+def write_r0a_evidence(path, measurements, components, traces):
+    node = _r0a_evidence_node(measurements, components, traces)
+    _exclusive_bytes(path, _canonical(node))
+    _need(read_r0a_evidence(path) == (measurements, components, traces), "R0A_EVIDENCE_READBACK")
+    return Path(path)
+
+
+def read_r0a_evidence(path):
+    node = _json_bytes(Path(path).read_bytes())
+    _need(type(node) is dict and set(node) == {"schema", "readiness", "operational", "progress"}
+          and node["schema"] == "program-k-e2-r0a-observations/v1", "R0A_EVIDENCE_SCHEMA")
+    values = tuple(_fact_read(node[name]) for name in ("readiness", "operational", "progress"))
+    _need(_r0a_evidence_node(*values) == node, "R0A_EVIDENCE_NOT_REPRODUCIBLE")
+    return values
+
+
+def adapt_r0b(measurements, workload, materialization, postprocess, accounting, *,
+               complete_wall_ns, max_combined_memory_bytes, containment_complete, finalization):
+    """Carry observed facts into the existing readiness owner; no projection here."""
+    readiness.validate_r0a_measurements(measurements)
+    _need(type(materialization) is SyntheticMaterialization and type(postprocess) is PostprocessingResult
+          and type(accounting) is ArchiveAccounting, "R0B_OBSERVATIONS_REQUIRED")
+    _need(type(finalization) is FinalizationFact, "R0B_FINALIZATION_OBSERVATION_REQUIRED")
+    FinalizationFact.__post_init__(finalization)
+    _need(finalization.complete, "R0B_FINALIZATION_INCOMPLETE")
+    _need(complete_wall_ns >= postprocess.complete_wall_ns + finalization.wall_ns,
+          "R0B_COMPLETE_WALL_ACCOUNTING")
+    _need(postprocess.bootstrap_progress_count == identity.BOOTSTRAP_REPLICATES + 1
+          and postprocess.bootstrap_n == workload.selection.counts.n, "R0B_BOOTSTRAP_PROGRESS_COVERAGE")
+    ArchiveAccounting.__post_init__(accounting)
+    _need(finalization.stages[2][1] == accounting.archive_bytes
+          and finalization.stages[1][1] < accounting.archive_bytes, "R0B_FINALIZATION_BYTE_BINDING")
+    _need(tuple(n for _, n in materialization.family_counts) == workload.unit_counts
+          and tuple(name for name, _ in materialization.family_counts) == _SYNTHETIC_FAMILIES,
+          "R0B_REALIZED_FAMILY_COUNTS")
+    _need(materialization.coordinator.status is records.AuditStatus.PASS
+          and materialization.readback_complete and materialization.cleanup_complete
+          and postprocess.qualification_complete and postprocess.cleanup_complete,
+          "R0B_REQUIRED_COMPLETION")
+    expected_seals = materialization.coordinator.streams + (materialization.identity_seal,)
+    _need(type(postprocess.streams) is tuple
+          and len({v.name for v in postprocess.streams}) == len(postprocess.streams)
+          and tuple(sorted(postprocess.streams, key=lambda v: v.name))
+              == tuple(sorted(expected_seals, key=lambda v: v.name)), "R0B_SUPPORTING_SEAL_BINDING")
+    coordinator = materialization.coordinator
+    expected_units = workload.unit_counts[0] + workload.unit_counts[1] + workload.unit_counts[4]
+    _need(type(coordinator.receipts) is tuple and len(coordinator.receipts) == coordinator.durable_units == expected_units
+          and coordinator.durable_primary_boards == workload.unit_counts[0]
+          and all(type(v) is operational.UnitReceipt and v.status is records.AuditStatus.PASS
+                  for v in coordinator.receipts) and not coordinator.reason_codes,
+          "R0B_RECEIPT_STATUS_COVERAGE")
+    _need(accounting.attributable_bytes == sum(size for _, size in materialization.family_totals),
+          "R0B_ATTRIBUTABLE_ACCOUNTING")
+    seals = {v.name: v for v in postprocess.streams}
+    supporting = readiness.SupportingStreams(tuple(seals[name] for name in
+        ("operations", "resources", qualification.IDENTITY_STREAM)), True, True, True,
+        postprocess.qualification_complete, True, materialization.cleanup_complete and postprocess.cleanup_complete)
+    value = readiness.R0BMeasurement(measurements[0].plan.protocol_seed, identity.CANDIDATE_MAX,
+        complete_wall_ns, postprocess.phases, postprocess.bootstrap_replicates, postprocess.bootstrap_n,
+        postprocess.shared_bootstrap_complete, postprocess.compact_scalar_bootstrap,
+        postprocess.streaming_reconstruction, materialization.readback_complete and postprocess.readback_complete,
+        postprocess.progress_bounded and finalization.complete,
+        materialization.synthetic_non_evidence, materialization.family_min_bytes,
+        accounting.archive_bytes, workload, supporting, accounting.fixed_allowance_bytes,
+        materialization.max_unit_payload_bytes, max_combined_memory_bytes, containment_complete)
+    return readiness.validate_r0b_measurement(value, measurements)
+
+
+def _source_digest(provenance):
+    return sha256(_canonical(_fact_node(provenance.sources))).hexdigest()
+
+
+def _close_experiment_archive(root, materialization, postprocess, receipt, provenance, workload, *,
+                              check=lambda: None, progress=None):
+    """Close the measured archive before its external operator receipt exists.
+
+    The internal manifest excludes only its own bytes and COMPLETE.json from
+    its hash inventory. Both are subsequently included in fixed-allowance bytes.
+    """
+    root = Path(root)
+    _need(materialization.readback_complete and materialization.cleanup_complete
+          and postprocess.qualification_complete and postprocess.readback_complete and postprocess.cleanup_complete,
+          "R0B_ARCHIVE_COMPLETION_REQUIRED")
+    _need(progress is None or callable(progress), "FINALIZATION_PROGRESS_CALLBACK")
+    def observe(stage, done, total):
+        check()
+        if progress is not None:
+            progress(stage, done, total)
+    observe("writes", 0, 4)
+    _exclusive_bytes(root / "coordinator.json", _canonical(_fact_node(materialization.coordinator)))
+    observe("writes", 1, 4)
+    _exclusive_bytes(root / "status.json", _canonical({"state": "COMPLETED_SYNTHETIC_NON_EVIDENCE",
+        "receipts_complete": True, "work_plan_revalidated": True, "resources_complete": True,
+        "cleanup_complete": True, "readback_complete": True}))
+    observe("writes", 2, 4)
+    files = _inventory(root, check=check,
+        progress=lambda done, total: observe("manifest_inventory", done, total))
+    streams = tuple(sorted(postprocess.streams + (postprocess.progress_stream,), key=lambda v: v.name))
+    node = {"schema": "program-k-e2-r0b-experiment/v1", "classification": "SYNTHETIC_NON_EFFECTIVENESS",
+        "selection_receipt_sha256": sha256(receipt.canonical_bytes).hexdigest(),
+        "provenance": _fact_node(provenance), "workload": _fact_node(workload),
+        "family_totals": _fact_node(materialization.family_totals),
+        "family_counts": _fact_node(materialization.family_counts),
+        "family_min_bytes": _fact_node(materialization.family_min_bytes),
+        "phases": _fact_node(postprocess.phases), "streams": _fact_node(streams),
+        "inventory_before_manifest_receipt": _fact_node(files),
+        "scope": "Every file under this experiment directory, including manifest and completion receipt, counts."}
+    data = _canonical(node)
+    _exclusive_bytes(root / "manifest.json", data)
+    observe("writes", 3, 4)
+    completion = records.CompletionReceipt(sha256(data).hexdigest(), workload.selection.counts.corpus_digest.hex(),
+        _source_digest(provenance), identity.PROTOCOL_SHA256, streams, records.CompletionState.COMPLETED)
+    store.write_completion_receipt(root, completion)
+    _need(store.read_completion_receipt(root) == completion, "R0B_COMPLETION_READBACK")
+    observe("writes", 4, 4)
+    return account_experiment_archive(root, materialization, check=check,
+        progress=lambda done, total: observe("accounting_inventory", done, total))
+
+
+def _authorize(authorization, expected):
+    _need(type(authorization) is ActualRunAuthorization and authorization is expected,
+          "EXPLICIT_ACTUAL_R0_AUTHORIZATION_REQUIRED")
+
+
+def _fresh_ignored_root(path):
+    root = Path(path).resolve()
+    results = (qualification._ROOT / "results").resolve(strict=True)
+    _need(results in root.parents and not root.exists(), "FRESH_IGNORED_R0_ROOT_REQUIRED")
+    for parent in root.parents:
+        if parent == results:
+            break
+        _need(not parent.is_symlink() and not parent.is_junction(), "RUN_ROOT_LINK_FORBIDDEN")
+    relative = root.relative_to(qualification._ROOT).as_posix() + "/.r0-guard"
+    _need(qualification._git("check-ignore", "--", relative).strip(), "IGNORED_RUN_ROOT_REQUIRED")
+    return root
+
+
+def _begin_run(root, mode, receipt, provenance):
+    root.mkdir(parents=True, exist_ok=False)
+    try:
+        _exclusive_bytes(root / "INCOMPLETE.json", _canonical({"state": "INCOMPLETE_AT_CREATION",
+            "mode": mode, "source_head": provenance.r0_harness_source_head,
+            "selection_sha256": sha256(receipt.canonical_bytes).hexdigest()}))
+    except BaseException:
+        _fail_run(root)
+        raise
+
+
+def _fail_run(root):
+    # Retain the initial marker even if a disk failure prevents this final marker.
+    # A FAILED marker always overrides any partially published completion receipt.
+    try:
+        _exclusive_bytes(Path(root) / "FAILED.json", _canonical({"state": "FAILED_OR_INCOMPLETE"}))
+    except Exception:
+        pass
+
+
+def _finish_run(root, mode, receipt, provenance, details, corpus_digest, *, final_check=lambda: None):
+    _need(mode in ("R0_A", "R0_B"), "R0_MODE_REQUIRED")
+    files = _inventory(root)
+    node = {"schema": "program-k-e2-r0-run/v1", "mode": mode,
+        "classification": "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE",
+        "status": "COMPLETE_FOR_INDEPENDENT_REVIEW_NOT_ENVELOPE_ADMISSION",
+        "provenance": _fact_node(provenance),
+        "selection": {"path": receipt.path, "sha256": SELECTION_RECEIPT_SHA256,
+                      "byte_length": SELECTION_RECEIPT_BYTES, "selection_source_head": SELECTION_SOURCE_HEAD},
+        "amendment": {"sha256": qualification._AMENDMENT_SHA256,
+                      "byte_length": qualification._AMENDMENT_BYTE_LENGTH},
+        "protocol": {"sha256": identity.PROTOCOL_SHA256, "blob": qualification._BLOB},
+        "details": details, "files": _fact_node(files),
+        "forbidden_actions": {"actual_e2": False, "final_envelope_selected": False,
+            "holdout": False, "target_recount": False, "synthetic_search": False, "project_git_mutation": False}}
+    data = _canonical(node)
+    _exclusive_bytes(Path(root) / "manifest.json", data)
+    completion = records.CompletionReceipt(sha256(data).hexdigest(), corpus_digest,
+        _source_digest(provenance), identity.PROTOCOL_SHA256, (), records.CompletionState.COMPLETED)
+    result = _validate_run_manifest(Path(root), receipt, completion)
+    final_check()
+    store.write_completion_receipt(root, completion)
+    _need(store.read_completion_receipt(root) == completion, "RUN_COMPLETION_READBACK")
+    return result
+
+
+def validate_existing_run(root, receipt):
+    """Read-only integrity and readiness-fact verification; never select an envelope."""
+    root = Path(root).resolve(strict=True)
+    _need(type(receipt) is AcceptedSelectionReceipt and load_selection_receipt(receipt.path) == receipt,
+          "SELECTION_RECEIPT_CHANGED")
+    _need(not (root / "FAILED.json").exists(), "RUN_FAILED_OR_INCOMPLETE")
+    completion = store.read_completion_receipt(root)
+    return _validate_run_manifest(root, receipt, completion)
+
+
+def _validate_run_manifest(root, receipt, completion):
+    _need(not (root / "FAILED.json").exists(), "RUN_FAILED_OR_INCOMPLETE")
+    data = (root / "manifest.json").read_bytes()
+    node = _json_bytes(data)
+    _need(set(node) == {"schema", "mode", "classification", "status", "provenance", "selection",
+                        "amendment", "protocol", "details", "files", "forbidden_actions"}
+          and node["schema"] == "program-k-e2-r0-run/v1", "RUN_MANIFEST_SCHEMA")
+    _need(node["classification"] == "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE"
+          and node["status"] == "COMPLETE_FOR_INDEPENDENT_REVIEW_NOT_ENVELOPE_ADMISSION",
+          "RUN_MANIFEST_CLASSIFICATION")
+    _exact_fields(node["forbidden_actions"], {"actual_e2": False, "final_envelope_selected": False,
+        "holdout": False, "target_recount": False, "synthetic_search": False, "project_git_mutation": False},
+        "RUN_MANIFEST_CLASSIFICATION")
+    provenance = _fact_read(node["provenance"])
+    _exact_fields(_json_bytes((root / "INCOMPLETE.json").read_bytes()),
+        {"state": "INCOMPLETE_AT_CREATION", "mode": node["mode"],
+         "source_head": provenance.r0_harness_source_head, "selection_sha256": SELECTION_RECEIPT_SHA256},
+        "RUN_INITIAL_MARKER_BINDING")
+    _need(type(provenance) is RunProvenance and completion.state is records.CompletionState.COMPLETED
+          and completion.manifest_sha256 == sha256(data).hexdigest()
+          and completion.source_sha256 == _source_digest(provenance)
+          and completion.protocol_sha256 == identity.PROTOCOL_SHA256 and completion.streams == (),
+          "RUN_COMPLETION_BINDING")
+    _need(node["selection"] == {"path": receipt.path, "sha256": SELECTION_RECEIPT_SHA256,
+        "byte_length": SELECTION_RECEIPT_BYTES, "selection_source_head": SELECTION_SOURCE_HEAD}
+        and node["amendment"] == {"sha256": qualification._AMENDMENT_SHA256,
+            "byte_length": qualification._AMENDMENT_BYTE_LENGTH}
+        and node["protocol"] == {"sha256": identity.PROTOCOL_SHA256, "blob": qualification._BLOB},
+        "RUN_AUTHORITY_BINDING")
+    _need(_inventory(root, exclude=("manifest.json", "COMPLETE.json")) == _fact_read(node["files"]),
+          "RUN_ARCHIVE_DRIFT")
+    details = node["details"]
+    if node["mode"] == "R0_A":
+        _need(set(details) == {"observations"} and details["observations"] == "r0a-observations.json",
+              "R0A_MANIFEST_DETAILS")
+        values, _, _ = read_r0a_evidence(root / details["observations"])
+        _need(values[0].plan.protocol_seed == bytes.fromhex(identity.PROTOCOL_SHA256), "R0A_FROZEN_PROTOCOL_SEED")
+        expected_digest = identity.corpus_digest(values[0].plan.protocol_seed, len(values[0].plan.ordered_indices),
+                                                 values[0].plan.ordered_indices).hex()
+    else:
+        _need(node["mode"] == "R0_B"
+              and set(details) == {"r0a", "r0a_source_manifest", "r0b", "accounting", "finalization"},
+              "R0B_MANIFEST_DETAILS")
+        values, value = _fact_read(details["r0a"]), _fact_read(details["r0b"])
+        readiness.validate_r0b_measurement(value, values)
+        _need(value.workload == receipt.workload, "R0B_SELECTION_BINDING")
+        finalization = _fact_read(details["finalization"])
+        _need(type(finalization) is FinalizationFact and finalization.complete
+              and value.progress_bounded
+              and value.complete_wall_ns >= sum(v.wall_ns for v in value.phases) + finalization.wall_ns,
+              "R0B_FINALIZATION_BINDING")
+        accounting = _fact_read(details["accounting"])
+        _need(type(accounting) is ArchiveAccounting and _inventory(root / "experiment") == accounting.files
+              and value.archive_bytes == accounting.archive_bytes
+              and value.realized_fixed_allowance_bytes == accounting.fixed_allowance_bytes
+              and finalization.stages[2][1] == accounting.archive_bytes
+              and finalization.stages[1][1] < accounting.archive_bytes,
+              "R0B_ARCHIVE_ACCOUNTING_DRIFT")
+        expected_digest = value.workload.selection.counts.corpus_digest.hex()
+    _need(completion.corpus_sha256 == expected_digest, "RUN_CORPUS_BINDING")
+    return node
+
+
+def _materialize_r0a_work(plan, envelope, run_id):
+    # Called only after the public launcher's explicit authorization/source gate.
+    from benchmark_board import EXPERT_GENERAL_V1, generate_board
+    work = []
+    for position, index in enumerate(plan.ordered_indices):
+        generated = generate_board(EXPERT_GENERAL_V1, index)
+        board = records.BoardIdentity(index, generated.board_fingerprint, 30, 16, 99, (0, 0),
+                                      "V1", "EXPERT_GENERAL_V1")
+        work.append(operational.R0Work(position, board, plan.protocol_seed, run_id, _runtime_identity()))
+    return _r0a_work(plan, envelope, tuple(work))
+
+
+def launch_r0a(receipt_path, root, envelopes, *, authorization=None):
+    """Actual R0-A. A later operator must separately authorize this exact mode."""
+    _authorize(authorization, ActualRunAuthorization.R0_A)
+    receipt = load_selection_receipt(receipt_path)
+    provenance = capture_run_provenance(receipt)
+    _need(type(envelopes) is tuple and tuple(v.concurrency for v in envelopes) == (1, 2, 4),
+          "R0A_CONCURRENCY_COVERAGE")
+    for envelope in envelopes:
+        operational._envelope(envelope)
+    plan = readiness.build_r0a_plan(bytes.fromhex(identity.PROTOCOL_SHA256))
+    root = _fresh_ignored_root(root)
+    _begin_run(root, "R0_A", receipt, provenance)
+    try:
+        work = tuple(_materialize_r0a_work(plan, envelope, "R0-" + uuid.uuid4().hex + "-c" + str(envelope.concurrency))
+                     for envelope in envelopes)
+        measured, raw, traces = _measure_r0a(plan, work, envelopes, root / "r0a")
+        write_r0a_evidence(root / "r0a-observations.json", measured, raw, traces)
+        _recheck_provenance(receipt, provenance)
+        result = _finish_run(root, "R0_A", receipt, provenance, {"observations": "r0a-observations.json"},
+            identity.corpus_digest(plan.protocol_seed, len(plan.ordered_indices), plan.ordered_indices).hex(),
+            final_check=lambda: _recheck_provenance(receipt, provenance))
+        return result
+    except BaseException:
+        _fail_run(root)
+        raise
+
+
+def launch_r0b(receipt_path, root, r0a_root, envelope, *, authorization=None):
+    """Actual R0-B; uses the selected corpus and one frozen shared bootstrap."""
+    _authorize(authorization, ActualRunAuthorization.R0_B)
+    receipt = load_selection_receipt(receipt_path)
+    provenance = capture_run_provenance(receipt)
+    prior = validate_existing_run(r0a_root, receipt)
+    _need(prior["mode"] == "R0_A" and _fact_read(prior["provenance"]) == provenance,
+          "R0A_CURRENT_SOURCE_REQUIRED")
+    measured, _, _ = read_r0a_evidence(Path(r0a_root) / "r0a-observations.json")
+    operational._envelope(envelope)
+    _need(envelope in tuple(v.envelope for v in measured), "R0B_MEASURED_ENVELOPE_REQUIRED")
+    sizing = readiness.derive_r0b_sizing_plan(measured)
+    workload = receipt.workload
+    readiness.validate_payload_fit(workload, sizing.unit_bytes, min(v.envelope.max_payload_bytes for v in measured))
+    root = _fresh_ignored_root(root)
+    _begin_run(root, "R0_B", receipt, provenance)
+    try:
+        experiment = root / "experiment"
+        experiment.mkdir()
+        streams = experiment / "streams"
+        streams.mkdir()
+        cancel = threading.Event()
+        monitor = operational._R0MemoryMonitor(operational._MemoryLedger(envelope), cancel, envelope)
+        monitor_live = True
+        with monitor:
+            plan = build_selected_work_plan(receipt, "synthetic-i7-r0b-" + uuid.uuid4().hex)
+            identity_seal = qualification.write_identity(streams, plan)
+            materialized = materialize_synthetic(plan, sizing.unit_bytes, envelope, streams, identity_seal,
+                                                 progress=lambda *_: monitor.check())
+            _need(tuple(n for _, n in materialized.family_counts) == workload.unit_counts,
+                  "R0B_REALIZED_FAMILY_COUNTS")
+            post_started = time.perf_counter_ns()
+            def check():
+                if monitor_live:
+                    monitor.check()
+                else:
+                    _need(monitor.reason is None, "R0B_CONTAINMENT_INCOMPLETE")
+                _need(time.perf_counter_ns() - post_started < envelope.max_launcher_wall_ms * 1_000_000,
+                      "R0B_COMPLETE_POSTPROCESS_TIMEOUT")
+            postprocess = _postprocess_r0b(plan, materialized.coordinator, identity_seal, streams, envelope,
+                                           experiment / "postprocessing", progress=lambda *_: check())
+            finalizing = _FinalizationObserver(check)
+            accounting = _close_experiment_archive(experiment, materialized, postprocess, receipt,
+                provenance, workload, check=check, progress=finalizing.observe)
+            finalizing.observe("source_recheck", 0, 1)
+            _recheck_provenance(receipt, provenance)
+            finalizing.observe("source_recheck", 1, 1)
+            finalizing.observe("cleanup", 0, 1)
+        monitor_live = False
+        finalizing.observe("cleanup", 1, 1)
+        finalization = finalizing.finish()
+        wall = time.perf_counter_ns() - post_started
+        value = adapt_r0b(measured, workload, materialized, postprocess, accounting,
+            complete_wall_ns=wall, max_combined_memory_bytes=max(monitor.combined,
+                materialized.max_coordinator_memory_bytes), containment_complete=monitor.reason is None,
+            finalization=finalization)
+        details = {"r0a": _fact_node(measured), "r0b": _fact_node(value), "accounting": _fact_node(accounting),
+            "finalization": _fact_node(finalization),
+            "r0a_source_manifest": sha256((Path(r0a_root) / "manifest.json").read_bytes()).hexdigest()}
+        _recheck_provenance(receipt, provenance)
+        result = _finish_run(root, "R0_B", receipt, provenance, details, workload.selection.counts.corpus_digest.hex(),
+                             final_check=lambda: _recheck_provenance(receipt, provenance))
+        return result
+    except BaseException:
+        _fail_run(root)
+        raise
+# EVIDENCE_LAUNCH_END
