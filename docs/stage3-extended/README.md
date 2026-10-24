@@ -26,22 +26,35 @@ Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
 [closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 Gameplay inspection is COMPLETE; additional gameplay required: NONE.
 Milestones **1–9 remain CLOSED**. Milestone **10** selected **Program K**; its
-[research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) is **FROZEN / ACCEPTED**
-(2026-10-20). The [Gate-R E0/E1 research protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md)
-is now also **FROZEN / ACCEPTED**. Independent protocol audit/re-audit concluded
-**BLOCKER 0 / REQUIRED 0**, with final **CONTENT FREEZE PASS**. Bounded experimental
-Program K now exists; Gate-R E0/E1 implementation qualification is **CLOSED /
-ACCEPTED**. Actual E1 is **E1_PASS / E1_QUALIFIED**, `progression_allowed = true`;
-see the [E1 final closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) (2026-10-23).
-Milestone 10 research remains **ACTIVE**, with effectiveness not established.
+[research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
+[Gate-R E0/E1 research protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) are
+**FROZEN / ACCEPTED**. Gate-R E0/E1 implementation qualification is
+**CLOSED / ACCEPTED**; Actual E1 is **E1_PASS / E1_QUALIFIED / ACCEPTED** with
+`progression_allowed = true`; see the
+[E1 final closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md).
+
 The [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) is
-**FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0** (2026-10-23).
-**Implementation midpoint: I1–I4 = 4/8 COMPLETE / ACCEPTED (50%).** I0 is accepted
-architecture mapping and is excluded from the implementation denominator.
-**NEXT: Program K E2 Slice I5 — certificate/evaluator/Oracle-B/determinism audit adapters.**
-Actual E2 is **NOT RUN**; effectiveness is **NOT YET ESTABLISHED**. This midpoint
-update grants no I5, R0, Actual E2, conditional E3 or Gate P execution permission.
+**FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+Program K E2 implementation slices **I1–I8 are 8/8 COMPLETE / ACCEPTED**; I0 is
+accepted architecture mapping/discovery and is excluded from that denominator.
+The accepted pre-R0-PRE implementation parent is
+`9071469e2e4a884722ea02e2faea3441d916876c`.
+
+The [R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
+is **CONTENT-FROZEN / ACCEPTED** at exactly **58,052 bytes**, SHA-256
+`5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf`;
+final independent exact-byte re-audit:
+**PASS — BLOCKER 0 / REQUIRED 0 / OPTIONAL 5**.
+
+**NEXT: amendment-conforming readiness / R0-PRE implementation correction +
+qualification.** The existing eight-file R0-PRE observational candidate is
+preserved but **not accepted**. Real `U_KD / I_OD / I_OK` counts remain forbidden
+until the corrected implementation is qualified and committed.
+
+R0-A/R0-B are **NOT RUN**; no final N/concurrency or Operating Envelope is frozen.
+Actual E2 is **NOT AUTHORIZED / NOT RUN**; effectiveness is **NOT YET ESTABLISHED**.
 Gate P remains a separate later decision; production integration remains **NONE**.
+Milestone 10 research therefore remains **ACTIVE**.
 
 첫 milestone **Execution / Playback / Visualizer Foundation**은
 **FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
@@ -182,86 +195,118 @@ results retain their original identity and meaning.
 9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation;
    [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
 10. **ACTIVE — Program K: Logical Known-Mine Capability + Selective Physical Materialization** —
-    [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
-    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md);
-    Gate-R E0/E1 implementation qualification **CLOSED / ACCEPTED**;
-    [accepted Actual E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md).
-    [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
-    **FROZEN / ACCEPTED**. **I1–I4 = 4/8 COMPLETE / ACCEPTED (50%); NEXT I5** —
-    certificate/evaluator/Oracle-B/determinism audit adapters. Actual E2 **NOT RUN**;
-    no effectiveness result. The midpoint update grants no further implementation
-    or execution permission.
+    [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md),
+    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md),
+    [accepted Actual E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md),
+    [frozen E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md),
+    and [frozen R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md).
+    **I1–I8 = 8/8 COMPLETE / ACCEPTED.** The accepted pre-R0-PRE parent is
+    `9071469e2e4a884722ea02e2faea3441d916876c`.
+    **NEXT: amendment-conforming readiness/R0-PRE implementation correction +
+    qualification.** R0-A/R0-B and Actual E2 remain unrun/unapproved.
 
 ### Current Program K boundary
 
-The bounded experimental implementation is accepted; full P-8 is **PASS / ACCEPTED**,
-and Actual E0 is **PASS / QUALIFIED / ACCEPTED**.
-Actual E1 is **E1_PASS / E1_QUALIFIED / ACCEPTED** with `progression_allowed = true`:
-one execution, 54 scheduled + 18 post-hoc evaluator COMPLETE, all exit codes 0,
-zero retries/resumes, and one successful publication/readback each. Final ChatGPT
-adjudication: **GATE-R E1 FINAL PASS / ACCEPTED — BLOCKER 0 / REQUIRED 0**.
-G8 remains **NOT_APPLICABLE**: Model-C diagnostics only; effectiveness belongs to E2.
+The bounded experimental Program K implementation and Gate-R history remain
+accepted. Full P-8 is **PASS / ACCEPTED**, Actual E0 is
+**PASS / QUALIFIED / ACCEPTED**, and Actual E1 is
+**E1_PASS / E1_QUALIFIED / ACCEPTED** with `progression_allowed = true`.
+G8 remains **NOT_APPLICABLE** in E1 because effectiveness belongs to E2.
 
 The [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) is
 **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
-Its frozen commit/blob/SHA-256, exact I1–I4 commit provenance and complete I0–I8
-slice table are recorded in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
 
-**Implementation midpoint: I1–I4 = 4/8 COMPLETE / ACCEPTED (50%).** I0 is accepted
-mapping/discovery and does not count among the eight implementation slices.
-I1 identity/immutable records, I2 streaming durable store, I3 aggregate/bootstrap/
-verdict/report core and I4 per-game evidence are accepted. I4 includes full P-3,
-G5 provenance and durable decision/plan/logical-M projection. Its additive I1
-`ActionDecisionRecord` retains `SCHEMA_VERSION = 1` and **18/18** pre-existing
-top-level fixture canonical bytes/hashes. Final accepted I4 focused verification
-was **9 modules, 551 / 551 PASS**, failures/errors/skips **0 / 0 / 0**; this was
-not a full-suite run and was not rerun for this documentation update.
+Program K E2 implementation:
 
-The accepted **I4 / midpoint technical source baseline** is
-`f9a213b15e990cc50dedad6c8c10c42519593af7`. A later documentation-only commit
-does not replace that accepted technical source identity.
+| Slice | State | Accepted commit |
+| --- | --- | --- |
+| I0 | ACCEPTED architecture mapping; excluded from denominator | n/a |
+| I1 | COMPLETE / ACCEPTED | `aa687d2627dceeb037a6f79e1f4a7017e38c13f7` |
+| I2 | COMPLETE / ACCEPTED | `441e165acea308ba885615c25b7cd244b6a5f3ef` |
+| I3 | COMPLETE / ACCEPTED | `9c8acef772cc71de0dae09e4e238ed42bf05a1e4` |
+| I4 | COMPLETE / ACCEPTED | `f9a213b15e990cc50dedad6c8c10c42519593af7` |
+| I5 | COMPLETE / ACCEPTED | `bbc2d0ada1e42e1770085a7d5454f0f0d1929fbe` |
+| I6 | COMPLETE / ACCEPTED | `9fe69da293293ab22ad5c7a25cc3341863a10584` |
+| I7 | COMPLETE / ACCEPTED | `1e6355ecfc9497338d75ef3e723fddf2445d378b` |
+| I8 | COMPLETE / ACCEPTED | `9071469e2e4a884722ea02e2faea3441d916876c` |
 
-**NEXT: Program K E2 Slice I5 — certificate/evaluator/Oracle-B/determinism audit adapters.**
-I5 is implementation qualification infrastructure. The remaining sequence is
-I5 → I6 execution/coordinator + operational/resource layer → I7 integration
-qualification → I8 readiness/R0 admission → R0-A/R0-B and operating-envelope
-validation → Actual E2 execution/frozen-gate adjudication → E3 only if required
-by the frozen trigger conditions. Gate P remains a separate later decision.
-Listing this sequence authorizes none of these activities.
+**I1–I8 = 8/8 COMPLETE / ACCEPTED.** This is implementation progress only;
+Program K effectiveness remains **NOT YET ESTABLISHED**.
 
-**Actual E2 is NOT RUN**; no effectiveness PASS/FAIL/DEFER result exists. No Actual
-E2 corpus or rehearsal/R0 was executed as part of I1–I4 acceptance. Effectiveness
-is **NOT YET ESTABLISHED**; the midpoint is no production-superiority claim.
-Production modification/integration remains **NONE**, with no production/V1
-algorithm change in this documentation update. Stage-3 V1 and Model C remain
-**CLOSED / FROZEN**; ZiNi Improvement remains **CLOSED**, and its final holdout
-`2,010,000 .. 2,010,099` remains unopened/excluded. Model C is modeled physical
-time, not CPU or measured human wall time; decision-compute ns is a separate
-diagnostic authority. Milestone 10 and Stage-3 Extended remain **ACTIVE**.
+#### R0 Attribution Amendment v1 — frozen authority
 
-The [E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) records nonblocking postprocessing
-performance/observability debt: approximately 28 hours for the launcher versus
-6,617.328 seconds for the recorded supervised job, without authoritative percentage
-progress. The frozen E2 protocol requires bounded streaming/postprocessing,
-progress visibility and operational admission checks before Actual E2. I2 streaming
-is accepted; remaining integration/readiness obligations are not satisfied by the
-I1–I4 midpoint. This debt does not reopen E1 and is not repaired by documentation.
+The [R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
+was added after R0 boundary auditing exposed attribution gaps that were not
+representable by the original readiness projection.
 
-The frozen specification/protocol retain their semantic authority and historical
-prerequisites; recovery must not repeat E0/E1 qualification or the old Gate-R
-authorization decision. **Program L** remains a fallback under the frozen contract,
-restricted to existing V1-admissible certainty alternatives; L implementation is
-not authorized. No A-E5, official 100k or E/L rerun is authorized. The ZiNi final
-holdout remains unopened/excluded; frozen Stage-3 V1 remains historical authority.
+Accepted exact identity:
 
-Recovery order: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this roadmap →
+- byte length: `58,052`
+- SHA-256:
+  `5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf`
+- final independent exact-byte re-audit:
+  **PASS — BLOCKER 0 / REQUIRED 0 / OPTIONAL 5**
+- final disposition:
+  **CONTENT-FROZEN / ACCEPTED**
+
+The amendment preserves the frozen treatment/selector/bootstrap/effect-gate
+semantics and changes only enumerated R0 attribution/admission semantics.
+Important accepted additions include route-specific Oracle wall accounting,
+`I_OK`, rank-0 shared-reference byte ownership, zero-row Oracle support,
+fixed-allowance/payload/containment checks and synthetic-domain R0-B dominance.
+
+The authoring header may remain `CANDIDATE — NOT CONTENT-FROZEN / NOT ACCEPTED`;
+the external freeze receipt is the live freeze-state authority. Do not edit the
+content-frozen bytes merely to change the header.
+
+#### Current R0-PRE implementation state
+
+The pre-amendment eight-file R0-PRE observational candidate remains in the
+worktree and must be preserved. It is **not accepted** and is not R0 evidence.
+It contains useful observational seams, but its readiness/attribution semantics
+must be corrected to the frozen amendment.
+
+Historical candidate regression before the amendment was strong, including a
+full 4005/4005 total with zero failures/errors/skips, but those results do not
+qualify amendment conformance.
+
+**CURRENT NEXT: amendment-conforming readiness/R0-PRE implementation correction +
+qualification.** This is not a new I9 slice; it is required conformance work on
+the already accepted readiness/R0 boundary before real R0 can begin.
+
+Required future order:
+
+1. implement and qualify amendment conformance;
+2. user commits the qualified implementation;
+3. only then calculate real `U_KD(10000) / I_OD(10000) / I_OK(10000)`;
+4. qualify/accept the R0 harness;
+5. separately authorize and execute R0-A/R0-B;
+6. adjudicate N/concurrency and freeze the E2 Operating Envelope;
+7. separately authorize Actual E2;
+8. conditional E3 only if the frozen trigger requires it;
+9. Gate P remains separate.
+
+The R0-B synthetic workload remains outside research/rehearsal/holdout domains.
+Real target counts are numeric dominance targets only and do not authorize
+opening the Actual-E2 corpus.
+
+**Actual E2 is NOT RUN**; no effectiveness PASS/FAIL/DEFER exists. R0-A/R0-B are
+**NOT RUN**; no final N/concurrency or Operating Envelope exists. Production
+integration remains **NONE**. Stage-3 V1 / Model C stay **CLOSED / FROZEN** and
+the ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
+
+The [E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) records the historical
+approximately 28-hour launcher/postprocessing observability debt. The accepted
+E2 infrastructure and amendment address later bounded admission requirements;
+they do not reopen E1.
+
+Recovery order:
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this roadmap →
 [frozen E2 protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
-[E1 closeout and accepted evidence](STAGE3_PROGRAM_K_E1_CLOSEOUT.md) →
-[frozen K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) →
-[frozen Gate-R protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) → current source/tests
-only when implementation facts are disputed. Do not repeat E2-D0, protocol audits
-or content adjudication merely for recovery. Read existing evidence; do not
-reinvoke execute/assess/persist/readback for recovery.
+[frozen R0 Attribution Amendment](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) →
+current source/tests for disputed implementation facts.
+Do not repeat E2-D0, protocol/amendment audits, Gate-R/E0/E1 execution or closed
+evidence merely for recovery.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
@@ -384,13 +429,14 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
   playback/clock, Engine, solver/planner, Model C or process lifecycle.
 
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
-That interpretation is now CLOSED; Program K's research specification and Gate-R
-E0/E1 protocol remain FROZEN / ACCEPTED. Gate-R E0/E1 implementation qualification
-is now CLOSED / ACCEPTED, and the E2 Effectiveness Protocol is FROZEN / ACCEPTED.
-E2 implementation is now **I1–I4 = 4/8 COMPLETE / ACCEPTED (50%)**; current NEXT
-is **I5 — certificate/evaluator/Oracle-B/determinism audit adapters**. Actual E2 is
-NOT RUN; this midpoint update authorizes no further implementation or execution.
-The historical polish acceptance is unchanged.
+That interpretation is now CLOSED. Program K's research specification, Gate-R
+E0/E1 protocol and E2 Effectiveness Protocol remain FROZEN / ACCEPTED.
+E2 implementation is now **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
+[R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
+is **CONTENT-FROZEN / ACCEPTED**. Current NEXT is amendment-conforming
+readiness/R0-PRE implementation correction + qualification. Actual R0 and Actual
+E2 are NOT RUN; effectiveness is NOT YET ESTABLISHED. The historical polish
+acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -730,11 +776,12 @@ The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
 are also CLOSED. Program K's research specification and Gate-R E0/E1 protocol are
 FROZEN / ACCEPTED; its bounded experimental implementation and Gate-R E0/E1
-qualification are now accepted/closed. The E2 Effectiveness Protocol is FROZEN /
-ACCEPTED. E2 implementation is **I1–I4 = 4/8 COMPLETE / ACCEPTED (50%); NEXT I5** —
-certificate/evaluator/Oracle-B/determinism audit adapters. Actual E2 is NOT RUN;
-effectiveness is NOT YET ESTABLISHED. This midpoint update grants no further
-implementation or execution permission; milestone 10 remains ACTIVE.
+qualification are accepted/closed. The E2 Effectiveness Protocol is FROZEN /
+ACCEPTED, E2 implementation is **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
+R0 Attribution Amendment v1 is **CONTENT-FROZEN / ACCEPTED**. Current next work is
+amendment-conforming readiness/R0-PRE implementation correction + qualification.
+R0-A/R0-B and Actual E2 are NOT RUN; effectiveness is NOT YET ESTABLISHED.
+Milestone 10 remains ACTIVE.
 The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;
 its dated record remains unchanged. No historical acceptance is reopened.
