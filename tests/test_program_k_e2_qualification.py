@@ -33,6 +33,34 @@ from tests.test_program_k_e2_execution import _literal_context, _literal_work
 from tests.test_program_k_e2_operational import _envelope
 
 
+def _committed_fixture_sources():
+    """Snapshot committed I7 premises for synthetic fixtures, not live admission.
+
+    Later slices may legitimately be under review in the working tree. This
+    fixture reads only explicit committed blobs; production capture_sources and
+    its separate live-worktree rejection tests retain their original authority.
+    """
+    head = q._git("rev-parse", "HEAD").strip().decode("ascii")
+    paths = tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL,
+                                             q._REPAIR_TEST) + q._E2)))
+    refs = tuple(head + ":" + path for path in paths)
+    refs += tuple(q._E1 + ":" + path for path in q._PROTECTED)
+    refs += (q._FREEZE + ":" + q._PROTOCOL,)
+    blobs = q._blobs(refs)
+    current = dict(zip(paths, blobs[:len(paths)]))
+    for index, path in enumerate(q._PROTECTED):
+        if current[path] != blobs[len(paths) + index]:
+            raise AssertionError("FIXTURE_E1_CORE_IDENTITY_DRIFT")
+    protocol_blob = blobs[-1]
+    if current[q._PROTOCOL] != protocol_blob or protocol_blob[0] != q._BLOB:
+        raise AssertionError("FIXTURE_FROZEN_PROTOCOL_IDENTITY_DRIFT")
+    identity.validate_protocol_bytes(protocol_blob[1])
+    if q._git("rev-parse", "HEAD").strip().decode("ascii") != head:
+        raise AssertionError("FIXTURE_HEAD_CHANGED_DURING_CAPTURE")
+    return tuple(records.SourceBlobIdentity(path, current[path][0],
+                 sha256(current[path][1]).hexdigest(), len(current[path][1])) for path in paths)
+
+
 def _entries(root, name):
     values = []
     for line in (Path(root) / (name + ".jsonl")).read_bytes().splitlines():
@@ -67,7 +95,7 @@ class QualificationTests(unittest.TestCase):
         cls.envelope = _envelope(validation_wall_ms=10_000, readback_wall_ms=10_000,
                                  aggregation_wall_ms=10_000, report_wall_ms=10_000,
                                  publication_wall_ms=10_000)
-        cls.sources = q.capture_sources()
+        cls.sources = _committed_fixture_sources()
         cls.protocol_bytes = q._git("cat-file", "blob", q._BLOB)
         cls.bundles = cls._literal_bundles(cls.plan[0])
         cls.two_plan = execution.make_work_plan(
@@ -639,10 +667,35 @@ class QualificationTests(unittest.TestCase):
 
     def test_source_guard_rejects_dirty_staged_and_unapproved_untracked_paths(self):
         for status in (b" M core_engine.py\n", b"M  experiments/program_k_e2_qualification.py\n",
-                       b"?? unrelated.py\n", b" M experiments/program_k_e2_qualification.py\n"):
+                       b"?? unrelated.py\n", b" M experiments/program_k_e2_qualification.py\n",
+                       b"?? experiments/program_k_e2_readiness.py\n",
+                       b"?? tests/test_program_k_e2_readiness.py\n",
+                       b" M tests/test_program_k_e2_qualification.py\n"):
             with self.source_capture(statuses=(status,)), self.subTest(status=status):
                 with self.assertRaisesRegex(q.QualificationError, "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE"):
                     q.capture_sources()
+
+    def test_committed_fixture_snapshot_does_not_claim_live_review_admission(self):
+        status = b"?? experiments/program_k_e2_readiness.py\n"
+        with self.source_capture(statuses=(status,), tracked=True) as observations:
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("No working-tree bytes")):
+                first = _committed_fixture_sources()
+                self.assertEqual(first, _committed_fixture_sources())
+            self.assertEqual(observations["status"], 0)
+            self.assertIs(type(first), tuple)
+            self.assertTrue(all(type(value) is records.SourceBlobIdentity for value in first))
+            with self.assertRaisesRegex(q.QualificationError, "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE"):
+                q.capture_sources()
+
+    def test_committed_fixture_snapshot_retains_authority_and_head_checks(self):
+        for drift, reason in (("protected_oid", "FIXTURE_E1_CORE_IDENTITY_DRIFT"),
+                              ("protocol_oid", "FIXTURE_FROZEN_PROTOCOL_IDENTITY_DRIFT")):
+            with self.source_capture(drift=drift), self.subTest(drift=drift):
+                with self.assertRaisesRegex(AssertionError, reason):
+                    _committed_fixture_sources()
+        with self.source_capture(heads=("a" * 40, "b" * 40)):
+            with self.assertRaisesRegex(AssertionError, "FIXTURE_HEAD_CHANGED_DURING_CAPTURE"):
+                _committed_fixture_sources()
 
     def test_source_guard_detects_head_and_status_races(self):
         for changes in ({"heads": ("a" * 40, "b" * 40)},
