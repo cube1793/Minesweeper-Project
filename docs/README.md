@@ -11,7 +11,7 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 - [Building](../BUILDING.md): Windows PyInstaller 빌드와 package 검증 절차.
 - [Stage-3 Extended index](stage3-extended/README.md): Extended roadmap와 각 milestone 상태.
 
-## Stage 1 / Stage 2 / Pre-Stage3
+## Stage 1 / Stage 2 / Pre-Stage3 — CLOSED
 
 공통 앱/Replay/ZiNi/Stage-2 실행 구조와 telemetry/benchmark 기반은 root 문서와
 아래 Pre-Stage3 명세에서 확인한다.
@@ -49,8 +49,7 @@ Validation / audit:
 - [ZiNi Improvement index](zini-improvement/README.md)
 - [ZiNi Improvement final adjudication](zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)
 
-The final quality holdout `2,010,000 .. 2,010,099` remains unopened unless a future
-explicit protocol authorizes its use.
+The final quality holdout `2,010,000 .. 2,010,099` remains forbidden/unopened.
 
 ## Stage-3 Extended — ACTIVE
 
@@ -89,6 +88,9 @@ Closed milestones / durable closeouts:
 
 Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
 Capability + Selective Physical Materialization** remains **ACTIVE**.
+Current state as of **2026-10-25 (Asia/Seoul): PRE-ACTUAL-E2**.
+Program K is the whole research program; E2 is its effectiveness experiment;
+Gate P is later production/integration qualification after E2/any required E3.
 
 Gate-R E0/E1 implementation qualification is **CLOSED / ACCEPTED**. Actual E1 is
 **E1_PASS / E1_QUALIFIED / ACCEPTED**, `progression_allowed = true`; the
@@ -99,25 +101,29 @@ The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENES
 remains **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
 
 Program K E2 implementation slices **I1–I8 are 8/8 COMPLETE / ACCEPTED**.
-The accepted pre-R0-PRE implementation parent is
-`9071469e2e4a884722ea02e2faea3441d916876c`.
-
 The [R0 Attribution Amendment v1](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
-is **CONTENT-FROZEN / ACCEPTED** at exactly **58,052 bytes**, SHA-256
-`5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf`.
-Its final independent exact-byte re-audit is **PASS — BLOCKER 0 / REQUIRED 0 /
-OPTIONAL 5**. The frozen amendment does not change treatment or research semantics;
-it replaces only the enumerated R0 attribution/admission semantics.
+is **CONTENT-FROZEN / ACCEPTED**. Amendment conformance (`cdba3513`), the accepted
+N=10000 target counts/synthetic selection, and setup-containment repair (`e6593f7`)
+are complete/accepted.
 
-**CURRENT NEXT:** amendment-conforming readiness / R0-PRE implementation correction
-and qualification. The current eight-file R0-PRE observational candidate is
-preserved but **not accepted**. Real `U_KD / I_OD / I_OK` target counts may be
-computed only after the corrected implementation is qualified and committed.
+**R0 harness implementation — FINAL ACCEPTANCE PASS / COMMITTED / PUSHED** at
+`7e7f847816fedb77cef67b576eab665afabfbfbf` (`7e7f847`),
+`feat: add Program K E2 R0 harness`; **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
+Accepted historical full-source qualification: **4117/4117 PASS**
+(`4111 MAIN + 6 ISOLATED`). Exact identities, receipts and qualification history
+are in the [current handoff](CURRENT_HANDOFF.md).
 
-R0-A/R0-B are **NOT RUN**. No final N/concurrency or E2 Operating Envelope is
-frozen. Actual E2 is **NOT AUTHORIZED / NOT RUN** and there is no effectiveness
-PASS/FAIL/DEFER result. E3 remains conditional/later; Gate P remains separate;
-production integration remains **NONE**.
+**Real R0-A and Real R0-B: NOT RUN. R0 adjudication: NOT DONE.**
+Operating Envelope/final N/concurrency: **NOT SELECTED / NOT FROZEN**.
+**Actual E2: NOT RUN / NOT AUTHORIZED YET.** E3 is conditional/not triggered;
+Gate P, production integration and native K visual acceptance are not started.
+Program K final closeout is not done; Stage-3 Extended remains **ACTIVE**.
+
+**NEXT:** separately authorized Real R0-A → R0-A adjudication → Real R0-B →
+complete R0 readiness adjudication → select/freeze Operating Envelope → separate
+Actual-E2 authorization/execution. Any triggered E3, Gate P, integration and
+completed K trace/native visual acceptance precede Program K final closeout;
+Extended closes only when all remaining requirements are satisfied.
 
 Recovery order:
 [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
