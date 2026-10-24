@@ -19,9 +19,25 @@ from experiments import program_k_e2_records as records
 
 
 I7_BASELINE = "1e6355ecfc9497338d75ef3e723fddf2445d378b"
+I8_BASELINE = "9071469e2e4a884722ea02e2faea3441d916876c"
+AMENDMENT_PATH = "docs/stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md"
+AMENDMENT_SHA256 = "5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf"
+AMENDMENT_BYTE_LENGTH = 58_052
+AMENDMENT_RECEIPT = "external-content-freeze-acceptance:2026-10-24:" + AMENDMENT_SHA256
+SYNTHETIC_INDEX_LOW = 2_000_000_000_000
+SYNTHETIC_SEARCH_LIMIT = 100_000
+# Disjoint consecutive 10k blocks; finite 100k-candidate operational ceiling.
+# Tests lower the attempt bound and use an explicitly synthetic protocol seed.
+SYNTHETIC_INDEX_HIGH = SYNTHETIC_INDEX_LOW + SYNTHETIC_SEARCH_LIMIT * 10_000
+CALIBRATION_ROUTES = ("P", "K", "D", "O", "O_K_BIND", "O_D_REPEAT",
+                      "O_K_SETUP", "O_D_SETUP")
 I8_PATHS = ("experiments/program_k_e2_readiness.py", "tests/test_program_k_e2_readiness.py")
 I7_FIXTURE_PATH = "tests/test_program_k_e2_qualification.py"
 REVIEW_PATHS = I8_PATHS + (I7_FIXTURE_PATH,)
+AMENDMENT_CANDIDATE_PATHS = tuple("experiments/program_k_e2_" + name + ".py"
+    for name in ("analysis", "audit", "execution", "operational", "readiness", "qualification"))
+AMENDMENT_REVIEW_PATHS = AMENDMENT_CANDIDATE_PATHS + tuple(
+    "tests/test_" + path.split("/")[-1] for path in AMENDMENT_CANDIDATE_PATHS)
 POSTPROCESS_PHASES = (records.Phase.AGGREGATION, records.Phase.VALIDATION,
                       records.Phase.PUBLICATION, records.Phase.READBACK, records.Phase.REPORT)
 _NS_PER_MS = 1_000_000
@@ -88,6 +104,147 @@ def ceil_fraction(value):
     return -(-value.numerator // value.denominator)
 
 
+@dataclass(frozen=True, slots=True)
+class AmendmentProvenance:
+    sha256: str = AMENDMENT_SHA256
+    byte_length: int = AMENDMENT_BYTE_LENGTH
+    external_receipt: str = AMENDMENT_RECEIPT
+    protocol_sha256: str = identity.PROTOCOL_SHA256
+    protocol_blob: str = identity.PROTOCOL_BLOB_ID
+    protocol_commit: str = identity.FREEZE_COMMIT
+
+    def __post_init__(self):
+        _need((self.sha256, self.byte_length, self.external_receipt,
+               self.protocol_sha256, self.protocol_blob, self.protocol_commit) ==
+              (AMENDMENT_SHA256, AMENDMENT_BYTE_LENGTH, AMENDMENT_RECEIPT,
+               identity.PROTOCOL_SHA256, identity.PROTOCOL_BLOB_ID, identity.FREEZE_COMMIT),
+              "FROZEN_AMENDMENT_PROVENANCE_REQUIRED")
+        _integer(self.byte_length, 1)
+
+
+@dataclass(frozen=True, slots=True)
+class SubsetCounts:
+    n: int
+    u_kd: int
+    i_od: int
+    i_ok: int
+    corpus_digest: bytes
+
+    def __post_init__(self):
+        _integer(self.n, 1)
+        _need(self.n <= identity.CANDIDATE_MAX, "COUNT_POPULATION_DOMAIN")
+        for value in (self.u_kd, self.i_od, self.i_ok):
+            _integer(value)
+        _seed(self.corpus_digest)
+        k, d, o = min(self.n, 256), min(self.n, 256), min(self.n, 128)
+        _need(max(k, d) <= self.u_kd <= min(self.n, k + d)
+              and max(0, o + d - self.n) <= self.i_od <= min(o, d)
+              and max(0, o + k - self.n) <= self.i_ok <= min(o, k), "SUBSET_COUNT_RANGE")
+
+
+def _memberships(protocol_seed, indices):
+    """Reuse the frozen digest/selector; no board or candidate-stream generation."""
+    _seed(protocol_seed)
+    _need(type(indices) is tuple and 0 < len(indices) <= identity.CANDIDATE_MAX,
+          "ORDERED_CORPUS_REQUIRED")
+    digest = identity.corpus_digest(protocol_seed, len(indices), indices)
+    sets = tuple(frozenset(identity.select_subset_positions(label, protocol_seed,
+        digest, len(indices), min(len(indices), cap))) for label, cap in (
+            (identity.KCONTROL_LABEL, identity.KCONTROL_CAP),
+            (identity.ORACLE_B_LABEL, identity.ORACLE_B_CAP),
+            (identity.DETERMINISM_LABEL, identity.DETERMINISM_CAP)))
+    return digest, sets
+
+
+def subset_counts(protocol_seed, indices):
+    """Pure supplied-corpus counts. Real target invocation requires later authority."""
+    digest, (k, o, d) = _memberships(protocol_seed, indices)
+    return SubsetCounts(len(indices), len(k | d), len(o & d), len(o & k), digest)
+
+
+def target_counts(protocol_seed, n, ordered_candidate_prefix):
+    """Prospective count helper; deliberately does not select a real prefix."""
+    _constants()
+    _need(type(n) is int and n in identity.N_LADDER
+          and type(ordered_candidate_prefix) is tuple and len(ordered_candidate_prefix) == n,
+          "ALLOWED_CANDIDATE_PREFIX_REQUIRED")
+    return subset_counts(protocol_seed, ordered_candidate_prefix)
+
+
+def validate_final_corpus_digest(counts, protocol_seed, indices):
+    _record(counts, SubsetCounts)
+    _need(len(indices) == counts.n and identity.corpus_digest(protocol_seed, counts.n, indices)
+          == counts.corpus_digest, "PROSPECTIVE_FINAL_DIGEST_MISMATCH")
+
+
+def _synthetic_domain(low, high):
+    _integer(low)
+    _integer(high, 1)
+    _need(SYNTHETIC_INDEX_LOW <= low < high <= SYNTHETIC_INDEX_HIGH,
+          "SYNTHETIC_DOMAIN_REQUIRED")
+    forbidden = ((identity.PRIMARY_LOW, identity.PRIMARY_HIGH),
+                 (identity.REHEARSAL_LOW, identity.REHEARSAL_HIGH),
+                 (1_000_000_000, 1_001_100_000), (2_010_000, 2_010_100))
+    forbidden += tuple(v.domain for v in identity.DOCUMENTED_EXPOSURE_REGISTRY if v.domain)
+    _need(all(high <= a or low >= b for a, b in forbidden)
+          and not any(low <= i < high for v in identity.DOCUMENTED_EXPOSURE_REGISTRY
+                      for i in v.indices), "RESERVED_SYNTHETIC_DOMAIN")
+
+
+def synthetic_candidate_indices(ordinal):
+    _integer(ordinal)
+    _need(ordinal < SYNTHETIC_SEARCH_LIMIT, "SYNTHETIC_SEARCH_BOUND")
+    low = SYNTHETIC_INDEX_LOW + ordinal * identity.CANDIDATE_MAX
+    high = low + identity.CANDIDATE_MAX
+    _synthetic_domain(low, high)
+    return tuple(range(low, high))
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticCorpusSelection:
+    protocol_seed: bytes
+    ordinal: int
+    counts: SubsetCounts
+
+    def __post_init__(self):
+        _seed(self.protocol_seed)
+        _record(self.counts, SubsetCounts)
+        _need(self.counts == subset_counts(self.protocol_seed, self.ordered_indices),
+              "SYNTHETIC_MEMBERSHIP_MISMATCH")
+
+    @property
+    def ordered_indices(self):
+        return synthetic_candidate_indices(self.ordinal)
+
+
+def search_synthetic_corpus(target_u_kd, target_i_od, target_i_ok, *,
+        protocol_seed=bytes.fromhex(identity.PROTOCOL_SHA256),
+        attempt_limit=SYNTHETIC_SEARCH_LIMIT, auxiliary_k_bind=False,
+        auxiliary_d_repeat=False):
+    """First matching block, or None (NOT READY), with no fallback.
+
+    Production uses the frozen seed/domain/bound. Explicit seed and smaller
+    attempt bound support bounded synthetic-only qualification; no real-target
+    selection is performed at import or by readiness validation.
+    """
+    _seed(protocol_seed)
+    _integer(attempt_limit, 1)
+    _need(attempt_limit <= SYNTHETIC_SEARCH_LIMIT, "SYNTHETIC_SEARCH_BOUND")
+    for value in (target_u_kd, target_i_od, target_i_ok):
+        _integer(value)
+    _need(256 <= target_u_kd <= 512 and target_i_od <= 128 and target_i_ok <= 128,
+          "SYNTHETIC_TARGET_RANGE")
+    _boolean(auxiliary_k_bind)
+    _boolean(auxiliary_d_repeat)
+    for ordinal in range(attempt_limit):
+        counts = subset_counts(protocol_seed, synthetic_candidate_indices(ordinal))
+        if (counts.u_kd >= target_u_kd
+                and counts.i_od >= max(target_i_od, int(not auxiliary_d_repeat))
+                and counts.i_ok >= max(target_i_ok, int(not auxiliary_k_bind))):
+            return SyntheticCorpusSelection(protocol_seed, ordinal, counts)
+    return None
+
+
 def _rehearsal_indices(seed):
     _seed(seed)
     _constants()
@@ -102,9 +259,11 @@ class R0APlan:
 
     protocol_seed: bytes
     ordered_indices: tuple
+    provenance: AmendmentProvenance = AmendmentProvenance()
 
     def __post_init__(self):
         _seed(self.protocol_seed)
+        _record(self.provenance, AmendmentProvenance)
         _need(type(self.ordered_indices) is tuple, "ORDERED_IDENTITIES_REQUIRED")
         for index in self.ordered_indices:
             _integer(index)
@@ -132,13 +291,7 @@ class ByteAccounting(Enum):
 
 @dataclass(frozen=True, slots=True)
 class ComponentMeasurement:
-    """One separately accounted P/K/O/D 64-unit component, not I6 receipt time.
-
-    Oracle-B units include each scheduled applicability check. A unit with no
-    applicable private comparison still has a completed operational path/record.
-    Durable bytes include attributable persistence/progress/cleanup overhead;
-    each archived byte belongs to exactly one component.
-    """
+    """P/K/D directly timed standalone route and attributable bundle bytes only."""
 
     wall_ns: int
     durable_bytes: int
@@ -152,6 +305,93 @@ class ComponentMeasurement:
         _need(self.completed_units <= identity.R0_A_BOARD_COUNT, "COMPONENT_COUNT")
         _need(self.max_unit_bytes <= self.durable_bytes
               <= identity.R0_A_BOARD_COUNT * self.max_unit_bytes, "COMPONENT_BYTE_ACCOUNTING")
+
+
+@dataclass(frozen=True, slots=True)
+class OracleMeasurement:
+    """Scheduled route completion is independent of audit-only zero bytes."""
+    wall_ns: int
+    durable_bytes: int
+    max_unit_bytes: int
+    completed_units: int
+
+    def __post_init__(self):
+        _integer(self.wall_ns, 1)
+        for value in (self.durable_bytes, self.max_unit_bytes, self.completed_units):
+            _integer(value)
+        _need(self.completed_units <= 64 and self.max_unit_bytes <= self.durable_bytes
+              <= 64 * self.max_unit_bytes, "ORACLE_BYTE_ACCOUNTING")
+
+
+@dataclass(frozen=True, slots=True)
+class WallRouteMeasurement:
+    wall_ns: int
+    completed_units: int
+
+    def __post_init__(self):
+        _integer(self.wall_ns, 1)
+        _integer(self.completed_units)
+        _need(self.completed_units <= 64, "ROUTE_COUNT")
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceMeasurement:
+    """Exact rank-0 CM observations from every setup route, never whole archives."""
+    route: str
+    durable_bytes: int
+    max_unit_bytes: int
+    completed_units: int
+
+    def __post_init__(self):
+        _need(self.route in ("K", "D", "O_K_SETUP", "O_D_SETUP"), "REFERENCE_ROUTE")
+        for value in (self.durable_bytes, self.max_unit_bytes):
+            _integer(value, 1)
+        _integer(self.completed_units)
+        _need(self.completed_units <= 64 and self.max_unit_bytes <= self.durable_bytes
+              <= 64 * self.max_unit_bytes, "REFERENCE_BYTE_ACCOUNTING")
+
+
+@dataclass(frozen=True, slots=True)
+class RouteContainment:
+    route: str
+    max_worker_memory_bytes: int
+    max_coordinator_memory_bytes: int
+    max_combined_memory_bytes: int
+    max_decision_wall_ns: int
+    max_arm_wall_ns: int
+    max_case_wall_ns: int
+    max_shadow_wall_ns: int
+    max_physical_inputs: int
+    max_payload_bytes: int
+    launcher_wall_ns: int
+    watchdogs_complete: bool
+    resources_complete: bool
+    cleanup_complete: bool
+    progress_complete: bool
+    readback_complete: bool
+    watchdog_breaches: int = 0
+    resource_breaches: int = 0
+
+    def __post_init__(self):
+        _need(self.route in CALIBRATION_ROUTES, "CONTAINMENT_ROUTE")
+        for name in _CONTAINMENT_MAXIMA + ("max_payload_bytes", "launcher_wall_ns"):
+            _integer(getattr(self, name), 0 if name in (
+                "max_decision_wall_ns", "max_shadow_wall_ns") else 1)
+        _need(self.max_combined_memory_bytes >= max(self.max_worker_memory_bytes,
+              self.max_coordinator_memory_bytes), "MEMORY_PEAK_ACCOUNTING")
+        _need(self.max_decision_wall_ns <= self.max_arm_wall_ns <= self.max_case_wall_ns,
+              "OBSERVED_WALL_ORDER")
+        for name in _CONTAINMENT_COMPLETENESS + ("readback_complete",):
+            _boolean(getattr(self, name))
+        _integer(self.watchdog_breaches)
+        _integer(self.resource_breaches)
+
+
+_CONTAINMENT_MAXIMA = ("max_worker_memory_bytes", "max_coordinator_memory_bytes",
+    "max_combined_memory_bytes", "max_decision_wall_ns", "max_arm_wall_ns",
+    "max_case_wall_ns", "max_shadow_wall_ns", "max_physical_inputs")
+_CONTAINMENT_COMPLETENESS = ("watchdogs_complete", "resources_complete",
+                           "cleanup_complete", "progress_complete")
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +409,12 @@ class R0AConcurrencyMeasurement:
     plan: R0APlan
     primary: ComponentMeasurement
     k_control: ComponentMeasurement
-    oracle_b: ComponentMeasurement
+    oracle_primary: OracleMeasurement
     determinism: ComponentMeasurement
+    oracle_k_bind: WallRouteMeasurement
+    oracle_d_repeat: OracleMeasurement
+    references: tuple
+    containment: tuple
     wall_accounting: WallAccounting
     byte_accounting: ByteAccounting
     envelope: operational.OperatingEnvelope
@@ -194,9 +438,21 @@ class R0AConcurrencyMeasurement:
         _integer(self.concurrency, 1)
         _need(self.concurrency in identity.R0_A_CONCURRENCY_CANDIDATES, "CONCURRENCY_DOMAIN")
         _record(self.plan, R0APlan)
-        for component in _components(self):
+        for component in (self.primary, self.k_control, self.determinism):
             _record(component, ComponentMeasurement)
-        _need(type(self.wall_accounting) is WallAccounting, "WALL_ACCOUNTING_REQUIRED")
+        for component in (self.oracle_primary, self.oracle_d_repeat):
+            _record(component, OracleMeasurement)
+        _record(self.oracle_k_bind, WallRouteMeasurement)
+        _need(type(self.references) is tuple and tuple(v.route for v in self.references)
+              == ("K", "D", "O_K_SETUP", "O_D_SETUP"), "REFERENCE_ROUTE_COVERAGE")
+        for reference in self.references:
+            _record(reference, ReferenceMeasurement)
+        _need(type(self.containment) is tuple and tuple(v.route for v in self.containment)
+              == CALIBRATION_ROUTES, "CONTAINMENT_ROUTE_COVERAGE")
+        for route in self.containment:
+            _record(route, RouteContainment)
+        _need(self.wall_accounting is WallAccounting.CONSERVATIVE_STANDALONE,
+              "COMPLETE_STANDALONE_WALL_REQUIRED")
         _need(type(self.byte_accounting) is ByteAccounting, "DISJOINT_BYTES_REQUIRED")
         _record(self.envelope, operational.OperatingEnvelope)
         _need(self.envelope.concurrency == self.concurrency, "ENVELOPE_CONCURRENCY_MISMATCH")
@@ -214,6 +470,12 @@ class R0AConcurrencyMeasurement:
             _boolean(value)
         _integer(self.watchdog_breaches)
         _integer(self.resource_breaches)
+        for name in _CONTAINMENT_MAXIMA:
+            _need(getattr(self, name) >= max(getattr(v, name) for v in self.containment),
+                  "CONTAINMENT_MAXIMUM_OMITTED")
+        for name in ("watchdog_breaches", "resource_breaches"):
+            _need(getattr(self, name) >= max(getattr(v, name) for v in self.containment),
+                  "CONTAINMENT_BREACH_OMITTED")
 
     @property
     def primary_pairs_per_hour(self):
@@ -222,7 +484,8 @@ class R0AConcurrencyMeasurement:
 
 
 def _components(measurement):
-    return (measurement.primary, measurement.k_control, measurement.oracle_b, measurement.determinism)
+    return (measurement.primary, measurement.k_control, measurement.determinism,
+            measurement.oracle_primary, measurement.oracle_k_bind, measurement.oracle_d_repeat)
 
 
 def validate_r0a_measurements(measurements):
@@ -235,6 +498,9 @@ def validate_r0a_measurements(measurements):
               "R0A_COMPONENT_INCOMPLETE")
         _need(value.watchdogs_complete and value.resources_complete and value.cleanup_complete
               and value.progress_complete, "R0A_OPERATIONAL_EVIDENCE_INCOMPLETE")
+        _need(all(v.completed_units == 64 for v in value.references), "R0A_REFERENCE_INCOMPLETE")
+        _need(all(all(getattr(v, name) for name in _CONTAINMENT_COMPLETENESS)
+                  and v.readback_complete for v in value.containment), "R0A_ROUTE_INCOMPLETE")
     ordered = tuple(sorted(measurements, key=lambda v: v.concurrency))
     _need(tuple(v.concurrency for v in ordered) == identity.R0_A_CONCURRENCY_CANDIDATES,
           "R0A_CONCURRENCY_COVERAGE")
@@ -246,12 +512,57 @@ def validate_r0a_measurements(measurements):
 class ComponentSizes:
     primary: int
     k_control: int
-    oracle_b: int
+    oracle_primary: int
+    oracle_repeat: int
     determinism: int
+    reference: int
 
     def __post_init__(self):
-        for value in _components(self):
+        for value in (self.primary, self.k_control, self.determinism, self.reference):
             _integer(value, 1)
+        _integer(self.oracle_primary)
+        _integer(self.oracle_repeat)
+
+
+def _sizes(value):
+    return (value.primary, value.k_control, value.oracle_primary, value.oracle_repeat,
+            value.determinism, value.reference)
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticWorkload:
+    selection: SyntheticCorpusSelection
+    target: SubsetCounts
+    auxiliary_k_bind_complete: bool = False
+    auxiliary_d_repeat_complete: bool = False
+
+    def __post_init__(self):
+        _record(self.selection, SyntheticCorpusSelection)
+        _record(self.target, SubsetCounts)
+        _need(self.target.n == identity.CANDIDATE_MAX, "NMAX_TARGET_REQUIRED")
+        _boolean(self.auxiliary_k_bind_complete)
+        _boolean(self.auxiliary_d_repeat_complete)
+        actual = self.selection.counts
+        _need(all(getattr(actual, n) >= getattr(self.target, n)
+                  for n in ("u_kd", "i_od", "i_ok")), "SYNTHETIC_COUNT_DOMINANCE")
+        _need((actual.i_ok > 0 or self.auxiliary_k_bind_complete)
+              and (actual.i_od > 0 or self.auxiliary_d_repeat_complete),
+              "ORACLE_STRUCTURAL_COVERAGE_REQUIRED")
+
+    @property
+    def unit_counts(self):
+        actual = self.selection.counts
+        return (10000, 256, 128, actual.i_od, 256, actual.u_kd)
+
+
+def validate_synthetic_work_plan(plan, workload):
+    """Later harness seam. Retain I7 and exact own-corpus membership validation."""
+    _record(workload, SyntheticWorkload)
+    qualification._plan(plan)
+    _need(plan[0].protocol_seed == workload.selection.protocol_seed
+          and tuple(v.board.game_index for v in plan) == workload.selection.ordered_indices,
+          "SYNTHETIC_WORK_PLAN_IDENTITY")
+    return plan
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,17 +581,64 @@ class R0BSizingPlan:
     def n_max(self):
         return identity.CANDIDATE_MAX
 
-    @property
-    def unit_counts(self):
-        return (identity.CANDIDATE_MAX, identity.KCONTROL_CAP,
-                identity.ORACLE_B_CAP, identity.DETERMINISM_CAP)
-
-
 def derive_r0b_sizing_plan(measurements):
     values = validate_r0a_measurements(measurements)
-    maxima = tuple(max(_components(v)[i].max_unit_bytes for v in values) for i in range(4))
+    oracle = max(o.max_unit_bytes for v in values for o in (v.oracle_primary, v.oracle_d_repeat))
+    maxima = (max(v.primary.max_unit_bytes for v in values),
+              max(v.k_control.max_unit_bytes for v in values), oracle, oracle,
+              max(v.determinism.max_unit_bytes for v in values),
+              max(r.max_unit_bytes for v in values for r in v.references))
     sizes = ComponentSizes(*(ceil_fraction(identity.ARCHIVE_BYTES_SAFETY_FACTOR * v) for v in maxima))
     return R0BSizingPlan(values[0].plan.protocol_seed, sizes)
+
+
+def synthetic_unit_payloads(workload, sizes):
+    """All actual PRIMARY/D/K composite units, including zero-byte O schedules."""
+    _record(workload, SyntheticWorkload)
+    _record(sizes, ComponentSizes)
+    _, (k, o, d) = _memberships(workload.selection.protocol_seed,
+                               workload.selection.ordered_indices)
+    result = []
+    for position in range(identity.CANDIDATE_MAX):
+        families = ("primary",) + (("reference",) if position in k | d else ())
+        families += ("oracle_primary",) if position in o else ()
+        result.append((position, "PRIMARY", families, sum(getattr(sizes, f) for f in families)))
+        if position in d:
+            families = ("determinism",) + (("oracle_repeat",) if position in o else ())
+            result.append((position, "DETERMINISM", families, sum(getattr(sizes, f) for f in families)))
+        if position in k:
+            result.append((position, "K_CONTROL", ("k_control",), sizes.k_control))
+    return tuple(result)
+
+
+def validate_payload_fit(workload, sizes, max_payload_bytes):
+    _integer(max_payload_bytes, 1)
+    _need(all(v[3] <= max_payload_bytes for v in synthetic_unit_payloads(workload, sizes)),
+          "R0B_COMPOSITE_PAYLOAD_CAP")
+
+
+@dataclass(frozen=True, slots=True)
+class SupportingStreams:
+    """Actual sealed I7 supports; receipt/status claims stay outside bundle sizes."""
+    streams: tuple
+    receipts_complete: bool
+    status_complete: bool
+    work_plan_revalidated: bool
+    qualification_complete: bool
+    resources_complete: bool
+    cleanup_complete: bool
+
+    def __post_init__(self):
+        _need(type(self.streams) is tuple and tuple(v.name for v in self.streams)
+              == ("operations", "resources", qualification.IDENTITY_STREAM),
+              "R0B_SUPPORTING_STREAM_COVERAGE")
+        for value in self.streams:
+            _record(value, records.StreamDigest)
+            _need(value.byte_length > 0 and value.record_count > 0, "R0B_SUPPORTING_STREAM_EMPTY")
+        for value in (self.receipts_complete, self.status_complete, self.work_plan_revalidated,
+                      self.qualification_complete, self.resources_complete, self.cleanup_complete):
+            _boolean(value)
+            _need(value, "R0B_SUPPORTING_STRUCTURE_INCOMPLETE")
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +692,13 @@ class R0BMeasurement:
     synthetic_non_evidence: bool
     unit_bytes: ComponentSizes
     archive_bytes: int
+    workload: SyntheticWorkload
+    supporting: SupportingStreams
+    realized_fixed_allowance_bytes: int
+    realized_max_unit_payload_bytes: int
+    max_combined_memory_bytes: int
+    containment_complete: bool
+    provenance: AmendmentProvenance = AmendmentProvenance()
 
     def __post_init__(self):
         _constants()
@@ -345,6 +710,13 @@ class R0BMeasurement:
         for phase in self.phases:
             _record(phase, PhaseMeasurement)
         _record(self.unit_bytes, ComponentSizes)
+        _record(self.workload, SyntheticWorkload)
+        _record(self.supporting, SupportingStreams)
+        _record(self.provenance, AmendmentProvenance)
+        _integer(self.realized_fixed_allowance_bytes)
+        _integer(self.realized_max_unit_payload_bytes, 1)
+        _integer(self.max_combined_memory_bytes, 1)
+        _boolean(self.containment_complete)
         for value in (self.shared_bootstrap_complete, self.compact_scalar_bootstrap,
                       self.streaming_reconstruction, self.readback_complete,
                       self.progress_bounded, self.synthetic_non_evidence):
@@ -365,35 +737,57 @@ def _complete_r0b(value):
           and value.streaming_reconstruction and value.readback_complete
           and value.progress_bounded and value.synthetic_non_evidence,
           "R0B_READINESS_INCOMPLETE")
+    _need(value.containment_complete, "R0B_CONTAINMENT_INCOMPLETE")
+    _need(value.realized_fixed_allowance_bytes <= identity.FIXED_REPORT_RECEIPT_ALLOWANCE,
+          "R0B_FIXED_ALLOWANCE_CAP")
+    report_bytes = next(p.output_bytes for p in value.phases if p.phase is records.Phase.REPORT)
+    _need(value.realized_fixed_allowance_bytes >= sum(v.byte_length for v in value.supporting.streams)
+          + report_bytes,
+          "R0B_SUPPORTING_BYTE_ACCOUNTING")
+    _need(value.archive_bytes <= identity.MAX_ARCHIVE_BYTES, "R0B_ARCHIVE_CAP")
+    _need(identity.POSTPROCESS_WALL_SAFETY_FACTOR * value.complete_wall_ns
+          <= identity.MAX_ACTUAL_E2_LAUNCHER_WALL_SECONDS * _NS_PER_SECOND,
+          "R0B_POSTPROCESS_WALL_CAP")
+    _need(identity.MEMORY_SAFETY_FACTOR * value.max_combined_memory_bytes
+          <= identity.MAX_COMBINED_MEMORY_BYTES, "R0B_MEMORY_CAP")
     return value
 
 
 def validate_r0b_measurement(value, measurements):
     _complete_r0b(value)
     sizing = derive_r0b_sizing_plan(measurements)
-    _need(value.protocol_seed == sizing.protocol_seed, "R0B_PROTOCOL_IDENTITY_MISMATCH")
-    _need(all(actual >= needed for actual, needed in zip(_components(value.unit_bytes),
-              _components(sizing.unit_bytes))), "R0B_PAYLOAD_UNDERSIZED")
+    _need(value.protocol_seed == sizing.protocol_seed == value.workload.selection.protocol_seed,
+          "R0B_PROTOCOL_IDENTITY_MISMATCH")
+    _need(all(actual >= needed for actual, needed in zip(_sizes(value.unit_bytes),
+              _sizes(sizing.unit_bytes))), "R0B_PAYLOAD_UNDERSIZED")
     _need(value.archive_bytes >= sum(n * size for n, size in
-              zip(sizing.unit_counts, _components(value.unit_bytes))), "R0B_ARCHIVE_ACCOUNTING")
+              zip(value.workload.unit_counts, _sizes(value.unit_bytes)))
+          + value.realized_fixed_allowance_bytes, "R0B_ARCHIVE_ACCOUNTING")
     _need(value.archive_bytes >= max(p.output_bytes for p in value.phases), "R0B_OUTPUT_ACCOUNTING")
+    cap = min(v.envelope.max_payload_bytes for v in measurements)
+    validate_payload_fit(value.workload, value.unit_bytes, cap)
+    minimum_maximum = max(v[3] for v in synthetic_unit_payloads(value.workload, value.unit_bytes))
+    _need(minimum_maximum <= value.realized_max_unit_payload_bytes <= cap,
+          "R0B_REALIZED_PAYLOAD_CAP")
     return value
 
 
-def _scaled(n, values):
+def _scaled(n, values, counts):
     _constants()
     _integer(n, 1)
     _need(n <= identity.CANDIDATE_MAX, "PROJECTION_N_DOMAIN")
-    counts = (n, min(n, identity.KCONTROL_CAP), min(n, identity.ORACLE_B_CAP),
-              min(n, identity.DETERMINISM_CAP))
+    _need(len(values) == len(counts), "PROJECTION_TERM_COUNT")
     return sum((Fraction(value * count, identity.R0_A_BOARD_COUNT)
                 for value, count in zip(values, counts)), Fraction())
 
 
-def project_execution(n, measurement):
+def project_execution(n, measurement, counts):
     _record(measurement, R0AConcurrencyMeasurement)
+    _record(counts, SubsetCounts)
+    _need(counts.n == n, "PROJECTION_COUNT_POPULATION")
     return identity.EXECUTION_WALL_SAFETY_FACTOR * _scaled(n,
-        tuple(v.wall_ns for v in _components(measurement)))
+        tuple(v.wall_ns for v in _components(measurement)),
+        (n, min(n, 256), min(n, 256), min(n, 128), counts.i_ok, counts.i_od))
 
 
 def project_postprocess(measurement):
@@ -401,7 +795,7 @@ def project_postprocess(measurement):
     return identity.POSTPROCESS_WALL_SAFETY_FACTOR * measurement.complete_wall_ns
 
 
-def project_archive(n, measurements):
+def project_archive(n, measurements, counts):
     """Concurrency-independent §21.6 projection.
 
     Conservative implementation convention: use the componentwise largest
@@ -409,13 +803,25 @@ def project_archive(n, measurements):
     estimate when serialization/progress overhead differs between rehearsals.
     """
     values = validate_r0a_measurements(measurements)
-    maxima = tuple(max(_components(v)[i].durable_bytes for v in values) for i in range(4))
-    return identity.ARCHIVE_BYTES_SAFETY_FACTOR * _scaled(n, maxima) + identity.FIXED_REPORT_RECEIPT_ALLOWANCE
+    _record(counts, SubsetCounts)
+    _need(counts.n == n, "PROJECTION_COUNT_POPULATION")
+    maxima = (max(v.primary.durable_bytes for v in values),
+              max(v.k_control.durable_bytes for v in values),
+              max(o.durable_bytes for v in values for o in (v.oracle_primary, v.oracle_d_repeat)),
+              max(v.determinism.durable_bytes for v in values),
+              max(r.durable_bytes for v in values for r in v.references))
+    return identity.ARCHIVE_BYTES_SAFETY_FACTOR * _scaled(n, maxima,
+        (n, min(n, 256), min(n, 128) + counts.i_od, min(n, 256), counts.u_kd)
+        ) + identity.FIXED_REPORT_RECEIPT_ALLOWANCE
 
 
-def project_memory(measurement):
+def project_memory(measurement, r0b=None):
     _record(measurement, R0AConcurrencyMeasurement)
-    return identity.MEMORY_SAFETY_FACTOR * measurement.max_combined_memory_bytes
+    maximum = measurement.max_combined_memory_bytes
+    if r0b is not None:
+        _complete_r0b(r0b)
+        maximum = max(maximum, r0b.max_combined_memory_bytes)
+    return identity.MEMORY_SAFETY_FACTOR * maximum
 
 
 def _cap_reasons(value):
@@ -441,8 +847,18 @@ def _cap_reasons(value):
         reasons.append("TESTED_MEMORY_CAP")
     if value.max_physical_inputs > envelope.max_physical_inputs:
         reasons.append("PHYSICAL_INPUT_CAP")
-    if sum(v.durable_bytes for v in _components(value)) > envelope.archive_cap_bytes:
+    if (sum(v.durable_bytes for v in (value.primary, value.k_control,
+            value.determinism, value.oracle_primary, value.oracle_d_repeat))
+            + max(v.durable_bytes for v in value.references)) > envelope.archive_cap_bytes:
         reasons.append("TESTED_ARCHIVE_CAP")
+    if any(v.max_payload_bytes > envelope.max_payload_bytes for v in value.containment):
+        reasons.append("PAYLOAD_CAP")
+    if any(v.launcher_wall_ns >= envelope.max_launcher_wall_ms * _NS_PER_MS
+           for v in value.containment):
+        reasons.append("CALIBRATION_LAUNCHER_CAP")
+    if any(v.launcher_wall_ns >= envelope.max_job_wall_ms * _NS_PER_MS
+           for v in value.containment):
+        reasons.append("CALIBRATION_JOB_CAP")
     return tuple(reasons)
 
 
@@ -471,6 +887,8 @@ class AdmissionProjection:
               "LAUNCHER_ACCOUNTING")
         allowed = ("WATCHDOG_BREACH", "RESOURCE_BREACH", "DECISION_CAP", "ARM_CAP", "CASE_CAP",
                    "SHADOW_CAP", "TESTED_MEMORY_CAP", "PHYSICAL_INPUT_CAP", "TESTED_ARCHIVE_CAP",
+                   "PAYLOAD_CAP", "CALIBRATION_LAUNCHER_CAP",
+                   "CALIBRATION_JOB_CAP",
                    "LAUNCHER_CEILING", "ARCHIVE_CEILING", "MEMORY_CEILING")
         _need(type(self.reasons) is tuple and all(type(v) is str and v in allowed for v in self.reasons)
               and self.reasons == tuple(v for v in allowed if v in self.reasons), "ADMISSION_REASON_DOMAIN")
@@ -498,11 +916,16 @@ class CandidateEnvelopeProposal:
     n: int
     envelope: operational.OperatingEnvelope
     projection: AdmissionProjection
+    target_counts: SubsetCounts
+    provenance: AmendmentProvenance = AmendmentProvenance()
 
     def __post_init__(self):
         _integer(self.n, 1)
         _record(self.envelope, operational.OperatingEnvelope)
         _record(self.projection, AdmissionProjection)
+        _record(self.target_counts, SubsetCounts)
+        _record(self.provenance, AmendmentProvenance)
+        _need(self.target_counts.n == self.n, "PROPOSAL_TARGET_POPULATION")
         _need(self.projection.admitted and self.n == self.projection.n
               and self.envelope.concurrency == self.projection.concurrency,
               "ADMITTED_PROPOSAL_REQUIRED")
@@ -526,9 +949,19 @@ class AdmissionDecision:
     state: AdmissionState
     projections: tuple
     candidate: CandidateEnvelopeProposal | None
+    target_counts: tuple
+    realized_synthetic_counts: SubsetCounts
+    provenance: AmendmentProvenance = AmendmentProvenance()
 
     def __post_init__(self):
         _constants()
+        _record(self.provenance, AmendmentProvenance)
+        _record(self.realized_synthetic_counts, SubsetCounts)
+        _validate_targets(self.target_counts)
+        _need(self.realized_synthetic_counts.n == identity.CANDIDATE_MAX
+              and all(getattr(self.realized_synthetic_counts, name)
+                      >= getattr(self.target_counts[-1], name)
+                      for name in ("u_kd", "i_od", "i_ok")), "ADMISSION_SYNTHETIC_DOMINANCE")
         _need(type(self.state) is AdmissionState and type(self.projections) is tuple,
               "ADMISSION_DECISION_TYPE")
         for projection in self.projections:
@@ -541,12 +974,14 @@ class AdmissionDecision:
             _need(not admitted and self.candidate is None, "NOT_READY_RECONCILIATION")
         else:
             _record(self.candidate, CandidateEnvelopeProposal)
+            _need(self.candidate.target_counts == next(v for v in self.target_counts
+                  if v.n == self.candidate.n), "ADMISSION_TARGET_IDENTITY")
             _need(bool(admitted) and self.candidate.projection == max(admitted,
                   key=lambda p: (p.n, p.primary_pairs_per_hour, -p.concurrency)),
                   "SELECTION_PRIORITY")
 
 
-def _proposal(value, r0b, projection):
+def _proposal(value, r0b, projection, counts):
     """Only scaling-dependent caps change; tested unit safety caps are retained.
 
     Ceil each Fraction to integer ms/bytes. Individual rounded phase budgets may
@@ -559,15 +994,24 @@ def _proposal(value, r0b, projection):
     phases = tuple(ms(identity.POSTPROCESS_WALL_SAFETY_FACTOR * p.wall_ns) for p in r0b.phases)
     envelope = replace(value.envelope, max_job_wall_ms=job, max_launcher_wall_ms=launcher,
         worker_memory_cap_bytes=ceil_fraction(identity.MEMORY_SAFETY_FACTOR * value.max_worker_memory_bytes),
-        coordinator_memory_cap_bytes=ceil_fraction(identity.MEMORY_SAFETY_FACTOR * value.max_coordinator_memory_bytes),
+        coordinator_memory_cap_bytes=ceil_fraction(identity.MEMORY_SAFETY_FACTOR * max(
+            value.max_coordinator_memory_bytes, r0b.max_combined_memory_bytes)),
         memory_cap_bytes=ceil_fraction(projection.memory_bytes),
         archive_cap_bytes=ceil_fraction(projection.archive_bytes),
         aggregation_wall_ms=phases[0], validation_wall_ms=phases[1], publication_wall_ms=phases[2],
         readback_wall_ms=phases[3], report_wall_ms=phases[4])
-    return CandidateEnvelopeProposal(projection.n, envelope, projection)
+    return CandidateEnvelopeProposal(projection.n, envelope, projection, counts)
 
 
-def select_operating_candidate(measurements, r0b):
+def _validate_targets(targets):
+    _need(type(targets) is tuple, "TARGET_COUNT_TUPLE_REQUIRED")
+    for value in targets:
+        _record(value, SubsetCounts)
+    _need(tuple(v.n for v in targets) == identity.N_LADDER, "TARGET_COUNT_LADDER_REQUIRED")
+    return targets
+
+
+def select_operating_candidate(measurements, r0b, target_counts):
     """Pure complete-facts admission; no measured facts are acquired here.
 
     Malformed/incomplete facts raise ReadinessError (or the reused I6 envelope
@@ -576,13 +1020,16 @@ def select_operating_candidate(measurements, r0b):
     """
     values = validate_r0a_measurements(measurements)
     validate_r0b_measurement(r0b, values)
+    _validate_targets(target_counts)
+    _need(r0b.workload.target == target_counts[-1], "R0B_TARGET_IDENTITY_MISMATCH")
     postprocess = project_postprocess(r0b)
     projections = []
-    for n in identity.N_LADDER:
-        archive = project_archive(n, values)
+    for counts in target_counts:
+        n = counts.n
+        archive = project_archive(n, values, counts)
         for value in values:
-            execution = project_execution(n, value)
-            memory = project_memory(value)
+            execution = project_execution(n, value, counts)
+            memory = project_memory(value, r0b)
             launcher = execution + postprocess
             reasons = list(_cap_reasons(value))
             if launcher > identity.MAX_ACTUAL_E2_LAUNCHER_WALL_SECONDS * _NS_PER_SECOND:
@@ -596,10 +1043,13 @@ def select_operating_candidate(measurements, r0b):
     projections = tuple(projections)
     admitted = tuple(p for p in projections if p.admitted)
     if not admitted:
-        return AdmissionDecision(AdmissionState.ACTUAL_E2_NOT_READY, projections, None)
+        return AdmissionDecision(AdmissionState.ACTUAL_E2_NOT_READY, projections, None,
+                                 target_counts, r0b.workload.selection.counts)
     selected = max(admitted, key=lambda p: (p.n, p.primary_pairs_per_hour, -p.concurrency))
     value = next(v for v in values if v.concurrency == selected.concurrency)
-    return AdmissionDecision(AdmissionState.CANDIDATE_PROPOSED, projections, _proposal(value, r0b, selected))
+    counts = next(v for v in target_counts if v.n == selected.n)
+    return AdmissionDecision(AdmissionState.CANDIDATE_PROPOSED, projections,
+        _proposal(value, r0b, selected, counts), target_counts, r0b.workload.selection.counts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -609,6 +1059,7 @@ class ReviewSourceBinding:
     committed: tuple
     candidates: tuple
     status: str
+    provenance: AmendmentProvenance = AmendmentProvenance()
 
 
 def _source_identity(path, blob, data):
@@ -616,26 +1067,25 @@ def _source_identity(path, blob, data):
 
 
 def capture_review_sources():
-    """Authenticate this exact uncommitted I8 review without changing Git/I7.
+    """Read-only exact amendment review capture at the live descendant HEAD.
 
-    Committed continuity uses Git blob bytes; candidate identities hash the exact
-    working bytes (including CRLF if present). Only the two new untracked files
-    and the optional unstaged I7 fixture correction are permitted. This guard is
-    deliberately specific to the accepted I7 baseline, not a future R0 launcher.
+    Preserve accepted I7 qualification hygiene: this review-only dirty whitelist
+    never authorizes a dirty real R0 launch or weakens qualification.capture_sources.
     """
     head = _git("rev-parse", "HEAD").strip().decode("ascii")
     origin = _git("rev-parse", "origin/main").strip().decode("ascii")
     branch = _git("branch", "--show-current").strip().decode("ascii")
-    _need(head == origin == I7_BASELINE and branch == "main", "ACCEPTED_I7_BASELINE_REQUIRED")
+    _need(branch == "main", "MAIN_BRANCH_REQUIRED")
+    _git("merge-base", "--is-ancestor", I8_BASELINE, head)
     status = _git("status", "--porcelain=v1", "--untracked-files=all").decode("utf-8")
-    allowed = {"?? " + path for path in I8_PATHS} | {" M " + I7_FIXTURE_PATH}
+    allowed = {" M " + path for path in AMENDMENT_REVIEW_PATHS}
     lines = status.splitlines()
-    _need(len(lines) == len(set(lines)) and set(lines) <= allowed
-          and {"?? " + path for path in I8_PATHS} <= set(lines),
+    _need(len(lines) == len(set(lines)) and set(lines) <= allowed,
           "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE")
     paths = tuple(sorted(set(qualification._PROTECTED + qualification._E2
         + tuple("tests/test_" + path.split("/")[-1] for path in qualification._E2)
-        + ("benchmark_board.py", identity.PROTOCOL_PATH, "scripts/run_source_unittest_isolated.py"))))
+        + AMENDMENT_REVIEW_PATHS + (AMENDMENT_PATH,
+        "benchmark_board.py", identity.PROTOCOL_PATH, "scripts/run_source_unittest_isolated.py"))))
     refs = tuple(head + ":" + path for path in paths)
     refs += tuple(identity.E1_CORE_BASELINE + ":" + path for path in qualification._PROTECTED)
     refs += (identity.FREEZE_COMMIT + ":" + identity.PROTOCOL_PATH,)
@@ -647,17 +1097,22 @@ def capture_review_sources():
     _need(current[identity.PROTOCOL_PATH] == frozen and frozen[0] == identity.PROTOCOL_BLOB_ID,
           "FROZEN_PROTOCOL_IDENTITY_DRIFT")
     identity.validate_protocol_bytes(frozen[1])
-    candidates = tuple((path, (_ROOT / path).read_bytes()) for path in sorted(REVIEW_PATHS))
+    amendment = (_ROOT / AMENDMENT_PATH).read_bytes()
+    _need(len(amendment) == AMENDMENT_BYTE_LENGTH and sha256(amendment).hexdigest()
+          == AMENDMENT_SHA256 and current[AMENDMENT_PATH][1] == amendment,
+          "FROZEN_AMENDMENT_IDENTITY_DRIFT")
+    candidates = tuple((path, (_ROOT / path).read_bytes()) for path in sorted(AMENDMENT_REVIEW_PATHS))
     # Do not rely only on porcelain: also detect accepted working-source drift
     # hidden by index flags. CRLF conversion is not a source-content change.
     for path in paths:
-        if path != I7_FIXTURE_PATH:
+        if path not in AMENDMENT_REVIEW_PATHS:
             _need((_ROOT / path).read_bytes().replace(b"\r\n", b"\n")
                   == current[path][1].replace(b"\r\n", b"\n"), "ACCEPTED_WORKING_SOURCE_DRIFT")
     _need(_git("rev-parse", "HEAD").strip().decode("ascii") == head
           and _git("rev-parse", "origin/main").strip().decode("ascii") == origin
           and _git("branch", "--show-current").strip().decode("ascii") == branch
           and _git("status", "--porcelain=v1", "--untracked-files=all").decode("utf-8") == status
+          and (_ROOT / AMENDMENT_PATH).read_bytes() == amendment
           and all((_ROOT / path).read_bytes() == data for path, data in candidates),
           "SOURCE_CHANGED_DURING_CAPTURE")
     return ReviewSourceBinding(head, records.ProtocolIdentity(identity.PROTOCOL_PATH,

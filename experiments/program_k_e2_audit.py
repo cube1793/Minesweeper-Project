@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from hashlib import sha256
 import json
+from time import perf_counter_ns
 
 from core_engine import CellState, GameStatus
 from experiments import program_k_e2_records as records
@@ -63,6 +64,48 @@ def _items(**values):
 def _texts(value):
     _need(type(value) is tuple and all(type(s) is str and s for s in value),
           "Expected immutable nonempty reason strings.")
+
+
+@dataclass(frozen=True, slots=True)
+class OracleBTimingFact:
+    """Operational-only selected-board timing, separate from audit authority.
+
+    Applicability counts each selected D/E probe, including an unreached phase.
+    Actual checks count accepted reference calls, including calls that fail;
+    missing public prerequisites do not count as a reference call. Wall time is
+    the sum of those Oracle-specific blocks, excluding ordinary certificates.
+    Intervals retain the host-wide perf-counter epoch so concurrent workers'
+    overlapping Oracle spans can be combined without summing an overlap twice.
+    An initial-only board has no probes and honestly records zero throughout.
+    """
+
+    arm: records.ArmIdentity
+    applicability_checks: int
+    actual_checks: int
+    wall_ns: int
+    intervals: tuple = ()
+
+    def __post_init__(self):
+        _need(type(self.arm) is records.ArmIdentity and self.arm.arm is records.Arm.K_P0,
+              "Oracle timing requires the exact K-P0 arm identity.")
+        records.ArmIdentity.__post_init__(self.arm)
+        _need(all(type(value) is int and value >= 0 for value in
+                  (self.applicability_checks, self.actual_checks, self.wall_ns)),
+              "Oracle timing requires nonnegative exact integers.")
+        _need(self.actual_checks <= self.applicability_checks,
+              "Oracle calls cannot exceed applicability checks.")
+        _need(type(self.intervals) is tuple and len(self.intervals) == self.applicability_checks,
+              "Each applicability probe requires its exact timing interval.")
+        previous_end = total = 0
+        for interval in self.intervals:
+            _need(type(interval) is tuple and len(interval) == 2
+                  and all(type(value) is int and value >= 0 for value in interval),
+                  "Oracle intervals require nonnegative exact integer bounds.")
+            start, end = interval
+            _need(previous_end <= start <= end, "Oracle intervals must be chronological and nonoverlapping.")
+            total += end - start
+            previous_end = end
+        _need(total == self.wall_ns, "Oracle wall must equal the directly measured interval sum.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,18 +294,26 @@ def _oracle_b(index, phase, observation, num_mines, logical, proofs, expected, *
         status, differences, expected_snapshot, actual_snapshot)
 
 
-def audit_k_p0(raw, projection, *, raw_arm, table, oracle_b_enabled):
+def audit_k_p0(raw, projection, *, raw_arm, table, oracle_b_enabled,
+              oracle_timing_observer=None):
     """Audit one supplied board. No subset choice, solver replay or truth read.
 
     Certificate owned-M snapshots are batch premises, not the running union of
     earlier targets. Only PASS certificates enter the qualified proof history.
     A broken history prevents subsequent Oracle-B qualification, while retaining
     every reached phase and every acquisition's public verifier result.
+    Optional timing reports one closed fact only after a selected board's audit
+    is complete. It cannot alter proof admission or any returned audit record.
     """
     _need(type(oracle_b_enabled) is bool, "Oracle selection must be an exact bool.")
+    _need(oracle_timing_observer is None or callable(oracle_timing_observer),
+          "Oracle timing observer must be callable or None.")
     _bind_raw(raw, projection, raw_arm=raw_arm, table=table)
     certificates, oracle_checks, proofs = [], [], ()
     failures, incomplete = [], []
+    applicability_checks = actual_checks = wall_ns = 0
+    oracle_intervals = []
+    measure_oracle = oracle_b_enabled and oracle_timing_observer is not None
     history_valid = True
     acquisitions = iter(projection.acquisitions)
     if not projection.effect_evidence_complete:
@@ -303,17 +354,29 @@ def audit_k_p0(raw, projection, *, raw_arm, table, oracle_b_enabled):
                         proofs += (certificate,)
                     else:
                         history_valid = False
-                expected = decision.phase_d if phase == "D" else decision.phase_e
-                if oracle_b_enabled and expected is not None:
-                    ready = public_ready and history_valid
-                    if phase == "E":
-                        ready = ready and d_check is not None and d_check.status is AuditStatus.PASS
-                    logical = decision.local.after.M if phase == "D" else decision.after.M
-                    check = _oracle_b(index, phase, observation, raw_arm.board.mines, logical,
-                                      proofs, expected, ready=ready)
-                    oracle_checks.append(check)
-                    if phase == "D":
-                        d_check = check
+                # Ordinary acquisition verification is complete before this
+                # selected Oracle-only applicability/check measurement starts.
+                # Disabled maintenance performs none of the measured work.
+                if oracle_b_enabled:
+                    started_ns = perf_counter_ns() if measure_oracle else None
+                    expected = decision.phase_d if phase == "D" else decision.phase_e
+                    if expected is not None:
+                        ready = public_ready and history_valid
+                        if phase == "E":
+                            ready = ready and d_check is not None and d_check.status is AuditStatus.PASS
+                        logical = decision.local.after.M if phase == "D" else decision.after.M
+                        check = _oracle_b(index, phase, observation, raw_arm.board.mines, logical,
+                                          proofs, expected, ready=ready)
+                        if measure_oracle and ready:
+                            actual_checks += 1
+                        oracle_checks.append(check)
+                        if phase == "D":
+                            d_check = check
+                    if measure_oracle:
+                        ended_ns = perf_counter_ns()
+                        wall_ns += ended_ns - started_ns
+                        oracle_intervals.append((started_ns, ended_ns))
+                        applicability_checks += 1
         _need(next(acquisitions, None) is None, "Unconsumed I4 acquisition evidence.")
         for item in certificates:
             reason = "CERTIFICATE:" + str(item.action_ordinal) + ":" + item.acquisition.certificate_sha256
@@ -328,12 +391,18 @@ def audit_k_p0(raw, projection, *, raw_arm, table, oracle_b_enabled):
             elif item.status is AuditStatus.INCOMPLETE:
                 incomplete.append(reason)
         status = AuditStatus.FAIL if failures else AuditStatus.INCOMPLETE if incomplete else AuditStatus.PASS
-        return KBoardPublicAudit(raw_arm, tuple(certificates), oracle_b_enabled, tuple(oracle_checks),
-                                 status, tuple(incomplete), tuple(failures))
+        result = KBoardPublicAudit(raw_arm, tuple(certificates), oracle_b_enabled, tuple(oracle_checks),
+                                  status, tuple(incomplete), tuple(failures))
     except E2AuditError:
         raise
     except (ValueError, TypeError, AttributeError, IndexError, KeyError, StopIteration) as error:
         raise E2AuditError(str(error)) from error
+    if measure_oracle:
+        # Callback failure is an operational failure, not an audit verdict.
+        # Do not catch it, reinterpret it, or include it in durable audit data.
+        oracle_timing_observer(OracleBTimingFact(raw_arm, applicability_checks, actual_checks, wall_ns,
+                                                tuple(oracle_intervals)))
+    return result
 
 
 @dataclass(frozen=True, slots=True)

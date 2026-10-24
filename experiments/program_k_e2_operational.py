@@ -8,9 +8,11 @@ coordinator private bytes (not instantaneous RSS). No E1 suite is imported.
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 import json
 import multiprocessing
+from pathlib import Path
 from queue import Empty, Full, Queue
 import sys
 import threading
@@ -217,16 +219,16 @@ class _Channel:
     def event(self, name, arm):
         self.send(b"E" + json.dumps((name, arm), separators=(",", ":"), ensure_ascii=True).encode("ascii"))
 
-    def result(self, data):
+    def result(self, data, *, tags=(b"H", b"D", b"F")):
         _need(type(data) is bytes and 0 < len(data) <= self.envelope.max_payload_bytes, "PAYLOAD_CAP")
-        self.send(b"H" + str(len(data)).encode("ascii"))
+        self.send(tags[0] + str(len(data)).encode("ascii"))
         chunk = self.envelope.max_ipc_frame_bytes - 1
         for start in range(0, len(data), chunk):
-            self.send(b"D" + data[start:start + chunk])
-        self.send(b"F")
+            self.send(tags[1] + data[start:start + chunk])
+        self.send(tags[2])
 
 
-def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
+def _worker_main(work, kind, first_bytes, envelope, connection, barrier, r0_observe=False):
     """Spawn target; barrier precedes generation/source checks/private answers."""
     barrier.wait()
     channel = _Channel(connection, envelope)
@@ -234,6 +236,23 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
     abort_reason = None
     counts = {}
     current_arm = None
+    oracle_facts = []
+    r0_arm_started, r0_max_arm = None, 0
+
+    def observe_oracle(fact):
+        execution.audit.OracleBTimingFact.__post_init__(fact)
+        _need(type(fact) is execution.audit.OracleBTimingFact
+              and fact.arm == execution._arm(work, records.Arm.K_P0,
+                  repeat=kind is execution.WorkerKind.DETERMINISM)
+              and not oracle_facts, "ORACLE_TIMING_IDENTITY")
+        oracle_facts.append(fact)
+
+    def observe_prior(fact):
+        _need(type(fact) is execution.PriorBindingTimingFact
+              and fact.work_position == work.position and fact.kind is kind,
+              "PRIOR_TIMING_IDENTITY")
+        execution.PriorBindingTimingFact.__post_init__(fact)
+        channel.send(b"B")
 
     def abort(code):
         nonlocal abort_reason
@@ -246,12 +265,15 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
 
     def observe(name, arm):
         nonlocal current_arm, abort_reason
+        nonlocal r0_arm_started, r0_max_arm
         check()
         _need(name in ("ARM_START", "ARM_END", "BEFORE_INPUT")
               and arm in ("CONTROL", "K_P0", "K_CONTROL"), "WORKER_BOUNDARY")
         if name == "ARM_START":
             _need(current_arm is None and arm not in counts, "ARM_REUSE")
             current_arm, counts[arm] = arm, 0
+            if r0_observe:
+                r0_arm_started = time.perf_counter_ns()
         else:
             _need(current_arm == arm, "ARM_BOUNDARY_ORDER")
         if name == "BEFORE_INPUT":
@@ -260,6 +282,9 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
                 raise OperationalAbort(abort_reason)
             counts[arm] += 1
             watchdog.reset()
+        if r0_observe and name == "ARM_END":
+            r0_max_arm = max(r0_max_arm, time.perf_counter_ns() - r0_arm_started)
+            r0_arm_started = None
         channel.event(name, arm)
         if name == "ARM_END":
             current_arm = None
@@ -272,6 +297,13 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
         watchdog.start()
         kwargs = dict(shadow_timeout_ms=envelope.shadow_timeout_ms,
                       max_physical_inputs=envelope.max_physical_inputs, observer=observe, abort_check=check)
+        if r0_observe and work.oracle_b_selected and kind is not execution.WorkerKind.K_CONTROL:
+            kwargs["oracle_timing_observer"] = observe_oracle
+        if r0_observe and work.oracle_b_selected and kind is not execution.WorkerKind.PRIMARY:
+            # The acknowledged frame ends a parent-clock boundary containing
+            # spawn transport, child decode and accepted prior validation, before
+            # any downstream solver can begin.
+            kwargs["prior_binding_observer"] = observe_prior
         if kind is execution.WorkerKind.PRIMARY:
             _need(first_bytes is None, "PRIMARY_HAS_PRIOR")
             bundle = execution.execute_primary(work, **kwargs)
@@ -287,6 +319,14 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier):
         watchdog.stop()
         watchdog = None
         execution.revalidate_bundle(bundle, work, kind, max_payload_bytes=envelope.max_payload_bytes)
+        if r0_observe:
+            _need(len(oracle_facts) == int(work.oracle_b_selected and kind is not
+                  execution.WorkerKind.K_CONTROL), "ORACLE_TIMING_COVERAGE")
+            fact = oracle_facts[0] if oracle_facts else None
+            telemetry = (0, 0, 0, ()) if fact is None else (
+                fact.applicability_checks, fact.actual_checks, fact.wall_ns, fact.intervals)
+            channel.result(json.dumps(telemetry + (r0_max_arm,), separators=(",", ":")).encode("ascii"),
+                           tags=(b"T", b"U", b"V"))
         channel.result(execution.encode_bundle(bundle))
     except BaseException as error:
         # No exception repr/traceback crosses the answer-owning worker boundary.
@@ -340,9 +380,9 @@ class _MemoryLedger:
 class UnitReceipt:
     """Operational total wall, not a future R0 component measurement.
 
-    R0 must measure non-overlapping or explicitly non-double-counted P64 primary
-    pair, K64 K-CONTROL, O64 Oracle-B and D64 determinism wall components. These
-    total elapsed values alone do not satisfy that later protocol requirement.
+    R0 uses complete conservative P/K/D standalone boundaries and three Oracle
+    route boundaries. These per-worker totals alone omit coordinator persistence
+    and cannot substitute for the complete directly observed route measurements.
     """
 
     position: int
@@ -367,6 +407,61 @@ class _OperationResult:
     receipt: UnitReceipt
     bundle: object
     samples: tuple
+    observation: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class _R0Observation:
+    worker_memory: int
+    coordinator_memory: int
+    combined_memory: int
+    decision_wall: int
+    arm_wall: int
+    shadow_wall: int
+    physical_inputs: int
+    oracle: tuple
+    resources_complete: bool
+    cleanup_complete: bool
+    watchdogs_complete: bool
+    prior_binding_intervals: tuple = ()
+
+    @property
+    def prior_binding_wall_ns(self):
+        return _interval_union_wall(self.prior_binding_intervals)
+
+    def __post_init__(self):
+        for value in (self.worker_memory, self.coordinator_memory, self.combined_memory,
+                      self.decision_wall, self.arm_wall, self.shadow_wall, self.physical_inputs):
+            _integer(value)
+        for value in (self.resources_complete, self.cleanup_complete, self.watchdogs_complete):
+            _need(type(value) is bool, "EXACT_COMPLETION_FLAG")
+        _need(type(self.oracle) is tuple and len(self.oracle) == 4, "ORACLE_TELEMETRY")
+        probes, calls, wall, intervals = self.oracle
+        for value in (probes, calls, wall):
+            _integer(value)
+        _need(calls <= probes and type(intervals) is tuple and len(intervals) == probes,
+              "ORACLE_TELEMETRY_COUNTS")
+        previous = 0
+        total = 0
+        for interval in intervals:
+            _need(type(interval) is tuple and len(interval) == 2, "ORACLE_TELEMETRY_INTERVAL")
+            start, end = interval
+            _integer(start)
+            _integer(end)
+            _need(previous <= start <= end, "ORACLE_TELEMETRY_ORDER")
+            previous, total = end, total + end - start
+        _need(total == wall, "ORACLE_TELEMETRY_WALL")
+        _need(self.combined_memory >= max(self.worker_memory, self.coordinator_memory),
+              "R0_MEMORY_ACCOUNTING")
+        _need(type(self.prior_binding_intervals) is tuple, "PRIOR_BINDING_INTERVALS")
+        previous = 0
+        for interval in self.prior_binding_intervals:
+            _need(type(interval) is tuple and len(interval) == 2, "PRIOR_BINDING_INTERVAL")
+            start, end = interval
+            _integer(start)
+            _integer(end)
+            _need(previous <= start <= end, "PRIOR_BINDING_INTERVAL_ORDER")
+            previous = end
 
 
 def _missing(work, kind, reason):
@@ -398,14 +493,17 @@ def _bind_prior_bundle(candidate, first_bytes, work, kind, envelope):
 
 
 def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
-                         job_started_ns, launcher_started_ns, *, worker_target=None):
+                         job_started_ns, launcher_started_ns, *, worker_target=None, r0_observe=False):
     """One disposable process. The private test target never changes the public plan."""
     started = time.monotonic_ns()
+    counter_started = time.perf_counter_ns() if r0_observe else None
     context = multiprocessing.get_context("spawn")
     parent, child = context.Pipe(duplex=True)
     barrier = context.Event()
+    _need(type(r0_observe) is bool and (not r0_observe or worker_target is None), "R0_PRODUCTION_WORKER_REQUIRED")
+    args = (work, kind, first_bytes, envelope, child, barrier)
     process = context.Process(target=_worker_main if worker_target is None else worker_target,
-                              args=(work, kind, first_bytes, envelope, child, barrier))
+                              args=args + (True,) if r0_observe else args)
     inbox, reader_stop = Queue(maxsize=2), threading.Event()
     reader = api = job = peak_memory = None
     token = object()
@@ -418,6 +516,13 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
     current_arm = None
     arm_started = None
     counts = {}
+    telemetry_size, telemetry, telemetry_wire = None, None, bytearray()
+    max_worker = max_coordinator = max_combined = max_arm = 0
+    max_decision = max_shadow = 0
+    resources_complete = cleanup_complete = True
+    prior_binding_intervals = []
+    prior_bound = False
+    prior_cleanup_started = None
 
     def read_frames():
         while not reader_stop.is_set():
@@ -435,9 +540,19 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                 return
 
     def sample():
-        nonlocal first_sample, peak_sample, last_sample
-        current, breached = ledger.sample(token, peak_memory(), _unit_id(work.position, kind),
-                                          time.monotonic_ns() - started)
+        nonlocal first_sample, peak_sample, last_sample, max_worker, max_coordinator, max_combined
+        nonlocal resources_complete
+        try:
+            worker = peak_memory()
+            current, breached = ledger.sample(token, worker, _unit_id(work.position, kind),
+                                              time.monotonic_ns() - started)
+        except BaseException:
+            resources_complete = False
+            raise
+        if r0_observe:
+            max_worker = max(max_worker, worker)
+            max_coordinator = max(max_coordinator, current.coordinator_bytes)
+            max_combined = max(max_combined, current.combined_bytes)
         first_sample = first_sample or current
         last_sample = current
         if peak_sample is None or current.combined_bytes > peak_sample.combined_bytes:
@@ -498,8 +613,16 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
             if tag == b"S":
                 _need(not started_frame and not data, "MALFORMED_IPC")
                 started_frame = True
+            elif tag == b"B":
+                _need(r0_observe and work.oracle_b_selected and first_bytes is not None
+                      and kind is not execution.WorkerKind.PRIMARY and started_frame
+                      and not prior_bound and not data and not counts and expected_size is None,
+                      "PRIOR_BINDING_BOUNDARY")
+                prior_binding_intervals.append((counter_started, time.perf_counter_ns()))
+                prior_bound = True
             elif tag == b"E":
                 _need(started_frame and expected_size is None, "MALFORMED_IPC")
+                _need(not r0_observe or telemetry_size is None, "R0_ARM_AFTER_TELEMETRY")
                 event = json.loads(data.decode("ascii"))
                 _need(type(event) is list and len(event) == 2
                       and event[0] in ("ARM_START", "ARM_END", "BEFORE_INPUT")
@@ -516,9 +639,46 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                         counts[arm] += 1
                         if counts[arm] > envelope.max_physical_inputs:
                             raise OperationalAbort("PHYSICAL_INPUT_CAP")
+            elif tag in (b"T", b"U", b"V"):
+                _need(r0_observe and started_frame and current_arm is None
+                      and expected_size is None and telemetry is None, "UNEXPECTED_R0_TELEMETRY")
+                if tag == b"T":
+                    _need(telemetry_size is None and data and data.isdigit(), "R0_TELEMETRY_HEADER")
+                    expected_arms = ({"K_CONTROL"} if kind is execution.WorkerKind.K_CONTROL
+                                     else {"CONTROL", "K_P0"})
+                    _need(set(counts) == expected_arms, "R0_TELEMETRY_BEFORE_COMPLETE_ARMS")
+                    telemetry_size = int(data)
+                    _need(str(telemetry_size).encode("ascii") == data
+                          and 0 < telemetry_size <= envelope.max_payload_bytes, "R0_TELEMETRY_CAP")
+                elif tag == b"U":
+                    _need(telemetry_size is not None and data
+                          and len(telemetry_wire) + len(data) <= telemetry_size, "R0_TELEMETRY_CHUNK")
+                    telemetry_wire.extend(data)
+                else:
+                    _need(not data and telemetry_size == len(telemetry_wire), "R0_TELEMETRY_LENGTH")
+                    node = json.loads(telemetry_wire.decode("ascii"))
+                    _need(type(node) is list and len(node) == 5 and type(node[3]) is list,
+                          "R0_TELEMETRY_SHAPE")
+                    intervals = tuple(tuple(pair) if type(pair) is list else pair for pair in node[3])
+                    fact = execution.audit.OracleBTimingFact(execution._arm(work, records.Arm.K_P0,
+                        repeat=kind is execution.WorkerKind.DETERMINISM),
+                                                            *node[:3], intervals)
+                    _need((work.oracle_b_selected and kind is not execution.WorkerKind.K_CONTROL)
+                          or node[:4] == [0, 0, 0, []], "UNSELECTED_ORACLE_TIMING")
+                    _integer(node[4])
+                    _need(node[4] <= time.perf_counter_ns() - counter_started, "ARM_TIMING_CLOCK_BINDING")
+                    max_arm = node[4]
+                    _need(len(intervals) <= 2 * envelope.max_physical_inputs, "ORACLE_TIMING_COUNT_CAP")
+                    _need(all(counter_started <= a <= b <= time.perf_counter_ns() for a, b in intervals),
+                          "ORACLE_TIMING_CLOCK_BINDING")
+                    telemetry = (fact.applicability_checks, fact.actual_checks, fact.wall_ns, fact.intervals)
+                    telemetry_wire.clear()
             elif tag == b"H":
                 _need(started_frame and expected_size is None and current_arm is None
                       and data and all(48 <= c <= 57 for c in data), "MALFORMED_IPC")
+                _need(not r0_observe or telemetry is not None, "MISSING_R0_TELEMETRY")
+                _need(not r0_observe or not work.oracle_b_selected or first_bytes is None
+                      or prior_bound, "MISSING_PRIOR_BINDING_BOUNDARY")
                 expected_size = int(data)
                 _need(str(expected_size).encode("ascii") == data and expected_size > 0, "MALFORMED_IPC")
                 if expected_size > envelope.max_payload_bytes:
@@ -530,9 +690,12 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
             elif tag == b"F":
                 _need(not data and expected_size is not None and len(wire) == expected_size, "MALFORMED_IPC")
                 validation_started = time.monotonic_ns()
+                binding_started = time.perf_counter_ns() if r0_observe and first_bytes is not None else None
                 candidate = execution.decode_bundle(bytes(wire))
                 execution.revalidate_bundle(candidate, work, kind, max_payload_bytes=envelope.max_payload_bytes)
                 _bind_prior_bundle(candidate, first_bytes, work, kind, envelope)
+                if binding_started is not None:
+                    prior_binding_intervals.append((binding_started, time.perf_counter_ns()))
                 streams = dict(candidate.streams)
                 physical_names = ({"CONTROL": "control_physical_inputs", "K_P0": "kp0_physical_inputs"}
                                   if kind is execution.WorkerKind.PRIMARY else
@@ -543,10 +706,38 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                 _need(counts == expected_counts, "PHYSICAL_INPUT_STREAM_BINDING")
                 bundle = candidate
                 diagnosed_fail = candidate.status is records.AuditStatus.FAIL
+                if r0_observe:
+                    if work.oracle_b_selected and kind is not execution.WorkerKind.K_CONTROL:
+                        prefix = "repeat_" if kind is execution.WorkerKind.DETERMINISM else ""
+                        decisions = tuple(records.decode(value) for value in streams[prefix + "kp0_decisions"])
+                        children = tuple(records.decode(value) for value in streams[prefix + "oracle_b_audits"])
+                        # Every captured noninitial K decision reaches both applicability probes.
+                        _need(telemetry[0] == 2 * sum(value.action_ordinal > 0 for value in decisions)
+                              and telemetry[1] == sum(value.status is not records.AuditStatus.INCOMPLETE
+                                                      for value in children), "ORACLE_TIMING_EVIDENCE_BINDING")
+                    for name, values in candidate.streams:
+                        if name.endswith("decision_spans") or name == "kcontrol_maintenance":
+                            for encoded in values:
+                                value = records.decode(encoded)
+                                if type(value) is records.DecisionSpanRecord:
+                                    max_decision = max(max_decision, value.duration_ns or 0)
+                                else:
+                                    timings = dict(value.timings)
+                                    max_decision = max(max_decision, timings.get("v1_plan_position_ns") or 0)
+                                    max_shadow = max(max_shadow, timings.get("shadow_ns") or 0)
+                    for observed, cap, diagnosis, inclusive in (
+                        (max_arm, envelope.max_arm_wall_ms, "ARM_TIMEOUT", True),
+                        (max_decision, envelope.max_decision_wall_ms, "DECISION_TIMEOUT", True),
+                        (max_shadow, envelope.shadow_timeout_ms, "SHADOW_TIMEOUT", False),
+                    ):
+                        if observed >= cap * 1_000_000 if inclusive else observed > cap * 1_000_000:
+                            raise OperationalAbort(diagnosis)
                 if time.monotonic_ns() - validation_started >= envelope.validation_wall_ms * 1_000_000:
                     raise OperationalAbort("VALIDATION_TIMEOUT")
                 wire.clear()
                 finished = True
+                if r0_observe and prior_bound:
+                    prior_cleanup_started = time.perf_counter_ns()
             elif tag == b"X":
                 allowed = {b"DECISION_TIMEOUT", b"WATCHDOG_INCOMPLETE", b"PHYSICAL_INPUT_CAP",
                            b"WORKER_SEMANTIC_ERROR", b"WORKER_EXCEPTION", b"REQUIRED_EVIDENCE_INCOMPLETE",
@@ -574,8 +765,10 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                 if process.is_alive():
                     api.TerminateJobObject(job, 1)
                 if not api.CloseHandle(job):
+                    cleanup_complete = False
                     reason = reason or "JOB_CLOSE_INCOMPLETE"
             except BaseException:
+                cleanup_complete = False
                 reason = reason or "JOB_CLOSE_INCOMPLETE"
         if process.pid is not None:
             if process.is_alive():
@@ -585,13 +778,16 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                 process.kill()
                 process.join(timeout=2)
                 reason = reason or "WORKER_REAP_INCOMPLETE"
+                cleanup_complete = False
             if process.is_alive():
+                cleanup_complete = False
                 reason = "WORKER_REAP_INCOMPLETE"
         parent.close()
         child.close()
         if reader is not None:
             reader.join(timeout=1)
             if reader.is_alive():
+                cleanup_complete = False
                 reason = reason or "READER_REAP_INCOMPLETE"
         ledger.remove(token)
     elapsed = time.monotonic_ns() - started
@@ -606,10 +802,22 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
     exit_code = process.exitcode
     if process.pid is not None and not process.is_alive():
         process.close()
+    if prior_cleanup_started is not None:
+        # Solver work has completed before F. This directly timed tail contains
+        # accepted result acknowledgement, prior transport retirement and all
+        # worker/reader/Job cleanup without including the K solver interval.
+        prior_binding_intervals.append((prior_cleanup_started, time.perf_counter_ns()))
     summary_reason = reason or ("AUDIT_FAIL" if status is records.AuditStatus.FAIL else
                                 "AUDIT_INCOMPLETE" if status is records.AuditStatus.INCOMPLETE else "ADMITTED")
+    observation = None if not r0_observe else _R0Observation(
+        max_worker, max_coordinator, max_combined, max_decision, max_arm, max_shadow,
+        max(counts.values(), default=0), telemetry or (0, 0, 0, ()),
+        resources_complete and bool(samples), cleanup_complete,
+        finished and telemetry is not None and reason not in ("DECISION_TIMEOUT", "ARM_TIMEOUT", "CASE_TIMEOUT",
+            "JOB_TIMEOUT", "LAUNCHER_TIMEOUT", "SHADOW_TIMEOUT", "WATCHDOG_INCOMPLETE"),
+        tuple(prior_binding_intervals))
     return _OperationResult(UnitReceipt(work.position, kind, status, summary_reason, elapsed,
-                                       exit_code), bundle, samples)
+                                       exit_code), bundle, samples, observation)
 
 
 def _workflow(work, envelope, ledger, cancel, job_started, launcher_started):
@@ -660,7 +868,7 @@ class _EvidenceSink:
 
     @staticmethod
     def _size(key, data):
-        return len(json.dumps(key, separators=(",", ":")).encode("ascii")) + len(data) + 2
+        return len(store._key_bytes(key)) + len(data) + 2
 
     def _append(self, name, key, record):
         data = records.encode(record)
@@ -780,6 +988,464 @@ def readback_streams(root, sealed_streams, envelope):
         raise
     except Exception:
         raise OperationalError("READBACK_INTEGRITY_FAIL") from None
+
+
+class R0Component(Enum):
+    PRIMARY = "P"
+    K_CONTROL = "K"
+    ORACLE_B = "O"
+    DETERMINISM = "D"
+    ORACLE_K_BIND = "O_K_BIND"
+    ORACLE_D_REPEAT = "O_D_REPEAT"
+
+
+@dataclass(frozen=True, slots=True)
+class R0Work:
+    """Explicit operational-only identity, never an accepted E2 BoardWork plan.
+
+    The later launcher authenticates the first-64 selection. This boundary only
+    executes supplied identities, without generating a corpus or selecting N.
+    """
+
+    position: int
+    board: records.BoardIdentity
+    protocol_seed: bytes
+    run_id: str
+    runtime: records.RuntimeIdentity | None = None
+
+    def __post_init__(self):
+        execution.BoardWork(self.position, self.board, self.protocol_seed, self.run_id,
+                            False, False, False, self.runtime)
+        _need(self.run_id.startswith("R0-"), "R0_RUN_ID_REQUIRED")
+
+
+@dataclass(frozen=True, slots=True)
+class R0UnitMeasurement:
+    """Strict target attribution; setup totals are containment diagnostics only.
+
+    Reference bytes are only rank-0 control_maintenance from prerequisite
+    PRIMARY archives. Supporting bytes are outside all bundle-stream families.
+    """
+    work: R0Work
+    component: R0Component
+    status: records.AuditStatus
+    reasons: tuple
+    wall_ns: int
+    durable_bytes: int
+    setup_wall_ns: int
+    setup_bytes: int
+    max_case_wall_ns: int
+    observations: tuple
+    reference_bytes: int = 0
+    supporting_bytes: int = 0
+    max_payload_bytes: int = 0
+
+    def __post_init__(self):
+        _need(type(self.work) is R0Work and type(self.component) is R0Component
+              and type(self.status) is records.AuditStatus, "R0_MEASUREMENT_IDENTITY")
+        R0Work.__post_init__(self.work)
+        _need(type(self.reasons) is tuple and all(type(s) is str and s
+              and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789" for c in s) for s in self.reasons),
+              "R0_STATIC_REASONS")
+        for value in (self.wall_ns, self.durable_bytes, self.setup_wall_ns, self.setup_bytes,
+                      self.max_case_wall_ns, self.reference_bytes, self.supporting_bytes,
+                      self.max_payload_bytes):
+            _integer(value)
+        _need(type(self.observations) is tuple, "R0_OBSERVATIONS_TUPLE")
+        for item in self.observations:
+            _need(type(item) is _R0Observation, "R0_OBSERVATION_TYPE")
+            _R0Observation.__post_init__(item)
+
+
+@dataclass(frozen=True, slots=True)
+class R0ComponentMeasurement:
+    """Outcome-blind component facts, not admission or a readiness verdict.
+
+    P/K/D are directly timed complete standalone waves. O primary and D-repeat
+    use complete affected target phases, through coordinator-equivalent admission,
+    encoding, persistence/readback and cleanup. Their baseline work is conservative
+    duplicate wall inclusion. O K-bind unions only directly observed prior
+    preparation/transport/binding/validation phases, excluding the K solver.
+    All six routes retain every prerequisite observation for containment.
+    """
+
+    component: R0Component
+    concurrency: int
+    units: tuple
+    wall_ns: int
+    coordinator_memory_bytes: int
+    complete_wall_ns: int
+    combined_memory_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.component) is R0Component and type(self.concurrency) is int
+              and self.concurrency in (1, 2, 4), "R0_COMPONENT_CONCURRENCY")
+        _need(type(self.units) is tuple and bool(self.units), "R0_UNIT_COVERAGE")
+        for unit in self.units:
+            _need(type(unit) is R0UnitMeasurement and unit.component is self.component,
+                  "R0_UNIT_COMPONENT")
+            R0UnitMeasurement.__post_init__(unit)
+        _need(tuple(unit.work.position for unit in self.units) == tuple(range(len(self.units)))
+              and len({unit.work.board.game_index for unit in self.units}) == len(self.units),
+              "R0_MEASUREMENT_COVERAGE")
+        for value in (self.wall_ns, self.coordinator_memory_bytes, self.complete_wall_ns,
+                      self.combined_memory_bytes):
+            _integer(value)
+        _need(self.complete_wall_ns >= self.wall_ns, "R0_WALL_ACCOUNTING")
+        _need(self.combined_memory_bytes >= self.coordinator_memory_bytes, "R0_MEMORY_ACCOUNTING")
+
+
+def _r0_work(work, component):
+    return execution.BoardWork(work.position, work.board, work.protocol_seed, work.run_id,
+        component in (R0Component.ORACLE_B, R0Component.ORACLE_K_BIND, R0Component.ORACLE_D_REPEAT),
+        component in (R0Component.DETERMINISM, R0Component.ORACLE_D_REPEAT),
+        component in (R0Component.K_CONTROL, R0Component.ORACLE_K_BIND), work.runtime)
+
+
+def _bundle_stream_bytes(operation, names=None):
+    """Exact accepted store key/TAB/record/LF framing, never diagnostic keys."""
+    if operation.bundle is None:
+        return 0
+    return sum(_EvidenceSink._size((operation.receipt.position, _kind_rank(operation.receipt.kind), index), data)
+               for name, values in operation.bundle.streams if names is None or name in names
+               for index, data in enumerate(values))
+
+
+def _r0_attributable_bytes(operation, component):
+    if component is R0Component.ORACLE_K_BIND:
+        return 0  # Wall-only: the K target emits no Oracle audit family.
+    if component in (R0Component.ORACLE_B, R0Component.ORACLE_D_REPEAT):
+        return _bundle_stream_bytes(operation, {"oracle_b_audits" if component is
+            R0Component.ORACLE_B else "repeat_oracle_b_audits"})
+    excluded = {"oracle_b_audits", "repeat_oracle_b_audits"}
+    if component is R0Component.PRIMARY:
+        excluded.add("control_maintenance")
+    return _bundle_stream_bytes(operation, set(execution.STREAM_NAMES) - excluded)
+
+
+def _interval_union_wall(intervals):
+    """Union directly observed wall intervals, never subtraction of whole runs."""
+    total, end = 0, None
+    for start, stop in sorted(intervals):
+        total += stop - start if end is None or start >= end else max(0, stop - end)
+        end = stop if end is None else max(end, stop)
+    return total
+
+
+class _R0MemoryMonitor:
+    """Keep the accepted shared ledger sampled during setup and persistence too."""
+
+    def __init__(self, ledger, cancel, envelope):
+        self.ledger, self.cancel, self.envelope = ledger, cancel, envelope
+        self.stop = threading.Event()
+        self.lock = threading.Lock()
+        self.coordinator = self.combined = 0
+        self.reason = None
+        self.thread = threading.Thread(target=self.run, daemon=True, name="program-k-r0-memory")
+
+    def sample(self):
+        with self.lock:
+            try:
+                value, breached = self.ledger.sample("r0-coordinator", 0, "R0", 0)
+                self.coordinator = max(self.coordinator, value.coordinator_bytes)
+                self.combined = max(self.combined, value.combined_bytes)
+                if breached:
+                    self.reason = self.reason or "MEMORY_CAP"
+            except Exception:
+                self.reason = self.reason or "MEMORY_MONITOR_INCOMPLETE"
+            if self.reason is not None:
+                self.cancel.set()
+
+    def check(self):
+        self.sample()
+        if self.reason is not None:
+            raise OperationalAbort(self.reason)
+
+    def run(self):
+        while not self.stop.wait(self.envelope.monitor_interval_ms / 1000):
+            self.sample()
+
+    def __enter__(self):
+        self.check()
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop.set()
+        self.thread.join(timeout=1)
+        self.ledger.remove("r0-coordinator")
+        if self.thread.is_alive():
+            self.cancel.set()
+            raise OperationalAbort("MEMORY_MONITOR_REAP_INCOMPLETE")
+        if exc[0] is None and self.reason is not None:
+            raise OperationalAbort(self.reason)
+
+
+def _persist_r0(root, operation, envelope, *, oracle_only=False, byte_budget=None):
+    """Existing I2 records only, exclusive files, strict streaming readback."""
+    if byte_budget is not None:
+        _integer(byte_budget)
+        if byte_budget <= 8192:
+            raise OperationalAbort("ARCHIVE_CAP")
+        # Tighten this archive's allowance to the remaining whole-run budget.
+        # Execution/watchdog caps are unchanged; this copy only owns persistence.
+        envelope = replace(envelope, archive_cap_bytes=min(envelope.archive_cap_bytes, byte_budget),
+                           max_payload_bytes=min(envelope.max_payload_bytes, byte_budget))
+    root.mkdir()
+    started = time.monotonic_ns()
+
+    def publication_check():
+        if time.monotonic_ns() - started >= envelope.publication_wall_ms * 1_000_000:
+            raise OperationalAbort("PUBLICATION_TIMEOUT")
+
+    if not oracle_only:
+        sink = _EvidenceSink(root, envelope, 1)
+        try:
+            receipt = sink.admit(operation)
+            seals = sink.seal()
+            publication_check()
+            readback_streams(root, seals, envelope)
+            return receipt, sink.byte_length
+        finally:
+            sink.close()
+    writers = []
+    try:
+        seals = []
+        streams = {} if operation.bundle is None else dict(operation.bundle.streams)
+        # Whole-worker resource samples belong to the prerequisite archive;
+        # their persistence is not incremental Oracle maintenance work.
+        for name in (("repeat_oracle_b_audits",) if operation.receipt.kind is
+                     execution.WorkerKind.DETERMINISM else ("oracle_b_audits",)):
+            writer = store.StreamWriter(root, name)
+            writers.append(writer)
+            values = tuple(records.decode(data) for data in streams.get(name, ()))
+            for index, value in enumerate(values):
+                key = (operation.receipt.position, _kind_rank(operation.receipt.kind), index)
+                added = _EvidenceSink._size(key, records.encode(value))
+                if sum(item.byte_length for item in writers) + added > envelope.archive_cap_bytes:
+                    raise OperationalAbort("ARCHIVE_CAP")
+                writer.append(key, value)
+                publication_check()
+            writer.checkpoint()
+            seals.append(writer.seal())
+            publication_check()
+        deadline = time.monotonic_ns() + envelope.readback_wall_ms * 1_000_000
+
+        def visit(*_):
+            if time.monotonic_ns() >= deadline:
+                raise OperationalAbort("READBACK_TIMEOUT")
+
+        for writer, seal in zip(writers, seals):
+            visit()
+            observed = store.scan_stream(root, writer.stream_name, visit=visit)
+            visit()
+            _need(observed == seal, "READBACK_INTEGRITY_FAIL")
+        return operation.receipt, sum(item.byte_length for item in writers)
+    finally:
+        for writer in writers:
+            writer.close()
+
+
+def measure_r0_component(plan, component, root, envelope, *, cancel=None, progress=None):
+    """Public R0-only measurement, using the SAME production process supervisor.
+
+    No private worker target, solver replay codec, retry, selector, bootstrap or
+    readiness decision exists here. A later launcher supplies authenticated R0 identities
+    and a new ignored root. Raw evidence is sealed beneath each unit; the return
+    and optional progress observer expose only immutable operational facts.
+    At most c primary references are retained. Each K/D setup wave is completed
+    before the corresponding target wave starts. Exceptions preserve the root.
+    """
+    envelope = _envelope(envelope)
+    _need(type(component) is R0Component and type(plan) is tuple and bool(plan), "R0_PLAN_REQUIRED")
+    for work in plan:
+        _need(type(work) is R0Work, "R0_WORK_REQUIRED")
+        R0Work.__post_init__(work)
+    first = plan[0]
+    _need(tuple(work.position for work in plan) == tuple(range(len(plan)))
+          and len({work.board.game_index for work in plan}) == len(plan)
+          and all((work.protocol_seed, work.run_id, work.runtime) ==
+                  (first.protocol_seed, first.run_id, first.runtime) for work in plan), "R0_PLAN_IDENTITY")
+    _need(progress is None or callable(progress), "R0_PROGRESS_OBSERVER")
+    _need(cancel is None or (callable(getattr(cancel, "is_set", None))
+                            and callable(getattr(cancel, "set", None))), "CANCELLATION_TOKEN")
+    cancel = threading.Event() if cancel is None else cancel
+    root = Path(root)
+    root.mkdir()  # Exclusive: never overwrite, retry, remove, or reuse a failed root.
+    complete_started = time.perf_counter_ns()
+    started = time.monotonic_ns()
+    ledger = _MemoryLedger(envelope)
+    units, measured_wall, all_intervals = [], 0, []
+    archive_bytes = 0
+    target_kind = {R0Component.PRIMARY: execution.WorkerKind.PRIMARY,
+                   R0Component.ORACLE_B: execution.WorkerKind.PRIMARY,
+                   R0Component.ORACLE_K_BIND: execution.WorkerKind.K_CONTROL,
+                   R0Component.ORACLE_D_REPEAT: execution.WorkerKind.DETERMINISM,
+                   R0Component.K_CONTROL: execution.WorkerKind.K_CONTROL,
+                   R0Component.DETERMINISM: execution.WorkerKind.DETERMINISM}[component]
+    needs_setup = component in (R0Component.K_CONTROL, R0Component.DETERMINISM,
+                               R0Component.ORACLE_K_BIND, R0Component.ORACLE_D_REPEAT)
+
+    def checkpoint():
+        monitor.check()
+        now = time.monotonic_ns()
+        if archive_bytes > envelope.archive_cap_bytes:
+            cancel.set()
+            raise OperationalAbort("ARCHIVE_CAP")
+        if now - started >= min(envelope.max_job_wall_ms, envelope.max_launcher_wall_ms) * 1_000_000:
+            cancel.set()
+            raise OperationalAbort("JOB_TIMEOUT" if envelope.max_job_wall_ms <= envelope.max_launcher_wall_ms
+                                   else "LAUNCHER_TIMEOUT")
+
+    def supervise(work, kind, prior):
+        return _supervise_operation(work, kind, prior, envelope, ledger, cancel, started, started,
+                                    r0_observe=True)
+
+    def admit(operation, work):
+        # Reproduce the Actual-E2 coordinator's second parent revalidation.
+        validation_started = time.monotonic_ns()
+        _need(operation.receipt.position == work.position, "R0_COORDINATOR_POSITION")
+        if operation.bundle is not None:
+            execution.revalidate_bundle(operation.bundle, work, operation.receipt.kind,
+                                        max_payload_bytes=envelope.max_payload_bytes)
+        if time.monotonic_ns() - validation_started >= envelope.validation_wall_ms * 1_000_000:
+            raise OperationalAbort("VALIDATION_TIMEOUT")
+
+    orchestration_started = time.perf_counter_ns()
+    with _R0MemoryMonitor(ledger, cancel, envelope) as monitor, ThreadPoolExecutor(
+            max_workers=envelope.concurrency, thread_name_prefix="program-k-r0") as pool:
+        orchestration_interval = (orchestration_started, time.perf_counter_ns())
+        if component is R0Component.ORACLE_K_BIND:
+            all_intervals.append(orchestration_interval)
+        else:
+            measured_wall += orchestration_interval[1] - orchestration_interval[0]
+        for offset in range(0, len(plan), envelope.concurrency):
+            checkpoint()
+            batch = plan[offset:offset + envelope.concurrency]
+            standalone_started = time.perf_counter_ns()
+            works = tuple(_r0_work(work, component) for work in batch)
+            roots = tuple(root / str(work.position) for work in batch)
+            for directory in roots:
+                directory.mkdir()
+            setups, setup_bytes = [None] * len(batch), [0] * len(batch)
+            setup_supporting, reference_bytes = [0] * len(batch), [0] * len(batch)
+            setup_payloads = [0] * len(batch)
+            if needs_setup:
+                futures = tuple(pool.submit(supervise, work, execution.WorkerKind.PRIMARY, None) for work in works)
+                setups = [future.result() for future in futures]
+                for index, operation in enumerate(setups):
+                    admit(operation, works[index])
+                    receipt, size = _persist_r0(roots[index] / "setup", operation, envelope,
+                                               byte_budget=envelope.archive_cap_bytes - archive_bytes)
+                    setups[index] = replace(operation, receipt=receipt)
+                    setup_bytes[index] = size
+                    persisted = receipt.reason != "ARCHIVE_CAP"
+                    setup_supporting[index] = size - (_bundle_stream_bytes(operation) if persisted else 0)
+                    _need(setup_supporting[index] >= 0, "R0_BYTE_OWNERSHIP")
+                    reference_bytes[index] = (_bundle_stream_bytes(operation, {"control_maintenance"})
+                                              if persisted else 0)
+                    archive_bytes += size
+                checkpoint()
+            # K/D include their complete setup; Oracle downstream routes begin
+            # after setup, but include directly timed prior encoding/preparation.
+            target_started = time.perf_counter_ns()
+            encoding_started = time.perf_counter_ns()
+            priors = tuple(None if setup is None or setup.bundle is None or
+                           setup.receipt.status is not records.AuditStatus.PASS else
+                           execution.encode_bundle(setup.bundle) for setup in setups)
+            encoding_interval = (encoding_started, time.perf_counter_ns())
+            setup_payloads = [0 if prior is None else len(prior) for prior in priors]
+            if component is R0Component.ORACLE_K_BIND:
+                all_intervals.append(encoding_interval)
+            futures = []
+            for index, work in enumerate(works):
+                setup = setups[index]
+                if setup is not None and (setup.receipt.status is not records.AuditStatus.PASS or setup.bundle is None):
+                    futures.append(None)
+                else:
+                    futures.append(pool.submit(supervise, work, target_kind, priors[index]))
+            outcomes = [future.result() if future is not None else
+                        _missing(work, target_kind, "PRIMARY_PREMISES_MISSING")
+                        for work, future in zip(works, futures)]
+            for index, operation in enumerate(outcomes):
+                setup = setups[index]
+                admission_started = time.perf_counter_ns()
+                admit(operation, works[index])
+                admission_interval = (admission_started, time.perf_counter_ns())
+                if component is R0Component.ORACLE_K_BIND:
+                    all_intervals.append(admission_interval)
+                # Actual _workflow encodes every admitted primary as a prior,
+                # including a primary without downstream targets. Keep that
+                # phase inside P/O-primary calibration boundaries as well.
+                payload = None if operation.bundle is None else execution.encode_bundle(operation.bundle)
+                receipt, size = _persist_r0(roots[index] / "target", operation, envelope,
+                                           byte_budget=envelope.archive_cap_bytes - archive_bytes)
+                archive_bytes += size
+                observation = operation.observation
+                if component is R0Component.ORACLE_K_BIND and observation is not None:
+                    all_intervals.extend(observation.prior_binding_intervals)
+                related = tuple(item for item in (setup, operation) if item is not None)
+                status = (records.AuditStatus.FAIL if any(item.receipt.status is records.AuditStatus.FAIL
+                          for item in related) or receipt.status is records.AuditStatus.FAIL else
+                          records.AuditStatus.INCOMPLETE if receipt.status is not records.AuditStatus.PASS
+                          or any(item.receipt.status is not records.AuditStatus.PASS for item in related) else
+                          records.AuditStatus.PASS)
+                observations = tuple(item.observation for item in related if item.observation is not None)
+                if status is records.AuditStatus.PASS and (len(observations) != len(related) or not all(
+                    item.resources_complete and item.cleanup_complete and item.watchdogs_complete
+                    for item in observations)):
+                    status = records.AuditStatus.INCOMPLETE
+                if component is R0Component.ORACLE_K_BIND and status is records.AuditStatus.PASS and (
+                        observation is None or not observation.prior_binding_intervals):
+                    status = records.AuditStatus.INCOMPLETE
+                reasons = tuple(dict.fromkeys(item.receipt.reason for item in related
+                                              if item.receipt.reason != "ADMITTED"))
+                if receipt.reason != "ADMITTED" and receipt.reason not in reasons:
+                    reasons += (receipt.reason,)
+                if status is not records.AuditStatus.PASS and not reasons:
+                    reasons = ("R0_OBSERVATION_INCOMPLETE",)
+                wall = (0 if observation is None else observation.prior_binding_wall_ns) + (
+                    encoding_interval[1] - encoding_interval[0] + admission_interval[1] - admission_interval[0]) if (
+                    component is R0Component.ORACLE_K_BIND) else time.perf_counter_ns() - (
+                    standalone_started if component in (R0Component.PRIMARY, R0Component.K_CONTROL,
+                                                        R0Component.DETERMINISM) else target_started)
+                persisted = receipt.reason != "ARCHIVE_CAP"
+                attributable = _r0_attributable_bytes(operation, component) if persisted else 0
+                supporting = setup_supporting[index] + size - (_bundle_stream_bytes(operation) if persisted else 0)
+                _need(supporting >= 0, "R0_BYTE_OWNERSHIP")
+                unit = R0UnitMeasurement(batch[index], component, status, reasons, wall, attributable,
+                    0 if setup is None else setup.receipt.elapsed_ns, setup_bytes[index],
+                    max(item.receipt.elapsed_ns for item in related), observations,
+                    reference_bytes[index], supporting, max(setup_payloads[index],
+                    0 if payload is None else len(payload)))
+                units.append(unit)
+                if progress is not None:
+                    progress(unit, len(units), len(plan))
+                if status is not records.AuditStatus.PASS:
+                    cancel.set()
+            checkpoint()
+            if component is not R0Component.ORACLE_K_BIND:
+                measured_wall += time.perf_counter_ns() - (standalone_started if component in (
+                    R0Component.PRIMARY, R0Component.K_CONTROL, R0Component.DETERMINISM) else target_started)
+        cleanup_started = time.perf_counter_ns()
+    cleanup_interval = (cleanup_started, time.perf_counter_ns())
+    if component is R0Component.ORACLE_K_BIND:
+        all_intervals.append(cleanup_interval)
+    else:
+        measured_wall += cleanup_interval[1] - cleanup_interval[0]
+    measured_wall += _interval_union_wall(all_intervals)
+    observations = tuple(item for unit in units for item in unit.observations)
+    coordinator_peak = max((item.coordinator_memory for item in observations), default=0)
+    combined_peak = max((item.combined_memory for item in observations), default=0)
+    complete_wall = time.perf_counter_ns() - complete_started
+    if component in (R0Component.PRIMARY, R0Component.K_CONTROL, R0Component.DETERMINISM,
+                     R0Component.ORACLE_B):
+        # These routes have no excluded prerequisite. The entire launcher
+        # boundary conservatively includes all scheduling/checkpoint overhead.
+        measured_wall = complete_wall
+    return R0ComponentMeasurement(component, envelope.concurrency, tuple(units), measured_wall,
+                                   max(monitor.coordinator, coordinator_peak),
+                                   complete_wall, max(monitor.combined, combined_peak))
 
 
 def coordinate(plan, root, envelope, *, cancel=None, launcher_started_ns=None):

@@ -13,6 +13,7 @@ import inspect
 import json
 import os
 import platform
+from time import perf_counter_ns
 
 import benchmark_board
 from core_engine import CellState, GameStatus, MinesweeperEngine
@@ -94,6 +95,46 @@ def _cells(value):
 def _record(value, cls):
     _need(type(value) is cls, "CANONICAL_RECORD_TYPE_REQUIRED")
     cls.__post_init__(value)
+
+
+@dataclass(frozen=True, slots=True)
+class PriorBindingTimingFact:
+    """Optional operational observation, never a persisted evidence record.
+
+    The interval contains the complete initial PRIMARY prior revalidation in
+    the selected downstream worker. Decode/transport and parent binding remain
+    owned by the operational caller. The callback occurs before target setup
+    and solver execution, so a caller can acknowledge a transport boundary
+    without reclassifying ordinary K-CONTROL work as Oracle work.
+    """
+
+    work_position: int
+    kind: WorkerKind
+    start_ns: int
+    end_ns: int
+
+    def __post_init__(self):
+        _uint(self.work_position)
+        _need(type(self.kind) is WorkerKind and self.kind in
+              (WorkerKind.K_CONTROL, WorkerKind.DETERMINISM), "DOWNSTREAM_BINDING_KIND_REQUIRED")
+        _uint(self.start_ns)
+        _uint(self.end_ns)
+        _need(self.start_ns <= self.end_ns, "PRIOR_BINDING_INTERVAL_ORDER")
+
+    @property
+    def wall_ns(self):
+        return self.end_ns - self.start_ns
+
+
+def _revalidate_primary_prior(work, first_primary_bundle, kind, observer):
+    if observer is None:
+        revalidate_bundle(first_primary_bundle, work, WorkerKind.PRIMARY)
+        return
+    _need(callable(observer), "PRIOR_BINDING_OBSERVER_REQUIRED")
+    started = perf_counter_ns()
+    revalidate_bundle(first_primary_bundle, work, WorkerKind.PRIMARY)
+    ended = perf_counter_ns()
+    observer(PriorBindingTimingFact(work.position, kind, started, ended))
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,7 +600,8 @@ def _oracle_b_coverage(raw, arm, selected):
     return records.OracleBCoverageRecord(arm, selected, tuple(applicable))
 
 
-def _run_pair(work, owner, table, *, repeat=False, max_physical_inputs=480, observer=None, abort_check=None):
+def _run_pair(work, owner, table, *, repeat=False, max_physical_inputs=480, observer=None, abort_check=None,
+              oracle_timing_observer=None):
     """Private direct seam for literal unit fixtures; public workers own generation."""
     _record(work, BoardWork)
     _record(owner, _BoardOwner)
@@ -593,8 +635,9 @@ def _run_pair(work, owner, table, *, repeat=False, max_physical_inputs=480, obse
         streams[prefix + "control_maintenance"] = tuple(records.encode(item) for item in
             _project_control_reference(raw_results[records.Arm.CONTROL], control))
     coverage = _oracle_b_coverage(raw_results[records.Arm.K_P0], kp0_arm, work.oracle_b_selected)
+    audit_options = {} if oracle_timing_observer is None else {"oracle_timing_observer": oracle_timing_observer}
     public = audit.audit_k_p0(raw_results[records.Arm.K_P0], kp0, raw_arm=kp0_arm, table=table,
-                              oracle_b_enabled=work.oracle_b_selected)
+                              oracle_b_enabled=work.oracle_b_selected, **audit_options)
     # Exactly once, after both executions, with the same raw K result and answer.
     private_records = evaluator.evaluate_k_p0(raw_results[records.Arm.K_P0], kp0,
         evaluator.PrivateFixedAnswer(kp0_arm, owner.mines), raw_arm=kp0_arm, table=table)
@@ -632,11 +675,13 @@ def _run_pair(work, owner, table, *, repeat=False, max_physical_inputs=480, obse
     return projections, streams, tuple(headers[role] for role in _ROLES if role in headers), status, tuple(reasons)
 
 
-def execute_primary(work, *, shadow_timeout_ms=1000, max_physical_inputs=480, observer=None, abort_check=None):
+def execute_primary(work, *, shadow_timeout_ms=1000, max_physical_inputs=480, observer=None, abort_check=None,
+                    oracle_timing_observer=None):
     owner = _materialize_board(work)
     table = load_timing_table()
     _, streams, headers, status, reasons = _run_pair(work, owner, table, max_physical_inputs=max_physical_inputs,
-                                                     observer=observer, abort_check=abort_check)
+                                                     observer=observer, abort_check=abort_check,
+                                                     oracle_timing_observer=oracle_timing_observer)
     return _bundle(work, WorkerKind.PRIMARY, streams, headers, status, reasons)
 
 
@@ -678,15 +723,16 @@ def _control_determinism(first, repeat, first_maintenance, repeat_maintenance):
 
 
 def execute_repeat(work, first_primary_bundle, *, shadow_timeout_ms=1000, max_physical_inputs=480,
-                   observer=None, abort_check=None):
+                   observer=None, abort_check=None, oracle_timing_observer=None,
+                   prior_binding_observer=None):
     _record(work, BoardWork)
     if not work.determinism_selected:
         return None
-    revalidate_bundle(first_primary_bundle, work, WorkerKind.PRIMARY)
+    _revalidate_primary_prior(work, first_primary_bundle, WorkerKind.DETERMINISM, prior_binding_observer)
     owner, table = _materialize_board(work), load_timing_table()
     projections, streams, headers, status, reasons = _run_pair(
         work, owner, table, repeat=True, max_physical_inputs=max_physical_inputs,
-        observer=observer, abort_check=abort_check)
+        observer=observer, abort_check=abort_check, oracle_timing_observer=oracle_timing_observer)
     first = {role: restore_projection(first_primary_bundle, role) for role in ("control", "kp0")}
     retained = {name: values for name, values in first_primary_bundle.streams
                 if name.startswith("control_") or name.startswith("kp0_")}
@@ -964,14 +1010,14 @@ def compare_k_control(reference, actual):
 
 
 def execute_k_control(work, first_primary_bundle, *, shadow_timeout_ms=1000, max_physical_inputs=480,
-                      observer=None, abort_check=None):
+                      observer=None, abort_check=None, prior_binding_observer=None):
     """One fresh process invocation only; the operational owner always retires it."""
     _record(work, BoardWork)
     if not work.k_control_selected:
         return None
     _uint(shadow_timeout_ms, positive=True)
     _need(shadow_timeout_ms <= identity.SHADOW_TIMEOUT_MS, "SHADOW_CAP_EXCEEDS_PROVISIONAL_CEILING")
-    revalidate_bundle(first_primary_bundle, work, WorkerKind.PRIMARY)
+    _revalidate_primary_prior(work, first_primary_bundle, WorkerKind.K_CONTROL, prior_binding_observer)
     owner, table = _materialize_board(work), load_timing_table()
     arm = _arm(work, records.Arm.K_CONTROL)
     port = _fresh_engine(owner, max_physical_inputs, observer, abort_check, arm.arm.value)

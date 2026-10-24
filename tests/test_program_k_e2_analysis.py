@@ -362,6 +362,110 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(analyze(rows), analyze(rows))
 
 
+class BootstrapProgressTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = (row(0, fallback=1),
+                     row(1, control=400_020, kp0=20, control_compute=100,
+                         kp0_compute=200, fallback=1))
+
+    def test_none_preserves_accepted_result_golden(self):
+        # Captured with these two synthetic rows from accepted source commit
+        # 9071469e2e4a884722ea02e2faea3441d916876c before the observer addition.
+        result = analyze(self.rows, bootstrap_progress=None)
+        self.assertEqual(hashlib.sha256(repr(result).encode("utf-8")).hexdigest(),
+                         "5d3f6fa9db9129be7426d5c4a463bf5defa655004ef7ed44fec28af0bc348fc0")
+        self.assertEqual(result.bootstrap.accepted_draws, 20_000)
+
+    def test_observer_preserves_result_and_reports_every_registered_replicate(self):
+        baseline = analyze(self.rows)
+        before = tuple(repr(value) for value in self.rows)
+        events = []
+
+        def observe(completed, total):
+            self.assertIs(type(completed), int)
+            self.assertIs(type(total), int)
+            events.append((completed, total))
+            # Only immutable scalar counts cross the observer boundary. Local
+            # changes and arbitrary return values cannot supply analysis data.
+            completed += 100
+            total = -1
+            return {"completed": completed, "total": total, "rows": ()}
+
+        result = analyze(self.rows, bootstrap_progress=observe)
+        self.assertEqual(result, baseline)
+        self.assertEqual(tuple(repr(value) for value in self.rows), before)
+        self.assertEqual(events, [(completed, 10_000) for completed in range(10_001)])
+        self.assertEqual(result.bootstrap.replicates, 10_000)
+
+    def test_completed_counts_follow_draws_and_callback_failure_propagates(self):
+        class ObserverFailure(RuntimeError):
+            pass
+
+        original_draw = analysis.uniform_position
+        for fail_at in (0, 3, 10_000):
+            with self.subTest(fail_at=fail_at):
+                accepted = 0
+                events = []
+                failure = ObserverFailure("synthetic observer failed")
+
+                def draw(state, n):
+                    nonlocal accepted
+                    value = original_draw(state, n)
+                    accepted += 1
+                    return value
+
+                def observe(completed, total):
+                    events.append((completed, total))
+                    self.assertEqual(accepted, completed * len(self.rows))
+                    if completed == fail_at:
+                        raise failure
+
+                with patch.object(analysis, "uniform_position", new=draw):
+                    with self.assertRaises(ObserverFailure) as raised:
+                        analyze(self.rows, bootstrap_progress=observe)
+                self.assertIs(raised.exception, failure)
+                self.assertEqual(accepted, fail_at * len(self.rows))
+                self.assertEqual(events, [(completed, 10_000) for completed in range(fail_at + 1)])
+
+    def test_observer_preserves_shared_draws_rejections_and_exact_metrics(self):
+        rows = (row(0, control=1000, kp0=990, control_compute=100, kp0_compute=101),
+                row(1, control=1000, kp0=960, control_compute=100, kp0_compute=103, fallback=1),
+                row(2, control=1000, kp0=930, control_compute=100, kp0_compute=107, fallback=1))
+        events = []
+        accepted = 0
+
+        def draw(state, n):
+            nonlocal accepted
+            self.assertEqual(n, 3)
+            position = (0, 1, 1)[accepted % 3]
+            accepted += 1
+            return (state + 1) & ((1 << 64) - 1), position, 2
+
+        with patch.object(analysis, "uniform_position", new=draw):
+            result = analyze(rows, bootstrap_progress=lambda done, total: events.append((done, total)))
+        self.assertEqual((accepted, result.bootstrap.accepted_draws, result.bootstrap.rejected_draws),
+                         (30_000, 30_000, 60_000))
+        self.assertEqual(result.bootstrap.g8.interval, (Fraction(30), Fraction(30)))
+        self.assertEqual(result.bootstrap.g5.interval, (Fraction(40), Fraction(40)))
+        self.assertEqual(result.bootstrap.g9.interval, (Fraction(89993, 3), Fraction(89993, 3)))
+        self.assertEqual(events, [(completed, 10_000) for completed in range(10_001)])
+
+    def test_noncallable_observer_is_rejected_before_sampling(self):
+        with patch.object(analysis, "uniform_position", side_effect=AssertionError("Unexpected sampling")):
+            for invalid in (False, 0, "observer", (), [], object()):
+                with self.subTest(invalid=type(invalid)):
+                    with self.assertRaises(analysis.AnalysisError):
+                        analyze(self.rows, bootstrap_progress=invalid)
+                    with self.assertRaises(analysis.AnalysisError):
+                        analysis._shared_bootstrap(self.rows, SEED, DIGEST, progress=invalid)
+
+    def test_invalid_analysis_input_does_not_start_progress(self):
+        events = []
+        with self.assertRaises(analysis.AnalysisError):
+            analyze(self.rows[::-1], bootstrap_progress=lambda done, total: events.append((done, total)))
+        self.assertEqual(events, [])
+
+
 class G5Tests(unittest.TestCase):
     def test_zero_exposure_even_with_setup_flags_is_not_applicable(self):
         result = analyze((row(setup=77),), g5_evidence_complete=True)

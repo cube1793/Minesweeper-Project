@@ -355,6 +355,264 @@ class PrimaryPairTests(unittest.TestCase):
         self.assertEqual(obj["version"], 1)
 
 
+class OracleTimingObserverTests(unittest.TestCase):
+    """The optional operational observer cannot alter accepted worker evidence."""
+
+    def _fixed_solver_clocks(self):
+        # Solver duration noise is excluded from this exact evidence comparison;
+        # the independent Oracle observer retains its real clock and intervals.
+        stack = ExitStack()
+        stack.enter_context(patch.object(runner, "perf_counter_ns", return_value=100))
+        stack.enter_context(patch("stage3_runner.perf_counter_ns", return_value=100))
+        return stack
+
+    def _assert_fact(self, fact, arm):
+        self.assertIs(type(fact), audit.OracleBTimingFact)
+        self.assertEqual(tuple(field.name for field in fields(fact)),
+                         ("arm", "applicability_checks", "actual_checks", "wall_ns", "intervals"))
+        self.assertEqual(fact.arm, arm)
+        self.assertFalse(hasattr(fact, "__dict__"))
+        self.assertIs(type(fact.intervals), tuple)
+        self.assertEqual(len(fact.intervals), fact.applicability_checks)
+        self.assertEqual(sum(end - start for start, end in fact.intervals), fact.wall_ns)
+        self.assertLessEqual(fact.actual_checks, fact.applicability_checks)
+        for field in fields(fact):
+            with self.subTest(field=field.name), self.assertRaises(FrozenInstanceError):
+                setattr(fact, field.name, None)
+        for name in ("private_answer", "mine_positions", "projection", "outcome", "pair",
+                     "model_c_delta", "ww_wl_lw_ll", "g5_g8_g9", "mechanism_counts"):
+            self.assertFalse(hasattr(fact, name))
+
+    def test_primary_observer_preserves_exact_evidence_and_default_audit_keywords(self):
+        work, facts = _literal_work(), []
+        with _literal_context(work), self._fixed_solver_clocks(), \
+                patch.object(runner, "run_control_capture", wraps=runner.run_control_capture) as control, \
+                patch.object(runner, "run_k_p0", wraps=runner.run_k_p0) as kp0, \
+                patch.object(runner, "run_k_control", side_effect=AssertionError("No K-CONTROL worker")), \
+                patch.object(audit, "_oracle_b", wraps=audit._oracle_b) as oracle, \
+                patch.object(audit, "audit_k_p0", wraps=audit.audit_k_p0) as audited, \
+                patch.object(evaluator, "evaluate_k_p0", wraps=evaluator.evaluate_k_p0) as evaluated:
+            with patch.object(audit, "perf_counter_ns", side_effect=AssertionError("Default audit has no observer clock")):
+                baseline = execution.execute_primary(work)
+            default_calls = oracle.call_count
+            oracle.reset_mock()
+            observed = execution.execute_primary(work, oracle_timing_observer=facts.append)
+        self.assertEqual(set(audited.call_args_list[0].kwargs), {"raw_arm", "table", "oracle_b_enabled"})
+        self.assertEqual(set(audited.call_args_list[1].kwargs),
+                         {"raw_arm", "table", "oracle_b_enabled", "oracle_timing_observer"})
+        self.assertEqual((control.call_count, kp0.call_count, evaluated.call_count), (2, 2, 2))
+        self.assertGreater(default_calls, 0)
+        self.assertEqual(oracle.call_count, default_calls)
+        self.assertEqual(execution.encode_bundle(observed), execution.encode_bundle(baseline))
+        self.assertIs(observed.status, records.AuditStatus.PASS)
+        self.assertEqual(len(facts), 1)
+        self._assert_fact(facts[0], execution.restore_projection(observed, "kp0").arm)
+
+    def test_repeat_observer_preserves_full_first_repeat_evidence_and_identity(self):
+        work, facts = _literal_work(), []
+        with _literal_context(work), self._fixed_solver_clocks():
+            first = execution.execute_primary(work)
+            first_bytes = execution.encode_bundle(first)
+            with patch.object(runner, "run_control_capture", wraps=runner.run_control_capture) as control, \
+                    patch.object(runner, "run_k_p0", wraps=runner.run_k_p0) as kp0, \
+                    patch.object(runner, "run_k_control", side_effect=AssertionError("No K-CONTROL worker")), \
+                    patch.object(audit, "_oracle_b", wraps=audit._oracle_b) as oracle, \
+                    patch.object(audit, "audit_k_p0", wraps=audit.audit_k_p0) as audited:
+                baseline = execution.execute_repeat(work, first)
+                default_calls = oracle.call_count
+                oracle.reset_mock()
+                observed = execution.execute_repeat(work, first, oracle_timing_observer=facts.append)
+        self.assertEqual((control.call_count, kp0.call_count), (2, 2))
+        self.assertEqual(oracle.call_count, default_calls)
+        self.assertNotIn("oracle_timing_observer", audited.call_args_list[0].kwargs)
+        self.assertIn("oracle_timing_observer", audited.call_args_list[1].kwargs)
+        self.assertEqual(execution.encode_bundle(observed), execution.encode_bundle(baseline))
+        self.assertEqual(execution.encode_bundle(first), first_bytes)
+        self.assertEqual(len(facts), 1)
+        repeat_arm = execution.restore_projection(observed, "repeat_kp0").arm
+        self._assert_fact(facts[0], repeat_arm)
+        self.assertNotEqual(repeat_arm.unit_id, execution.restore_projection(first, "kp0").arm.unit_id)
+        parts = _streams(observed)
+        for name in ("control_determinism", "kp0_determinism"):
+            self.assertIs(parts[name][0].status, records.AuditStatus.PASS)
+        execution.revalidate_bundle(observed, work, execution.WorkerKind.DETERMINISM)
+
+    def test_observer_receives_only_closed_fact_after_both_solver_arms_end(self):
+        work, ended, facts = _literal_work(), set(), []
+
+        def boundary(name, arm):
+            if name == "ARM_END":
+                ended.add(arm)
+
+        def observe(fact):
+            self.assertEqual(ended, {"CONTROL", "K_P0"})
+            self.assertIs(type(fact), audit.OracleBTimingFact)
+            facts.append(fact)
+
+        with _literal_context(work):
+            observed = execution.execute_primary(work, observer=boundary, oracle_timing_observer=observe)
+        self.assertEqual(len(facts), 1)
+        self._assert_fact(facts[0], execution.restore_projection(observed, "kp0").arm)
+        self.assertGreater(facts[0].actual_checks, 0)
+        self.assertNotIn("oracle_timing", {name for name, _ in observed.streams})
+
+    def test_observer_exception_propagates_without_evaluator_or_published_bundle(self):
+        work = _literal_work()
+        with _literal_context(work):
+            first = execution.execute_primary(work)
+        for repeat in (False, True):
+            failure = RuntimeError("synthetic observer failure")
+            with self.subTest(repeat=repeat), _literal_context(work), \
+                    patch.object(evaluator, "evaluate_k_p0", side_effect=AssertionError("Observer already failed")), \
+                    patch.object(execution, "_bundle", side_effect=AssertionError("No successful bundle after failure")), \
+                    patch.object(audit, "OracleBTimingFact", wraps=audit.OracleBTimingFact) as made:
+                def observe(fact):
+                    raise failure
+                with self.assertRaises(RuntimeError) as caught:
+                    if repeat:
+                        execution.execute_repeat(work, first, oracle_timing_observer=observe)
+                    else:
+                        execution.execute_primary(work, oracle_timing_observer=observe)
+                self.assertIs(caught.exception, failure)
+                self.assertEqual(made.call_count, 1)
+
+    def test_disabled_oracle_does_not_measure_or_callback_for_primary_or_repeat(self):
+        work = _literal_work(oracle_b_selected=False)
+        with _literal_context(work), \
+                patch.object(audit, "_oracle_b", side_effect=AssertionError("Disabled Oracle executed")), \
+                patch.object(audit, "perf_counter_ns", side_effect=AssertionError("Disabled Oracle timed")):
+            def forbidden(_):
+                self.fail("Disabled Oracle emitted timing")
+            first = execution.execute_primary(work, oracle_timing_observer=forbidden)
+            repeated = execution.execute_repeat(work, first, oracle_timing_observer=forbidden)
+        self.assertEqual(_streams(first)["oracle_b_audits"], ())
+        self.assertEqual(_streams(repeated)["repeat_oracle_b_audits"], ())
+        self.assertIs(first.status, records.AuditStatus.PASS)
+        self.assertIs(repeated.status, records.AuditStatus.PASS)
+
+    def test_initial_only_literal_reports_completed_zero_applicability_without_fake_wall(self):
+        mines, facts = frozenset(), []
+        work = _literal_work(width=1, mines=mines)
+        with _literal_context(work, mines), \
+                patch.object(audit, "_oracle_b", side_effect=AssertionError("Initial-only Oracle comparison")):
+            result = execution.execute_primary(work, oracle_timing_observer=facts.append)
+        self.assertEqual(len(facts), 1)
+        self._assert_fact(facts[0], execution.restore_projection(result, "kp0").arm)
+        self.assertEqual((facts[0].applicability_checks, facts[0].actual_checks,
+                          facts[0].wall_ns, facts[0].intervals), (0, 0, 0, ()))
+        self.assertEqual(_streams(result)["oracle_b_audits"], ())
+
+
+class PriorBindingObserverTests(unittest.TestCase):
+    def _fixed_solver_clocks(self):
+        stack = ExitStack()
+        stack.enter_context(patch.object(runner, "perf_counter_ns", return_value=100))
+        stack.enter_context(patch("stage3_runner.perf_counter_ns", return_value=100))
+        return stack
+
+    def test_both_downstream_callbacks_end_before_target_setup_and_solver(self):
+        work = _literal_work()
+        with _literal_context(work):
+            first = execution.execute_primary(work)
+        accepted = execution.revalidate_bundle
+        for kind, invoke in ((execution.WorkerKind.K_CONTROL, execution.execute_k_control),
+                             (execution.WorkerKind.DETERMINISM, execution.execute_repeat)):
+            events, facts = [], []
+
+            def validate(bundle, bound_work, bound_kind, **kwargs):
+                if bundle is first:
+                    self.assertEqual(events, ["CLOCK"])
+                    events.append("VALIDATE_PRIOR")
+                return accepted(bundle, bound_work, bound_kind, **kwargs)
+
+            def clock():
+                events.append("CLOCK")
+                return 100 if len(events) == 1 else 175
+
+            def observed(fact):
+                self.assertEqual(events, ["CLOCK", "VALIDATE_PRIOR", "CLOCK"])
+                facts.append(fact)
+                events.append("BOUND")
+
+            def materialize(bound_work):
+                self.assertEqual(events[-1], "BOUND")
+                events.append("TARGET_SETUP")
+                return execution._BoardOwner(bound_work.board, frozenset({(1, 0)}))
+
+            def boundary(name, arm):
+                if name == "ARM_START":
+                    self.assertEqual(events[-1], "TARGET_SETUP")
+
+            with self.subTest(kind=kind), _literal_context(work), \
+                    patch.object(execution, "revalidate_bundle", side_effect=validate), \
+                    patch.object(execution, "perf_counter_ns", side_effect=clock) as timed, \
+                    patch.object(execution, "_materialize_board", side_effect=materialize):
+                result = invoke(work, first, prior_binding_observer=observed, observer=boundary)
+            self.assertIs(result.status, records.AuditStatus.PASS)
+            self.assertEqual(timed.call_count, 2)
+            self.assertEqual(facts, [execution.PriorBindingTimingFact(work.position, kind, 100, 175)])
+            self.assertEqual(facts[0].wall_ns, 75)
+            self.assertNotIn("prior_binding", {name for name, _ in result.streams})
+
+    def test_observer_preserves_exact_bundles_and_prior_bytes(self):
+        work = _literal_work()
+        with _literal_context(work), self._fixed_solver_clocks():
+            first = execution.execute_primary(work)
+            before = execution.encode_bundle(first)
+            for invoke in (execution.execute_k_control, execution.execute_repeat):
+                facts = []
+                with self.subTest(invoke=invoke.__name__):
+                    with patch.object(execution, "perf_counter_ns", side_effect=AssertionError("Default clock")):
+                        baseline = invoke(work, first)
+                    observed = invoke(work, first, prior_binding_observer=facts.append)
+                    self.assertEqual(execution.encode_bundle(observed), execution.encode_bundle(baseline))
+                    self.assertEqual(execution.encode_bundle(first), before)
+                    self.assertEqual(len(facts), 1)
+
+    def test_unselected_target_never_observes_or_reads_clock(self):
+        work = _literal_work(determinism_selected=False, k_control_selected=False)
+        with patch.object(execution, "perf_counter_ns", side_effect=AssertionError("Unselected clock")), \
+                patch.object(execution, "_materialize_board", side_effect=AssertionError("Unselected setup")):
+            for invoke in (execution.execute_k_control, execution.execute_repeat):
+                self.assertIsNone(invoke(work, None, prior_binding_observer=lambda _: self.fail("Unselected callback")))
+
+    def test_callback_failure_and_invalid_prior_cannot_enter_target(self):
+        work = _literal_work()
+        with _literal_context(work):
+            first = execution.execute_primary(work)
+        for invoke in (execution.execute_k_control, execution.execute_repeat):
+            with self.subTest(invoke=invoke.__name__), \
+                    patch.object(execution, "_materialize_board", side_effect=AssertionError("No target after failure")):
+                failure = RuntimeError("synthetic binding observer failure")
+
+                def reject(_):
+                    raise failure
+
+                with self.assertRaises(RuntimeError) as caught:
+                    invoke(work, first, prior_binding_observer=reject)
+                self.assertIs(caught.exception, failure)
+                with self.assertRaises(ValueError):
+                    invoke(work, replace(first, work_position=1),
+                           prior_binding_observer=lambda _: self.fail("Invalid prior callback"))
+                with self.assertRaisesRegex(ValueError, "PRIOR_BINDING_OBSERVER_REQUIRED"):
+                    invoke(work, first, prior_binding_observer=42)
+
+    def test_timing_fact_is_closed_immutable_and_strict(self):
+        fact = execution.PriorBindingTimingFact(0, execution.WorkerKind.K_CONTROL, 7, 7)
+        self.assertEqual(fact.wall_ns, 0)
+        self.assertEqual(tuple(field.name for field in fields(fact)),
+                         ("work_position", "kind", "start_ns", "end_ns"))
+        self.assertFalse(hasattr(fact, "__dict__"))
+        for field in fields(fact):
+            with self.assertRaises(FrozenInstanceError):
+                setattr(fact, field.name, None)
+        for changes in ({"work_position": True}, {"kind": execution.WorkerKind.PRIMARY},
+                        {"kind": "K_CONTROL"}, {"start_ns": -1}, {"end_ns": 6},
+                        {"start_ns": 1.0}, {"end_ns": True}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(fact, **changes)
+
+
 class OracleCoverageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -375,14 +633,21 @@ class OracleCoverageTests(unittest.TestCase):
 
     def test_selected_zero_applicable_phases_is_explicit_and_makes_zero_oracle_calls(self):
         work = _literal_work(42_424_244, width=1, mines=frozenset())
+        facts, bindings = [], []
         with _literal_context(work, frozenset()), patch.object(audit, "_oracle_b",
                 side_effect=AssertionError("No reached phase can invoke Oracle-B")):
             result = execution.execute_primary(work)
-        coverage, = _streams(result)["oracle_b_coverage"]
-        self.assertTrue(coverage.selected)
-        self.assertEqual(coverage.applicable, ())
-        self.assertEqual(_streams(result)["oracle_b_audits"], ())
-        self.assertIs(result.status, records.AuditStatus.PASS)
+            repeated = execution.execute_repeat(work, result, oracle_timing_observer=facts.append,
+                                                 prior_binding_observer=bindings.append)
+        for bundle, prefix in ((result, ""), (repeated, "repeat_")):
+            coverage, = _streams(bundle)[prefix + "oracle_b_coverage"]
+            self.assertTrue(coverage.selected)
+            self.assertEqual(coverage.applicable, ())
+            self.assertEqual(_streams(bundle)[prefix + "oracle_b_audits"], ())
+            self.assertIs(bundle.status, records.AuditStatus.PASS)
+        self.assertEqual(len(bindings), 1)  # No audit rows still consumes/binds the prior.
+        self.assertEqual(len(facts), 1)
+        self.assertEqual((facts[0].applicability_checks, facts[0].actual_checks, facts[0].wall_ns), (0, 0, 0))
 
     def test_raw_applicability_d_only_d_and_e_and_chronological_boundaries(self):
         raw = self.raw_results[0]

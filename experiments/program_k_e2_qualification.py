@@ -56,6 +56,10 @@ _E2 = tuple("experiments/program_k_e2_" + name + ".py" for name in (
     "identity", "records", "store", "analysis", "report", "game", "audit",
     "evaluator", "execution", "operational", "qualification"))
 _CANDIDATES = (_E2[-1], "tests/test_program_k_e2_qualification.py")
+_AMENDMENT = "docs/stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md"
+_AMENDMENT_SHA256 = "5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf"
+_AMENDMENT_BYTE_LENGTH = 58_052
+_R0_SOURCE_PATHS = ("experiments/program_k_e2_readiness.py", _AMENDMENT)
 _REPAIR_TEST = "tests/test_program_k_e2_operational.py"
 IDENTITY_STREAM = "qualification_identity"
 _STREAMS = execution.STREAM_NAMES + ("operations", "resources")
@@ -112,7 +116,10 @@ def capture_sources():
         _need((line[:2] == "??" and line[3:] in _CANDIDATES) or repair,
               "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE")
         repair_modified = repair_modified or repair
-    paths = tuple(sorted(set(_PROTECTED + ("benchmark_board.py", _PROTOCOL, _REPAIR_TEST) + _E2)))
+    # R0-B uses readiness sizing/selection and the separately frozen amendment.
+    # Bind their committed identities without weakening I7 worktree or plan hygiene.
+    paths = tuple(sorted(set(_PROTECTED + ("benchmark_board.py", _PROTOCOL, _REPAIR_TEST)
+                             + _E2 + _R0_SOURCE_PATHS)))
     committed = tuple(path for path in paths if not candidate_is_new or path != _E2[-1])
     refs = tuple(head + ":" + path for path in committed)
     refs += tuple(_E1 + ":" + path for path in _PROTECTED)
@@ -125,6 +132,10 @@ def capture_sources():
     _need(current[_PROTOCOL] == protocol_blob and protocol_blob[0] == _BLOB,
           "FROZEN_PROTOCOL_IDENTITY_DRIFT")
     identity.validate_protocol_bytes(protocol_blob[1])
+    amendment = current[_AMENDMENT][1]
+    _need(len(amendment) == _AMENDMENT_BYTE_LENGTH
+          and sha256(amendment).hexdigest() == _AMENDMENT_SHA256,
+          "FROZEN_AMENDMENT_IDENTITY_DRIFT")
     candidates = {_E2[-1]: (_ROOT / _E2[-1]).read_bytes()}
     if repair_modified:
         candidates[_REPAIR_TEST] = (_ROOT / _REPAIR_TEST).read_bytes()

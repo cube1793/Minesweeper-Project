@@ -42,7 +42,7 @@ def _committed_fixture_sources():
     """
     head = q._git("rev-parse", "HEAD").strip().decode("ascii")
     paths = tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL,
-                                             q._REPAIR_TEST) + q._E2)))
+                                             q._REPAIR_TEST) + q._E2 + q._R0_SOURCE_PATHS)))
     refs = tuple(head + ":" + path for path in paths)
     refs += tuple(q._E1 + ":" + path for path in q._PROTECTED)
     refs += (q._FREEZE + ":" + q._PROTOCOL,)
@@ -55,6 +55,10 @@ def _committed_fixture_sources():
     if current[q._PROTOCOL] != protocol_blob or protocol_blob[0] != q._BLOB:
         raise AssertionError("FIXTURE_FROZEN_PROTOCOL_IDENTITY_DRIFT")
     identity.validate_protocol_bytes(protocol_blob[1])
+    amendment = current[q._AMENDMENT][1]
+    if (len(amendment) != q._AMENDMENT_BYTE_LENGTH
+            or sha256(amendment).hexdigest() != q._AMENDMENT_SHA256):
+        raise AssertionError("FIXTURE_FROZEN_AMENDMENT_IDENTITY_DRIFT")
     if q._git("rev-parse", "HEAD").strip().decode("ascii") != head:
         raise AssertionError("FIXTURE_HEAD_CHANGED_DURING_CAPTURE")
     return tuple(records.SourceBlobIdentity(path, current[path][0],
@@ -97,6 +101,7 @@ class QualificationTests(unittest.TestCase):
                                  publication_wall_ms=10_000)
         cls.sources = _committed_fixture_sources()
         cls.protocol_bytes = q._git("cat-file", "blob", q._BLOB)
+        cls.amendment_bytes = q._git("show", "HEAD:" + q._AMENDMENT)
         cls.bundles = cls._literal_bundles(cls.plan[0])
         cls.two_plan = execution.make_work_plan(
             (board, _literal_work(42_424_243).board),
@@ -650,6 +655,10 @@ class QualificationTests(unittest.TestCase):
                     oid, data = q._BLOB, self.protocol_bytes
                     if drift == "protocol_oid":
                         oid = "f" * 40
+                elif path == q._AMENDMENT:
+                    data = self.amendment_bytes
+                    if drift == "amendment_bytes":
+                        data += b"\n"
                 elif path == q._PROTECTED[0] and commit == head and drift == "protected_oid":
                     oid = "2" * 40
                 result.append((oid, data))
@@ -660,7 +669,8 @@ class QualificationTests(unittest.TestCase):
 
     def test_source_guard_rejects_protected_and_protocol_blob_drift(self):
         for drift, reason in (("protected_oid", "E1_CORE_IDENTITY_DRIFT"),
-                              ("protocol_oid", "FROZEN_PROTOCOL_IDENTITY_DRIFT")):
+                              ("protocol_oid", "FROZEN_PROTOCOL_IDENTITY_DRIFT"),
+                              ("amendment_bytes", "FROZEN_AMENDMENT_IDENTITY_DRIFT")):
             with self.source_capture(drift=drift), self.subTest(drift=drift):
                 with self.assertRaisesRegex(q.QualificationError, reason):
                     q.capture_sources()
@@ -689,7 +699,8 @@ class QualificationTests(unittest.TestCase):
 
     def test_committed_fixture_snapshot_retains_authority_and_head_checks(self):
         for drift, reason in (("protected_oid", "FIXTURE_E1_CORE_IDENTITY_DRIFT"),
-                              ("protocol_oid", "FIXTURE_FROZEN_PROTOCOL_IDENTITY_DRIFT")):
+                              ("protocol_oid", "FIXTURE_FROZEN_PROTOCOL_IDENTITY_DRIFT"),
+                              ("amendment_bytes", "FIXTURE_FROZEN_AMENDMENT_IDENTITY_DRIFT")):
             with self.source_capture(drift=drift), self.subTest(drift=drift):
                 with self.assertRaisesRegex(AssertionError, reason):
                     _committed_fixture_sources()
@@ -716,6 +727,10 @@ class QualificationTests(unittest.TestCase):
                 values = q.capture_sources()
                 self.assertTrue(all(type(value) is records.SourceBlobIdentity for value in values))
                 self.assertEqual(sum(value.path == q._E2[-1] for value in values), 1)
+                by_path = {value.path: value for value in values}
+                self.assertTrue(set(q._R0_SOURCE_PATHS) <= set(by_path))
+                self.assertEqual(by_path[q._AMENDMENT].sha256, q._AMENDMENT_SHA256)
+                self.assertEqual(by_path[q._AMENDMENT].byte_length, q._AMENDMENT_BYTE_LENGTH)
 
     def test_source_guard_binds_only_unstaged_repair_during_candidate_review(self):
         status = (" M " + q._REPAIR_TEST + "\n").encode("ascii")

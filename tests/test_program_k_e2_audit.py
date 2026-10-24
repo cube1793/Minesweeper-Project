@@ -60,12 +60,14 @@ class AuditFixtures(unittest.TestCase):
         cls.guess_projection = game.project_k_p0(
             cls.guess_raw, _arm(records.Arm.K_P0, _board(5, 2, 102)), table=cls.table)
 
-    def run_audit(self, raw=None, projection=None, *, enabled=True, raw_arm=None):
+    def run_audit(self, raw=None, projection=None, *, enabled=True, raw_arm=None,
+                  oracle_timing_observer=None):
         raw = self.raw if raw is None else raw
         projection = self.projection if projection is None else projection
         return audit.audit_k_p0(raw, projection,
                                raw_arm=projection.arm if raw_arm is None else raw_arm,
-                               table=self.table, oracle_b_enabled=enabled)
+                               table=self.table, oracle_b_enabled=enabled,
+                               oracle_timing_observer=oracle_timing_observer)
 
     def assert_status(self, value, expected):
         self.assertIs(value.status, getattr(audit.AuditStatus, expected))
@@ -429,6 +431,167 @@ class OracleBAuditTests(AuditFixtures):
         self.assert_status(result, "INCOMPLETE")
         self.assertEqual(len(result.oracle_b_audits), 2)
         self.assertTrue(all(item.status is not audit.AuditStatus.PASS for item in result.oracle_b_audits))
+
+
+class OracleBTimingTests(AuditFixtures):
+    def test_default_and_unselected_paths_never_read_clock_or_emit_timing(self):
+        observed = []
+        with patch.object(audit, "perf_counter_ns", side_effect=AssertionError("unexpected timing")):
+            default = self.run_audit()
+            unselected = self.run_audit(enabled=False, oracle_timing_observer=observed.append)
+        self.assert_status(default, "PASS")
+        self.assert_status(unselected, "PASS")
+        self.assertEqual(observed, [])
+
+    def test_observer_on_off_preserve_every_record_and_exact_reference_count(self):
+        baseline = self.run_audit(self.exact_raw, self.exact_projection)
+        probes = 2 * sum(trace.selection is not None for trace in self.exact_raw.traces[1:])
+        observed = []
+        bounds = tuple(value for index in range(probes) for value in (100 + index * 20, 107 + index * 20))
+        with patch.object(audit, "perf_counter_ns", side_effect=bounds) as clock, \
+                patch.object(oracles, "materialized_exact_reference",
+                             wraps=oracles.materialized_exact_reference) as reference:
+            timed = self.run_audit(self.exact_raw, self.exact_projection,
+                                   oracle_timing_observer=observed.append)
+        self.assertEqual(timed, baseline)
+        self.assertEqual(clock.call_count, probes * 2)
+        fact, = observed
+        self.assertEqual(fact.arm, self.exact_projection.arm)
+        self.assertEqual(fact.applicability_checks, probes)
+        self.assertEqual(fact.actual_checks, reference.call_count)
+        self.assertEqual(fact.actual_checks, len(timed.oracle_b_audits))
+        self.assertEqual(fact.wall_ns, 7 * probes)
+        self.assertEqual(fact.intervals, tuple(zip(bounds[::2], bounds[1::2])))
+        repeated = []
+        with patch.object(audit, "perf_counter_ns", side_effect=bounds):
+            self.assertEqual(self.run_audit(self.exact_raw, self.exact_projection,
+                             oracle_timing_observer=repeated.append), baseline)
+        self.assertEqual(repeated, observed)
+
+    def test_clock_blocks_exclude_certificate_work_and_callback_runs_after_final_semantics(self):
+        now, events, observed = [0], [], []
+        certificate_call, oracle_call = audit._audit_certificate, audit._oracle_b
+        final_validation = audit.KBoardPublicAudit.__post_init__
+
+        def certificate(*args, **kwargs):
+            events.append("CERTIFICATE")
+            now[0] += 1_000_000
+            return certificate_call(*args, **kwargs)
+
+        def oracle(*args, **kwargs):
+            events.append("ORACLE")
+            now[0] += 11
+            return oracle_call(*args, **kwargs)
+
+        def validate(value):
+            final_validation(value)
+            events.append("FINAL_AUDIT_VALIDATED")
+
+        def observe(fact):
+            self.assertEqual(events[-1], "FINAL_AUDIT_VALIDATED")
+            observed.append(fact)
+
+        with patch.object(audit, "perf_counter_ns", side_effect=lambda: now[0]), \
+                patch.object(audit, "_audit_certificate", side_effect=certificate), \
+                patch.object(audit, "_oracle_b", side_effect=oracle), \
+                patch.object(audit.KBoardPublicAudit, "__post_init__", validate):
+            result = self.run_audit(self.exact_raw, self.exact_projection,
+                                    oracle_timing_observer=observe)
+        self.assert_status(result, "PASS")
+        self.assertIn("CERTIFICATE", events)
+        self.assertEqual(observed[0].wall_ns, 11 * events.count("ORACLE"))
+        self.assertGreater(now[0], observed[0].wall_ns)
+
+    def test_selected_initial_only_board_emits_honest_zero_fact(self):
+        raw = runner.run_k_p0(_PublicPort(_engine(2)), table=self.table, capture_effects=True)
+        projection = game.project_k_p0(raw, _arm(records.Arm.K_P0, _board(2)), table=self.table)
+        observed = []
+        with patch.object(audit, "perf_counter_ns", side_effect=AssertionError("no applicability probe")), \
+                patch.object(oracles, "materialized_exact_reference", side_effect=AssertionError("no exact phase")):
+            result = self.run_audit(raw, projection, oracle_timing_observer=observed.append)
+        self.assert_status(result, "PASS")
+        self.assertEqual(observed, [audit.OracleBTimingFact(projection.arm, 0, 0, 0)])
+
+    def test_absent_phase_applicability_is_measured_without_fabricated_minimum(self):
+        # Isolate the no-exact-phase branch with a detached synthetic decision.
+        # The mocked raw binder makes no claim that this is an executed board.
+        raw = self.raw
+        for index in range(1, len(raw.traces)):
+            if raw.traces[index].selection is not None:
+                raw = _with_decision(raw, index, phase_d=None, phase_e=None)
+        probes = 2 * sum(trace.selection is not None for trace in raw.traces[1:])
+        observed = []
+        with patch.object(audit, "_bind_raw"), \
+                patch.object(audit, "perf_counter_ns", return_value=100) as clock, \
+                patch.object(oracles, "materialized_exact_reference", side_effect=AssertionError("unreached phase")):
+            result = self.run_audit(raw, oracle_timing_observer=observed.append)
+        self.assertEqual(result.oracle_b_audits, ())
+        self.assertEqual(clock.call_count, probes * 2)
+        self.assertEqual(observed, [audit.OracleBTimingFact(self.projection.arm, probes, 0, 0,
+                                                          ((100, 100),) * probes)])
+
+    def test_failed_reference_and_unready_prerequisites_retain_semantics_and_counts(self):
+        with patch.object(oracles, "materialized_exact_reference", side_effect=ValueError("unavailable")):
+            baseline = self.run_audit()
+            observed = []
+            with patch.object(oracles, "materialized_exact_reference", side_effect=ValueError("unavailable")) as reference:
+                timed = self.run_audit(oracle_timing_observer=observed.append)
+        self.assertEqual(timed, baseline)
+        self.assert_status(timed, "FAIL")
+        self.assertEqual(observed[0].actual_checks, reference.call_count)
+        self.assertEqual(reference.call_count, 1)  # Failing D cannot authorize E.
+        raw = replace(self.raw, traces=self.raw.traces[:1] +
+                      (replace(self.raw.traces[1], public_effect=None, public_effect_status="NOT_EVALUATED"),)
+                      + self.raw.traces[2:])
+        projection = game.project_k_p0(raw, self.projection.arm, table=self.table)
+        baseline = self.run_audit(raw, projection)
+        observed = []
+        with patch.object(oracles, "materialized_exact_reference", side_effect=AssertionError("unqualified")):
+            timed = self.run_audit(raw, projection, oracle_timing_observer=observed.append)
+        self.assertEqual(timed, baseline)
+        self.assert_status(timed, "INCOMPLETE")
+        self.assertEqual(observed[0].actual_checks, 0)
+        self.assertGreater(observed[0].applicability_checks, 0)
+
+    def test_observer_exception_propagates_unchanged_and_bad_binding_never_emits(self):
+        error = ValueError("synthetic observer failure")
+        with self.assertRaises(ValueError) as raised:
+            self.run_audit(oracle_timing_observer=lambda _: (_ for _ in ()).throw(error))
+        self.assertIs(raised.exception, error)
+        observed = []
+        with self.assertRaises(audit.E2AuditError):
+            self.run_audit(raw_arm=replace(self.projection.arm, run_id="wrong"),
+                           oracle_timing_observer=observed.append)
+        self.assertEqual(observed, [])
+        for bad in (False, 0, 1.0, "observer", ()):
+            with self.subTest(observer=bad), self.assertRaises(audit.E2AuditError):
+                self.run_audit(oracle_timing_observer=bad)
+
+    def test_fact_is_closed_immutable_and_rejects_bad_integer_or_interval_evidence(self):
+        fact = audit.OracleBTimingFact(self.projection.arm, 2, 1, 9, ((10, 13), (20, 26)))
+        self.assertFalse(hasattr(fact, "__dict__"))
+        self.assertEqual({item.name for item in fields(fact)},
+                         {"arm", "applicability_checks", "actual_checks", "wall_ns", "intervals"})
+        self.assertTrue(fact.__dataclass_params__.frozen)
+        with self.assertRaises((FrozenInstanceError, AttributeError)):
+            fact.wall_ns = 0
+        for name in ("applicability_checks", "actual_checks", "wall_ns"):
+            for value in (True, False, -1, 1.0, Fraction(1)):
+                with self.subTest(field=name, value=value), self.assertRaises(audit.E2AuditError):
+                    replace(fact, **{name: value})
+        for intervals in ([], ((10, 13),), ((10, 13), [20, 26]),
+                          ((True, 13), (20, 26)), ((10, 13), (20, 26.0)),
+                          ((-1, 13), (20, 26)), ((13, 10), (20, 26)),
+                          ((10, 23), (20, 26)), ((20, 26), (10, 13)),
+                          ((10, 13), (20, 27))):
+            with self.subTest(intervals=intervals), self.assertRaises(audit.E2AuditError):
+                replace(fact, intervals=intervals)
+        for changes in ({"actual_checks": 3}, {"wall_ns": 10},
+                        {"arm": replace(fact.arm, arm=records.Arm.CONTROL)}):
+            with self.subTest(changes=changes), self.assertRaises(audit.E2AuditError):
+                replace(fact, **changes)
+        for forbidden in ("outcome", "effect", "private", "expected", "actual_digest", "certificate"):
+            self.assertNotIn(forbidden, {item.name for item in fields(fact)})
 
 
 class DeterminismAuditTests(AuditFixtures):

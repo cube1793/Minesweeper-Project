@@ -7,6 +7,7 @@ Nmax payloads, bootstrap calculation, official evidence or envelope is produced.
 from contextlib import contextmanager, ExitStack
 from dataclasses import FrozenInstanceError, fields, replace
 from fractions import Fraction
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,9 +24,22 @@ from experiments import program_k_e2_records as records
 _SEED = b"synthetic-i8-operational-seed-v1"
 _PHASES = (records.Phase.AGGREGATION, records.Phase.VALIDATION,
            records.Phase.PUBLICATION, records.Phase.READBACK, records.Phase.REPORT)
-_CANDIDATES = ("experiments/program_k_e2_readiness.py",
-               "tests/test_program_k_e2_readiness.py",
-               "tests/test_program_k_e2_qualification.py")
+_CANDIDATES = r.AMENDMENT_REVIEW_PATHS
+
+
+def _counts(n):
+    overlap = max(0, min(n, 128) + min(n, 256) - n)
+    return r.SubsetCounts(n, min(n, 256), overlap, overlap, sha256(str(n).encode()).digest())
+
+
+_TARGETS = tuple(_counts(n) for n in identity.N_LADDER)
+
+
+@lru_cache(maxsize=1)
+def _workload():
+    indices = r.synthetic_candidate_indices(0)
+    selection = r.SyntheticCorpusSelection(_SEED, 0, r.subset_counts(_SEED, indices))
+    return r.SyntheticWorkload(selection, _TARGETS[-1])
 
 
 def _envelope(concurrency=1, **changes):
@@ -49,11 +63,25 @@ def _component(wall_ns=64, durable_bytes=64, **changes):
     return replace(value, **changes)
 
 
+def _oracle(wall_ns=64, durable_bytes=64, **changes):
+    return replace(r.OracleMeasurement(wall_ns, durable_bytes, (durable_bytes + 63) // 64, 64), **changes)
+
+
+def _containment(route, **changes):
+    return replace(r.RouteContainment(route, 100, 200, 300, 1, 2, 3, 0, 1,
+                                     10, 10, True, True, True, True, True), **changes)
+
+
 def _measurement(concurrency=1, **changes):
     value = r.R0AConcurrencyMeasurement(
         concurrency=concurrency, plan=r.build_r0a_plan(_SEED),
-        primary=_component(), k_control=_component(), oracle_b=_component(),
-        determinism=_component(), wall_accounting=r.WallAccounting.NON_OVERLAPPING,
+        primary=_component(), k_control=_component(), oracle_primary=_oracle(),
+        determinism=_component(), oracle_k_bind=r.WallRouteMeasurement(64, 64),
+        oracle_d_repeat=_oracle(),
+        references=tuple(r.ReferenceMeasurement(route, 64, 1, 64)
+                         for route in ("K", "D", "O_K_SETUP", "O_D_SETUP")),
+        containment=tuple(_containment(route) for route in r.CALIBRATION_ROUTES),
+        wall_accounting=r.WallAccounting.CONSERVATIVE_STANDALONE,
         byte_accounting=r.ByteAccounting.NON_OVERLAPPING, envelope=_envelope(concurrency),
         max_worker_memory_bytes=100, max_coordinator_memory_bytes=200,
         max_combined_memory_bytes=300, max_decision_wall_ns=1, max_arm_wall_ns=2,
@@ -79,14 +107,20 @@ def _r0b(measurements=None, **changes):
         streaming_reconstruction=True, readback_complete=True, progress_bounded=True,
         synthetic_non_evidence=True,
         unit_bytes=sizing.unit_bytes,
+        workload=_workload(),
+        supporting=r.SupportingStreams(tuple(records.StreamDigest(name, "a" * 64, 1, 1)
+            for name in ("operations", "resources", q.IDENTITY_STREAM)), True, True, True,
+            True, True, True), realized_fixed_allowance_bytes=4,
+        realized_max_unit_payload_bytes=max(v[3] for v in r.synthetic_unit_payloads(_workload(), sizing.unit_bytes)),
+        max_combined_memory_bytes=300, containment_complete=True,
         archive_bytes=sum(count * getattr(sizing.unit_bytes, field.name)
-                          for count, field in zip(sizing.unit_counts, fields(sizing.unit_bytes))))
+                          for count, field in zip(_workload().unit_counts, fields(sizing.unit_bytes))) + 4)
     return replace(value, **changes)
 
 
 def _select(measurements=None, r0b=None):
     measurements = _measurements() if measurements is None else measurements
-    return r.select_operating_candidate(measurements, _r0b(measurements) if r0b is None else r0b)
+    return r.select_operating_candidate(measurements, _r0b(measurements) if r0b is None else r0b, _TARGETS)
 
 
 class RehearsalPlanTests(unittest.TestCase):
@@ -165,9 +199,10 @@ class MeasurementValidationTests(unittest.TestCase):
                         {"max_unit_bytes": 65}, {"durable_bytes": 129, "max_unit_bytes": 2}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(_component(), **changes)
-        for name in ("primary", "k_control", "oracle_b", "determinism"):
+        for name in ("primary", "k_control", "oracle_primary", "determinism"):
             with self.subTest(name=name), self.assertRaises(ValueError):
-                _select(_measurements(**{name: replace(_component(), completed_units=63)}))
+                factory = _oracle if name == "oracle_primary" else _component
+                _select(_measurements(**{name: replace(factory(), completed_units=63)}))
 
     def test_incomplete_operational_coverage_and_nonboolean_flags(self):
         for name in ("watchdogs_complete", "resources_complete", "cleanup_complete", "progress_complete"):
@@ -181,9 +216,8 @@ class MeasurementValidationTests(unittest.TestCase):
                                ("byte_accounting", "INCLUSIVE")):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 replace(_measurement(), **{field: invalid})
-        self.assertEqual(r.project_execution(1_000, _measurement()),
-            r.project_execution(1_000, _measurement(
-                wall_accounting=r.WallAccounting.CONSERVATIVE_STANDALONE)))
+        with self.assertRaisesRegex(ValueError, "COMPLETE_STANDALONE_WALL_REQUIRED"):
+            _measurement(wall_accounting=r.WallAccounting.NON_OVERLAPPING)
 
     def test_memory_and_wall_measurements_require_exact_integers(self):
         names = ("max_worker_memory_bytes", "max_coordinator_memory_bytes", "max_combined_memory_bytes",
@@ -247,11 +281,11 @@ class PostprocessingTests(unittest.TestCase):
         values = _measurements()
         values = (replace(values[0], primary=_component(durable_bytes=65)),
                   replace(values[1], k_control=_component(durable_bytes=129)),
-                  replace(values[2], oracle_b=_component(durable_bytes=193)))
+                  replace(values[2], oracle_primary=_oracle(durable_bytes=193)))
         plan = r.derive_r0b_sizing_plan(values)
         self.assertEqual(plan.n_max, 10_000)
-        self.assertEqual(plan.unit_counts, (10_000, 256, 128, 256))
-        self.assertEqual(plan.unit_bytes, r.ComponentSizes(3, 5, 6, 2))
+        self.assertEqual(_workload().unit_counts[:3], (10_000, 256, 128))
+        self.assertEqual(plan.unit_bytes, r.ComponentSizes(3, 5, 6, 6, 2, 2))
         self.assertEqual(plan, r.derive_r0b_sizing_plan(values[::-1]))
 
     def test_r0b_is_complete_nmax_shared_bootstrap_facts_only(self):
@@ -263,7 +297,7 @@ class PostprocessingTests(unittest.TestCase):
 
     def test_missing_r0b_wrong_identity_and_nmax_are_rejected(self):
         with self.assertRaises(ValueError):
-            r.select_operating_candidate(_measurements(), None)
+            r.select_operating_candidate(_measurements(), None, _TARGETS)
         for changes in ({"n_max": 9_999}, {"n_max": True}, {"bootstrap_n": 9_999},
                         {"bootstrap_replicates": 9_999}, {"protocol_seed": b"short"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -299,7 +333,7 @@ class PostprocessingTests(unittest.TestCase):
         self.assertEqual(r.project_postprocess(replace(_r0b(), complete_wall_ns=13)), Fraction(26))
 
     def test_r0b_payloads_below_safety_scaled_maximum_are_rejected(self):
-        for name in ("primary", "k_control", "oracle_b", "determinism"):
+        for name in ("primary", "k_control", "oracle_primary", "oracle_repeat", "determinism", "reference"):
             measured = _r0b()
             measured = replace(measured, unit_bytes=replace(measured.unit_bytes, **{name: 1}))
             with self.subTest(name=name), self.assertRaises(ValueError):
@@ -318,21 +352,22 @@ class PostprocessingTests(unittest.TestCase):
 class ExactAdmissionTests(unittest.TestCase):
     def test_component_scaling_uses_capped_subset_counts_exactly(self):
         measured = _measurement(primary=_component(3), k_control=_component(5),
-                                oracle_b=_component(7), determinism=_component(11))
+                                oracle_primary=_oracle(7), determinism=_component(11))
         for n in (1, 63, 64, 127, 128, 129, 255, 256, 257, 1_000, 10_000):
             expected = Fraction(2 * (3*n + 5*min(n, 256) + 7*min(n, 128)
-                                     + 11*min(n, 256)), 64)
+                                     + 11*min(n, 256) + 64*_counts(n).i_ok
+                                     + 64*_counts(n).i_od), 64)
             with self.subTest(n=n):
-                self.assertEqual(r.project_execution(n, measured), expected)
-                self.assertIs(type(r.project_execution(n, measured)), Fraction)
+                self.assertEqual(r.project_execution(n, measured, _counts(n)), expected)
+                self.assertIs(type(r.project_execution(n, measured, _counts(n))), Fraction)
 
     def test_archive_uses_conservative_component_maxima_not_double_summing_runs(self):
         values = _measurements()
         values = (replace(values[0], primary=_component(durable_bytes=128)),
                   replace(values[1], k_control=_component(durable_bytes=192)),
-                  replace(values[2], oracle_b=_component(durable_bytes=256)))
-        expected = Fraction(3, 2) * Fraction(128*1000 + 192*256 + 256*128 + 64*256, 64)
-        self.assertEqual(r.project_archive(1_000, values), expected + 268_435_456)
+                  replace(values[2], oracle_primary=_oracle(durable_bytes=256)))
+        expected = Fraction(3, 2) * Fraction(128*1000 + 192*256 + 256*128 + 64*256 + 64*256, 64)
+        self.assertEqual(r.project_archive(1_000, values, _counts(1000)), expected + 268_435_456)
 
     def test_largest_n_precedes_primary_throughput(self):
         values = tuple(_measurement(c, primary=_component(wall_ns=wall))
@@ -371,29 +406,29 @@ class ExactAdmissionTests(unittest.TestCase):
     def test_launcher_exact_12h_and_one_ns_over(self):
         # N=1000, all four component walls 32 ns -> execution = 1640 ns.
         values = _measurements(primary=_component(32), k_control=_component(32),
-                               oracle_b=_component(32), determinism=_component(32))
+                               oracle_primary=_oracle(32), determinism=_component(32))
         complete = (43_200_000_000_000 - 1_640) // 2
         result = _select(values, _r0b(values, complete_wall_ns=complete))
         self.assertEqual(result.candidate.n, 1_000)
         self.assertEqual(result.candidate.projection.launcher_wall_ns, Fraction(43_200_000_000_000))
         # Changes contribute +125 -120 -4 = exactly one projected nanosecond.
         changed = tuple(replace(value, primary=_component(36), k_control=_component(17),
-                                oracle_b=_component(31)) for value in values)
-        over = r.project_execution(1_000, changed[0]) + 2 * complete
+                                oracle_primary=_oracle(31)) for value in values)
+        over = r.project_execution(1_000, changed[0], _counts(1000)) + 2 * complete
         self.assertEqual(over, Fraction(43_200_000_000_001))
         self.assertIsNone(_select(changed, _r0b(changed, complete_wall_ns=complete)).candidate)
 
     def test_archive_exact_16gib_and_minimal_lattice_fraction_over(self):
-        k_bytes = 2_818_571_910
+        k_bytes = 2_818_571_846
         values = _measurements(primary=_component(durable_bytes=64),
-            k_control=_component(durable_bytes=k_bytes), oracle_b=_component(durable_bytes=128),
+            k_control=_component(durable_bytes=k_bytes), oracle_primary=_oracle(durable_bytes=128),
             determinism=_component(durable_bytes=64))
-        self.assertEqual(r.project_archive(1_000, values), Fraction(17_179_869_184))
+        self.assertEqual(r.project_archive(1_000, values, _counts(1000)), Fraction(17_179_869_184))
         self.assertEqual(_select(values).candidate.n, 1_000)
         changed = _measurements(primary=_component(durable_bytes=69),
-            k_control=_component(durable_bytes=k_bytes-20), oracle_b=_component(durable_bytes=129),
+            k_control=_component(durable_bytes=k_bytes-20), oracle_primary=_oracle(durable_bytes=129),
             determinism=_component(durable_bytes=64))
-        self.assertEqual(r.project_archive(1_000, changed), Fraction(17_179_869_184) + Fraction(3, 16))
+        self.assertEqual(r.project_archive(1_000, changed, _counts(1000)), Fraction(17_179_869_184) + Fraction(3, 16))
         self.assertIsNone(_select(changed).candidate)
 
     def test_corrected_integer_memory_boundaries_are_exact(self):
@@ -416,7 +451,7 @@ class ExactAdmissionTests(unittest.TestCase):
     def test_invalid_projection_population_is_rejected(self):
         for invalid in (0, -1, True, 1.0, Fraction(1000)):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
-                r.project_execution(invalid, _measurement())
+                r.project_execution(invalid, _measurement(), _counts(1000))
 
     def test_exact_frozen_constants_and_candidate_ladder_cannot_drift(self):
         for name, invalid in (("N_LADDER", (1_000, 5_000, 10_000)),
@@ -429,7 +464,7 @@ class ExactAdmissionTests(unittest.TestCase):
             ("MAX_ARCHIVE_BYTES", 17_179_869_185), ("FIXED_REPORT_RECEIPT_ALLOWANCE", 0)):
             values, measured = _measurements(), _r0b()
             with self.subTest(name=name), patch.object(identity, name, invalid), self.assertRaises(ValueError):
-                r.select_operating_candidate(values, measured)
+                r.select_operating_candidate(values, measured, _TARGETS)
 
     def test_same_value_float_constants_do_not_become_authority(self):
         values, measured = _measurements(), _r0b()
@@ -438,18 +473,18 @@ class ExactAdmissionTests(unittest.TestCase):
                              ("MAX_COMBINED_MEMORY_BYTES", 4294967296.0),
                              ("R0_A_CONCURRENCY_CANDIDATES", (True, 2, 4))):
             with self.subTest(name=name), patch.object(identity, name, value), self.assertRaises(ValueError):
-                r.select_operating_candidate(values, measured)
+                r.select_operating_candidate(values, measured, _TARGETS)
 
     def test_public_selection_revalidates_forged_frozen_measurement(self):
         values = _measurements()
         object.__setattr__(values[0], "max_combined_memory_bytes", True)
         with self.assertRaises(ValueError):
-            r.select_operating_candidate(values, _r0b())
+            r.select_operating_candidate(values, _r0b(), _TARGETS)
 
     def test_decision_rejects_wrong_priority_order_or_invented_admission(self):
         result = _select()
         smaller = next(value for value in result.projections if (value.n, value.concurrency) == (1000, 1))
-        proposal = replace(result.candidate, n=1000, projection=smaller)
+        proposal = replace(result.candidate, n=1000, projection=smaller, target_counts=_counts(1000))
         with self.assertRaises(ValueError):
             replace(result, candidate=proposal)
         with self.assertRaises(ValueError):
@@ -463,7 +498,7 @@ class ExactAdmissionTests(unittest.TestCase):
 class OutcomeAndAuthorizationTests(unittest.TestCase):
     def test_treatment_delta_counts_gates_and_mechanisms_cannot_be_inputs(self):
         values, measured = _measurements(), _r0b()
-        baseline = r.select_operating_candidate(values, measured)
+        baseline = r.select_operating_candidate(values, measured, _TARGETS)
         for name, effects in (("model_c_delta", (10**100, -(10**100))),
                               ("ww_wl_lw_ll", ((10000, 0, 0, 0), (0, 0, 10000, 0))),
                               ("g5_g8_g9", (("PASS",)*3, ("FAIL",)*3)),
@@ -471,16 +506,16 @@ class OutcomeAndAuthorizationTests(unittest.TestCase):
             for effect in effects:
                 with self.subTest(name=name, effect=effect), self.assertRaises(TypeError):
                     replace(values[0], **{name: effect})
-            self.assertEqual(r.select_operating_candidate(values, measured), baseline)
+            self.assertEqual(r.select_operating_candidate(values, measured, _TARGETS), baseline)
 
     def test_generic_payload_and_measurement_subclass_cannot_supply_outcomes(self):
         values = _measurements()
         forged = SimpleNamespace(**{field.name: getattr(values[0], field.name) for field in fields(values[0])},
                                  model_c_delta=10**100)
         with self.assertRaises(ValueError):
-            r.select_operating_candidate((forged,) + values[1:], _r0b())
+            r.select_operating_candidate((forged,) + values[1:], _r0b(), _TARGETS)
         with self.assertRaises(ValueError):
-            r.select_operating_candidate({value.concurrency: value for value in values}, _r0b())
+            r.select_operating_candidate({value.concurrency: value for value in values}, _r0b(), _TARGETS)
 
         class WithEffect(r.R0AConcurrencyMeasurement):
             pass
@@ -488,7 +523,7 @@ class OutcomeAndAuthorizationTests(unittest.TestCase):
         subclass = WithEffect(**{field.name: getattr(values[0], field.name) for field in fields(values[0])})
         object.__setattr__(subclass, "effect", 10**100)
         with self.assertRaises(ValueError):
-            r.select_operating_candidate((subclass,) + values[1:], _r0b())
+            r.select_operating_candidate((subclass,) + values[1:], _r0b(), _TARGETS)
 
     def test_proposal_has_no_freeze_publication_or_actual_e2_authority(self):
         result = _select()
@@ -505,151 +540,278 @@ class OutcomeAndAuthorizationTests(unittest.TestCase):
                 type(result.state)(value)
 
 
+class AmendmentReadinessTests(unittest.TestCase):
+    def test_zero_primary_and_repeat_bytes_keep_complete_positive_walls(self):
+        values = _measurements(oracle_primary=_oracle(17, 0), oracle_d_repeat=_oracle(19, 0))
+        plan = r.derive_r0b_sizing_plan(values)
+        self.assertEqual((plan.unit_bytes.oracle_primary, plan.unit_bytes.oracle_repeat), (0, 0))
+        measured = _r0b(values)
+        self.assertEqual(r.validate_r0b_measurement(measured, values), measured)
+        rows = r.synthetic_unit_payloads(measured.workload, measured.unit_bytes)
+        self.assertEqual(sum('oracle_primary' in v[2] for v in rows), 128)
+        self.assertEqual(sum('oracle_repeat' in v[2] for v in rows), measured.workload.selection.counts.i_od)
+        self.assertGreater(r.project_execution(1000, values[0], _counts(1000)), 0)
+        with self.assertRaises(ValueError):
+            _oracle(0, 0)
+
+    def test_oracle_maxima_reference_routes_and_i_ok_wall_only(self):
+        values = _measurements(oracle_primary=_oracle(11, 64), oracle_d_repeat=_oracle(13, 129))
+        references = values[0].references[:-1] + (r.ReferenceMeasurement('O_D_SETUP', 193, 4, 64),)
+        values = (replace(values[0], references=references),) + values[1:]
+        sizes = r.derive_r0b_sizing_plan(values).unit_bytes
+        self.assertEqual((sizes.oracle_primary, sizes.oracle_repeat, sizes.reference), (5, 5, 6))
+        a = r.SubsetCounts(1000, 400, 7, 2, b'x'*32)
+        b = replace(a, i_ok=9)
+        self.assertEqual(r.project_archive(1000, values, a), r.project_archive(1000, values, b))
+        self.assertEqual(r.project_execution(1000, values[0], b) - r.project_execution(1000, values[0], a), 14)
+        expected = Fraction(3, 2) * Fraction(64*1000 + 64*256 + 129*(128+7) + 64*256 + 193*400, 64)
+        self.assertEqual(r.project_archive(1000, values, a), expected + identity.FIXED_REPORT_RECEIPT_ALLOWANCE)
+
+    def test_missing_route_and_each_containment_route_cannot_disappear(self):
+        for route in r.CALIBRATION_ROUTES:
+            values = _measurements()
+            facts = tuple(v for v in values[0].containment if v.route != route)
+            with self.subTest(route=route), self.assertRaises(ValueError):
+                replace(values[0], containment=facts)
+            facts = tuple(replace(v, max_combined_memory_bytes=301) if v.route == route else v
+                          for v in values[0].containment)
+            with self.subTest(route=route), self.assertRaisesRegex(ValueError, 'CONTAINMENT_MAXIMUM_OMITTED'):
+                replace(values[0], containment=facts)
+            facts = tuple(replace(v, cleanup_complete=False) if v.route == route else v
+                          for v in values[0].containment)
+            with self.subTest(route=route), self.assertRaisesRegex(ValueError, 'R0A_ROUTE_INCOMPLETE'):
+                r.validate_r0a_measurements((replace(values[0], containment=facts),) + values[1:])
+        self.assertEqual(_containment('P', max_decision_wall_ns=0).max_shadow_wall_ns, 0)
+        with self.assertRaises(ValueError):
+            replace(_measurement(), oracle_k_bind=None)
+        with self.assertRaises(ValueError):
+            r.validate_r0a_measurements(_measurements(oracle_k_bind=r.WallRouteMeasurement(1, 63)))
+
+    def test_route_payload_launcher_caps_reject_candidate(self):
+        for changes in ({'max_payload_bytes': 67_108_865}, {'launcher_wall_ns': 43_200_000_000_000},
+                        {'launcher_wall_ns': 900_000_000_000}):
+            values = _measurements()
+            facts = tuple(replace(v, **changes) if v.route == 'O_D_SETUP' else v for v in values[0].containment)
+            values = tuple(replace(v, containment=facts) for v in values)
+            self.assertIsNone(_select(values).candidate)
+
+    def test_synthetic_counts_reuse_exact_selector_without_boards(self):
+        indices = tuple(range(r.SYNTHETIC_INDEX_LOW, r.SYNTHETIC_INDEX_LOW + 1000))
+        with patch('benchmark_board.generate_board', side_effect=AssertionError('no board generation')):
+            counts = r.target_counts(_SEED, 1000, indices)
+        digest = identity.corpus_digest(_SEED, 1000, indices)
+        k, o, d = (set(identity.select_subset_positions(label, _SEED, digest, 1000, cap))
+                   for label, cap in ((identity.KCONTROL_LABEL, 256), (identity.ORACLE_B_LABEL, 128),
+                                      (identity.DETERMINISM_LABEL, 256)))
+        self.assertEqual((counts.u_kd, counts.i_od, counts.i_ok), (len(k|d), len(o&d), len(o&k)))
+        r.validate_final_corpus_digest(counts, _SEED, indices)
+        with self.assertRaises(ValueError):
+            r.validate_final_corpus_digest(counts, _SEED, indices[::-1])
+        for n in (999, True, 0):
+            with self.assertRaises(ValueError):
+                r.target_counts(_SEED, n, indices)
+
+    def test_search_first_next_final_enumeration_and_domain_hygiene(self):
+        for ordinal in (0, 1, r.SYNTHETIC_SEARCH_LIMIT-1):
+            indices = r.synthetic_candidate_indices(ordinal)
+            self.assertEqual(len(indices), 10000)
+            self.assertEqual(indices[0], r.SYNTHETIC_INDEX_LOW + ordinal * 10000)
+            self.assertEqual(indices[-1], indices[0] + 9999)
+            for entry in identity.DOCUMENTED_EXPOSURE_REGISTRY:
+                if entry.domain:
+                    self.assertTrue(indices[-1] < entry.domain[0] or indices[0] >= entry.domain[1])
+                self.assertTrue(set(indices).isdisjoint(entry.indices))
+        for ordinal in (-1, True, r.SYNTHETIC_SEARCH_LIMIT):
+            with self.assertRaises(ValueError):
+                r.synthetic_candidate_indices(ordinal)
+        for low in (identity.PRIMARY_LOW, identity.REHEARSAL_LOW, 2_010_000, 0):
+            with self.assertRaises(ValueError):
+                r._synthetic_domain(low, low+10000)
+
+    def test_search_first_match_repeatability_and_tiny_finite_failure(self):
+        with patch('benchmark_board.generate_board', side_effect=AssertionError('no board generation')):
+            first = r.search_synthetic_corpus(256, 0, 0, protocol_seed=_SEED, attempt_limit=2)
+            second = r.search_synthetic_corpus(256, 0, 0, protocol_seed=_SEED, attempt_limit=2)
+            absent = r.search_synthetic_corpus(512, 128, 128, protocol_seed=_SEED, attempt_limit=2)
+        self.assertEqual(first, second)
+        self.assertEqual(first.ordinal, 0)
+        self.assertGreaterEqual(first.counts.i_od, 1)
+        self.assertGreaterEqual(first.counts.i_ok, 1)
+        self.assertIsNone(absent)
+        with self.assertRaises(ValueError):
+            r.search_synthetic_corpus(256, 0, 0, protocol_seed=_SEED, attempt_limit=100001)
+
+    def test_forged_counts_and_selection_are_revalidated(self):
+        selected = _workload().selection
+        with self.assertRaisesRegex(ValueError, 'SYNTHETIC_MEMBERSHIP_MISMATCH'):
+            replace(selected, counts=replace(selected.counts, corpus_digest=b'0'*32))
+        with self.assertRaises(ValueError):
+            replace(selected.counts, u_kd=True)
+        with self.assertRaises(ValueError):
+            replace(_workload(), target=replace(_TARGETS[-1], i_ok=128))
+        with self.assertRaises(ValueError):
+            replace(_select(), realized_synthetic_counts=_counts(1000))
+
+    def test_actual_topology_fits_composite_units_and_never_splits(self):
+        workload = _workload()
+        sizes = r.ComponentSizes(10, 13, 5, 7, 11, 3)
+        payloads = r.synthetic_unit_payloads(workload, sizes)
+        combinations = {v[2] for v in payloads}
+        for expected in (('primary',), ('primary', 'reference'), ('primary', 'oracle_primary'),
+                         ('primary', 'reference', 'oracle_primary'),
+                         ('determinism',), ('determinism', 'oracle_repeat'), ('k_control',)):
+            self.assertIn(expected, combinations)
+        self.assertEqual(len(payloads), 10000+256+256)
+        r.validate_payload_fit(workload, sizes, 18)
+        with self.assertRaisesRegex(ValueError, 'R0B_COMPOSITE_PAYLOAD_CAP'):
+            r.validate_payload_fit(workload, sizes, 17)
+        for maximum in (1, 67_108_865):
+            with self.assertRaisesRegex(ValueError, 'R0B_REALIZED_PAYLOAD_CAP'):
+                r.validate_r0b_measurement(_r0b(realized_max_unit_payload_bytes=maximum), _measurements())
+        with self.assertRaises(ValueError):
+            r.validate_r0b_measurement(_r0b(unit_bytes=r.ComponentSizes(40_000_000, 2, 2, 2, 2, 30_000_000),
+                archive_bytes=1_000_000_000_000), _measurements())
+
+    def test_target_and_realized_counts_remain_separate_and_archive_uses_realized(self):
+        measured = _r0b()
+        realized = measured.workload.selection.counts
+        self.assertGreater(realized.u_kd, measured.workload.target.u_kd)
+        self.assertEqual(measured.workload.unit_counts, (10000, 256, 128, realized.i_od, 256, realized.u_kd))
+        lower = measured.archive_bytes - (realized.u_kd - measured.workload.target.u_kd) * measured.unit_bytes.reference
+        with self.assertRaisesRegex(ValueError, 'R0B_ARCHIVE_ACCOUNTING'):
+            r.validate_r0b_measurement(replace(measured, archive_bytes=lower), _measurements())
+
+    def test_fixed_allowance_boundary_and_supporting_structure(self):
+        measured = _r0b()
+        allowance = identity.FIXED_REPORT_RECEIPT_ALLOWANCE
+        at = replace(measured, realized_fixed_allowance_bytes=allowance,
+                     archive_bytes=measured.archive_bytes + allowance-4)
+        r.validate_r0b_measurement(at, _measurements())
+        with self.assertRaisesRegex(ValueError, 'R0B_FIXED_ALLOWANCE_CAP'):
+            r.validate_r0b_measurement(replace(at, realized_fixed_allowance_bytes=allowance+1), _measurements())
+        for field in ('receipts_complete', 'status_complete', 'work_plan_revalidated',
+                      'qualification_complete', 'resources_complete', 'cleanup_complete'):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(measured.supporting, **{field: False})
+        with self.assertRaises(ValueError):
+            replace(measured.supporting, streams=measured.supporting.streams[:-1])
+        with self.assertRaisesRegex(ValueError, 'R0B_POSTPROCESS_WALL_CAP'):
+            r.project_postprocess(replace(measured, complete_wall_ns=21_600_000_000_001))
+        report = replace(measured.phases[-1], output_bytes=allowance+1)
+        with self.assertRaisesRegex(ValueError, 'R0B_SUPPORTING_BYTE_ACCOUNTING'):
+            r.validate_r0b_measurement(replace(measured, phases=measured.phases[:-1]+(report,),
+                archive_bytes=allowance+100_000), _measurements())
+
+    def test_postprocessing_memory_is_retained_in_proposal_caps(self):
+        values = _measurements()
+        measured = _r0b(values, max_combined_memory_bytes=1_000_000)
+        proposed = _select(values, measured).candidate
+        self.assertEqual(proposed.projection.memory_bytes, Fraction(1_500_000))
+        self.assertEqual(proposed.envelope.memory_cap_bytes, 1_500_000)
+        self.assertEqual(proposed.envelope.coordinator_memory_cap_bytes, 1_500_000)
+
+    def test_auxiliary_zero_route_coverage_does_not_invent_scale_payload(self):
+        # Selector is replaced only for this value-model structural-fixture test;
+        # production selection/work-plan always rederive unchanged memberships.
+        empty = r.SubsetCounts(10000, 256, 0, 0, b'x'*32)
+        with patch.object(r, 'subset_counts', return_value=empty):
+            selection = r.SyntheticCorpusSelection(_SEED, 0, empty)
+            with self.assertRaisesRegex(ValueError, 'ORACLE_STRUCTURAL_COVERAGE_REQUIRED'):
+                r.SyntheticWorkload(selection, _TARGETS[-1])
+            value = r.SyntheticWorkload(selection, _TARGETS[-1], True, True)
+            self.assertEqual(value.unit_counts[3], 0)
+            self.assertEqual(value.unit_counts[5], 256)
+
+    def test_work_plan_validation_calls_preserved_i7_boundary(self):
+        with patch.object(q, '_plan', side_effect=ValueError('I7 guard retained')) as validate:
+            with self.assertRaisesRegex(ValueError, 'I7 guard retained'):
+                r.validate_synthetic_work_plan((), _workload())
+        validate.assert_called_once_with(())
+
+
 class SourceReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.protocol_bytes = q._git("cat-file", "blob", identity.PROTOCOL_BLOB_ID)
+        cls.protocol_bytes = (r._ROOT / identity.PROTOCOL_PATH).read_bytes()
+        cls.amendment_bytes = (r._ROOT / r.AMENDMENT_PATH).read_bytes()
 
     @contextmanager
-    def source_capture(self, *, statuses=None, heads=None, origins=None, branches=None,
-                       drift=None, candidate_race=None):
-        """Explicit mocked Git/file observations; never manufacture a clean tree."""
-        status = b"".join(("?? " + path + "\n").encode("ascii") for path in _CANDIDATES[:2])
-        status += (" M " + _CANDIDATES[2] + "\n").encode("ascii")
-        streams = {
-            ("rev-parse", "HEAD"): (r.I7_BASELINE.encode("ascii") + b"\n",) if heads is None else heads,
-            ("rev-parse", "origin/main"): (r.I7_BASELINE.encode("ascii") + b"\n",) if origins is None else origins,
-            ("branch", "--show-current"): (b"main\n",) if branches is None else branches,
-            ("status", "--porcelain=v1", "--untracked-files=all"): (status,) if statuses is None else statuses,
-        }
+    def source_capture(self, *, status=None, branch=b'main\n', drift=None, race=None):
+        state = ''.join(' M ' + p + '\n' for p in _CANDIDATES) if status is None else status
         calls, reads = {}, {}
-
         def git(*args, data=None):
-            self.assertIn(args, streams)
-            position = calls.get(args, 0)
-            calls[args] = position + 1
-            values = streams[args]
-            return values[min(position, len(values)-1)]
-
+            calls[args] = calls.get(args, 0) + 1
+            if args[:2] == ('merge-base', '--is-ancestor'):
+                return b''
+            if args == ('branch', '--show-current'):
+                return branch
+            if args == ('status', '--porcelain=v1', '--untracked-files=all'):
+                return state.encode()
+            if args in (('rev-parse', 'HEAD'), ('rev-parse', 'origin/main')):
+                return (b'f'*40 if race == 'head' and calls[args] > 1 else b'e'*40) + b'\n'
+            raise AssertionError(args)
         def source(path):
-            return self.protocol_bytes if path == identity.PROTOCOL_PATH else b"mock committed " + path.encode("ascii") + b"\n"
-
+            if path == identity.PROTOCOL_PATH:
+                return self.protocol_bytes
+            if path == r.AMENDMENT_PATH:
+                return self.amendment_bytes
+            return b'mock committed ' + path.encode() + b'\n'
         def blobs(refs):
             result = []
             for ref in refs:
-                commit, path = ref.split(":", 1)
-                oid, data = "1" * 40, source(path)
-                if path == identity.PROTOCOL_PATH:
-                    oid = identity.PROTOCOL_BLOB_ID
-                    if drift == "protocol_oid":
-                        oid = "f" * 40
-                    if drift == "protocol_bytes":
-                        data += b"drift"
-                elif path == q._PROTECTED[0] and commit == r.I7_BASELINE and drift == "protected":
-                    oid = "2" * 40
+                commit, path = ref.split(':', 1)
+                oid = identity.PROTOCOL_BLOB_ID if path == identity.PROTOCOL_PATH else '1'*40
+                data = source(path)
+                if drift == 'protected' and path == q._PROTECTED[0] and commit == 'e'*40:
+                    oid = '2'*40
                 result.append((oid, data))
             return tuple(result)
-
         def read(path):
             name = path.relative_to(r._ROOT).as_posix()
             reads[name] = reads.get(name, 0) + 1
-            if name in _CANDIDATES:
-                data = b"exact candidate " + name.encode("ascii") + b"\r\n"
-                return data + b"changed" if candidate_race == name and reads[name] > 1 else data
-            data = source(name)
-            if drift == "working" and name == q._E2[0]:
-                data += b"hidden working drift"
+            data = b'exact candidate ' + name.encode() if name in _CANDIDATES else source(name)
+            if (drift == 'amendment' and name == r.AMENDMENT_PATH
+                    or drift == 'working' and name == q._E2[0]
+                    or race == name and reads[name] > 1):
+                data += b'drift'
             return data
+        with patch.object(r, '_git', side_effect=git), patch.object(r, '_blobs', side_effect=blobs), \
+                patch.object(Path, 'read_bytes', new=read):
+            yield
 
-        with patch.object(r, "_git", side_effect=git), patch.object(r, "_blobs", side_effect=blobs), \
-                patch.object(Path, "read_bytes", new=read):
-            yield SimpleNamespace(status=status.decode("ascii"), calls=calls, reads=reads)
-
-    def test_live_review_binds_exact_three_candidate_byte_identities(self):
-        # This production guard deliberately owns only the I7-based pre-commit
-        # review. A later user commit must test its refusal, not make ordinary
-        # source regression depend forever on today's untracked candidate state.
-        head = r._git("rev-parse", "HEAD").strip().decode("ascii")
-        if head != r.I7_BASELINE:
-            with self.assertRaisesRegex(ValueError, "ACCEPTED_I7_BASELINE_REQUIRED"):
-                r.capture_review_sources()
-            return
+    def test_live_review_binds_exact_candidates_and_amendment_without_git_mutation(self):
         value = r.capture_review_sources()
-        self.assertEqual(value.baseline_head, r.I7_BASELINE)
-        self.assertEqual(value.protocol.sha256, identity.PROTOCOL_SHA256)
-        self.assertEqual(tuple(item.path for item in value.candidates), tuple(sorted(_CANDIDATES)))
+        self.assertEqual(value.provenance, r.AmendmentProvenance())
+        self.assertEqual(tuple(v.path for v in value.candidates), tuple(sorted(_CANDIDATES)))
         for candidate in value.candidates:
             data = (r._ROOT / candidate.path).read_bytes()
-            self.assertEqual(candidate.sha256, sha256(data).hexdigest())
-            self.assertEqual(candidate.byte_length, len(data))
-        self.assertIn("?? " + _CANDIDATES[0], value.status)
-        self.assertIn("?? " + _CANDIDATES[1], value.status)
-        self.assertIn(" M " + _CANDIDATES[2], value.status)
-        protected_paths = {item.path for item in value.committed}
-        self.assertTrue(set(q._PROTECTED + q._E2) <= protected_paths)
+            self.assertEqual((candidate.sha256, candidate.byte_length), (sha256(data).hexdigest(), len(data)))
 
-    def test_later_committed_head_exercises_live_guard_rejection_without_skip(self):
-        with self.source_capture(heads=(b"f" * 40 + b"\n",)):
-            self.test_live_review_binds_exact_three_candidate_byte_identities()
-
-    def test_mocked_review_preserves_dirty_status_and_candidate_bytes(self):
-        with self.source_capture() as fixture:
+    def test_later_descendant_head_and_clean_committed_state_are_supported(self):
+        with self.source_capture(status=''):
             value = r.capture_review_sources()
-        self.assertEqual(value.status, fixture.status)
-        for candidate in value.candidates:
-            data = b"exact candidate " + candidate.path.encode("ascii") + b"\r\n"
-            self.assertEqual(candidate.sha256, sha256(data).hexdigest())
-            self.assertEqual(candidate.byte_length, len(data))
+        self.assertEqual(value.baseline_head, 'e'*40)
+        self.assertEqual(value.status, '')
+        self.assertEqual(value.provenance.byte_length, 58052)
 
-    def test_wrong_head_origin_and_branch_are_rejected(self):
-        for changes in ({"heads": (b"f"*40 + b"\n",)},
-                        {"origins": (b"f"*40 + b"\n",)}, {"branches": (b"other\n",)}):
-            with self.subTest(changes=changes), self.source_capture(**changes), self.assertRaisesRegex(
-                    ValueError, "ACCEPTED_I7_BASELINE_REQUIRED"):
+    def test_unrelated_staged_deleted_renamed_or_untracked_changes_rejected(self):
+        for status in ('?? unrelated.py\n', ' M core_engine.py\n', 'M  '+_CANDIDATES[0]+'\n',
+                       ' D '+_CANDIDATES[0]+'\n', 'R  old.py -> new.py\n', '?? '+_CANDIDATES[0]+'\n'):
+            with self.subTest(status=status), self.source_capture(status=status), self.assertRaises(ValueError):
                 r.capture_review_sources()
 
-    def test_any_fourth_dirty_untracked_or_staged_path_is_rejected(self):
-        base = b"".join(("?? " + path + "\n").encode("ascii") for path in _CANDIDATES[:2])
-        for extra in (b"?? unrelated.py\n", b" M core_engine.py\n", b"M  core_engine.py\n",
-                      b"?? experiments/program_k_e2_future.py\n", b" M experiments/program_k_e2_qualification.py\n"):
-            with self.subTest(extra=extra), self.source_capture(statuses=(base + extra,)), self.assertRaisesRegex(
-                    ValueError, "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE"):
-                r.capture_review_sources()
-
-    def test_staging_rename_delete_missing_candidates_or_duplicate_status_is_rejected(self):
-        lines = ["?? " + path + "\n" for path in _CANDIDATES[:2]]
-        for status in ("", lines[0], "".join(lines) + lines[0],
-                       "A  " + _CANDIDATES[0] + "\n" + lines[1],
-                       "".join(lines) + "M  " + _CANDIDATES[2] + "\n",
-                       "".join(lines) + " D " + _CANDIDATES[2] + "\n",
-                       "".join(lines) + "R  old.py -> " + _CANDIDATES[2] + "\n"):
-            with self.subTest(status=status), self.source_capture(statuses=(status.encode("ascii"),)), \
-                    self.assertRaisesRegex(ValueError, "UNAUTHORIZED_WORKTREE_OR_INDEX_CHANGE"):
-                r.capture_review_sources()
-
-    def test_protected_protocol_and_hidden_working_content_drift_is_rejected(self):
-        for drift in ("protected", "protocol_oid", "protocol_bytes", "working"):
+    def test_protected_and_frozen_authority_drift_rejected(self):
+        for drift in ('protected', 'amendment', 'working'):
             with self.subTest(drift=drift), self.source_capture(drift=drift), self.assertRaises(ValueError):
                 r.capture_review_sources()
+        with self.source_capture(branch=b'other\n'), self.assertRaises(ValueError):
+            r.capture_review_sources()
 
-    def test_head_origin_branch_and_status_races_are_rejected(self):
-        head = r.I7_BASELINE.encode("ascii") + b"\n"
-        with self.source_capture() as fixture:
-            status = fixture.status.encode("ascii")
-        for changes in ({"heads": (head, b"f"*40+b"\n")},
-                        {"origins": (head, b"f"*40+b"\n")},
-                        {"branches": (b"main\n", b"other\n")},
-                        {"statuses": (status, status + b"?? unrelated.py\n")}):
-            with self.subTest(changes=changes), self.source_capture(**changes), self.assertRaisesRegex(
-                    ValueError, "SOURCE_CHANGED_DURING_CAPTURE"):
-                r.capture_review_sources()
-
-    def test_each_of_three_candidate_byte_races_is_rejected(self):
-        for path in _CANDIDATES:
-            with self.subTest(path=path), self.source_capture(candidate_race=path), self.assertRaisesRegex(
-                    ValueError, "SOURCE_CHANGED_DURING_CAPTURE"):
+    def test_source_and_head_races_rejected(self):
+        for race in ('head', r.AMENDMENT_PATH, *_CANDIDATES):
+            with self.subTest(race=race), self.source_capture(race=race), self.assertRaises(ValueError):
                 r.capture_review_sources()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

@@ -6,8 +6,9 @@ mocked only for deliberately minimal transport fixtures.
 """
 
 import ast
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, replace
 import inspect
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -135,6 +136,43 @@ def _failed_then_exit_worker(work, kind, first, envelope, connection, barrier):
 def _close_then_late_exit_worker(work, kind, first, envelope, connection, barrier):
     _success_worker(work, kind, first, envelope, connection, barrier)
     time.sleep(0.04)
+
+
+def _r0_literal_worker(production_target, arguments, corrupt_telemetry=False):
+    """Test-only literal materialization, then the unchanged production target."""
+    from tests.test_program_k_e2_execution import _literal_context
+    accepted = op._Channel.result
+    def result(channel, data, *, tags=(b"H", b"D", b"F")):
+        if corrupt_telemetry and tags == (b"T", b"U", b"V"):
+            value = json.loads(data)
+            value[:4] = [0, 0, 0, []]
+            data = json.dumps(value, separators=(",", ":")).encode("ascii")
+        return accepted(channel, data, tags=tags)
+    with _literal_context(arguments[0]), patch.object(op._Channel, "result", new=result):
+        production_target(*arguments)
+
+
+def _r0_ordering_worker(arguments, mode):
+    """Synthetic IPC adversary; no board materialization or solver execution."""
+    work, kind, first, envelope, connection, barrier, observing = arguments
+    barrier.wait()
+    channel = op._Channel(connection, envelope)
+    expected = ("K_CONTROL",) if kind is execution.WorkerKind.K_CONTROL else ("CONTROL", "K_P0")
+    extra = "CONTROL" if kind is execution.WorkerKind.K_CONTROL else "K_CONTROL"
+    arms = {"early": (), "partial": expected[:-1], "wrong": (extra,),
+            "extra": expected + (extra,), "late_arm": expected}[mode]
+    try:
+        channel.send(b"S")
+        for arm in arms:
+            channel.event("ARM_START", arm)
+            channel.event("ARM_END", arm)
+        channel.send(b"T14")
+        if mode == "late_arm":
+            channel.event("ARM_START", extra)
+    except (EOFError, OSError, op.OperationalAbort):
+        pass
+    finally:
+        connection.close()
 
 
 class EnvelopeAndPlanTests(unittest.TestCase):
@@ -781,6 +819,598 @@ class StreamingCoordinatorTests(unittest.TestCase):
             op._workflow(work, _envelope(), None, threading.Event(), 1, 1)
         self.assertEqual(kinds, list(op._kinds(work)))
         self.assertEqual(len(kinds), len(set(kinds)))
+
+
+class R0TransportOrderingTests(unittest.TestCase):
+    def run_ordering(self, kind, mode):
+        context = op.multiprocessing.get_context("spawn")
+        work = replace(_plan()[0], oracle_b_selected=False)
+        envelope, api, pids = _envelope(), _FakeJobAPI(), []
+        def process(*, target, args):
+            self.assertIs(target, op._worker_main)
+            self.assertIs(args[-1], True)
+            return context.Process(target=_r0_ordering_worker, args=(args, mode))
+        def attach(pid, budget):
+            pids.append(pid)
+            return api, object(), lambda: 512
+        proxy = SimpleNamespace(Pipe=context.Pipe, Event=context.Event, Process=process)
+        started = time.monotonic_ns()
+        with patch.object(op.multiprocessing, "get_context", return_value=proxy), \
+                patch.object(op.harness, "_attach_memory_job", side_effect=attach), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=512):
+            result = op._supervise_operation(work, kind, None, envelope,
+                op._MemoryLedger(envelope), threading.Event(), started, started, r0_observe=True)
+        self.assertEqual(result.receipt.reason, "MALFORMED_IPC_OR_IDENTITY")
+        self.assertIs(result.receipt.status, records.AuditStatus.FAIL)
+        self.assertIsNone(result.bundle)
+        self.assertFalse(result.observation.watchdogs_complete)
+        self.assertTrue(result.observation.cleanup_complete)
+        self.assertEqual(api.closed, 1)
+        self.assertFalse(any(child.pid in pids for child in op.multiprocessing.active_children()))
+        self.assertFalse(any(thread.name == "program-k-e2-ipc-reader" and thread.is_alive()
+                             for thread in threading.enumerate()))
+
+    def test_r0_telemetry_requires_exact_completed_arm_set_for_each_worker_kind(self):
+        for kind in execution.WorkerKind:
+            for mode in ("early", "partial", "wrong", "extra"):
+                with self.subTest(kind=kind, mode=mode):
+                    self.run_ordering(kind, mode)
+
+    def test_r0_arm_events_are_rejected_once_telemetry_header_starts(self):
+        for kind in execution.WorkerKind:
+            with self.subTest(kind=kind):
+                self.run_ordering(kind, "late_arm")
+
+
+class R0ComponentTests(unittest.TestCase):
+    def plan(self, count=1):
+        return tuple(op.R0Work(work.position, work.board, work.protocol_seed,
+                               "R0-synthetic", work.runtime) for work in _plan(count))
+
+    def result(self, work, kind, *, status=records.AuditStatus.PASS, reason="ADMITTED",
+               elapsed=3, observation=None, bundle=True):
+        value = _result(work, kind, status, reason, bundle=bundle)
+        if work.oracle_b_selected and value.bundle is not None:
+            coverage = records.OracleBCoverageRecord(execution._arm(work, records.Arm.K_P0), True, ())
+            value = replace(value, bundle=replace(value.bundle, streams=value.bundle.streams +
+                (("oracle_b_coverage", (records.encode(coverage),)),)))
+        if observation is None:
+            observation = op._R0Observation(100, 200, 300, 2, 5, 1, 1, (0, 0, 0, ()), True, True, True)
+            if work.oracle_b_selected and kind is execution.WorkerKind.K_CONTROL:
+                now = time.perf_counter_ns()
+                observation = replace(observation, prior_binding_intervals=((now - 2, now - 1),))
+        return replace(value, receipt=replace(value.receipt, elapsed_ns=elapsed), observation=observation)
+
+    def run_component(self, directory, component, *, plan=None, supervise=None,
+                      envelope=None, cancel=None, progress=None):
+        plan = self.plan() if plan is None else plan
+        def default(work, kind, *args, **kwargs):
+            self.assertEqual(kwargs, {"r0_observe": True})
+            return self.result(work, kind)
+        with patch.object(op, "_supervise_operation", side_effect=default if supervise is None else supervise), \
+                patch.object(execution, "revalidate_bundle"), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200), \
+                patch("benchmark_board.generate_board", side_effect=AssertionError("No indexed generation")):
+            return op.measure_r0_component(plan, component, Path(directory) / "r0",
+                _envelope() if envelope is None else envelope, cancel=cancel, progress=progress)
+
+    def test_component_routes_use_exact_flags_and_only_production_supervision(self):
+        expected = {
+            op.R0Component.PRIMARY: ((False, False, False), (execution.WorkerKind.PRIMARY,)),
+            op.R0Component.ORACLE_B: ((True, False, False), (execution.WorkerKind.PRIMARY,)),
+            op.R0Component.K_CONTROL: ((False, False, True),
+                (execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL)),
+            op.R0Component.DETERMINISM: ((False, True, False),
+                (execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM)),
+            op.R0Component.ORACLE_K_BIND: ((True, False, True),
+                (execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL)),
+            op.R0Component.ORACLE_D_REPEAT: ((True, True, False),
+                (execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM)),
+        }
+        for component, (flags, kinds) in expected.items():
+            calls = []
+            def supervise(work, kind, prior, envelope, ledger, cancel, job, launcher, **kwargs):
+                self.assertEqual(kwargs, {"r0_observe": True})
+                self.assertEqual((work.oracle_b_selected, work.determinism_selected, work.k_control_selected), flags)
+                self.assertEqual(work.run_id, "R0-synthetic")
+                self.assertEqual(job, launcher)
+                self.assertEqual(prior is None, kind is execution.WorkerKind.PRIMARY)
+                if prior is not None:
+                    self.assertIs(execution.decode_bundle(prior).kind, execution.WorkerKind.PRIMARY)
+                calls.append(kind)
+                return self.result(work, kind)
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, component, supervise=supervise)
+                self.assertEqual(tuple(calls), kinds)
+                self.assertIs(value.units[0].status, records.AuditStatus.PASS)
+                self.assertFalse(any(path.name == "COMPLETE.json" for path in Path(directory).rglob("*")))
+
+    def test_k_and_d_complete_wall_contains_setup_persistence_prior_target_and_cleanup(self):
+        for component in (op.R0Component.K_CONTROL, op.R0Component.DETERMINISM):
+            setup_done, lock = set(), threading.Lock()
+            target_clock_calls = []
+            prepared_references = set()
+            accepted_encode = execution.encode_bundle
+            def encode(bundle):
+                prepared_references.add(bundle.work_position)
+                return accepted_encode(bundle)
+            def supervise(work, kind, *args, **kwargs):
+                if kind is execution.WorkerKind.PRIMARY:
+                    with lock:
+                        setup_done.add(work.position)
+                    return self.result(work, kind, elapsed=10**12)
+                self.assertEqual(setup_done, {0, 1})
+                self.assertEqual(prepared_references, {0, 1})
+                return self.result(work, kind, elapsed=7)
+            real_clock = time.perf_counter_ns
+            def clock():
+                target_clock_calls.append(frozenset(setup_done))
+                return real_clock()
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(op.time, "perf_counter_ns", side_effect=clock), \
+                    patch.object(execution, "encode_bundle", side_effect=encode):
+                value = self.run_component(directory, component, plan=self.plan(2), supervise=supervise)
+            self.assertTrue(target_clock_calls)
+            self.assertEqual(target_clock_calls[0], frozenset())  # Complete launcher interval starts before setup.
+            self.assertEqual(target_clock_calls[1], frozenset())  # Standalone boundary also starts before setup.
+            self.assertTrue(any(done == {0, 1} for done in target_clock_calls[2:]))
+            self.assertLess(value.wall_ns, 10**12)
+            self.assertTrue(all(unit.setup_wall_ns == 10**12 for unit in value.units))
+            self.assertTrue(all(unit.wall_ns < unit.setup_wall_ns for unit in value.units))
+
+    def test_o_complete_route_has_positive_wall_with_zero_audit_bytes(self):
+        intervals = (((10, 30),), ((20, 40),))
+        def supervise(work, kind, *args, **kwargs):
+            observation = op._R0Observation(100, 200, 300, 2, 5, 0, 1,
+                (1, 1, 20, intervals[work.position]), True, True, True)
+            return self.result(work, kind, elapsed=10**12, observation=observation)
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_B,
+                                       plan=self.plan(2), supervise=supervise)
+            self.assertGreater(value.wall_ns, 30)
+            for unit in value.units:
+                self.assertGreater(unit.wall_ns, 0)
+                self.assertEqual(unit.setup_wall_ns, 0)
+                target = Path(directory) / "r0" / str(unit.work.position) / "target"
+                self.assertTrue((target / "oracle_b_coverage.jsonl").is_file())
+                self.assertEqual(unit.durable_bytes, 0)
+                self.assertEqual((target / "oracle_b_audits.jsonl").stat().st_size, 0)
+                self.assertGreater(unit.supporting_bytes, 0)
+                self.assertIs(unit.status, records.AuditStatus.PASS)
+
+    def test_cohort_wall_is_direct_elapsed_not_sum_of_parallel_worker_receipts(self):
+        def supervise(work, kind, *args, **kwargs):
+            return self.result(work, kind, elapsed=10**12)
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.PRIMARY,
+                                       plan=self.plan(2), supervise=supervise)
+        self.assertLess(value.wall_ns, 10**12)
+        self.assertGreaterEqual(value.complete_wall_ns, value.wall_ns)
+
+    def test_standalone_boundary_includes_every_operational_phase(self):
+        for component in (op.R0Component.PRIMARY, op.R0Component.K_CONTROL, op.R0Component.DETERMINISM,
+                          op.R0Component.ORACLE_B, op.R0Component.ORACLE_D_REPEAT):
+            clock, events = [1], []
+            original_persist, original_encode = op._persist_r0, execution.encode_bundle
+            def tick(name, amount):
+                events.append(name)
+                clock[0] += amount
+            def supervise(work, kind, *args, **kwargs):
+                tick("setup" if kind is execution.WorkerKind.PRIMARY and component in (
+                    op.R0Component.K_CONTROL, op.R0Component.DETERMINISM,
+                    op.R0Component.ORACLE_D_REPEAT) else "target", 100)
+                return self.result(work, kind)
+            def encode(bundle):
+                tick("encoding", 10)
+                return original_encode(bundle)
+            def persist(*args, **kwargs):
+                result = original_persist(*args, **kwargs)
+                tick("persistence_readback_close", 20)
+                return result
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(op.time, "perf_counter_ns", side_effect=lambda: clock[0]), \
+                    patch.object(execution, "encode_bundle", side_effect=encode), \
+                    patch.object(op, "_persist_r0", side_effect=persist):
+                value = self.run_component(directory, component, supervise=supervise,
+                                           envelope=_envelope(concurrency=1))
+            self.assertIn("target", events)
+            self.assertIn("encoding", events)
+            self.assertIn("persistence_readback_close", events)
+            expected = 260 if component in (op.R0Component.K_CONTROL, op.R0Component.DETERMINISM) else (
+                140 if component is op.R0Component.ORACLE_D_REPEAT else 130)
+            self.assertEqual(value.wall_ns, expected)
+
+    def test_oracle_k_bind_excludes_solver_and_requires_binding_evidence(self):
+        def supervise(work, kind, *args, **kwargs):
+            return self.result(work, kind, elapsed=10**12)
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_K_BIND, supervise=supervise)
+        self.assertLess(value.wall_ns, 10**12)
+        self.assertEqual(value.units[0].durable_bytes, 0)
+        self.assertGreater(value.units[0].wall_ns, 0)
+        def missing(work, kind, *args, **kwargs):
+            result = self.result(work, kind)
+            return replace(result, observation=replace(result.observation, prior_binding_intervals=()))
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_K_BIND, supervise=missing)
+        self.assertIs(value.units[0].status, records.AuditStatus.INCOMPLETE)
+
+    def test_zero_repeat_oracle_audit_is_completed_with_nonzero_route_wall(self):
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.ORACLE_D_REPEAT)
+        self.assertIs(value.units[0].status, records.AuditStatus.PASS)
+        self.assertGreater(value.wall_ns, 0)
+        self.assertEqual(value.units[0].durable_bytes, 0)
+
+    def test_exact_store_framing_and_rank_specific_ownership(self):
+        work = op._r0_work(self.plan()[0], op.R0Component.K_CONTROL)
+        for kind, component in ((execution.WorkerKind.PRIMARY, op.R0Component.PRIMARY),
+                                (execution.WorkerKind.K_CONTROL, op.R0Component.K_CONTROL),
+                                (execution.WorkerKind.DETERMINISM, op.R0Component.DETERMINISM)):
+            result = self.result(work, kind)
+            # Canonical synthetic transport records test byte ownership, not
+            # semantic record membership (covered by literal route integration).
+            data = records.encode(work.board)
+            names = ("boards", "control_maintenance", "repeat_control_maintenance",
+                     "oracle_b_coverage", "repeat_oracle_b_coverage", "oracle_b_audits",
+                     "repeat_oracle_b_audits")
+            result = replace(result, bundle=replace(result.bundle, streams=tuple(
+                (name, (data,)) for name in sorted(names, key=execution.STREAM_NAMES.index))))
+            size = len(store._key_bytes((work.position, op._kind_rank(kind), 0))) + len(data) + 2
+            self.assertEqual(op._bundle_stream_bytes(result), size * len(names))
+            self.assertEqual(op._r0_attributable_bytes(result, component), size * (
+                4 if component is op.R0Component.PRIMARY else 5))
+            self.assertEqual(op._r0_attributable_bytes(result, op.R0Component.ORACLE_B), size)
+            self.assertEqual(op._r0_attributable_bytes(result, op.R0Component.ORACLE_D_REPEAT), size)
+            self.assertEqual(op._r0_attributable_bytes(result, op.R0Component.ORACLE_K_BIND), 0)
+            self.assertGreater(size, op._EvidenceSink._size((0,), data))
+
+    def test_closed_immutable_results_and_progress_exclude_treatment_fields(self):
+        progress = []
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.PRIMARY, plan=self.plan(2),
+                progress=lambda unit, done, total: progress.append((unit, done, total)))
+        self.assertEqual(tuple((done, total) for _, done, total in progress), ((1, 2), (2, 2)))
+        self.assertEqual(tuple(unit for unit, _, _ in progress), value.units)
+        for item in (value,) + value.units + tuple(obs for unit in value.units for obs in unit.observations):
+            self.assertFalse(hasattr(item, "__dict__"))
+            for field in fields(item):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(item, field.name, None)
+            for name in ("bundle", "model_c_delta", "ww_wl_lw_ll", "g5_g8_g9", "mechanism_rankings", "research_verdict"):
+                self.assertFalse(hasattr(item, name))
+                with self.assertRaises(TypeError):
+                    replace(item, **{name: 1})
+
+    def test_missing_or_incomplete_operational_observation_cannot_pass(self):
+        baseline = op._R0Observation(100, 200, 300, 2, 5, 1, 1, (0, 0, 0, ()), True, True, True)
+        for field in (None, "resources_complete", "cleanup_complete", "watchdogs_complete"):
+            def supervise(work, kind, *args, **kwargs):
+                result = self.result(work, kind, observation=baseline)
+                return replace(result, observation=None if field is None else replace(baseline, **{field: False}))
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, op.R0Component.PRIMARY, supervise=supervise)
+            self.assertIs(value.units[0].status, records.AuditStatus.INCOMPLETE)
+            self.assertIn("R0_OBSERVATION_INCOMPLETE", value.units[0].reasons)
+
+    def test_failed_setup_is_preserved_and_never_retried_or_used_for_target(self):
+        for component in (op.R0Component.K_CONTROL, op.R0Component.DETERMINISM):
+            calls = []
+            def supervise(work, kind, *args, **kwargs):
+                calls.append(kind)
+                return self.result(work, kind, status=records.AuditStatus.FAIL, reason="AUDIT_FAIL")
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, component, supervise=supervise)
+                self.assertEqual(calls, [execution.WorkerKind.PRIMARY])
+                self.assertIs(value.units[0].status, records.AuditStatus.FAIL)
+                self.assertEqual(value.units[0].reasons, ("AUDIT_FAIL", "PRIMARY_PREMISES_MISSING"))
+                self.assertTrue((Path(directory) / "r0" / "0" / "setup" / "boards.jsonl").is_file())
+                self.assertTrue((Path(directory) / "r0" / "0" / "target" / "operations.jsonl").is_file())
+
+    def test_k_target_failure_and_incomplete_and_d_mismatch_are_preserved_without_retry(self):
+        cases = ((op.R0Component.K_CONTROL, records.AuditStatus.FAIL, "AUDIT_FAIL"),
+                 (op.R0Component.K_CONTROL, records.AuditStatus.INCOMPLETE, "AUDIT_INCOMPLETE"),
+                 (op.R0Component.DETERMINISM, records.AuditStatus.FAIL, "DETERMINISM_MISMATCH"))
+        for component, status, reason in cases:
+            calls = []
+            def supervise(work, kind, *args, **kwargs):
+                calls.append(kind)
+                return self.result(work, kind) if kind is execution.WorkerKind.PRIMARY else self.result(
+                    work, kind, status=status, reason=reason)
+            with self.subTest(component=component, reason=reason), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, component, supervise=supervise)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(set(calls)), 2)
+                self.assertIs(calls[0], execution.WorkerKind.PRIMARY)
+                self.assertIs(value.units[0].status, status)
+                self.assertEqual(value.units[0].reasons, (reason,))
+                self.assertGreater(value.units[0].setup_bytes, 0)
+                self.assertGreater(value.units[0].durable_bytes, 0)
+                self.assertTrue((Path(directory) / "r0" / "0" / "target" / "operations.jsonl").is_file())
+
+    def test_target_memory_watchdog_and_case_cap_reasons_remain_incomplete(self):
+        for reason in ("MEMORY_CAP", "MEMORY_MONITOR_INCOMPLETE", "DECISION_TIMEOUT",
+                       "ARM_TIMEOUT", "CASE_TIMEOUT", "WATCHDOG_INCOMPLETE"):
+            calls = []
+            def supervise(work, kind, *args, **kwargs):
+                calls.append(kind)
+                if kind is execution.WorkerKind.PRIMARY:
+                    return self.result(work, kind)
+                observation = op._R0Observation(100, 200, 300, 2, 5, 1, 1, (0, 0, 0, ()),
+                    reason != "MEMORY_MONITOR_INCOMPLETE", True, reason.startswith("MEMORY"))
+                return self.result(work, kind, status=records.AuditStatus.INCOMPLETE,
+                                   reason=reason, observation=observation, bundle=False)
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+                value = self.run_component(directory, op.R0Component.K_CONTROL, supervise=supervise)
+                self.assertEqual(calls, [execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL])
+                unit, = value.units
+                self.assertIs(unit.status, records.AuditStatus.INCOMPLETE)
+                self.assertEqual(unit.reasons, (reason,))
+                self.assertTrue(all(type(item) is op._R0Observation for item in unit.observations))
+                self.assertTrue(all(item.cleanup_complete for item in unit.observations))
+                self.assertTrue((Path(directory) / "r0" / "0" / "setup" / "boards.jsonl").is_file())
+
+    def test_failure_and_progress_exception_leave_partial_roots_without_retry(self):
+        calls = []
+        def supervise(work, kind, *args, **kwargs):
+            calls.append(work.position)
+            return self.result(work, kind)
+        def fail(*args):
+            raise RuntimeError("synthetic progress failure")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "synthetic progress failure"):
+                self.run_component(directory, op.R0Component.PRIMARY, plan=self.plan(2),
+                                   supervise=supervise, envelope=_envelope(concurrency=1), progress=fail)
+            self.assertEqual(calls, [0])
+            self.assertTrue((Path(directory) / "r0" / "0" / "target" / "boards.jsonl").exists())
+            with self.assertRaises(FileExistsError):
+                self.run_component(directory, op.R0Component.PRIMARY, supervise=supervise)
+            self.assertEqual(calls, [0])
+
+    def test_rejects_non_r0_wrong_order_duplicate_and_identity_drift_before_root_creation(self):
+        plan = self.plan(2)
+        invalid = ((), list(plan), _plan(2), plan[::-1],
+                   (plan[0], replace(plan[1], board=plan[0].board)),
+                   (plan[0], replace(plan[1], run_id="R0-different")),
+                   (plan[0], replace(plan[1], protocol_seed=b"z" * 32)))
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op, "_supervise_operation", side_effect=AssertionError("Invalid plan ran")):
+            for plan_value in invalid:
+                with self.subTest(plan=type(plan_value)), self.assertRaises(ValueError):
+                    op.measure_r0_component(plan_value, op.R0Component.PRIMARY, Path(directory) / "r0", _envelope())
+                self.assertFalse((Path(directory) / "r0").exists())
+            for invalid_component in ("P", None, True):
+                with self.assertRaises(ValueError):
+                    op.measure_r0_component(plan, invalid_component, Path(directory) / "r0", _envelope())
+        with self.assertRaisesRegex(ValueError, "R0_RUN_ID_REQUIRED"):
+            replace(plan[0], run_id="actual-e2")
+
+    def test_existing_root_is_exclusive_and_public_api_has_no_worker_injection(self):
+        self.assertNotIn("worker_target", inspect.signature(op.measure_r0_component).parameters)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "r0"
+            root.mkdir()
+            sentinel = root / "preserved.txt"
+            sentinel.write_text("preserve", encoding="ascii")
+            with self.assertRaises(FileExistsError):
+                self.run_component(directory, op.R0Component.PRIMARY)
+            self.assertEqual(sentinel.read_text(encoding="ascii"), "preserve")
+
+    def test_shared_ledger_and_bounded_parallelism_are_reused_for_all_units(self):
+        active = peak = 0
+        ledgers, lock = [], threading.Lock()
+        def supervise(work, kind, prior, envelope, ledger, *args, **kwargs):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                ledgers.append(ledger)
+            time.sleep(0.005)
+            with lock:
+                active -= 1
+            return self.result(work, kind)
+        with tempfile.TemporaryDirectory() as directory:
+            value = self.run_component(directory, op.R0Component.PRIMARY, plan=self.plan(3), supervise=supervise)
+        self.assertLessEqual(peak, 2)
+        self.assertEqual(len(value.units), 3)
+        self.assertEqual(len({id(ledger) for ledger in ledgers}), 1)
+        self.assertTrue(all(isinstance(ledger, op._MemoryLedger) for ledger in ledgers))
+
+    def test_coordinator_memory_cap_preserves_root_and_prevents_workers(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=100_000_001), \
+                patch.object(op, "_supervise_operation", side_effect=AssertionError("Memory cap worker")):
+            with self.assertRaisesRegex(op.OperationalAbort, "MEMORY_CAP"):
+                op.measure_r0_component(self.plan(), op.R0Component.PRIMARY,
+                                        Path(directory) / "r0", _envelope())
+            self.assertTrue((Path(directory) / "r0").is_dir())
+
+    def test_observation_rejects_nonexact_memory_counts_and_mutable_or_inconsistent_intervals(self):
+        baseline = op._R0Observation(100, 200, 300, 2, 5, 1, 1, (1, 1, 2, ((10, 12),)), True, True, True)
+        for field in ("worker_memory", "coordinator_memory", "combined_memory", "decision_wall",
+                      "arm_wall", "shadow_wall", "physical_inputs"):
+            for invalid in (True, -1, 1.0, None):
+                with self.subTest(field=field, invalid=invalid), self.assertRaises(ValueError):
+                    replace(baseline, **{field: invalid})
+        for oracle in ((True, 1, 2, ((10, 12),)), (1, 1.0, 2, ((10, 12),)),
+                       (1, 1, True, ((10, 12),)), (1, 2, 2, ((10, 12),)),
+                       (1, 1, 2, [(10, 12)]), (1, 1, 2, ([10, 12],)),
+                       (1, 1, 2, ((10, 12.0),)), (1, 1, 2, ((12, 10),)),
+                       (2, 1, 4, ((10, 12), (11, 13))), (1, 1, 3, ((10, 12),)),
+                       (0, 0, 1, ())):
+            with self.subTest(oracle=oracle), self.assertRaises(ValueError):
+                replace(baseline, oracle=oracle)
+        with self.assertRaisesRegex(ValueError, "R0_MEMORY_ACCOUNTING"):
+            replace(baseline, combined_memory=199)
+
+    def test_final_persistence_checkpoint_cannot_escape_publication_cap(self):
+        original = store.StreamWriter.seal
+        clock, offset = time.monotonic_ns, [0]
+        def late_seal(writer):
+            result = original(writer)
+            offset[0] += 2_000_000
+            return result
+        for oracle_only in (False, True):
+            offset[0] = 0
+            with self.subTest(oracle_only=oracle_only), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(op.time, "monotonic_ns", side_effect=lambda: clock() + offset[0]), \
+                    patch.object(store.StreamWriter, "seal", new=late_seal):
+                work = op._r0_work(self.plan()[0], op.R0Component.ORACLE_B if oracle_only else op.R0Component.PRIMARY)
+                with self.assertRaisesRegex(op.OperationalAbort, "PUBLICATION_TIMEOUT"):
+                    op._persist_r0(Path(directory) / "target", self.result(work, execution.WorkerKind.PRIMARY),
+                                   _envelope(publication_wall_ms=1), oracle_only=oracle_only)
+                self.assertTrue((Path(directory) / "target").is_dir())
+                self.assertFalse((Path(directory) / "target" / "COMPLETE.json").exists())
+
+    def test_coordinator_equivalent_readmission_obeys_validation_cap(self):
+        clock, offset = time.monotonic_ns, [0]
+        def delayed_validation(*args, **kwargs):
+            offset[0] += 2_000_000
+        def supervise(work, kind, *args, **kwargs):
+            return self.result(work, kind)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.time, "monotonic_ns", side_effect=lambda: clock() + offset[0]), \
+                patch.object(execution, "revalidate_bundle", side_effect=delayed_validation), \
+                patch.object(op, "_supervise_operation", side_effect=supervise), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+            with self.assertRaisesRegex(op.OperationalAbort, "VALIDATION_TIMEOUT"):
+                op.measure_r0_component(self.plan(), op.R0Component.ORACLE_B,
+                    Path(directory) / "r0", _envelope(validation_wall_ms=1))
+
+    def test_component_archive_cannot_exceed_remaining_global_budget(self):
+        calls = []
+        def supervise(work, kind, *args, **kwargs):
+            calls.append(work.position)
+            return self.result(work, kind)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(op.OperationalAbort, "ARCHIVE_CAP"):
+                self.run_component(directory, op.R0Component.PRIMARY, plan=self.plan(3), supervise=supervise,
+                                   envelope=_envelope(concurrency=1, archive_cap_bytes=8400, max_payload_bytes=8000))
+            size = sum(path.stat().st_size for path in (Path(directory) / "r0").rglob("*.jsonl"))
+            self.assertLessEqual(size, 8400)
+            self.assertTrue(calls)
+            self.assertEqual(calls, list(range(len(calls))))
+            self.assertLessEqual(len(calls), 3)
+
+    def test_coordinator_peak_during_persistence_is_observed_and_monitor_reaped(self):
+        memory, sampled = [200], threading.Event()
+        original = op._persist_r0
+        def coordinator():
+            if memory[0] == 1000:
+                sampled.set()
+            return memory[0]
+        def persist(*args, **kwargs):
+            memory[0] = 1000
+            self.assertTrue(sampled.wait(1), "Background monitor did not observe persistence")
+            value = original(*args, **kwargs)
+            memory[0] = 200
+            return value
+        def supervise(work, kind, *args, **kwargs):
+            return self.result(work, kind)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.harness, "_coordinator_private_bytes", side_effect=coordinator), \
+                patch.object(op, "_supervise_operation", side_effect=supervise), \
+                patch.object(execution, "revalidate_bundle"), \
+                patch.object(op, "_persist_r0", side_effect=persist):
+            value = op.measure_r0_component(self.plan(), op.R0Component.PRIMARY,
+                                            Path(directory) / "r0", _envelope())
+        self.assertEqual(value.coordinator_memory_bytes, 1000)
+        self.assertGreaterEqual(value.combined_memory_bytes, 1000)
+        self.assertFalse(any(thread.name == "program-k-r0-memory" and thread.is_alive()
+                             for thread in threading.enumerate()))
+
+    def test_precancelled_public_measurement_spawns_no_process_and_remains_incomplete(self):
+        cancel = threading.Event()
+        cancel.set()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200), \
+                patch("multiprocessing.process.BaseProcess.start", side_effect=AssertionError("Cancelled process started")):
+            value = op.measure_r0_component(self.plan(), op.R0Component.PRIMARY,
+                                            Path(directory) / "r0", _envelope(), cancel=cancel)
+        self.assertIs(value.units[0].status, records.AuditStatus.INCOMPLETE)
+        self.assertIn("CANCELLED", value.units[0].reasons)
+
+    def test_literal_spawn_uses_production_worker_job_ipc_and_reaps_every_component(self):
+        from tests.test_program_k_e2_execution import _literal_work
+        work = _literal_work()
+        plan = (op.R0Work(0, work.board, work.protocol_seed, "R0-contained-literal"),)
+        context = op.multiprocessing.get_context("spawn")
+        original_attach = op.harness._attach_memory_job
+        envelope = _envelope(concurrency=1, max_decision_wall_ms=1000, max_arm_wall_ms=5000,
+            max_case_wall_ms=15000, max_job_wall_ms=30000, max_launcher_wall_ms=45000,
+            worker_memory_cap_bytes=500_000_000, coordinator_memory_cap_bytes=2_000_000_000,
+            memory_cap_bytes=3_000_000_000, max_physical_inputs=30,
+            archive_cap_bytes=5_000_000, max_payload_bytes=1_000_000)
+        for component in op.R0Component:
+            requested, attached = [], []
+            def process(*, target, args):
+                self.assertIs(target, op._worker_main)
+                self.assertIs(args[-1], True)
+                requested.append(target)
+                return context.Process(target=_r0_literal_worker, args=(target, args))
+            def attach(pid, budget):
+                attached.append(pid)
+                return original_attach(pid, budget)
+            proxy = SimpleNamespace(Pipe=context.Pipe, Event=context.Event, Process=process)
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(op.multiprocessing, "get_context", return_value=proxy), \
+                    patch.object(op.harness, "_attach_memory_job", side_effect=attach), \
+                    patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+                value = op.measure_r0_component(plan, component, Path(directory) / "r0", envelope)
+                self.assertIs(value.units[0].status, records.AuditStatus.PASS, value.units[0].reasons)
+                unit = value.units[0]
+                target_root = Path(directory) / "r0" / "0" / "target"
+                excluded = {"operations", "resources", "oracle_b_audits", "repeat_oracle_b_audits"}
+                if component is op.R0Component.PRIMARY:
+                    excluded.add("control_maintenance")
+                if component is op.R0Component.ORACLE_K_BIND:
+                    expected_bytes = 0
+                    self.assertEqual(len(unit.observations[-1].prior_binding_intervals), 3)
+                elif component in (op.R0Component.ORACLE_B, op.R0Component.ORACLE_D_REPEAT):
+                    name = "oracle_b_audits" if component is op.R0Component.ORACLE_B else "repeat_oracle_b_audits"
+                    expected_bytes = (target_root / (name + ".jsonl")).stat().st_size
+                else:
+                    expected_bytes = sum(path.stat().st_size for path in target_root.glob("*.jsonl")
+                                         if path.stem not in excluded)
+                self.assertEqual(unit.durable_bytes, expected_bytes)
+                setup_root = target_root.parent / "setup"
+                self.assertEqual(unit.reference_bytes, (setup_root / "control_maintenance.jsonl").stat().st_size
+                                 if setup_root.exists() else 0)
+                self.assertEqual(unit.supporting_bytes, sum(path.stat().st_size
+                    for path in target_root.parent.rglob("*.jsonl") if path.stem in ("operations", "resources")))
+                self.assertTrue(all(item.resources_complete and item.cleanup_complete and item.watchdogs_complete
+                                    for item in value.units[0].observations))
+                self.assertTrue(all(item.worker_memory > 0 for item in value.units[0].observations))
+                self.assertEqual(len(requested), 2 if component in (op.R0Component.K_CONTROL,
+                    op.R0Component.DETERMINISM, op.R0Component.ORACLE_K_BIND,
+                    op.R0Component.ORACLE_D_REPEAT) else 1)
+                self.assertEqual(len(attached), len(requested))
+                self.assertFalse(any(child.pid in attached for child in op.multiprocessing.active_children()))
+                self.assertFalse(any(thread.name in ("program-k-e2-ipc-reader", "program-k-e2-watchdog")
+                                     and thread.is_alive() for thread in threading.enumerate()))
+
+    def test_selected_zero_telemetry_cannot_override_nonempty_oracle_evidence(self):
+        from tests.test_program_k_e2_execution import _literal_work
+        work = _literal_work()
+        plan = (op.R0Work(0, work.board, work.protocol_seed, "R0-corrupt-literal"),)
+        context = op.multiprocessing.get_context("spawn")
+        def process(*, target, args):
+            self.assertIs(target, op._worker_main)
+            return context.Process(target=_r0_literal_worker, args=(target, args, True))
+        proxy = SimpleNamespace(Pipe=context.Pipe, Event=context.Event, Process=process)
+        envelope = _envelope(concurrency=1, max_decision_wall_ms=1000, max_arm_wall_ms=5000,
+            max_case_wall_ms=15000, max_job_wall_ms=30000, max_launcher_wall_ms=45000,
+            worker_memory_cap_bytes=500_000_000, coordinator_memory_cap_bytes=2_000_000_000,
+            memory_cap_bytes=3_000_000_000, max_physical_inputs=30,
+            archive_cap_bytes=5_000_000, max_payload_bytes=1_000_000)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op.multiprocessing, "get_context", return_value=proxy), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+            value = op.measure_r0_component(plan, op.R0Component.ORACLE_B, Path(directory) / "r0", envelope)
+            self.assertIs(value.units[0].status, records.AuditStatus.FAIL)
+            self.assertIn("MALFORMED_IPC_OR_IDENTITY", value.units[0].reasons)
+            self.assertFalse(any(thread.name == "program-k-e2-ipc-reader" and thread.is_alive()
+                                 for thread in threading.enumerate()))
 
 
 class OperationalPurityTests(unittest.TestCase):

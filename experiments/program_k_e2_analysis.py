@@ -592,14 +592,19 @@ def _metric(means, zero_count, missing_count=0):
     return BootstrapMetric(interval, len(means), undefined, zero_count, missing_count)
 
 
-def _shared_bootstrap(rows, protocol_seed, corpus_digest):
+def _shared_bootstrap(rows, protocol_seed, corpus_digest, *, progress=None):
     """One PRNG state, one replicate loop, three scalar accumulators per draw.
 
     Projection is O(N) once. Only three O(10,000) scalar-mean lists survive
     replicate boundaries; there is no draw matrix or per-replicate row copy.
+    The optional observer receives only completed/total replicate integers;
+    its return value is ignored and its exceptions propagate to the caller.
     """
+    _need(progress is None or callable(progress), "Bootstrap progress must be callable or None.")
     seed = bootstrap_seed(protocol_seed, corpus_digest)
     state = identity.uint64_be_decode(seed[:8])
+    if progress is not None:
+        progress(0, identity.BOOTSTRAP_REPLICATES)
     compact = tuple((True, row.pair.g5.is_exposed, row.control_model_us - row.kp0_model_us,
                      None if row.control_compute_ns is None or row.kp0_compute_ns is None
                      else (row.control_model_us - row.kp0_model_us) * 1000
@@ -609,7 +614,7 @@ def _shared_bootstrap(rows, protocol_seed, corpus_digest):
     n = len(compact)
     g8_means, g5_means, g9_means = [], [], []
     zero_ww = zero_exposed = missing_compute = rejected = 0
-    for _ in range(identity.BOOTSTRAP_REPLICATES):
+    for replicate in range(identity.BOOTSTRAP_REPLICATES):
         ww_count = exposed_count = saving_sum = exposed_sum = net_sum = 0
         compute_missing = False
         for _ in range(n):
@@ -638,6 +643,8 @@ def _shared_bootstrap(rows, protocol_seed, corpus_digest):
             g5_means.append(Fraction(exposed_sum, exposed_count))
         else:
             zero_exposed += 1
+        if progress is not None:
+            progress(replicate + 1, identity.BOOTSTRAP_REPLICATES)
     return BootstrapSummary(identity.BOOTSTRAP_REPLICATES, n * identity.BOOTSTRAP_REPLICATES,
                             rejected, seed.hex(), _metric(g5_means, zero_exposed),
                             _metric(g8_means, zero_ww), _metric(g9_means, zero_ww, missing_compute))
@@ -703,13 +710,18 @@ def classify_g9(*, observed_ww, missing_compute, pathology, bootstrap):
 
 def analyze_effectiveness(rows, *, protocol_seed, corpus_digest, concurrency,
                           pathology=G9PathologyDisposition.NONE, g5_evidence_complete=True,
-                          gate_statuses=None, implementation_identity_fail=False, context=()):
+                          gate_statuses=None, implementation_identity_fail=False, context=(),
+                          bootstrap_progress=None):
     """Analyze supplied rows only. Other gates and evidence qualification are caller-owned.
 
     Compute distributions contain available WW per-board comparable-span totals;
     their counts expose missing values. A complete observed net mean is withheld
     if any WW compute is missing. No absent value is coerced to zero.
+    bootstrap_progress observes completed bootstrap replicates only; it cannot
+    supply analysis values, and observer failure prevents a returned result.
     """
+    _need(bootstrap_progress is None or callable(bootstrap_progress),
+          "Bootstrap progress must be callable or None.")
     _need(type(rows) is tuple and len(rows) >= 1, "Expected nonempty exact row tuple.")
     _integer(concurrency, 1)
     _enum(pathology, G9PathologyDisposition)
@@ -747,7 +759,7 @@ def analyze_effectiveness(rows, *, protocol_seed, corpus_digest, concurrency,
     ratio = Fraction(s_k, s_c) if n_w else None
     primary = PrimarySummary(n_w, s_c, s_k, s_k - s_c, ratio,
                              1 - ratio if n_w else None, Fraction(s_c - s_k, n_w) if n_w else None)
-    boot = _shared_bootstrap(rows, protocol_seed, corpus_digest)
+    boot = _shared_bootstrap(rows, protocol_seed, corpus_digest, progress=bootstrap_progress)
     exposure_count = sum(row.pair.g5.is_exposed for row in rows)
     g5_status, g5_cause = classify_g5(exposure_count=exposure_count,
                                     evidence_complete=g5_evidence_complete, bootstrap=boot.g5)
