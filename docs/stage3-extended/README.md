@@ -6,10 +6,12 @@ Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen bas
 ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
 **Stage-3 Extended는 ACTIVE**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
 
-Current state: **2026-10-25 (Asia/Seoul), PRE-ACTUAL-E2**.
+Current state: **2026-10-26 (Asia/Seoul), PRE-ACTUAL-E2 — TWO STATIC FOLLOW-ON BLOCKS**.
 Accepted `main` / `origin/main` at refresh entry:
+`c0bc270bce1996797f9ecec80e79ea8998d3205d`.
+Accepted technical harness ancestor:
 `7e7f847816fedb77cef67b576eab665afabfbfbf`
-— `feat: add Program K E2 R0 harness`; direct parent
+— `feat: add Program K E2 R0 harness`; its direct parent is
 `e6593f7a99af2f0dd941eda7ee53a5164c79a2bd`.
 
 **Representative-board Demonstrations / Timeline Analytics — FINAL ACCEPTANCE
@@ -55,11 +57,17 @@ selection, and setup-containment repair (`e6593f7`) are complete/accepted.
 **R0 harness at `7e7f847`: FINAL ACCEPTANCE PASS / COMMITTED / PUSHED;
 BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
 
-**NEXT: separately authorized Real R0-A → adjudicate R0-A → Real R0-B →
-adjudicate complete R0 readiness → select/freeze Operating Envelope → separately
-authorize/run Actual E2.** Real R0-A/R0-B are **NOT RUN**, R0 adjudication is
-**NOT DONE**, and no final N/concurrency or Operating Envelope is selected/frozen.
-Actual E2 is **NOT RUN / NOT AUTHORIZED YET**; effectiveness is **NOT ESTABLISHED**.
+**Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun.**
+Its post-run integrity review and static follow-on review are complete. The
+accepted observations establish two independent static blocks: the frozen
+execution-admission projection exceeds 12 hours at every candidate N/concurrency,
+and the required synthetic R0-B family minima exceed the 16 GiB archive ceiling.
+**NEXT: source-only / read-only engineering investigation and remediation proposal
+for both blocks, followed by explicit adjudication.** Real R0-B is
+**NOT RUN / NOT AUTHORIZED**; this is not a failed R0-B run. Complete R0
+adjudication is **NOT DONE**. Final N/concurrency are **NOT SELECTED**, and the
+final E2 Operating Envelope is **NOT SELECTED / NOT FROZEN**.
+Actual E2 is **NOT RUN / NOT AUTHORIZED**; effectiveness is **NOT ESTABLISHED**.
 E3 is conditional/not triggered; Gate P, production integration and native K visual
 acceptance are not started. Program K final closeout is not done; milestone 10
 research remains **ACTIVE**.
@@ -210,9 +218,12 @@ results retain their original identity and meaning.
     and [frozen R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md).
     **I1–I8 = 8/8 COMPLETE / ACCEPTED.** Amendment conformance, target
     counts/synthetic selection, setup repair and R0 harness are accepted.
-    **NEXT: Real R0-A, its adjudication, then Real R0-B and complete readiness
-    adjudication, then Operating Envelope / separately authorized Actual E2.**
-    Real R0-A/R0-B and Actual E2 have not run. No milestone 11+ is frozen.
+    **Real R0-A is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun.**
+    **NEXT: source-only / read-only engineering investigation and remediation
+    proposal for the execution-admission and synthetic-archive blocks.** Real
+    R0-B and Actual E2 are **NOT RUN / NOT AUTHORIZED**. Later readiness,
+    Operating Envelope and execution steps remain conditional on resolution and
+    explicit adjudication. No milestone 11+ is frozen.
 
 ### Current Program K boundary
 
@@ -325,27 +336,200 @@ six measurement routes, independent Oracle setup containment and immutable R0-A
 readback; selected synthetic 10k materialization, six durable families,
 zero-row Oracle/supporting-stream/fixed-allowance accounting; and the frozen
 10,000-replicate production bootstrap through five bounded postprocessing phases
-with manifest/provenance/failure-atomic publication. These are accepted
-implementation capabilities, not executed R0 or effectiveness evidence.
+with manifest/provenance/failure-atomic publication. Real R0-A has now exercised
+and closed its authorized measurement scope as recorded below. R0-B capabilities
+remain unexecuted; neither implementation acceptance nor R0-A evidence establishes
+effectiveness.
 The historical readiness source-review guard remains historical; its positive
 test fixture was isolated from the later harness worktree without broadening
 the production guard.
 
-#### Current execution boundary / planned acceptance
+#### Accepted Real R0-A — complete / integrity pass / closed
 
-**Real R0-A / Real R0-B: NOT RUN. R0 adjudication: NOT DONE.**
-**Operating Envelope/final N/concurrency: NOT SELECTED / NOT FROZEN.**
-**Actual E2: NOT RUN / NOT AUTHORIZED YET.** E3 is **CONDITIONAL ONLY / NOT
-TRIGGERED**. Gate P, Program K production integration and native visual acceptance
-are **NOT STARTED**; Program K final closeout is **NOT DONE**.
+The single separately authorized initial calibration run is **COMPLETE / INTEGRITY
+PASS / EVIDENCE ACCEPTED / CLOSED**. Its post-run integrity review and static
+follow-on review are **COMPLETE**. Preserve the accepted run; **do not rerun R0-A**.
 
-Immediate next is separately authorized **Real R0-A**, then its evidence
-adjudication, **Real R0-B**, complete R0 readiness adjudication, Operating
-Envelope selection/freeze, and separate Actual-E2 authorization/execution.
-After any E3 required by the frozen trigger: Gate P → production integration →
-K trace in Visualizer / native-user observation → Program K final closeout →
-Stage-3 Extended closeout only when all remaining requirements are satisfied.
-These future steps are not PASS results or new frozen milestones.
+- Run root:
+  [`results/program-k-e2-real-r0a/20261024T193317.738335Z-2af3a8ca/`](../../results/program-k-e2-real-r0a/20261024T193317.738335Z-2af3a8ca/).
+- Source at run/review:
+  `c0bc270bce1996797f9ecec80e79ea8998d3205d`; 37-file source/provenance digest
+  `1db7293ec43835b44542c1373e5ce55424e3cc06e0d10f39dab2430b2d7cb163`.
+- Classification: `OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE`;
+  review status: `COMPLETE_FOR_INDEPENDENT_REVIEW_NOT_ENVELOPE_ADMISSION`.
+- `COMPLETE.json` records `COMPLETED`; `FAILED.json` is absent. The original
+  `INCOMPLETE_AT_CREATION` marker is retained as expected creation history, not
+  a current failure or incomplete-run verdict.
+- All `c=1,2,4` candidates and six routes `P`, `K`, `O`, `D`, `O_K_BIND`,
+  `O_D_REPEAT` completed: **18/18 routes, 64/64 positions each**, with the same
+  first-64 identities. First-64 corpus digest:
+  `bb1202fad3ed2f3d89026aed071a1a9c1e7140b09f2cdf326a52c86cec3f2a78`.
+- Manifest/completion, exact readback/adapter reproduction, committed-source,
+  receipt, frozen protocol/amendment and all required setup/watchdog/resource/
+  cleanup/progress/readback checks passed. Accepted calibration cap breaches: **0**;
+  highest measured utilization was combined memory, **36.6940%**.
+- Operator start: **2026-10-25 04:33:17.772727 KST**; successful return:
+  **2026-10-26 04:18:00.538514 KST**, exit **0**. Observed wrapper elapsed:
+  **85,482,777,754,500 ns = 23h44m42.7777545s**. This is the whole operator session,
+  not one route wall, an Actual-E2 runtime, or a breach of a per-component 12-hour
+  calibration cap.
+
+| Evidence identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Accepted selection receipt linked above | 7,364 | `72ea48582d3eb2c4eff82172b58fe88460a8a3747eee910efe5fc8a2deb6337c` |
+| Run `manifest.json` | 19,256,799 | `60adb78437d6edce767d05f7a9cb79fead0fcedf0a8b349559ab7cbd1da19edb` |
+| Run `COMPLETE.json` | 422 | `1ecea386f404f54ddc875ccf17398cc1c48e86ed40d43a76f834d95c2cf6954e` |
+| Run `r0a-observations.json` | 19,826,611 | `cf624bdc88f601d22f7ab9f52e630374b9b17ec0085584cb19796684142adb7c` |
+
+The frozen protocol SHA-256 remains
+`10b1055a6e1bcab8e03ab504755c9c9d655d5457800318396afb6e31497ba2fa`;
+the amendment remains the exact 58,052-byte identity above. R0-A used explicitly
+adjudicated **initial calibration** envelopes, including the 25 ms monitor cadence
+and a combined 4 GiB memory ceiling. Its permissive per-component job/launcher/
+phase ceilings do not become final E2 envelope values. R0-A evidence is operational
+non-effectiveness evidence only; no final concurrency is selected from it.
+
+Measured concurrency comparisons remain descriptive single-run observations:
+
+| Comparison | c=1 | c=2 | c=4 |
+| --- | ---: | ---: | ---: |
+| O_K_BIND attributed binding wall, seconds | 3,018.3200812 | 2,995.5455936 | 3,075.1226738 |
+
+O_K_BIND wall reduction was **0.7545%** from c=1 to c=2 and **−2.6565%** from
+c=2 to c=4. The other five route-wall reductions from c=2 to c=4 were
+P **18.7662%**, K **13.2703%**, O **18.8638%**, D **18.4825%** and O_D_REPEAT
+**23.2959%**. At c=4, K complete/setup walls were **6,365.4555667 / 1,029.7495051 s**,
+and D complete/setup walls were **2,999.361048 / 1,032.7497351 s**. Setup remains
+inside those complete standalone K/D walls. These observations establish neither
+a causal bottleneck nor a selected concurrency.
+
+#### Static block 1 — frozen execution-admission projection
+
+The accepted six-term execution projection is:
+
+```text
+E(N,c) = 2 * (
+    P64(c) * N / 64
+  + K64(c) * min(N,256) / 64
+  + D64(c) * min(N,256) / 64
+  + O64_primary(c) * min(N,128) / 64
+  + O64_k_bind(c) * I_OK(N) / 64
+  + O64_d_repeat(c) * I_OD(N) / 64
+)
+```
+
+For every frozen candidate **N = 1,000 / 2,500 / 5,000 / 10,000**, the complete
+standalone K/D terms alone give `L(c) = 8 * (K64(c) + D64(c))`. All omitted terms
+are nonnegative. K/D setup belongs to their complete standalone route walls;
+**do not subtract setup to make this bound fit**.
+
+| Concurrency | Exact K+D lower bound, ns | K+D lower bound, hours | Stronger N=1,000 P+K+D+O-primary bound, hours | Frozen ceiling |
+| --- | ---: | ---: | ---: | ---: |
+| c=1 | 115,091,421,316,800 | 31.9698392547 | 45.4706941160 | 12 h |
+| c=2 | 88,150,611,100,000 | 24.4862808611 | 34.9850789298 | 12 h |
+| c=4 | 74,918,532,917,600 | 20.8107035882 | 29.3375792716 | 12 h |
+
+Thus **every candidate N/concurrency is statically blocked by execution-admission
+time before R0-B postprocessing is added**. These are frozen-formula admission
+projection lower bounds derived from R0-A, not measured Actual-E2 runtimes and not
+the 23h44m operator session. The descriptive improvement from c=1 to c=4 does not
+select a winner or resolve the bound; c=4 still exceeds 12 hours using K+D alone.
+
+#### Static block 2 — required synthetic R0-B cumulative archive
+
+`derive_r0b_sizing_plan()` takes each attributable maximum unit over all candidate
+concurrencies and applies exact `ceil(3/2 * maximum)`. Oracle primary/repeat share
+one conservative maximum scalar but remain separate families. R uses the maximum
+across all reference routes. The already accepted synthetic receipt fixes the
+realized family counts below; real target counts must not replace them.
+
+| Required synthetic family | Observed max B | Minimum bytes/unit | Realized synthetic count | Minimum family bytes |
+| --- | ---: | ---: | ---: | ---: |
+| P primary | 3,744,932 | 5,617,398 | 10,000 | 56,173,980,000 |
+| K control | 19,723,787 | 29,585,681 | 256 | 7,573,934,336 |
+| Oracle primary | 5,698,786 | 8,548,179 | 128 | 1,094,166,912 |
+| Oracle repeat | 5,698,786 | 8,548,179 | 4 | 34,192,716 |
+| D determinism | 15,238,396 | 22,857,594 | 256 | 5,851,544,064 |
+| R rank-0 reference | 4,373,733 | 6,560,600 | 506 | 3,319,663,600 |
+| **Attributable lower bound** | | | | **74,047,481,628** |
+
+The minimum is **68.962091 GiB**, versus the frozen **17,179,869,184-byte / 16 GiB**
+archive ceiling: **4.310131 times the cap**, exceeding it by **56,867,612,444 bytes**
+before any supporting/provenance/report/manifest bytes. P alone requires
+**56,173,980,000 B ≈ 52.32 GiB** and exceeds the cap. Supporting/report/finalization
+overhead is unmeasured because R0-B has not run; omitted overhead is nonnegative.
+The exact fixed allowance remains **268,435,456 bytes**; it does not enlarge the
+archive cap. This is an unavoidable lower-bound conflict under the current sizing,
+counts and cap, not a claim that R0-B executed or failed.
+
+Per-unit composite payload is a different constraint:
+
+| Actual synthetic logical unit | Minimum composite bytes |
+| --- | ---: |
+| PRIMARY: P | 5,617,398 |
+| PRIMARY: P + R | 12,177,998 |
+| PRIMARY: P + Oracle primary | 14,165,577 |
+| PRIMARY: P + R + Oracle primary | 20,726,177 |
+| D: D | 22,857,594 |
+| D: D + Oracle repeat | **31,405,773** |
+| K: K | 29,585,681 |
+
+The largest minimum composite is **31,405,773 bytes**, below the **67,108,864-byte**
+per-unit cap by **35,703,091 bytes** (46.798249% utilization). That minimum-fit fact
+does not establish realized payload fit after schema framing/padding, and does not
+establish cumulative archive feasibility. Do not sum all six families as one unit
+or add R again to K/D: their attributable target families already own their copies.
+
+The accepted harness uses one cumulative evidence sink for all **10,512** logical
+workers (10,000 primary + 256 K + 256 D). Final archive accounting requires both
+`archive_bytes >= family minimum totals + realized fixed bytes` and
+`archive_bytes <= 17,179,869,184`. The public R0-B boundary currently checks minimum
+composite payload fit before creating a result root, but does not perform this
+minimum-total-archive preflight there; cumulative persistence/final accounting
+still fail closed. These facts were established by source-only/read-only static
+inspection and arithmetic, without materialization or a launcher invocation.
+
+#### Current execution boundary / engineering investigation
+
+**Immediate NEXT: source-only / read-only engineering investigation and remediation
+proposal for both static blocks, then explicit ChatGPT/user adjudication.**
+Candidate investigation areas are K/D setup/reference preparation, encoding/IPC,
+worker/coordinator validation, persistence/readback/cleanup and the observed weak
+or negative O_K_BIND scaling. For bytes, examine the approximately 3.745 MB primary
+maximum unit, required semantic content versus incidental representation, a compact
+semantically equivalent representation, and an early minimum-total-archive check.
+These are investigation targets, not established causes or approved implementations.
+
+Do not begin by loosening caps, safety factors, subsets, the candidate-N ladder,
+attribution, policy or thresholds. Any contract change requires separate explicit
+adjudication. This documentation refresh implements no remedy. **No R0-B
+authorization until both blocks are resolved and adjudicated.**
+
+| Boundary | Current status |
+| --- | --- |
+| Real R0-A execution / integrity / evidence | **COMPLETE / PASS / ACCEPTED; work CLOSED, no rerun** |
+| R0-A post-run integrity review | **COMPLETE** |
+| R0 follow-on static feasibility review | **COMPLETE** |
+| Execution-wall admission | **STATICALLY BLOCKED** |
+| R0-B minimum whole-archive feasibility | **STATICALLY BLOCKED** |
+| Real R0-B | **NOT RUN / NOT AUTHORIZED; no R0-B failure claimed** |
+| Complete R0 adjudication | **NOT DONE** |
+| Final N / final concurrency | **NOT SELECTED** |
+| Final E2 Operating Envelope | **NOT SELECTED / NOT FROZEN** |
+| Actual E2 | **NOT RUN / NOT AUTHORIZED** |
+| E2 PASS / FAIL / DEFER | **NONE** |
+| Program K effectiveness | **NOT ESTABLISHED** |
+| E3 | **CONDITIONAL ONLY / NOT TRIGGERED** |
+| Gate P / production integration / native K visual acceptance | **NOT STARTED** |
+| Program K final closeout | **NOT DONE** |
+| Stage-3 Extended / milestone 10 | **ACTIVE; milestones 1–9 remain CLOSED** |
+
+Only after separately accepted resolution may future authorization consider
+Real R0-B, complete R0 readiness adjudication, final Operating Envelope selection/
+freeze and separately authorized Actual E2. Any E3 required by the frozen trigger,
+Gate P, production integration, K trace/native-user acceptance, Program K closeout
+and eventual Extended closeout remain conditional later work. This is not an
+automatic execution chain, a PASS result, or a new frozen milestone.
 
 Planned visual acceptance after Gate P/integration and before Program K closeout
 uses an actual completed K trace replay, not live streaming. Logical-known-mine
@@ -495,10 +679,11 @@ E0/E1 protocol and E2 Effectiveness Protocol remain FROZEN / ACCEPTED.
 E2 implementation is now **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
 [R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
 is **CONTENT-FROZEN / ACCEPTED**. Conformance, selection, setup repair and the
-R0 harness at `7e7f847` are accepted. Current NEXT is separately authorized Real
-R0-A, followed by its adjudication and Real R0-B. Real R0 and Actual E2 are
-NOT RUN; effectiveness is NOT YET ESTABLISHED. The historical polish acceptance
-is unchanged.
+R0 harness at `7e7f847` are accepted. Real R0-A is now COMPLETE / INTEGRITY PASS /
+EVIDENCE ACCEPTED / CLOSED. Current NEXT is source-only / read-only engineering
+investigation and a remediation proposal for the two static follow-on blocks
+recorded above. R0-B and Actual E2 remain NOT RUN / NOT AUTHORIZED; effectiveness
+is NOT ESTABLISHED. The historical polish acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -841,10 +1026,12 @@ FROZEN / ACCEPTED; its bounded experimental implementation and Gate-R E0/E1
 qualification are accepted/closed. The E2 Effectiveness Protocol is FROZEN /
 ACCEPTED, E2 implementation is **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
 R0 Attribution Amendment v1 is **CONTENT-FROZEN / ACCEPTED**. Conformance,
-selection, setup repair and R0 harness `7e7f847` are accepted. Current next work
-is separately authorized Real R0-A, its adjudication, then Real R0-B and complete
-R0 readiness adjudication before Operating Envelope / Actual E2.
-R0-A/R0-B and Actual E2 are NOT RUN; effectiveness is NOT YET ESTABLISHED.
+selection, setup repair and R0 harness `7e7f847` are accepted. Real R0-A is COMPLETE /
+INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun. Current next work is
+source-only / read-only engineering investigation and a remediation proposal for
+the execution-admission and synthetic-archive blocks above. R0-B and Actual E2 are
+NOT RUN / NOT AUTHORIZED; complete R0 adjudication is NOT DONE and the final
+Operating Envelope is NOT FROZEN. Effectiveness is NOT ESTABLISHED.
 Milestone 10 remains ACTIVE.
 The historical Same-board closeout
 did not implement the later playback/route/cursor maintenance;

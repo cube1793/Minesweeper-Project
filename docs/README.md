@@ -88,7 +88,7 @@ Closed milestones / durable closeouts:
 
 Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
 Capability + Selective Physical Materialization** remains **ACTIVE**.
-Current state as of **2026-10-25 (Asia/Seoul): PRE-ACTUAL-E2**.
+Current state as of **2026-10-26 (Asia/Seoul): PRE-ACTUAL-E2 — REAL R0-A CLOSED**.
 Program K is the whole research program; E2 is its effectiveness experiment;
 Gate P is later production/integration qualification after E2/any required E3.
 
@@ -113,17 +113,30 @@ Accepted historical full-source qualification: **4117/4117 PASS**
 (`4111 MAIN + 6 ISOLATED`). Exact identities, receipts and qualification history
 are in the [current handoff](CURRENT_HANDOFF.md).
 
-**Real R0-A and Real R0-B: NOT RUN. R0 adjudication: NOT DONE.**
-Operating Envelope/final N/concurrency: **NOT SELECTED / NOT FROZEN**.
-**Actual E2: NOT RUN / NOT AUTHORIZED YET.** E3 is conditional/not triggered;
-Gate P, production integration and native K visual acceptance are not started.
-Program K final closeout is not done; Stage-3 Extended remains **ACTIVE**.
+The verified source baseline before this documentation refresh is
+`c0bc270bce1996797f9ecec80e79ea8998d3205d` (`c0bc270`): `main` / local
+`origin/main` aligned, ahead/behind **0/0**, clean index/worktree.
 
-**NEXT:** separately authorized Real R0-A → R0-A adjudication → Real R0-B →
-complete R0 readiness adjudication → select/freeze Operating Envelope → separate
-Actual-E2 authorization/execution. Any triggered E3, Gate P, integration and
-completed K trace/native visual acceptance precede Program K final closeout;
-Extended closes only when all remaining requirements are satisfied.
+**Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED — NO RERUN.**
+Its accepted evidence is **OPERATIONAL NON-EFFECTIVENESS** evidence. Subsequent
+read-only static review confirmed both the **execution-wall admission blocker**
+and the **R0-B whole-archive capacity blocker**; exact evidence, calculations and
+authority are recorded in the [current handoff](CURRENT_HANDOFF.md) and
+[Extended README](stage3-extended/README.md).
+
+**Real R0-B: NOT RUN / NOT AUTHORIZED**; it has not failed an executed run.
+**Complete R0 adjudication: NOT DONE.** Final N/concurrency: **NOT SELECTED**;
+final Operating Envelope: **NOT SELECTED / NOT FROZEN**. E2 PASS/FAIL/DEFER: **NONE**.
+**Actual E2: NOT RUN / NOT AUTHORIZED. Program K effectiveness: NOT ESTABLISHED.**
+E3 is conditional/not triggered; Gate P, production integration and native K
+visual acceptance are not started. Program K final closeout is not done;
+Stage-3 Extended remains **ACTIVE**.
+
+**NEXT:** source-only / read-only engineering investigation and a remediation
+proposal for ChatGPT/user adjudication. No automatic R0-B, envelope freeze or
+Actual-E2 execution follows the accepted R0-A evidence. Later operational work
+requires blocker resolution/adjudication and separate authorization; preserve the
+closed R0-A evidence unchanged.
 
 Recovery order:
 [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
