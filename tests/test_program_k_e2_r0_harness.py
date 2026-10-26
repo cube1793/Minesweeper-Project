@@ -2930,3 +2930,717 @@ class TextConstructorV1PreservationTests(unittest.TestCase):
             self.assertNotIn(cls.__name__, evidence._FACT_TYPES)
             with self.assertRaisesRegex(h.HarnessError, "UNSUPPORTED_METADATA_FACT"):
                 h._fact_read({"fact": cls.__name__, "fields": {}})
+
+
+# Slice 1G fixtures are detached, deliberately counterfactual public traces.
+# Every q used here is bounded; these tests make no performance/readiness claim.
+from stage3_physical import action_cost as _reference_action_cost, load_timing_table as _reference_timing_table
+
+_REFERENCE_PROFILE = b"\x71" * 32
+_REFERENCE_CAP = 1048576
+_REFERENCE_TAG = "SYNTHETIC_NON_EVIDENCE|L:|H:"
+_REFERENCE_TARGET = (1, 0)
+_REFERENCE_SOURCES = tuple((x, y) for y in range(16) for x in range(30)
+                           if (x, y) != _REFERENCE_TARGET)
+_REFERENCE_NEIGHBORS = ((0, 0), (2, 0), (0, 1), (1, 1), (2, 1))
+
+
+def _reference_work(*, k=True, d=True, oracle=True):
+    runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os",
+                                      "fixture-platform", "fixture-arch", None)
+    return execution.BoardWork(7, h.reference_board_identity(2_000_000_070_000),
+        bytes.fromhex(identity.PROTOCOL_SHA256), "slice1g-bounded-fixture",
+        oracle, d, k, runtime)
+
+
+def _reference_fixture(q=0, **selection):
+    work = _reference_work(**selection)
+    bundles = h._reference_bundles(work, h._reference_prefix(q), q)
+    return work, {bundle.kind: bundle for bundle in bundles}
+
+
+def _reference_values(bundle, name):
+    return tuple(records.decode(data) for data in dict(bundle.streams)[name])
+
+
+def _reference_targets(work, *, logical_reference=1, physical_reference=1):
+    oracle = int(work.oracle_b_selected)
+    return readiness.DualComponentSizes(
+        readiness.ComponentSizes(1, 1, oracle, oracle, 1, physical_reference),
+        readiness.ComponentSizes(1, 1, oracle, oracle, 1, logical_reference))
+
+
+def _reference_trial(ordinal, q, p=100, logical=100, *, target=100, logical_target=100):
+    policy = readiness.evaluate_family_size("reference", target, logical_target, p, logical)
+    units = (h.ReferenceUnitMetrics(execution.WorkerKind.PRIMARY,
+        logical + 11, logical + 21, p + 11, p + 51, 0, 0),)
+    return h.ReferenceTrial(ordinal, q, p, logical, p - target, logical - logical_target,
+                             units, policy.eligible, policy.rejection_reason)
+
+
+class ReferenceTraceCatalogTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.work, cls.bundles = _reference_fixture(19)
+        cls.primary = cls.bundles[execution.WorkerKind.PRIMARY]
+
+    def test_exact_separate_synthetic_identity_and_two_model_c_inputs(self):
+        board = self.work.board
+        self.assertEqual((board.width, board.height, board.mines, board.first_click), (30, 16, 0, (0, 0)))
+        self.assertNotEqual(board, h.synthetic_board_identity(board.game_index))
+        self.assertIn("SYNTHETIC", board.fingerprint)
+        projection = execution.restore_projection(self.primary, "control")
+        inputs = projection.physical_inputs
+        self.assertEqual(tuple((v.action_ordinal, v.action, v.target, v.cursor_before) for v in inputs),
+            ((0, records.Action.OPEN, (0, 0), (0, 0)), (1, records.Action.OPEN, (1, 0), (0, 0))))
+        table = _reference_timing_table()
+        first, second = _reference_action_cost(table, (0, 0), (0, 0)), _reference_action_cost(table, (0, 0), (1, 0))
+        self.assertEqual(tuple((v.input_us, v.cumulative_us) for v in inputs),
+                         ((first, first), (second, first + second)))
+
+    def test_build_is_detached_from_board_engine_solver_and_text_search(self):
+        with patch("benchmark_board.generate_board", side_effect=AssertionError("No generated board")), \
+             patch.object(execution, "_fresh_engine", side_effect=AssertionError("No engine")), \
+             patch.object(execution, "_materialize_board", side_effect=AssertionError("No materialization")), \
+             patch.object(h, "construct_text_family_v2", side_effect=AssertionError("No text search")):
+            work, bundles = _reference_fixture(3)
+        self.assertEqual(work.board.width, 30)
+        self.assertEqual(set(bundles), set(execution.WorkerKind))
+
+    def test_ordinal_zero_reveals_all_other_cells_once_in_reading_order(self):
+        for role in ("control", "kp0"):
+            first, second = execution.restore_projection(self.primary, role).public_effects
+            self.assertEqual(tuple(v.cell for v in first.changes), _REFERENCE_SOURCES)
+            self.assertEqual(len(first.changes), 479)
+            self.assertTrue(all((v.before, v.after) == ("HIDDEN", "CLUE_0") for v in first.changes))
+            self.assertEqual((first.before_status, first.after_status),
+                             (records.Status.PLAYING, records.Status.PLAYING))
+            self.assertEqual(second.changes, (records.PublicCellChange((1, 0), "HIDDEN", "CLUE_0"),))
+            self.assertEqual((second.before_status, second.after_status),
+                             (records.Status.PLAYING, records.Status.WON))
+
+    def test_complete_catalog_has_exact_five_neighbors_and_474_true_empty_constraints(self):
+        catalog = h._reference_catalog()
+        self.assertEqual(tuple(v[0] for v in catalog), _REFERENCE_SOURCES)
+        self.assertEqual(len(set(v[0] for v in catalog)), 479)
+        self.assertTrue(all(v[1] == 0 for v in catalog))
+        self.assertEqual(tuple(v[0] for v in catalog if v[2]), _REFERENCE_NEIGHBORS)
+        self.assertTrue(all(v[2] == ((1, 0),) for v in catalog if v[2]))
+        self.assertEqual(sum(v[2] == () for v in catalog), 474)
+
+    def test_complete_catalog_precedes_each_redundancy_prefix_and_v1_fields_are_exact(self):
+        for q in (0, 1, 19, 67):
+            prefix = h._reference_prefix(q)
+            constraints = h._reference_constraints(prefix, q)
+            self.assertEqual(constraints[:479], h._reference_catalog())
+            self.assertEqual(constraints[479:], tuple(h._reference_catalog()[prefix.index(i)] for i in range(q)))
+            self.assertEqual(len(constraints), 479 + q)
+        row = _reference_values(self.primary, "control_maintenance")[1]
+        decision = row.v1_decision
+        self.assertEqual((decision.action, decision.target, decision.evidence_kind,
+                          decision.evidence_action, decision.evidence_target),
+                         (records.Action.OPEN, (1, 0), "LOCAL_DETERMINISTIC", records.Action.OPEN, (1, 0)))
+        self.assertEqual((decision.safe_cells, decision.mine_cells, decision.probability_total_worlds,
+            decision.probabilities, decision.frontier_cells, decision.unconstrained_cells,
+            decision.plan_actions, decision.plan_model_us, decision.plan_safe_reveals),
+            (((1, 0),), (), None, (), (), (), (), None, None))
+
+    def test_initial_and_ordinal_one_observations_match_public_reconstruction(self):
+        initial = tuple(tuple(-2 for _ in range(30)) for _ in range(16))
+        later = tuple(tuple(-2 if (x, y) == (1, 0) else 0 for x in range(30)) for y in range(16))
+        self.assertEqual(h._reference_observation(initial=True), initial)
+        self.assertEqual(h._reference_observation(), later)
+        self.assertEqual(tuple(v.observation for v in _reference_values(self.primary, "control_maintenance")),
+                         (initial, later))
+
+    def test_fixed_text_surfaces_start_with_exact_empty_fill_tag(self):
+        self.assertEqual(_reference_values(self.primary, "evaluators")[0].detail, _REFERENCE_TAG)
+        repeated = self.bundles[execution.WorkerKind.DETERMINISM]
+        self.assertEqual(_reference_values(repeated, "repeat_evaluators")[0].detail, _REFERENCE_TAG)
+        actual = _reference_values(self.bundles[execution.WorkerKind.K_CONTROL], "kcontrol_maintenance")[-1]
+        self.assertEqual(dict(actual.soundness)["detail"], _REFERENCE_TAG)
+        self.assertTrue(all(v.expected.shared_kernel_evidence == _REFERENCE_TAG
+                            for v in _reference_values(self.primary, "oracle_b_audits")))
+
+
+class ReferencePackedPrefixTests(unittest.TestCase):
+    @staticmethod
+    def independent_indices(q):
+        result = []
+        for block in range((q + 15) // 16):
+            digest = sha256(b"PROGRAM_K_R0B_REFERENCE_REDUNDANCY_V1\0"
+                            + block.to_bytes(8, "big")).digest()
+            result.extend(int.from_bytes(digest[i:i + 2], "big") % 479 for i in range(0, 32, 2))
+        return tuple(result[:q])
+
+    def test_independent_sha256_u16_domain_and_strict_prefix_extension(self):
+        for q in (0, 1, 15, 16, 17, 79):
+            prefix = h._reference_prefix(q)
+            self.assertEqual(tuple(prefix.index(i) for i in range(q)), self.independent_indices(q))
+            longer = h._reference_prefix(q + 3)
+            self.assertEqual(prefix.indices, longer.indices[:2 * q])
+            self.assertEqual(prefix.lengths, longer.lengths[:4 * (q + 1)])
+
+    def test_packed_lengths_empty_prefix_and_no_retained_python_integer_sequence(self):
+        for q in (0, 1, 79):
+            prefix = h._reference_prefix(q)
+            self.assertEqual(prefix.q, q)
+            self.assertIs(type(prefix.indices), bytes)
+            self.assertIs(type(prefix.lengths), bytes)
+            self.assertEqual((len(prefix.indices), len(prefix.lengths)), (2 * q, 4 * (q + 1)))
+            self.assertEqual(len(prefix.indices) + len(prefix.lengths), 6 * q + 4)
+            self.assertEqual(prefix.added_length(0), 0)
+            self.assertFalse(hasattr(prefix, "__dict__"))
+            self.assertTrue(all(type(getattr(prefix, f.name)) is bytes for f in fields(prefix)))
+        self.assertEqual(h._reference_constraints(h._reference_prefix(0), 0), h._reference_catalog())
+        self.assertEqual(6 * 2_581_110 + 4, 15_486_664)
+
+    def test_domain_five_does_not_use_random_time_os_or_text_entropy(self):
+        import random
+        with patch.object(os, "urandom", side_effect=AssertionError("No OS entropy")), \
+             patch.object(random, "random", side_effect=AssertionError("No random")), \
+             patch.object(h.time, "time_ns", side_effect=AssertionError("No timestamp")), \
+             patch.object(h, "_text_entropy", side_effect=AssertionError("No text domain")):
+            self.assertEqual(tuple(h._reference_prefix(33).index(i) for i in range(33)),
+                             self.independent_indices(33))
+        with self.assertRaises(ValueError):
+            h._text_entropy("reference", 0, 10)
+
+    def test_canonical_minimum_increment_is_13_and_catalog_increments_vary(self):
+        canonical = json.dumps([[3, 0], 0, []], separators=(",", ":")).encode("ascii")
+        self.assertEqual(canonical, b"[[3,0],0,[]]")
+        self.assertEqual(len(canonical), 12)
+        increments = tuple(1 + len(json.dumps(v, separators=(",", ":")).encode("ascii"))
+                           for v in h._reference_catalog())
+        self.assertEqual(min(increments), 13)
+        self.assertGreater(len(set(increments)), 1)
+
+    def test_prefix_lengths_equal_actual_canonical_record_deltas_for_many_small_prefixes(self):
+        _, bundles = _reference_fixture()
+        baseline = _reference_values(bundles[execution.WorkerKind.PRIMARY], "control_maintenance")[1]
+        baseline_length = len(records.encode(baseline))
+        prefix = h._reference_prefix(97)
+        for q in (0, 1, 2, 7, 16, 31, 57, 97):
+            candidate = replace(baseline, v1_decision=replace(baseline.v1_decision,
+                constraints=h._reference_constraints(prefix, q)))
+            self.assertEqual(len(records.encode(candidate)) - baseline_length, prefix.added_length(q))
+            independent = sum(1 + len(json.dumps(h._reference_catalog()[index],
+                separators=(",", ":")).encode("ascii")) for index in self.independent_indices(q))
+            self.assertEqual(prefix.added_length(q), independent)
+
+    def test_small_prefix_and_materialization_callbacks_are_fatal(self):
+        seen = []
+        prefix = h._reference_prefix(97, _check=lambda: seen.append("prefix"))
+        h._reference_constraints(prefix, 97, _check=lambda: seen.append("materialize"))
+        self.assertIn("prefix", seen)
+        self.assertIn("materialize", seen)
+        def stop():
+            raise RuntimeError("bounded reference cancellation")
+        with self.assertRaisesRegex(RuntimeError, "bounded reference cancellation"):
+            h._reference_prefix(97, _check=stop)
+        with self.assertRaisesRegex(RuntimeError, "bounded reference cancellation"):
+            h._reference_constraints(prefix, 97, _check=stop)
+
+    def test_packed_prefix_and_tuple_materialization_check_across_small_chunk_boundary(self):
+        # 4,097 entries exercise two implementation chunks without encoding a
+        # large reference record, frame or bundle.
+        hashes, prefix_checks = [], []
+        original_sha = h.sha256
+        def hashed(data):
+            hashes.append(data)
+            return original_sha(data)
+        with patch.object(h, "sha256", side_effect=hashed):
+            prefix = h._reference_prefix(4097, _check=lambda: prefix_checks.append(len(hashes) * 16))
+        self.assertGreaterEqual(len(prefix_checks), 3)
+        self.assertTrue(all(b - a <= 65536 for a, b in zip(prefix_checks, prefix_checks[1:])))
+        indices, materialization_checks = [], []
+        original_index = h.ReferencePrefix.index
+        def index(value, i):
+            indices.append(i)
+            return original_index(value, i)
+        with patch.object(h.ReferencePrefix, "index", index):
+            constraints = h._reference_constraints(prefix, 4097,
+                _check=lambda: materialization_checks.append(len(indices)))
+        self.assertEqual(len(constraints), 479 + 4097)
+        self.assertEqual(indices, list(range(4097)))
+        self.assertGreaterEqual(len(materialization_checks), 3)
+        self.assertTrue(all(b - a <= 65536
+                            for a, b in zip(materialization_checks, materialization_checks[1:])))
+
+
+class ReferenceShadowBindingOracleTests(unittest.TestCase):
+    def test_three_explicit_shadow_accounting_values_retain_479_true_clues(self):
+        for q in (0, 23):
+            _, bundles = _reference_fixture(q)
+            row = _reference_values(bundles[execution.WorkerKind.K_CONTROL], "kcontrol_maintenance")[1]
+            shadow = row.shadow.decision
+            values = (shadow.local_before, shadow.local_after, shadow.after)
+            self.assertEqual(values[0], values[1])
+            self.assertEqual(values[1], values[2])
+            self.assertEqual(len({id(value) for value in values}), 3)
+            for value in values:
+                self.assertEqual((value.P, value.M, value.J, value.H, value.U, value.b),
+                                 ((), (), (), ((1, 0),), ((1, 0),), 0))
+                self.assertEqual(tuple(v[0] for v in value.constraints), _REFERENCE_SOURCES)
+                self.assertEqual(len(value.constraints), 479)
+                self.assertEqual(tuple(v[0] for v in value.constraints if v[3]), _REFERENCE_NEIGHBORS)
+                self.assertTrue(all(v[1] == 0 and v[2] == () and v[4] == 0 for v in value.constraints))
+                self.assertTrue(all(v[3] == ((1, 0),) for v in value.constraints if v[3]))
+                records.KControlAccounting.__post_init__(value)
+            records.KControlShadowDecision.__post_init__(shadow)
+
+    def test_shadow_connected_fields_and_actual_identity_are_exact(self):
+        _, bundles = _reference_fixture(23)
+        primary = _reference_values(bundles[execution.WorkerKind.PRIMARY], "control_maintenance")
+        actual = _reference_values(bundles[execution.WorkerKind.K_CONTROL], "kcontrol_maintenance")
+        shadow = actual[1].shadow.decision
+        self.assertEqual((shadow.observation, shadow.num_mines), (h._reference_observation(), 0))
+        self.assertEqual((shadow.acquired_mines, shadow.S_first, shadow.S_second_all, shadow.S_new,
+            shadow.S_current, shadow.selection_safe_cells, shadow.local_certificates,
+            shadow.exact_certificates, shadow.phase_d, shadow.phase_e, shadow.phase_e_status,
+            shadow.continuation, shadow.guess_target),
+            ((), ((1, 0),), ((1, 0),), (), ((1, 0),), ((1, 0),), (), (), None, None,
+             "NOT_REACHED", "LOCAL_SAFE", None))
+        self.assertEqual(execution.compare_k_control(primary, actual), (records.AuditStatus.PASS, ()))
+        for left, right in zip(primary, actual):
+            for field in ("physical", "observation", "public_effect", "terminal_effect", "v1_decision", "guess_checkpoint"):
+                self.assertEqual(getattr(left, field), getattr(right, field))
+
+    def test_all_premise_copies_repeat_arms_and_current_semantic_authorities_bind(self):
+        for q in (0, 7, 29):
+            work, bundles = _reference_fixture(q)
+            primary = bundles[execution.WorkerKind.PRIMARY]
+            source = dict(primary.streams)
+            for kind, bundle in bundles.items():
+                self.assertEqual(execution.revalidate_bundle(bundle, work, kind,
+                    max_payload_bytes=_REFERENCE_CAP), bundle)
+                if kind is not execution.WorkerKind.PRIMARY:
+                    self.assertEqual(dict(bundle.streams)["control_maintenance"], source["control_maintenance"])
+            repeat = bundles[execution.WorkerKind.DETERMINISM]
+            for name, data in primary.streams:
+                if name.startswith("control_") or name.startswith("kp0_"):
+                    self.assertEqual(dict(repeat.streams)[name], data)
+            first = _reference_values(primary, "control_maintenance")
+            repeated = _reference_values(repeat, "repeat_control_maintenance")
+            self.assertEqual(repeated[1].v1_decision.constraints, first[1].v1_decision.constraints)
+            self.assertNotEqual(repeated[1].arm, first[1].arm)
+            summary, = _reference_values(repeat, "control_determinism")
+            self.assertIs(summary.status, records.AuditStatus.PASS)
+
+    def test_oracle_overlap_exact_public_premises_and_current_qualification_reconstruction(self):
+        from experiments import program_k_oracles
+        work, bundles = _reference_fixture(7)
+        observation = h._reference_observation()
+        for kind in (execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM):
+            bundle = bundles[kind]
+            prefix = "repeat_" if kind is execution.WorkerKind.DETERMINISM else ""
+            coverage, = _reference_values(bundle, prefix + "oracle_b_coverage")
+            self.assertTrue(coverage.selected)
+            self.assertEqual(coverage.applicable, ((1, "D"), (1, "E")))
+            audits = _reference_values(bundle, prefix + "oracle_b_audits")
+            self.assertEqual(tuple(v.phase for v in audits), ("D", "E"))
+            for audit in audits:
+                self.assertEqual((audit.public_observation, audit.logical_mines), (observation, ()))
+                self.assertEqual(audit.input_digest, program_k_oracles.oracle_b_input_digest(observation, 0, frozenset()))
+                self.assertEqual(audit.expected, audit.actual)
+                self.assertEqual((audit.expected.total_worlds, audit.expected.mine_worlds,
+                    audit.expected.minimum_risk, audit.expected.minimum_risk_cells,
+                    audit.expected.materialized_observation),
+                    (1, (((1, 0), 0),), Fraction(0), ((1, 0),), observation))
+                self.assertEqual(audit.expected_digest, records.oracle_b_snapshot_digest(audit.expected))
+                self.assertEqual(audit.actual_digest, audit.expected_digest)
+                self.assertIs(audit.status, records.AuditStatus.PASS)
+            rebuilt = h.qualification._reconstruct(work, kind, dict(bundle.streams),
+                _reference_timing_table(), SyntheticMaterializationTests.envelope(max_payload_bytes=_REFERENCE_CAP))
+            self.assertEqual(rebuilt, bundle)
+        k = bundles[execution.WorkerKind.K_CONTROL]
+        self.assertEqual(h.qualification._reconstruct(work, k.kind, dict(k.streams), _reference_timing_table(),
+            SyntheticMaterializationTests.envelope(max_payload_bytes=_REFERENCE_CAP)), k)
+
+    def test_unselected_oracle_has_no_audits_and_reconstructs(self):
+        work, bundles = _reference_fixture(3, oracle=False)
+        for kind in (execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM):
+            bundle = bundles[kind]
+            prefix = "repeat_" if kind is execution.WorkerKind.DETERMINISM else ""
+            self.assertEqual(dict(bundle.streams)[prefix + "oracle_b_audits"], ())
+            coverage, = _reference_values(bundle, prefix + "oracle_b_coverage")
+            self.assertFalse(coverage.selected)
+            self.assertEqual(coverage.applicable, ())
+            self.assertEqual(h.qualification._reconstruct(work, kind, dict(bundle.streams), _reference_timing_table(),
+                SyntheticMaterializationTests.envelope(max_payload_bytes=_REFERENCE_CAP)), bundle)
+
+
+class ReferenceSearchSchedulerTests(unittest.TestCase):
+    def search(self, low, high, evaluator, target=100, check=None):
+        visited = []
+        def evaluate(q, ordinal):
+            visited.append(q)
+            return evaluator(q, ordinal)
+        trials, selected = h._search_reference_trials(low, high, target, evaluate, _check=check)
+        self.assertEqual(tuple(visited), tuple(v.q for v in trials))
+        self.assertEqual(tuple(v.ordinal for v in trials), tuple(range(1, len(trials) + 1)))
+        self.assertEqual(len(set(visited)), len(visited))
+        self.assertLessEqual(len(trials), 8)
+        return trials, selected
+
+    def test_nonzero_lower_endpoint_upper_endpoint_then_at_most_eight_unique_trials(self):
+        first = self.search(7, 107, lambda q, ordinal: _reference_trial(ordinal, q, 50))
+        self.assertEqual(tuple(v.q for v in first[0])[:2], (7, 107))
+        self.assertEqual(len(first[0]), 8)
+        self.assertIsNone(first[1])
+        self.assertEqual(first, self.search(7, 107, lambda q, ordinal: _reference_trial(ordinal, q, 50)))
+        singleton, _ = self.search(7, 7, lambda q, ordinal: _reference_trial(ordinal, q))
+        self.assertEqual(tuple(v.q for v in singleton), (7,))
+        tiny, _ = self.search(7, 10, lambda q, ordinal: _reference_trial(ordinal, q))
+        self.assertEqual(set(v.q for v in tiny), {7, 8, 9, 10})
+
+    def test_exact_secant_integer_floor_targets_reference_physical_minimum(self):
+        rows = (_reference_trial(1, 7, 10), _reference_trial(2, 17, 40))
+        self.assertEqual(h._next_reference_q(rows, 7, 17, 20), 10)
+        negative = (_reference_trial(1, 7, 40), _reference_trial(2, 17, 10))
+        self.assertEqual(h._next_reference_q(negative, 7, 17, 20), 13)
+
+    def test_secant_pair_uses_distance_a_b_tie_order(self):
+        rows = (_reference_trial(1, 7, 90), _reference_trial(2, 107, 110),
+                _reference_trial(3, 27, 99), _reference_trial(4, 77, 102))
+        self.assertEqual(h._next_reference_q(rows, 7, 107, 100), 43)
+        tied = (_reference_trial(1, 7, 90), _reference_trial(2, 107, 110),
+                _reference_trial(3, 27, 90), _reference_trial(4, 77, 110))
+        self.assertEqual(h._next_reference_q(tied, 7, 107, 100), 42)
+
+    def test_invalid_duplicate_equal_physical_proposals_use_largest_gap_midpoint(self):
+        for pa, pb in ((10, 11), (100, 200), (10, 10)):
+            rows = (_reference_trial(1, 7, pa), _reference_trial(2, 17, pb))
+            self.assertEqual(h._next_reference_q(rows, 7, 17, 100), 12)
+        rows = tuple(_reference_trial(i + 1, q, 50) for i, q in enumerate((7, 15, 11)))
+        self.assertEqual(h._next_reference_q(rows, 7, 15, 100), 9)
+        all_values = tuple(_reference_trial(i + 1, i + 7, 50) for i in range(4))
+        self.assertIsNone(h._next_reference_q(all_values, 7, 10, 100))
+
+    def test_nonmonotonic_physical_observations_leave_both_sides_available(self):
+        values = {7: 110, 23: 110, 15: 90, 11: 101, 19: 99, 9: 100, 13: 80, 17: 120}
+        trials, selected = self.search(7, 23,
+            lambda q, ordinal: _reference_trial(ordinal, q, values.get(q, 95)))
+        self.assertEqual(tuple(v.q for v in trials)[:4], (7, 23, 15, 11))
+        self.assertTrue(any(15 < v.q < 23 for v in trials))
+        self.assertEqual(selected, min((v for v in trials if v.eligible),
+            key=lambda v: (v.actual_physical_bytes, v.actual_logical_bytes, v.q)))
+
+    def test_first_eligible_is_not_returned_early_and_selection_uses_p_l_q(self):
+        trials, selected = self.search(7, 27, lambda q, ordinal:
+            _reference_trial(ordinal, q, 110 if q == 7 else 100, 101 if q == 27 else 100))
+        self.assertEqual(len(trials), 8)
+        self.assertTrue(trials[0].eligible)
+        self.assertNotEqual(selected, trials[0])
+        self.assertEqual(selected, min((v for v in trials if v.eligible),
+            key=lambda v: (v.actual_physical_bytes, v.actual_logical_bytes, v.q)))
+
+    def test_callback_wraps_each_trial_and_failure_after_success_aborts(self):
+        calls = []
+        def evaluate(q, ordinal):
+            calls.append(("trial", q))
+            return _reference_trial(ordinal, q)
+        h._search_reference_trials(7, 8, 100, evaluate, _check=lambda: calls.append(("check", None)))
+        self.assertEqual(calls, [("check", None), ("trial", 7), ("check", None),
+                                 ("check", None), ("trial", 8), ("check", None)])
+        visited = []
+        def eligible(q, ordinal):
+            visited.append(q)
+            return _reference_trial(ordinal, q)
+        def cancel():
+            if visited:
+                raise RuntimeError("cancel after reference success")
+        with self.assertRaisesRegex(RuntimeError, "cancel after reference success"):
+            h._search_reference_trials(7, 107, 100, eligible, _check=cancel)
+        self.assertEqual(visited, [7])
+        with self.assertRaisesRegex(MemoryError, "reference resource"):
+            h._search_reference_trials(7, 107, 100,
+                lambda *_: (_ for _ in ()).throw(MemoryError("reference resource")))
+
+    def test_reference_policy_has_no_plus_4096_upper_window(self):
+        for physical_bytes in (100, 4196, 4197, 100000):
+            trial = _reference_trial(1, 7, physical_bytes)
+            self.assertTrue(trial.eligible)
+            self.assertIsNone(trial.rejection_reason)
+        trials, selected = self.search(7, 10, lambda q, ordinal:
+            _reference_trial(ordinal, q, (100, 4196, 4197, 100000)[q - 7]))
+        self.assertTrue(all(v.eligible for v in trials))
+        self.assertEqual(selected.q, 7)
+        self.assertNotIn("SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT", tuple(v.rejection_reason for v in trials))
+
+
+def _reference_text_families(kind, oracle):
+    if kind is execution.WorkerKind.PRIMARY:
+        return ("primary",) + (("oracle_primary",) if oracle else ())
+    if kind is execution.WorkerKind.DETERMINISM:
+        return ("determinism",) + (("oracle_repeat",) if oracle else ())
+    return ("k_control",)
+
+
+def _reference_actual_logical_fit(bundles, targets, cap, *, oracle=True):
+    for bundle in bundles:
+        reserve = sum(max(0, getattr(targets.logical, family) - _text_logical_bytes(bundle, family))
+                      for family in _reference_text_families(bundle.kind, oracle))
+        bodies = tuple(data for _, values in bundle.streams for data in values)
+        if (any(len(data) > cap for data in bodies) or sum(map(len, bodies)) + reserve > cap
+                or len(execution.encode_bundle(bundle)) + reserve > cap):
+            return False
+    return True
+
+
+class ReferenceLogicalBoundsTests(unittest.TestCase):
+    def test_copy_aware_absolute_ceiling_is_arithmetic_only(self):
+        self.assertEqual(67_108_864 // 13, 5_162_220)
+        self.assertEqual(67_108_864 // 26, 2_581_110)
+        self.assertEqual(6 * (67_108_864 // 26) + 4, 15_486_664)
+
+    def test_exact_q_hi_handles_k_only_d_only_and_both_including_fixed_bytes(self):
+        cases = tuple(_reference_fixture(k=k, d=d) for k, d in ((True, False), (False, True), (True, True)))
+        cap = max(len(execution.encode_bundle(v)) for _, values in cases for v in values.values()) + 1024
+        prefix = h._reference_prefix(cap // 26)
+        highs = []
+        for work, values in cases:
+            bundles = tuple(values.values())
+            targets = _reference_targets(work)
+            with patch.object(physical, "encode_payload", side_effect=AssertionError("Bounds use no compression")), \
+                 patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("Bounds use no physical wire")):
+                low, high = h._reference_q_bounds(bundles, targets, prefix, cap)
+            self.assertEqual(low, 0)
+            self.assertLess(high, cap // 26)
+            self.assertLessEqual(high, 2_581_110)
+            actual = h._reference_bundles(work, prefix, high)
+            after = h._reference_bundles(work, prefix, high + 1)
+            self.assertTrue(_reference_actual_logical_fit(actual, targets, cap))
+            self.assertFalse(_reference_actual_logical_fit(after, targets, cap))
+            self.assertTrue(h._reference_expanded_fits(bundles, targets, prefix.added_length(high), cap))
+            self.assertFalse(h._reference_expanded_fits(bundles, targets, prefix.added_length(high + 1), cap))
+            highs.append(high)
+        self.assertEqual(highs[2], min(highs[:2]))
+
+    def test_text_logical_reserve_reduces_domain_and_is_dynamic_for_copied_families(self):
+        work, values = _reference_fixture()
+        bundles = tuple(values.values())
+        cap = max(len(execution.encode_bundle(v)) for v in bundles) + 2048
+        prefix = h._reference_prefix(cap // 26)
+        baseline = _reference_targets(work)
+        before = h._reference_q_bounds(bundles, baseline, prefix, cap)[1]
+        for family, kind in (("primary", execution.WorkerKind.PRIMARY),
+                             ("k_control", execution.WorkerKind.K_CONTROL),
+                             ("determinism", execution.WorkerKind.DETERMINISM)):
+            current = _text_logical_bytes(values[kind], family)
+            target = replace(baseline, logical=replace(baseline.logical, **{family: current + 1024}))
+            after = h._reference_q_bounds(bundles, target, prefix, cap)[1]
+            self.assertLessEqual(after, before)
+            for q in (0, min(7, after), after):
+                actual = h._reference_bundles(work, prefix, q)
+                self.assertEqual(h._reference_expanded_fits(bundles, target, prefix.added_length(q), cap),
+                                 _reference_actual_logical_fit(actual, target, cap))
+            beyond = h._reference_bundles(work, prefix, after + 1)
+            self.assertFalse(_reference_actual_logical_fit(beyond, target, cap))
+
+    def test_q_lo_prefix_binary_search_matches_actual_canonical_brute_force(self):
+        work, values = _reference_fixture()
+        bundles = tuple(values.values())
+        primary = values[execution.WorkerKind.PRIMARY]
+        row = _reference_values(primary, "control_maintenance")[1]
+        fixed = len(dict(primary.streams)["control_maintenance"][0])
+        prefix = h._reference_prefix(97)
+        lengths = tuple(fixed + len(records.encode(replace(row, v1_decision=replace(row.v1_decision,
+            constraints=h._reference_constraints(prefix, q))))) for q in range(98))
+        for target in (lengths[0] - 1, lengths[0], lengths[1], lengths[7] - 1, lengths[31], lengths[97]):
+            targets = _reference_targets(work, logical_reference=target)
+            actual, _ = h._reference_q_bounds(bundles, targets, prefix, _REFERENCE_CAP)
+            self.assertEqual(actual, next(q for q, length in enumerate(lengths) if length >= target))
+
+
+class ReferenceConstructorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.work, cls.baselines = _reference_fixture()
+        cls.cap = max(len(execution.encode_bundle(v)) for v in cls.baselines.values()) + 1024
+        cls.envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=cls.cap)
+        cls.logical0 = _text_logical_bytes(cls.baselines[execution.WorkerKind.PRIMARY], "reference")
+        cls.targets = _reference_targets(cls.work,
+            logical_reference=cls.logical0 + h._reference_prefix(7).added_length(7))
+        cls.result = h.construct_reference_v2(cls.work, cls.targets, _REFERENCE_PROFILE,
+            max_payload_bytes=cls.cap, envelope=cls.envelope)
+
+    def construct(self, **changes):
+        args = dict(max_payload_bytes=self.cap, envelope=self.envelope)
+        args.update(changes)
+        return h.construct_reference_v2(self.work, args.pop("targets", self.targets),
+            _REFERENCE_PROFILE, **args)
+
+    def test_selected_immutable_result_facts_have_all_units_and_bounded_q_ledger(self):
+        result = self.result
+        self.assertIsNone(result.rejection_reason)
+        self.assertIsNone(result.cause)
+        self.assertEqual(result.q_lo, 7)
+        self.assertEqual(tuple(v.q for v in result.trials)[:2], (result.q_lo, result.q_hi))
+        self.assertLessEqual(len(result.trials), 8)
+        self.assertEqual(len(set(v.q for v in result.trials)), len(result.trials))
+        self.assertEqual(result.selected_trial, min((v for v in result.trials if v.eligible),
+            key=lambda v: (v.actual_physical_bytes, v.actual_logical_bytes, v.q)))
+        self.assertEqual(tuple(v.kind for v in result.selected_trial.units), operational._kinds(self.work))
+        self.assertTrue(all(type(wire) is bytes for wire in result.selected_wires))
+        for value in (result, result.selected_trial, *result.selected_trial.units):
+            self.assertFalse(hasattr(value, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+
+    def test_selected_all_wires_equal_full_encoder_and_fresh_context_metrics(self):
+        result = self.result
+        prior = result.selected_wires[0]
+        for bundle, wire, metrics in zip(result.selected_bundles, result.selected_wires, result.selected_trial.units):
+            self.assertEqual(wire, execution.encode_bundle_v2(bundle, _REFERENCE_PROFILE, max_payload_bytes=self.cap))
+            fresh = operational._fresh_wb02_context(wire, self.work, bundle.kind, _REFERENCE_PROFILE,
+                self.envelope, prior_primary_wire=None if bundle.kind is execution.WorkerKind.PRIMARY else prior)
+            self.assertEqual(fresh.bundle, bundle)
+            self.assertEqual((metrics.lsum, metrics.llegacy, metrics.sunit, metrics.wnew),
+                (fresh.logical_bytes, fresh.legacy_bundle_bytes, fresh.physical_frame_bytes, fresh.wb02_wire_bytes))
+            self.assertEqual(metrics.physical_closure, metrics.sunit + metrics.physical_reserve)
+            self.assertLessEqual(metrics.physical_closure, self.cap)
+            self.assertTrue(all(v <= self.cap for v in (metrics.lsum, metrics.llegacy, metrics.sunit, metrics.wnew)))
+            if bundle.kind is execution.WorkerKind.PRIMARY:
+                rows = tuple(row for row in fresh.rows if row.stream_name == "control_maintenance")
+                self.assertEqual((sum(v.frame_length for v in rows), sum(len(v.logical_bytes) for v in rows)),
+                    (result.selected_trial.actual_physical_bytes, result.selected_trial.actual_logical_bytes))
+
+    def test_no_repeated_primary_body_compression_and_unchanged_frames_reused(self):
+        original_search, original_payload = h._search_reference_trials, physical.encode_payload
+        compressions, per_trial = [], []
+        def payload(data, *args, **kwargs):
+            compressions.append(data)
+            return original_payload(data, *args, **kwargs)
+        def search(low, high, target, evaluate, *, _check=None):
+            def observed(q, ordinal):
+                start = len(compressions)
+                trial = evaluate(q, ordinal)
+                per_trial.append(tuple(compressions[start:]))
+                return trial
+            return original_search(low, high, target, observed, _check=_check)
+        with patch.object(physical, "encode_payload", side_effect=payload), \
+             patch.object(h, "_search_reference_trials", side_effect=search), \
+             patch.object(execution, "encode_bundle_v2", wraps=execution.encode_bundle_v2) as full:
+            result = self.construct()
+        self.assertLessEqual(full.call_count, len(self.baselines))
+        self.assertEqual(len(per_trial), len(result.trials))
+        self.assertTrue(all(len(values) <= 4 for values in per_trial))
+        self.assertTrue(all(len(values) == len(set(values)) for values in per_trial))
+        self.assertTrue(any(len(values) == 4 for values in per_trial))
+        copied = []
+        for bundle, wire in zip(result.selected_bundles, result.selected_wires):
+            current = execution.decode_bundle_view_v2(wire, _REFERENCE_PROFILE, max_payload_bytes=self.cap)
+            oldwire = execution.encode_bundle_v2(self.baselines[bundle.kind], _REFERENCE_PROFILE, max_payload_bytes=self.cap)
+            baseline = execution.decode_bundle_view_v2(oldwire, _REFERENCE_PROFILE, max_payload_bytes=self.cap)
+            old = {(v.stream_name, v.key): v for v in baseline.rows}
+            for row in current.rows:
+                prior = old[row.stream_name, row.key]
+                if row.logical_bytes == prior.logical_bytes:
+                    self.assertEqual(row.frame_bytes, prior.frame_bytes)
+                if row.stream_name == "control_maintenance" and row.key[2] == 1:
+                    copied.append(row)
+        self.assertEqual(len(copied), 3)
+        self.assertEqual(len({row.logical_bytes for row in copied}), 1)
+        self.assertEqual(len({row.key for row in copied}), 3)
+        self.assertEqual(len({row.frame_bytes for row in copied}), 3)
+
+    def test_logical_domain_failure_precedes_physical_search_and_has_concrete_cause(self):
+        targets = replace(self.targets, logical=replace(self.targets.logical, reference=self.cap))
+        with patch.object(h, "_search_reference_trials", side_effect=AssertionError("No physical q search")), \
+             patch.object(physical, "encode_payload", side_effect=AssertionError("No physical compression")):
+            result = self.construct(targets=targets)
+        self.assertEqual(result.rejection_reason, "REFERENCE_SYNTHETIC_SIZING_UNREPRESENTABLE")
+        self.assertIn("LOGICAL", result.cause)
+        self.assertEqual(result.trials, ())
+        self.assertIsNone(result.selected_trial)
+        self.assertEqual(result.selected_bundles, ())
+        self.assertEqual(result.selected_wires, ())
+
+    def test_physical_text_reserve_is_exact_necessary_floor_without_4096(self):
+        wire = execution.encode_bundle_v2(self.baselines[execution.WorkerKind.PRIMARY],
+            _REFERENCE_PROFILE, max_payload_bytes=self.cap)
+        view = execution.decode_bundle_view_v2(wire, _REFERENCE_PROFILE, max_payload_bytes=self.cap)
+        primary_p, _ = _text_family_metrics(view, "primary")
+        targets = replace(self.targets, physical=replace(self.targets.physical, primary=primary_p + 5))
+        result = self.construct(targets=targets)
+        self.assertIsNone(result.rejection_reason)
+        primary = result.selected_trial.units[0]
+        self.assertEqual(primary.physical_reserve, 5)
+        self.assertEqual(primary.physical_closure, primary.sunit + 5)
+        impossible = replace(targets, physical=replace(targets.physical, primary=self.cap + 1))
+        rejected = self.construct(targets=impossible)
+        self.assertEqual(rejected.rejection_reason, "REFERENCE_SYNTHETIC_SIZING_UNREPRESENTABLE")
+        self.assertIsNotNone(rejected.cause)
+        self.assertTrue(all(not v.eligible for v in rejected.trials))
+
+    def test_new_identity_composes_with_one_1f_search_and_unknown_identity_rejects(self):
+        result = self.result
+        primary = result.selected_bundles[0]
+        view = execution.decode_bundle_view_v2(result.selected_wires[0], _REFERENCE_PROFILE,
+                                                max_payload_bytes=self.cap)
+        p, logical = _text_family_metrics(view, "primary")
+        text = h.construct_text_family_v2(self.work, primary, "primary", _REFERENCE_PROFILE,
+            physical_target=max(1, p - 128), logical_target=logical + 3,
+            max_payload_bytes=self.cap, envelope=self.envelope)
+        self.assertIsNone(text.rejection_reason)
+        self.assertEqual(dict(text.selected_bundle.streams)["control_maintenance"],
+                         dict(primary.streams)["control_maintenance"])
+        wrong = replace(self.work, board=replace(self.work.board, fingerprint="FORGED_REFERENCE"))
+        with self.assertRaises(ValueError):
+            h.construct_text_family_v2(wrong, primary, "primary", _REFERENCE_PROFILE,
+                physical_target=1, logical_target=1, max_payload_bytes=self.cap, envelope=self.envelope)
+
+    def test_input_domains_callbacks_resources_and_historical_fact_registry_are_closed(self):
+        for work in (replace(self.work, k_control_selected=False, determinism_selected=False),
+                     replace(self.work, board=h.synthetic_board_identity(self.work.board.game_index))):
+            with self.assertRaises(ValueError):
+                h.construct_reference_v2(work, self.targets, _REFERENCE_PROFILE,
+                    max_payload_bytes=self.cap, envelope=self.envelope)
+        with self.assertRaisesRegex(RuntimeError, "reference abort"):
+            self.construct(_check=lambda: (_ for _ in ()).throw(RuntimeError("reference abort")))
+        with patch.object(h, "_reference_prefix", side_effect=MemoryError("reference memory")), \
+             self.assertRaisesRegex(MemoryError, "reference memory"):
+            self.construct()
+        from experiments import program_k_e2_r0_evidence as evidence
+        for cls in (h.ReferenceTrial, h.ReferenceConstructionResult):
+            self.assertNotIn(cls, evidence._FACT_TYPES.values())
+            with self.assertRaisesRegex(h.HarnessError, "UNSUPPORTED_METADATA_FACT"):
+                h._fact_read({"fact": cls.__name__, "fields": {}})
+
+    def test_baseline_cap_and_binding_failures_return_concrete_root_cause(self):
+        cases = ((execution, "encode_bundle_v2", execution.E2ExecutionError("WORKER_WIRE_CAP"),
+                  "WORKER_WIRE_CAP"),
+                 (operational, "_fresh_wb02_context", operational.OperationalError("WB02_WORK_KIND_BINDING"),
+                  "WB02_WORK_KIND_BINDING"))
+        for owner, name, error, cause in cases:
+            with self.subTest(stage=name), patch.object(owner, name, side_effect=error), \
+                 patch.object(h, "_search_reference_trials", side_effect=AssertionError("No invalid baseline search")):
+                result = self.construct()
+            self.assertEqual(result.rejection_reason, "REFERENCE_SYNTHETIC_SIZING_UNREPRESENTABLE")
+            self.assertEqual(result.cause, cause)
+            self.assertEqual(result.trials, ())
+            self.assertIsNone(result.selected_trial)
+            self.assertEqual((result.selected_bundles, result.selected_wires), ((), ()))
+        # A callback carrying the same exception type/code remains fatal; it
+        # cannot be converted to an ordinary baseline or candidate rejection.
+        def stop():
+            raise execution.E2ExecutionError("WORKER_WIRE_CAP")
+        with self.assertRaisesRegex(execution.E2ExecutionError, "WORKER_WIRE_CAP"):
+            self.construct(_check=stop)
+
+    def test_trial_binding_failures_preserve_specific_cause_in_every_ledger_entry(self):
+        original = h._search_reference_trials
+        def search(low, high, target, evaluate, *, _check=None):
+            with patch.object(execution, "revalidate_bundle",
+                              side_effect=execution.E2ExecutionError("CONTROL_O4_REFERENCE_BINDING")):
+                return original(low, high, target, evaluate, _check=_check)
+        with patch.object(h, "_search_reference_trials", side_effect=search):
+            result = self.construct()
+        self.assertEqual(result.rejection_reason, "REFERENCE_SYNTHETIC_SIZING_UNREPRESENTABLE")
+        self.assertEqual(result.cause, "CONTROL_O4_REFERENCE_BINDING")
+        self.assertEqual(len(result.trials), 8)
+        self.assertEqual({v.rejection_reason for v in result.trials}, {"CONTROL_O4_REFERENCE_BINDING"})
+        self.assertTrue(all(not v.eligible for v in result.trials))
+        self.assertTrue(all(v.actual_logical_bytes >= self.targets.logical.reference for v in result.trials))
+        self.assertEqual((result.selected_bundles, result.selected_wires), ((), ()))

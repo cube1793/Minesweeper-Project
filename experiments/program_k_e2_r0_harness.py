@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import struct
 import sys
 import threading
 import time
@@ -505,6 +506,18 @@ def synthetic_board_identity(index):
         2, 1, 0, (0, 0), "SYNTHETIC_NON_BOARD", "R0B_SCHEMA_FIXTURE")
 
 
+def reference_board_identity(index):
+    """Explicit engine-counterfactual public scaffold; never a benchmark board."""
+    _integer(index)
+    return records.BoardIdentity(index, "UNMATERIALIZED_SYNTHETIC_REFERENCE_R0B:" + str(index),
+        30, 16, 0, (0, 0), "SYNTHETIC_REFERENCE_NON_BOARD", "R0B_REFERENCE_30X16_SCHEMA_FIXTURE")
+
+
+def _known_synthetic_board(board):
+    return type(board) is records.BoardIdentity and board in (
+        synthetic_board_identity(board.game_index), reference_board_identity(board.game_index))
+
+
 def _synthetic_projection(work, kind, *, repeat=False, exact=False):
     from stage3_physical import action_cost, load_timing_table
     arm = execution._arm(work, kind, repeat=repeat)
@@ -950,7 +963,7 @@ def construct_text_family_v2(work, bundle, family, codec_profile_sha256, *, phys
     execution.BoardWork.__post_init__(work)
     execution.WorkerBundle.__post_init__(bundle)
     _need(0 <= work.position < 10_000, "SYNTHETIC_TEXT_POSITION_DOMAIN")
-    _need(work.board == synthetic_board_identity(work.board.game_index), "SYNTHETIC_NON_BOARD_IDENTITY_REQUIRED")
+    _need(_known_synthetic_board(work.board), "SYNTHETIC_NON_BOARD_IDENTITY_REQUIRED")
     _need(bundle.kind is kind and kind in operational._kinds(work), "SYNTHETIC_TEXT_WORKER_FAMILY_MISMATCH")
     _need(type(codec_profile_sha256) is bytes and len(codec_profile_sha256) == 32,
           "WB02_PROFILE_IDENTITY_REQUIRED")
@@ -1099,6 +1112,573 @@ def construct_text_family_v2(work, bundle, family, codec_profile_sha256, *, phys
            trial.sunit, trial.wnew), "SYNTHETIC_TEXT_SELECTED_FACT_BINDING")
     _text_check(_check)
     return TextConstructionResult(family, candidate, wire, trial, trials, None)
+
+
+_REFERENCE_Q_MAX = 2_581_110
+_REFERENCE_TEXT = "SYNTHETIC_NON_EVIDENCE|L:|H:"
+
+
+def _reference_catalog():
+    target = (1, 0)
+    return tuple(((x, y), 0, (target,) if max(abs(x - 1), y) == 1 else ())
+                 for y in range(16) for x in range(30) if (x, y) != target)
+
+
+def _reference_observation(initial=False):
+    _need(type(initial) is bool, "REFERENCE_EXACT_INITIAL_FLAG")
+    return tuple(tuple(-2 if initial or (x, y) == (1, 0) else 0 for x in range(30)) for y in range(16))
+
+
+@dataclass(frozen=True, slots=True)
+class ReferencePrefix:
+    """Invocation-local packed indices and exact canonical added-length prefixes."""
+
+    indices: bytes
+    lengths: bytes
+
+    def __post_init__(self):
+        _need(type(self.indices) is bytes and type(self.lengths) is bytes
+              and len(self.indices) % 2 == 0 and self.q <= _REFERENCE_Q_MAX
+              and len(self.lengths) == 4 * (self.q + 1)
+              and self.lengths[:4] == bytes(4), "REFERENCE_PACKED_PREFIX_SHAPE")
+
+    @property
+    def q(self):
+        return len(self.indices) // 2
+
+    def index(self, i):
+        _need(type(i) is int and 0 <= i < self.q, "REFERENCE_PREFIX_INDEX")
+        return struct.unpack_from(">H", self.indices, 2 * i)[0]
+
+    def added_length(self, q):
+        _need(type(q) is int and 0 <= q <= self.q, "REFERENCE_PREFIX_LENGTH_INDEX")
+        return struct.unpack_from(">I", self.lengths, 4 * q)[0]
+
+
+def _reference_prefix(q, *, _check=None):
+    _need(type(q) is int and 0 <= q <= _REFERENCE_Q_MAX, "REFERENCE_Q_ABSOLUTE_BOUND")
+    # The comma is part of every append to the already nonempty full catalog.
+    deltas = tuple(1 + len(execution._json(entry)) for entry in _reference_catalog())
+    indices, lengths = bytearray(2 * q), bytearray(4 * (q + 1))
+    total = 0
+    for start in range(0, q, 16):
+        if start % 4_096 == 0:
+            _text_check(_check)
+        digest = sha256(b"PROGRAM_K_R0B_REFERENCE_REDUNDANCY_V1\0"
+                        + (start // 16).to_bytes(8, "big")).digest()
+        for offset, word in enumerate(struct.unpack(">16H", digest)):
+            i = start + offset
+            if i == q:
+                break
+            index = word % 479
+            total += deltas[index]
+            struct.pack_into(">H", indices, 2 * i, index)
+            struct.pack_into(">I", lengths, 4 * (i + 1), total)
+    _text_check(_check)
+    result = ReferencePrefix(bytes(indices), bytes(lengths))
+    _text_check(_check)
+    return result
+
+
+def _reference_constraints(prefix, q, *, _check=None):
+    _need(type(prefix) is ReferencePrefix and type(q) is int and 0 <= q <= prefix.q,
+          "REFERENCE_PREFIX_REQUIRED")
+    catalog = _reference_catalog()
+    # A q-sized collection is formed only for an actual candidate, never bounds.
+    entries = list(catalog)
+    for start in range(0, q, 4_096):
+        _text_check(_check)
+        entries.extend(catalog[prefix.index(i)] for i in range(start, min(start + 4_096, q)))
+    _text_check(_check)
+    result = tuple(entries)
+    _text_check(_check)
+    return result
+
+
+def _reference_work(work):
+    _need(type(work) is execution.BoardWork, "REFERENCE_EXACT_WORK_REQUIRED")
+    execution.BoardWork.__post_init__(work)
+    _need(0 <= work.position < 10_000 and work.board == reference_board_identity(work.board.game_index),
+          "REFERENCE_NON_BOARD_IDENTITY_REQUIRED")
+    _need(work.k_control_selected or work.determinism_selected, "REFERENCE_DEPENDENT_REQUIRED")
+
+
+def _reference_projection(work, kind, *, repeat=False):
+    from stage3_physical import action_cost, load_timing_table
+    arm = execution._arm(work, kind, repeat=repeat)
+    table, origin, target = load_timing_table(), (0, 0), (1, 0)
+    first, second = action_cost(table, origin, origin), action_cost(table, origin, target)
+    physical_rows = (
+        records.PhysicalInputRecord(0, records.Action.OPEN, origin, origin, first, first, records.Status.PLAYING),
+        records.PhysicalInputRecord(1, records.Action.OPEN, target, origin, second, first + second, records.Status.WON))
+    public = (
+        records.PublicEffectRecord(0, tuple(records.PublicCellChange(source, "HIDDEN", "CLUE_0")
+            for source, _, _ in _reference_catalog()), records.Status.PLAYING, records.Status.PLAYING),
+        records.PublicEffectRecord(1, (records.PublicCellChange(target, "HIDDEN", "CLUE_0"),),
+                                   records.Status.PLAYING, records.Status.WON))
+    initial = records.ActionDecisionRecord(arm, 0,
+        "CONTROL_INITIAL_OPEN" if kind is records.Arm.CONTROL else "POLICY_INITIAL_OPEN",
+        "INITIAL", records.Action.OPEN, origin, (), None, None, (), (), (), ())
+    if kind is records.Arm.CONTROL:
+        selected = records.ActionDecisionRecord(arm, 1, "local_deterministic", "local_deterministic",
+            records.Action.OPEN, target, (), None, None, (), (), (), ())
+        scope = records.DecisionScope.CONTROL_PLAN_POSITION
+    else:
+        selected = records.ActionDecisionRecord(arm, 1, "DIRECT_SAFE_OPEN",
+            "EXACT_SAFE" if work.oracle_b_selected else "LOCAL_SAFE", records.Action.OPEN, target,
+            ((records.Action.OPEN, target),), second, 1, (), (target,), (), ())
+        scope = records.DecisionScope.K_ANALYZE_DECISION_THROUGH_SELECT_POLICY
+    return game.GameProjection(arm, records.Outcome.WIN, physical_rows, public,
+        (records.TerminalEffectRecord(1, (), records.Status.WON),),
+        (records.DecisionSpanRecord(1, scope, 1),), (), (), (), (initial, selected),
+        first + second, 1, True, True, True, ())
+
+
+def _reference_maintenance(projection, constraints):
+    decision = records.KControlV1Decision(records.Action.OPEN, (1, 0), "LOCAL_DETERMINISTIC",
+        records.Action.OPEN, (1, 0), constraints, ((1, 0),), (), None, (), (), (), (), None, None)
+    return tuple(records.KControlMaintenanceRecord(projection.arm, physical_row,
+        _reference_observation(initial=i == 0), projection.public_effects[i],
+        None if i == 0 else projection.terminal_effects[0], None if i == 0 else decision, None,
+        tuple((name, None if i == 0 and name == "v1_plan_position_ns" else 1) for name in execution._TIMINGS),
+        (), (), None, None, None, "REFERENCE") for i, physical_row in enumerate(projection.physical_inputs))
+
+
+def _reference_k_actual(work, reference):
+    target = ((1, 0),)
+    catalog = tuple((source, 0, (), hidden, 0) for source, _, hidden in _reference_catalog())
+    before, local_after, after = (records.KControlAccounting((), target, (), (), target, 0, catalog)
+                                  for _ in range(3))
+    decision = records.KControlShadowDecision(_reference_observation(), 0, before, local_after,
+        (), target, target, (), target, (), None, None, "NOT_REACHED", after, (), "LOCAL_SAFE", target, None)
+    initial = records.KControlShadowState(True, (), None, None, None, False, True)
+    current = records.KControlShadowState(True, (), decision, None, 1, True, True)
+    final = records.KControlShadowState(True, (), None, None, 1, False, True)
+    arm = execution._arm(work, records.Arm.K_CONTROL)
+    soundness = (("classification", "NO_DISCREPANCY"), ("boundary", 1),
+        ("implicated_boundary", None), ("safe_cells", target), ("detail", _REFERENCE_TEXT))
+    return (replace(reference[0], arm=arm, shadow=initial, classification="NOT_REACHED"),
+            replace(reference[1], arm=arm, shadow=current, soundness=soundness,
+                    final_shadow=final, classification="PASS"))
+
+
+def _reference_children(projection, selected, prefix=""):
+    from experiments import program_k_oracles
+    target, observation = ((1, 0),), _reference_observation()
+    oracle = ()
+    if selected:
+        snapshot = records.OracleBExactSnapshot(target, target, (), 1, (((1, 0), 0),), target,
+            (), Fraction(0), target, _REFERENCE_TEXT, _SYNTHETIC_LABEL, observation)
+        digest = records.oracle_b_snapshot_digest(snapshot)
+        input_digest = program_k_oracles.oracle_b_input_digest(observation, 0, frozenset())
+        oracle = tuple(records.OracleBAuditRecord(1, phase, (), observation, (), input_digest,
+            digest, digest, records.AuditStatus.PASS, (), snapshot, snapshot) for phase in ("D", "E"))
+    return {prefix + "certificate_audits": (),
+        prefix + "oracle_b_audits": tuple(records.encode(value) for value in oracle),
+        prefix + "oracle_b_coverage": (records.encode(records.OracleBCoverageRecord(
+            projection.arm, selected, tuple((value.action_ordinal, value.phase) for value in oracle))),),
+        prefix + "evaluators": tuple(records.encode(records.EvaluatorRecord(projection.arm, category,
+            target if category is records.AssertionCategory.CERTAINTY_OPEN else (),
+            records.EvaluationStatus.PASS if category is records.AssertionCategory.CERTAINTY_OPEN
+            else records.EvaluationStatus.NOT_EVALUATED, _SYNTHETIC_LABEL, _REFERENCE_TEXT))
+            for category in records.AssertionCategory)}
+
+
+def _reference_bundles(work, prefix, q, *, _check=None):
+    _reference_work(work)
+    constraints = _reference_constraints(prefix, q, _check=_check)
+    projections = tuple(_reference_projection(work, arm) for arm in (records.Arm.CONTROL, records.Arm.K_P0))
+    reference = _reference_maintenance(projections[0], constraints)
+    streams, headers = {}, []
+    for projection, role in zip(projections, ("control", "kp0")):
+        header, values = execution._projection_streams(projection, role)
+        headers.append(header)
+        streams.update(values)
+    streams.update(_reference_children(projections[1], work.oracle_b_selected))
+    streams["pairs"] = (records.encode(game.pair_projections(*projections).pair),)
+    streams["control_maintenance"] = tuple(records.encode(value) for value in reference)
+    primary = execution._bundle(work, execution.WorkerKind.PRIMARY, streams, headers, records.AuditStatus.PASS, ())
+    bundles = [primary]
+    for kind in operational._kinds(work)[1:]:
+        _text_check(_check)
+        if kind is execution.WorkerKind.K_CONTROL:
+            actual = _reference_k_actual(work, reference)
+            streams = {"control_maintenance": dict(primary.streams)["control_maintenance"],
+                "kcontrol_arms": (records.encode(execution._arm(work, records.Arm.K_CONTROL)),),
+                "kcontrol_maintenance": tuple(records.encode(value) for value in actual)}
+            headers = []
+        else:
+            streams = {name: values for name, values in primary.streams
+                       if name.startswith("control_") or name.startswith("kp0_")}
+            headers = list(primary.projection_headers)
+            repeated = tuple(_reference_projection(work, arm, repeat=True)
+                             for arm in (records.Arm.CONTROL, records.Arm.K_P0))
+            for projection, role in zip(repeated, ("repeat_control", "repeat_kp0")):
+                header, values = execution._projection_streams(projection, role)
+                headers.append(header)
+                streams.update(values)
+            streams["repeat_control_maintenance"] = tuple(records.encode(replace(value, arm=repeated[0].arm))
+                                                          for value in reference)
+            streams.update(_reference_children(repeated[1], work.oracle_b_selected, "repeat_"))
+            streams["control_determinism"] = (records.encode(execution._control_determinism(
+                projections[0], repeated[0], streams["control_maintenance"], streams["repeat_control_maintenance"])),)
+            streams["kp0_determinism"] = (records.encode(audit.determinism_record(
+                audit.compare_determinism(projections[1], repeated[1], selected=True))),)
+        bundles.append(execution._bundle(work, kind, streams, headers, records.AuditStatus.PASS, ()))
+        _text_check(_check)
+    return tuple(bundles)
+
+
+def _reference_candidate_bundles(work, baseline_bundles, prefix, q, *, _check=None):
+    constraints = _reference_constraints(prefix, q, _check=_check)
+    primary_streams = dict(baseline_bundles[0].streams)
+    reference = records.decode(primary_streams["control_maintenance"][1])
+    decision = replace(reference.v1_decision, constraints=constraints)
+    changed_reference = records.encode(replace(reference, v1_decision=decision))
+    copies = (primary_streams["control_maintenance"][0], changed_reference)
+    result = []
+    for baseline in baseline_bundles:
+        _text_check(_check)
+        streams = dict(baseline.streams)
+        streams["control_maintenance"] = copies
+        if baseline.kind is execution.WorkerKind.K_CONTROL:
+            rows = streams["kcontrol_maintenance"]
+            streams["kcontrol_maintenance"] = (rows[0], records.encode(replace(records.decode(rows[1]),
+                                                                            v1_decision=decision)))
+        elif baseline.kind is execution.WorkerKind.DETERMINISM:
+            rows = streams["repeat_control_maintenance"]
+            streams["repeat_control_maintenance"] = (rows[0], records.encode(replace(records.decode(rows[1]),
+                                                                                   v1_decision=decision)))
+            streams["control_determinism"] = (records.encode(execution._control_determinism(
+                execution.restore_projection(baseline, "control"), execution.restore_projection(baseline, "repeat_control"),
+                copies, streams["repeat_control_maintenance"])),)
+        result.append(replace(baseline, streams=tuple((name, streams[name]) for name, _ in baseline.streams)))
+        _text_check(_check)
+    return tuple(result)
+
+
+def _reference_text_families(bundle):
+    names = dict(bundle.streams)
+    if bundle.kind is execution.WorkerKind.PRIMARY:
+        return ("primary",) + (("oracle_primary",) if names["oracle_b_audits"] else ())
+    if bundle.kind is execution.WorkerKind.DETERMINISM:
+        return ("determinism",) + (("oracle_repeat",) if names["repeat_oracle_b_audits"] else ())
+    return ("k_control",)
+
+
+def _reference_size_bases(bundles):
+    bases = []
+    for bundle in bundles:
+        rows = tuple((len(data), int(index == 1 and name in (
+            "control_maintenance", "repeat_control_maintenance", "kcontrol_maintenance")))
+            for name, values in bundle.streams for index, data in enumerate(values))
+        families = tuple((family, sum(len(data) for name, values in bundle.streams
+                         if _text_owned(family, name) for data in values),
+                         2 if family in ("k_control", "determinism") else 0)
+                         for family in _reference_text_families(bundle))
+        bases.append((bundle.kind, sum(length for length, _ in rows), execution.legacy_bundle_size(bundle),
+                      rows, families))
+    return tuple(bases)
+
+
+def _reference_bases_fit(bases, targets, added, limit):
+    for _, logical, legacy, rows, families in bases:
+        copies = sum(coefficient for _, coefficient in rows)
+        reserve = sum(max(0, getattr(targets.logical, family) - (size + coefficient * added))
+                      for family, size, coefficient in families)
+        if (logical + copies * added + reserve > limit or legacy + copies * added + reserve > limit
+                or any(size + coefficient * added > limit for size, coefficient in rows)):
+            return False
+    return True
+
+
+def _reference_expanded_fits(bundles, targets, added_bytes, max_payload_bytes):
+    return _reference_bases_fit(_reference_size_bases(bundles), targets, added_bytes, max_payload_bytes)
+
+
+def _reference_q_bounds(bundles, targets, prefix, max_payload_bytes):
+    reference_l0 = sum(len(data) for data in dict(bundles[0].streams)["control_maintenance"])
+    needed = max(0, targets.logical.reference - reference_l0)
+    low, high = 0, prefix.q + 1
+    while low < high:
+        mid = (low + high) // 2
+        if mid <= prefix.q and prefix.added_length(mid) >= needed:
+            high = mid
+        else:
+            low = mid + 1
+    q_lo = low
+    bases = _reference_size_bases(bundles)
+    if not _reference_bases_fit(bases, targets, 0, max_payload_bytes):
+        return q_lo, None
+    low, high = 0, prefix.q
+    while low < high:
+        mid = (low + high + 1) // 2
+        if _reference_bases_fit(bases, targets, prefix.added_length(mid), max_payload_bytes):
+            low = mid
+        else:
+            high = mid - 1
+    return q_lo, low
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceUnitMetrics:
+    kind: execution.WorkerKind
+    lsum: int | None
+    llegacy: int | None
+    sunit: int | None
+    wnew: int | None
+    logical_reserve: int | None
+    physical_reserve: int | None
+
+    @property
+    def physical_closure(self):
+        return None if self.sunit is None or self.physical_reserve is None else self.sunit + self.physical_reserve
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceTrial:
+    ordinal: int
+    q: int
+    actual_physical_bytes: int | None
+    actual_logical_bytes: int | None
+    physical_margin: int | None
+    logical_margin: int | None
+    units: tuple
+    eligible: bool
+    rejection_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceConstructionResult:
+    """In-memory evaluated-set result; never evidence or profile qualification."""
+
+    q_lo: int | None
+    q_hi: int | None
+    trials: tuple
+    selected_trial: ReferenceTrial | None
+    selected_bundles: tuple
+    selected_wires: tuple
+    rejection_reason: str | None
+    cause: str | None
+
+
+def _next_reference_q(trials, q_lo, q_hi, physical_target):
+    # Translate coordinates only; the accepted 1F endpoint/secant/gap schedule
+    # is unchanged, including the physical target and all tie-breaking rules.
+    shifted = tuple(TextTrial(trial.ordinal, trial.q - q_lo, 0, trial.actual_physical_bytes,
+        trial.actual_logical_bytes, trial.physical_margin, trial.logical_margin,
+        None, None, None, None, trial.eligible, trial.rejection_reason) for trial in trials)
+    proposed = _next_text_h(shifted, q_hi - q_lo, physical_target)
+    return None if proposed is None else proposed + q_lo
+
+
+def _search_reference_trials(q_lo, q_hi, physical_target, evaluate, *, _check=None):
+    _need(type(q_lo) is int and type(q_hi) is int and 0 <= q_lo <= q_hi <= _REFERENCE_Q_MAX,
+          "REFERENCE_Q_SEARCH_DOMAIN")
+    _integer(physical_target, 1)
+    _need(callable(evaluate), "REFERENCE_EVALUATOR_REQUIRED")
+    trials = []
+    for ordinal in range(1, 9):
+        q = _next_reference_q(trials, q_lo, q_hi, physical_target)
+        if q is None:
+            break
+        _text_check(_check)
+        trial = evaluate(q, ordinal)
+        _text_check(_check)
+        _need(type(trial) is ReferenceTrial and trial.q == q and trial.ordinal == ordinal,
+              "REFERENCE_TRIAL_BINDING")
+        trials.append(trial)
+    eligible = [trial for trial in trials if trial.eligible]
+    selected = min(eligible, key=lambda trial: (trial.actual_physical_bytes,
+                   trial.actual_logical_bytes, trial.q)) if eligible else None
+    return tuple(trials), selected
+
+
+def _reference_failure(q_lo, q_hi, trials, cause):
+    return ReferenceConstructionResult(q_lo, q_hi, trials, None, (), (),
+                                       "REFERENCE_SYNTHETIC_SIZING_UNREPRESENTABLE", cause)
+
+
+def _reference_static_cause(error):
+    # Retain known public diagnoses, never arbitrary validator exception text.
+    known = frozenset(("WORKER_PAYLOAD_CAP", "WORKER_LEGACY_CAP", "WORKER_WIRE_CAP",
+        "WB02_METADATA_CAP", "LOGICAL_PAYLOAD_CAP", "WB02_WORK_KIND_BINDING",
+        "WB02_BOUNDARY_VALIDATION_FAILED", "KCONTROL_REFERENCE_BINDING",
+        "REPEAT_FIRST_PREMISE_BINDING", "REPEAT_FIRST_HEADER_BINDING",
+        "CONTROL_O4_REFERENCE_BINDING", "CONTROL_O4_DECISION_BINDING",
+        "CONTROL_DETERMINISM_SUMMARY_MISMATCH", "KCONTROL_CLASSIFICATION_MISMATCH",
+        "NONCANONICAL_OR_WRONG_RECORD_FAMILY", "WRONG_LOGICAL_RECORD_TYPE",
+        "NONCANONICAL_LOGICAL_BYTES", "PREPARED_PAYLOAD_LOGICAL_MISMATCH",
+        "CONTEXTUAL_CRC_MISMATCH", "UNEXPECTED_LOGICAL_KEY", "MODE_LENGTH_MISMATCH",
+        "REFERENCE_MUTATION_SCOPE", "REFERENCE_WIRE_SIZE_BINDING",
+        "REFERENCE_SELECTED_FACT_BINDING", "REFERENCE_SELECTED_SIZE_BINDING"))
+    reason = str(error)
+    if reason in known:
+        return reason
+    if isinstance(error, records.RecordError):
+        return "REFERENCE_CANONICAL_RECORD_FAILURE"
+    return "REFERENCE_CANDIDATE_BINDING_OR_CAP_FAILURE"
+
+
+def _reference_unit_metrics(bundle, rows, targets, profile):
+    logical = sum(len(data) for _, values in bundle.streams for data in values)
+    legacy = execution.legacy_bundle_size(bundle)
+    frames = sum(row.frame_length for row in rows)
+    logical_reserve = physical_reserve = 0
+    for family in _reference_text_families(bundle):
+        owned = tuple(row for row in rows if _text_owned(family, row.stream_name))
+        logical_reserve += max(0, getattr(targets.logical, family) - sum(len(row.logical_bytes) for row in owned))
+        physical_reserve += max(0, getattr(targets.physical, family) - sum(row.frame_length for row in owned))
+    groups, cursor = [], 0
+    for name, values in bundle.streams:
+        group = rows[cursor:cursor + len(values)]
+        groups.append((name, len(values), sum(map(len, values)), sum(row.frame_length for row in group)))
+        cursor += len(values)
+    _, _, wire = execution._wb02_layout(bundle, profile, logical, legacy, groups, frames)
+    return ReferenceUnitMetrics(bundle.kind, logical, legacy, frames, wire, logical_reserve, physical_reserve)
+
+
+def construct_reference_v2(work, targets, codec_profile_sha256, *, max_payload_bytes, envelope, _check=None):
+    """Truthful coupled reference search, without persistence or text searches.
+
+    Every prefix is bounded by the two-copy absolute ceiling. The caller's
+    envelope exists solely for the unchanged fresh operational boundary.
+    """
+    _reference_work(work)
+    _need(type(targets) is readiness.DualComponentSizes, "REFERENCE_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    _need(type(codec_profile_sha256) is bytes and len(codec_profile_sha256) == 32,
+          "WB02_PROFILE_IDENTITY_REQUIRED")
+    _need(type(max_payload_bytes) is int and 0 < max_payload_bytes <= physical.MAX_PAYLOAD_BYTES,
+          "REFERENCE_PAYLOAD_CAP")
+    operational._envelope(envelope)
+    _need(envelope.max_payload_bytes == max_payload_bytes, "REFERENCE_ENVELOPE_CAP_BINDING")
+    if work.oracle_b_selected:
+        _need(targets.physical.oracle_primary > 0 and (not work.determinism_selected
+              or targets.physical.oracle_repeat > 0), "REFERENCE_REACHED_ORACLE_TARGET_REQUIRED")
+    _text_check(_check)
+    prefix = _reference_prefix(min(_REFERENCE_Q_MAX, max_payload_bytes // 26), _check=_check)
+    baselines = _reference_bundles(work, prefix, 0, _check=_check)
+    q_lo, q_hi = _reference_q_bounds(baselines, targets, prefix, max_payload_bytes)
+    if q_hi is None:
+        return _reference_failure(q_lo, q_hi, (), "LOGICAL_MINIMUM_COMPOSITE_CAP")
+    if q_lo > q_hi:
+        return _reference_failure(q_lo, q_hi, (), "SYNTHETIC_LOGICAL_DOMAIN_EMPTY")
+    baseline_contexts = []
+    primary_wire = None
+    for bundle in baselines:
+        _text_check(_check)
+        try:
+            wire = execution.encode_bundle_v2(bundle, codec_profile_sha256, max_payload_bytes=max_payload_bytes)
+        except (records.RecordError, execution.E2ExecutionError, physical.PhysicalError) as error:
+            return _reference_failure(q_lo, q_hi, (), _reference_static_cause(error))
+        _text_check(_check)
+        try:
+            context = operational._fresh_wb02_context(wire, work, bundle.kind, codec_profile_sha256, envelope,
+                                                     prior_primary_wire=primary_wire)
+        except (execution.E2ExecutionError, operational.OperationalError, physical.PhysicalError) as error:
+            return _reference_failure(q_lo, q_hi, (), _reference_static_cause(error))
+        baseline_contexts.append(context)
+        if bundle.kind is execution.WorkerKind.PRIMARY:
+            primary_wire = wire
+        _text_check(_check)
+    best = None
+
+    def evaluate(q, ordinal):
+        nonlocal best
+        # Materialization callbacks are deliberately outside rejection catches.
+        candidates = _reference_candidate_bundles(work, baselines, prefix, q, _check=_check)
+        reference_l = sum(len(data) for data in dict(candidates[0].streams)["control_maintenance"])
+        reference_p = None
+        metrics, wires, prepared = [], [], {}
+        reason = None
+        primary_legacy = execution.encode_bundle(candidates[0])
+        for bundle, baseline in zip(candidates, baseline_contexts):
+            _text_check(_check)
+            unit = ReferenceUnitMetrics(bundle.kind, None, None, None, None, None, None)
+            wire = None
+            try:
+                execution.revalidate_bundle(bundle, work, bundle.kind, max_payload_bytes=max_payload_bytes)
+                operational._bind_prior_bundle(bundle,
+                    None if bundle.kind is execution.WorkerKind.PRIMARY else primary_legacy,
+                    work, bundle.kind, envelope)
+                rows = []
+                for row, data in zip(baseline.rows, (data for _, values in bundle.streams for data in values)):
+                    if data == row.logical_bytes:
+                        rows.append(row)
+                        continue
+                    _need((row.stream_name in ("control_maintenance", "kcontrol_maintenance",
+                          "repeat_control_maintenance") and row.key[2] == 1)
+                          or (row.stream_name == "control_determinism" and row.key[2] == 0),
+                          "REFERENCE_MUTATION_SCOPE")
+                    context = physical.context_for(row.stream_name, codec_profile_sha256)
+                    raw_only = physical._context(context).raw_only
+                    cache_key = (raw_only, data)
+                    if cache_key not in prepared:
+                        prepared[cache_key] = physical.encode_payload(data, raw_only=raw_only,
+                                                                     max_payload_bytes=max_payload_bytes)
+                    mode, payload = prepared[cache_key]
+                    frame = physical._frame_from_payload(data, row.key, context, mode, payload,
+                                                          max_payload_bytes=max_payload_bytes)
+                    rows.append(execution.WB02Row(row.stream_name, row.key, data, frame, len(frame)))
+                rows = tuple(rows)
+                unit = _reference_unit_metrics(bundle, rows, targets, codec_profile_sha256)
+                if bundle.kind is execution.WorkerKind.PRIMARY:
+                    reference_p = sum(row.frame_length for row in rows if row.stream_name == "control_maintenance")
+                if max(unit.lsum + unit.logical_reserve, unit.llegacy + unit.logical_reserve) > max_payload_bytes:
+                    reason = reason or "LOGICAL_MINIMUM_COMPOSITE_CAP"
+                elif unit.sunit > max_payload_bytes:
+                    reason = reason or "REFERENCE_SUNIT_CAP"
+                elif unit.wnew > max_payload_bytes:
+                    reason = reason or "REFERENCE_WNEW_CAP"
+                elif unit.physical_closure > max_payload_bytes:
+                    reason = reason or "REFERENCE_PHYSICAL_MINIMUM_COMPOSITE_CAP"
+                else:
+                    wire = execution._compose_bundle_v2_from_rows(bundle, codec_profile_sha256, rows,
+                                                                  max_payload_bytes=max_payload_bytes)
+                    _need(len(wire) == unit.wnew, "REFERENCE_WIRE_SIZE_BINDING")
+            except (records.RecordError, execution.E2ExecutionError, operational.OperationalError,
+                    physical.PhysicalError, HarnessError) as error:
+                reason = reason or _reference_static_cause(error)
+            metrics.append(unit)
+            wires.append(wire)
+            _text_check(_check)
+        if reason is None:
+            policy = readiness.evaluate_family_size("reference", targets.physical.reference,
+                targets.logical.reference, reference_p, reference_l)
+            reason = policy.rejection_reason
+        trial = ReferenceTrial(ordinal, q, reference_p, reference_l,
+            None if reference_p is None else reference_p - targets.physical.reference,
+            reference_l - targets.logical.reference, tuple(metrics), reason is None, reason)
+        if trial.eligible and (best is None or (reference_p, reference_l, q) < (
+                best[0].actual_physical_bytes, best[0].actual_logical_bytes, best[0].q)):
+            best = trial, candidates, tuple(wires)
+        return trial
+
+    trials, selected = _search_reference_trials(q_lo, q_hi, targets.physical.reference, evaluate, _check=_check)
+    if selected is None:
+        causes = {trial.rejection_reason for trial in trials}
+        cause = next(iter(causes)) if len(causes) == 1 else "SYNTHETIC_SIZING_SEARCH_EXHAUSTED"
+        return _reference_failure(q_lo, q_hi, trials, cause)
+    trial, bundles, wires = best
+    _need(trial == selected, "REFERENCE_SELECTION_BINDING")
+    for bundle, wire, expected in zip(bundles, wires, trial.units):
+        _text_check(_check)
+        try:
+            context = operational._fresh_wb02_context(wire, work, bundle.kind, codec_profile_sha256, envelope,
+                prior_primary_wire=None if bundle.kind is execution.WorkerKind.PRIMARY else wires[0])
+            _need(context.bundle == bundle and _reference_unit_metrics(bundle, context.rows, targets,
+                  codec_profile_sha256) == expected, "REFERENCE_SELECTED_FACT_BINDING")
+            if bundle.kind is execution.WorkerKind.PRIMARY:
+                reference_rows = tuple(row for row in context.rows if row.stream_name == "control_maintenance")
+                _need((sum(row.frame_length for row in reference_rows),
+                       sum(len(row.logical_bytes) for row in reference_rows)) ==
+                      (trial.actual_physical_bytes, trial.actual_logical_bytes), "REFERENCE_SELECTED_SIZE_BINDING")
+        except (records.RecordError, execution.E2ExecutionError, operational.OperationalError,
+                physical.PhysicalError, HarnessError) as error:
+            return _reference_failure(q_lo, q_hi, trials, _reference_static_cause(error))
+        _text_check(_check)
+    return ReferenceConstructionResult(q_lo, q_hi, trials, trial, bundles, wires, None, None)
 
 
 @dataclass(frozen=True, slots=True)

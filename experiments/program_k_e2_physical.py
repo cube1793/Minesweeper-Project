@@ -253,6 +253,28 @@ def encode_frame(logical, key, context, *, max_payload_bytes=MAX_PAYLOAD_BYTES):
     return row + struct.pack(">I", contextual_crc32(context, row))
 
 
+def _frame_from_payload(logical, key, context, mode, payload, *,
+                        max_payload_bytes=MAX_PAYLOAD_BYTES):
+    """Reframe an invocation-local payload without trusting its preparation.
+
+    The caller obtains mode/payload from encode_payload. Every distinct copy
+    still checks canonical logical bytes, bounded exact expansion and its own
+    key/context before receiving a fresh contextual CRC. This representation
+    helper grants no semantic, profile or persistence authority.
+    """
+    spec = _context(context)
+    _key(key, spec.key_arity)
+    _bound(max_payload_bytes)
+    _need(type(logical) is bytes and len(logical) <= max_payload_bytes, "LOGICAL_PAYLOAD_CAP")
+    _logical(logical, context)
+    restored = decode_payload(mode, payload, len(logical), raw_only=spec.raw_only,
+                              max_payload_bytes=max_payload_bytes)
+    _need(restored == logical, "PREPARED_PAYLOAD_LOGICAL_MISMATCH")
+    row = (struct.pack(">BII", mode, len(logical), len(payload))
+           + b"".join(encode_uleb128(component) for component in key) + payload)
+    return row + struct.pack(">I", contextual_crc32(context, row))
+
+
 @dataclass(frozen=True, slots=True)
 class DecodedFrame:
     key: tuple

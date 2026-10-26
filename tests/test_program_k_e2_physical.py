@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from dataclasses import FrozenInstanceError, replace
 from fractions import Fraction
 import hashlib
+import inspect
 import io
 import json
 from pathlib import Path
@@ -379,6 +380,145 @@ class FrameTests(unittest.TestCase):
                     p.encode_frame(logical, (0, 0, 0), self.context)
                 with self.assertRaises(p.PhysicalError):
                     p.decode_frame(_row(logical), self.context)
+
+
+class PreparedPayloadFrameTests(unittest.TestCase):
+    def setUp(self):
+        self.logical = r.encode(fixtures._fixtures()[4])
+        self.context = _context()
+        self.mode, self.payload = p.encode_payload(self.logical)
+
+    def test_prepared_frame_matches_normal_and_independent_wire_for_record_families(self):
+        values = (("boards", self.logical, (U64_MAX, 0, 128)),
+                  ("operations", r.encode(fixtures._fixtures()[15]), (128,)),
+                  ("control_maintenance", r.encode(fixtures._kc_fixture(reference=True)), (2, 0, 1)),
+                  ("kcontrol_maintenance", r.encode(fixtures._kc_fixture()), (2, 2, 1)),
+                  ("oracle_b_coverage", r.encode(fixtures._oracle_coverage_fixture()), (2, 0, 0)))
+        for name, logical, key in values:
+            context = _context(name)
+            raw_only = p._stream(name).raw_only
+            mode, payload = p.encode_payload(logical, raw_only=raw_only)
+            expected = p.encode_frame(logical, key, context)
+            with self.subTest(name=name), patch.object(p, "encode_payload",
+                    side_effect=AssertionError("Prepared payload must not be recompressed")):
+                frame = p._frame_from_payload(logical, key, context, mode, payload)
+            self.assertEqual(frame, expected)
+            self.assertEqual(frame, _row(logical, name=name, key=key, mode=mode, payload=payload))
+            self.assertEqual(p.decode_frame(frame, context, expected_key=key).logical_bytes, logical)
+
+    def test_normal_encoder_still_freshly_encodes_payload_on_each_call(self):
+        with patch.object(p, "encode_payload", wraps=p.encode_payload) as encoded, \
+                patch.object(p, "_frame_from_payload", side_effect=AssertionError("No cached normal path")):
+            first = p.encode_frame(self.logical, (0, 0, 0), self.context)
+            second = p.encode_frame(self.logical, (0, 1, 0), self.context)
+        self.assertEqual(encoded.call_count, 2)
+        self.assertTrue(all(call.args == (self.logical,) for call in encoded.call_args_list))
+        self.assertTrue(all(call.kwargs == dict(raw_only=False, max_payload_bytes=p.MAX_PAYLOAD_BYTES)
+                            for call in encoded.call_args_list))
+        self.assertEqual(first, _row(self.logical, mode=self.mode, payload=self.payload))
+        self.assertEqual(second, _row(self.logical, key=(0, 1, 0), mode=self.mode, payload=self.payload))
+
+    def test_reused_payload_has_distinct_valid_key_profile_context_and_crc(self):
+        copies = ((self.context, (7, rank, 1)) for rank in (0, 1, 2))
+        copies = tuple(copies) + ((p.context_for("boards", b"z" * 32), (7, 0, 1)),)
+        frames = []
+        with patch.object(p, "encode_payload", side_effect=AssertionError("No repeated compression")):
+            for context, key in copies:
+                frame = p._frame_from_payload(self.logical, key, context, self.mode, self.payload)
+                frames.append(frame)
+                decoded = p.decode_frame(frame, context, expected_key=key)
+                self.assertEqual((decoded.key, decoded.logical_bytes), (key, self.logical))
+        self.assertEqual(len(set(frames)), 4)
+        self.assertEqual(len({frame[-4:] for frame in frames}), 4)
+        for frame, (context, key) in zip(frames, copies):
+            other_profile = p.context_for("boards", b"y" * 32)
+            with self.assertRaisesRegex(p.PhysicalError, "CONTEXTUAL_CRC_MISMATCH"):
+                p.decode_frame(frame, other_profile)
+            with self.assertRaisesRegex(p.PhysicalError, "UNEXPECTED_LOGICAL_KEY"):
+                p.decode_frame(frame, context, expected_key=(7, key[1], 2))
+        with self.assertRaises(p.PhysicalError):
+            p.decode_frame(frames[0], _context("runtime"))
+
+    def test_exact_logical_equality_is_required_even_for_equal_length_canonical_records(self):
+        board = r.decode(self.logical)
+        alternate = r.encode(replace(board, fingerprint="z" * len(board.fingerprint)))
+        self.assertEqual(len(alternate), len(self.logical))
+        self.assertNotEqual(alternate, self.logical)
+        with self.assertRaisesRegex(p.PhysicalError, "PREPARED_PAYLOAD_LOGICAL_MISMATCH"):
+            p._frame_from_payload(alternate, (0, 0, 0), self.context, self.mode, self.payload)
+        with self.assertRaisesRegex(p.PhysicalError, "PREPARED_PAYLOAD_LOGICAL_MISMATCH"):
+            p._frame_from_payload(self.logical, (0, 0, 0), self.context, p.RAW, alternate)
+
+    def test_wrong_record_family_or_noncanonical_body_is_rejected_before_inflation(self):
+        for logical in (self.logical + b"\n", b"{}", r.encode(fixtures._fixtures()[1])):
+            with self.subTest(logical=logical[:20]), \
+                    patch.object(p, "decode_payload", side_effect=AssertionError("Canonical input first")), \
+                    self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(logical, (0, 0, 0), self.context, p.RAW, logical)
+        with self.assertRaises(p.PhysicalError):
+            p._frame_from_payload(self.logical, (0, 0, 0), _context("runtime"), self.mode, self.payload)
+
+    def test_corrupt_truncated_trailing_and_wrong_mode_payloads_fail_closed(self):
+        self.assertEqual(self.mode, p.DEFLATE)
+        malformed = ((p.DEFLATE, self.payload[:-1]), (p.DEFLATE, self.payload + b"junk"),
+                     (p.DEFLATE, self.payload * 2), (p.DEFLATE, b"\xff\xff\xff"),
+                     (p.DEFLATE, self.logical), (p.RAW, self.logical[:-1]),
+                     (2, self.payload), (True, self.payload), (1.0, self.payload),
+                     (p.DEFLATE, bytearray(self.payload)), (p.DEFLATE, memoryview(self.payload)))
+        for mode, payload in malformed:
+            with self.subTest(mode=mode, length=len(payload)), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(self.logical, (0, 0, 0), self.context, mode, payload)
+        for end in range(len(self.payload)):
+            with self.subTest(end=end), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(self.logical, (0, 0, 0), self.context, self.mode, self.payload[:end])
+
+    def test_raw_only_stream_requires_raw_even_for_valid_compressed_payload(self):
+        logical = r.encode(fixtures._oracle_coverage_fixture())
+        compressed = _deflate(logical)
+        self.assertLess(len(compressed), len(logical))
+        for name in ("oracle_b_coverage", "repeat_oracle_b_coverage"):
+            context = _context(name)
+            with self.assertRaisesRegex(p.PhysicalError, "RAW_ONLY_STREAM"):
+                p._frame_from_payload(logical, (3, 0, 0), context, p.DEFLATE, compressed)
+            frame = p._frame_from_payload(logical, (3, 0, 0), context, p.RAW, logical)
+            self.assertEqual(frame, p.encode_frame(logical, (3, 0, 0), context))
+
+    def test_exact_context_key_and_input_types_are_revalidated(self):
+        class Context(p.FrameContext):
+            pass
+        for context in (None, object(), Context(PROFILE, "boards", allowed_logical_record_types=(r.BoardIdentity,))):
+            with self.subTest(context=type(context)), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(self.logical, (0, 0, 0), context, self.mode, self.payload)
+        for field, value in (("codec_profile_sha256", b"x" * 31),
+                             ("codec_profile_sha256", bytearray(PROFILE)),
+                             ("stream_registry_revision", True), ("frame_format", "PKE2RF01"),
+                             ("expected_key_arity", 1), ("stream_name", "not-a-stream"),
+                             ("allowed_logical_record_types", (r.RuntimeIdentity,))):
+            context = _context()
+            object.__setattr__(context, field, value)
+            with self.subTest(field=field), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(self.logical, (0, 0, 0), context, self.mode, self.payload)
+        for key in ((0,), (0, 0, True), [0, 0, 0], (0, -1, 0), (0, 0, U64_MAX + 1)):
+            with self.subTest(key=key), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(self.logical, key, self.context, self.mode, self.payload)
+        for logical in (bytearray(self.logical), memoryview(self.logical), self.logical.decode("ascii")):
+            with self.subTest(logical=type(logical)), self.assertRaises(p.PhysicalError):
+                p._frame_from_payload(logical, (0, 0, 0), self.context, self.mode, self.payload)
+
+    def test_bounds_precede_inflation_and_no_trust_or_external_dependency_is_added(self):
+        with patch.object(p.zlib, "decompressobj", side_effect=AssertionError("Bounds first")):
+            for limit in (True, 0, -1, p.MAX_PAYLOAD_BYTES + 1, len(self.logical) - 1):
+                with self.subTest(limit=limit), self.assertRaises(p.PhysicalError):
+                    p._frame_from_payload(self.logical, (0, 0, 0), self.context,
+                                          self.mode, self.payload, max_payload_bytes=limit)
+        self.assertEqual(tuple(inspect.signature(p._frame_from_payload).parameters),
+                         ("logical", "key", "context", "mode", "payload", "max_payload_bytes"))
+        for name in ("validated", "trusted", "qualified", "admitted"):
+            with self.subTest(name=name), self.assertRaises(TypeError):
+                p._frame_from_payload(self.logical, (0, 0, 0), self.context, self.mode, self.payload,
+                                      **{name: True})
+        imported_modules = {value.__name__ for value in vars(p).values() if isinstance(value, types.ModuleType)}
+        self.assertFalse(any("operational" in name or "store" in name for name in imported_modules))
 
 
 class LogicalCompatibilityTests(unittest.TestCase):
