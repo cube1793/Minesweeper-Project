@@ -457,6 +457,61 @@ def encode_bundle_v2(bundle, codec_profile_sha256, *,
             _need(48 + frame_size <= max_payload_bytes, "WORKER_WIRE_CAP")
             frames.append(frame)
         groups.append((name, len(values), sum(map(len, values)), group_size))
+    return _wb02_wire(bundle, codec_profile_sha256, logical_size, legacy_size,
+                      frames, groups, frame_size, max_payload_bytes, max_metadata_bytes)
+
+
+def _compose_bundle_v2_from_rows(bundle, codec_profile_sha256, rows, *,
+                                max_payload_bytes=physical.MAX_PAYLOAD_BYTES,
+                                max_metadata_bytes=None):
+    """Recompose exact RF02 slices inside one caller's construction boundary.
+
+    Rows are untrusted representation values: every supplied slice is decoded
+    against its expected profile, stream, key and canonical logical body. No
+    frame is recompressed and no validation authority crosses this boundary.
+    Work-specific semantic and prior checks remain the caller's responsibility.
+    """
+    if max_metadata_bytes is None:
+        max_metadata_bytes = max_payload_bytes
+    _wb02_limits(codec_profile_sha256, max_payload_bytes, max_metadata_bytes)
+    _record(bundle, WorkerBundle)
+    _need(type(rows) is tuple, "WB02_EXACT_ROWS_REQUIRED")
+    logical_size = sum(len(data) for _, values in bundle.streams for data in values)
+    _need(logical_size <= max_payload_bytes and len(bundle.board) <= max_payload_bytes,
+          "WORKER_PAYLOAD_CAP")
+    _need(dict(bundle.streams).get("boards") == (bundle.board,), "BOARD_IDENTITY_STREAM_REQUIRED")
+    legacy_size = legacy_bundle_size(bundle)
+    _need(legacy_size <= max_payload_bytes, "WORKER_LEGACY_CAP")
+    _need(len(rows) == sum(len(values) for _, values in bundle.streams), "WB02_ROW_COUNT_MISMATCH")
+    frames, groups, frame_size, cursor = [], [], 0, 0
+    rank = _wb02_rank(bundle.kind)
+    for name, values in bundle.streams:
+        context = physical.context_for(name, codec_profile_sha256)
+        group_size = 0
+        for index, data in enumerate(values):
+            row = rows[cursor]
+            cursor += 1
+            key = (bundle.work_position, rank, index)
+            _need(type(row) is WB02Row and type(row.stream_name) is str and row.stream_name == name
+                  and type(row.key) is tuple and all(type(value) is int for value in row.key)
+                  and row.key == key and type(row.logical_bytes) is bytes and row.logical_bytes == data
+                  and type(row.frame_bytes) is bytes and type(row.frame_length) is int
+                  and row.frame_length == len(row.frame_bytes), "WB02_ROW_BINDING_MISMATCH")
+            frame_size += row.frame_length
+            _need(48 + frame_size <= max_payload_bytes, "WORKER_WIRE_CAP")
+            decoded = physical.decode_frame(row.frame_bytes, context, expected_key=key,
+                                             max_payload_bytes=max_payload_bytes)
+            _need(decoded.logical_bytes == data and decoded.frame_length == row.frame_length,
+                  "WB02_ROW_LOGICAL_MISMATCH")
+            group_size += row.frame_length
+            frames.append(row.frame_bytes)
+        groups.append((name, len(values), sum(map(len, values)), group_size))
+    return _wb02_wire(bundle, codec_profile_sha256, logical_size, legacy_size,
+                      frames, groups, frame_size, max_payload_bytes, max_metadata_bytes)
+
+
+def _wb02_layout(bundle, codec_profile_sha256, logical_size, legacy_size, groups, frame_size):
+    """Pure metadata arithmetic; no wire allocation or representation admission."""
     node = {"container": WB02_MAGIC.decode("ascii"), "codec_profile_sha256": codec_profile_sha256.hex(),
             "size_basis": WB02_SIZE_BASIS, "position": bundle.work_position, "kind": bundle.kind.value,
             "arm_order": bundle.arm_order.value, "headers": _transport_headers(bundle),
@@ -473,6 +528,14 @@ def encode_bundle_v2(bundle, codec_profile_sha256, *,
         node["wire_bytes"] = wire_size
     else:
         raise E2ExecutionError("WB02_SIZE_FIXED_POINT")
+    return node, metadata_size, wire_size
+
+
+def _wb02_wire(bundle, codec_profile_sha256, logical_size, legacy_size,
+               frames, groups, frame_size, max_payload_bytes, max_metadata_bytes):
+    """Single metadata/SHA composition for the two representation-checked paths."""
+    node, metadata_size, wire_size = _wb02_layout(
+        bundle, codec_profile_sha256, logical_size, legacy_size, groups, frame_size)
     _need(metadata_size <= max_metadata_bytes, "WB02_METADATA_CAP")
     _need(wire_size <= max_payload_bytes, "WORKER_WIRE_CAP")
     metadata = _json(node)

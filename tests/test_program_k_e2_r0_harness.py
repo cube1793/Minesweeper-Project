@@ -3,6 +3,8 @@
 from dataclasses import FrozenInstanceError, fields, replace
 from fractions import Fraction
 import inspect
+import base64
+from hashlib import shake_256
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,7 @@ from experiments import program_k_e2_records as records
 from experiments import program_k_e2_execution as execution
 from experiments import program_k_e2_operational as operational
 from experiments import program_k_e2_readiness as readiness
+from experiments import program_k_e2_physical as physical
 
 
 # RECEIPT_TESTS_BEGIN
@@ -2129,3 +2132,801 @@ class V1MetadataSeamCompatibilityTests(unittest.TestCase):
             with self.subTest(owner=function.__name__):
                 self.assertIn(expected, function.__code__.co_consts)
                 self.assertNotIn(expected[:-1] + "2", function.__code__.co_consts)
+
+
+# Slice 1F fixtures are deliberately tiny, supplied non-boards. They neither
+# calibrate a profile nor run a corpus, constructor reference search or solver.
+_TEXT_PROFILE = b"\x63" * 32
+_TEXT_CAP = 131072
+_TEXT_FAMILIES = (
+    ("primary", 0, 0, execution.WorkerKind.PRIMARY),
+    ("k_control", 1, 2, execution.WorkerKind.K_CONTROL),
+    ("oracle_primary", 2, 0, execution.WorkerKind.PRIMARY),
+    ("oracle_repeat", 3, 1, execution.WorkerKind.DETERMINISM),
+    ("determinism", 4, 1, execution.WorkerKind.DETERMINISM),
+)
+
+
+def _text_fixture(oracle=1, position=0):
+    runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os",
+                                      "fixture-platform", "fixture-arch", None)
+    work = execution.BoardWork(position, h.synthetic_board_identity(2_000_000_050_000),
+        bytes.fromhex(identity.PROTOCOL_SHA256), "slice1f-bounded-fixture",
+        True, True, True, runtime)
+    sizes = readiness.ComponentSizes(1, 1, oracle, oracle, 1, 1)
+    primary = h.build_synthetic_bundle(work, execution.WorkerKind.PRIMARY, sizes,
+                                        max_payload_bytes=_TEXT_CAP)
+    bundles = {execution.WorkerKind.PRIMARY: primary}
+    for kind in (execution.WorkerKind.DETERMINISM, execution.WorkerKind.K_CONTROL):
+        bundles[kind] = h.build_synthetic_bundle(work, kind, sizes, primary,
+                                                 max_payload_bytes=_TEXT_CAP)
+    return work, bundles
+
+
+def _text_owned(name, kind, family):
+    # Independent frozen ownership map, not a call to the constructor's map.
+    if kind is execution.WorkerKind.PRIMARY:
+        owner = ("reference" if name == "control_maintenance" else
+                 "oracle_primary" if name == "oracle_b_audits" else "primary")
+    elif kind is execution.WorkerKind.DETERMINISM:
+        owner = "oracle_repeat" if name == "repeat_oracle_b_audits" else "determinism"
+    else:
+        owner = "k_control"
+    return owner == family
+
+
+def _text_family_metrics(view, family):
+    rows = tuple(row for row in view.rows if _text_owned(row.stream_name, view.bundle.kind, family))
+    return sum(len(row.frame_bytes) for row in rows), sum(len(row.logical_bytes) for row in rows)
+
+
+def _text_with_literal(bundle, family, text):
+    """Independent test mutation for canonical-size and semantic comparisons."""
+    stream = {"primary": "evaluators", "determinism": "repeat_evaluators",
+              "k_control": "kcontrol_maintenance", "oracle_primary": "oracle_b_audits",
+              "oracle_repeat": "repeat_oracle_b_audits"}[family]
+    streams = dict(bundle.streams)
+    values = list(streams[stream])
+    indices = range(2) if family.startswith("oracle_") else (-1,) if family == "k_control" else (0,)
+    for index in indices:
+        item = records.decode(values[index])
+        if family.startswith("oracle_"):
+            expected = replace(item.expected, shared_kernel_evidence=text)
+            actual = replace(item.actual, shared_kernel_evidence=text)
+            item = replace(item, expected=expected, actual=actual,
+                expected_digest=records.oracle_b_snapshot_digest(expected),
+                actual_digest=records.oracle_b_snapshot_digest(actual))
+        elif family == "k_control":
+            item = replace(item, soundness=tuple((key, text if key == "detail" else value)
+                                                  for key, value in item.soundness))
+        else:
+            item = replace(item, detail=text)
+        values[index] = records.encode(item)
+    streams[stream] = tuple(values)
+    return replace(bundle, streams=tuple((name, streams[name]) for name, _ in bundle.streams))
+
+
+def _text_logical_bytes(bundle, family):
+    return sum(len(data) for name, values in bundle.streams if _text_owned(name, bundle.kind, family)
+               for data in values)
+
+
+def _text_trial(ordinal, knob, p=100, logical=100, *, physical_target=100,
+                logical_target=100, reason=None):
+    evaluation = readiness.evaluate_family_size("primary", physical_target, logical_target, p, logical)
+    rejection = evaluation.rejection_reason if reason is None else reason
+    return h.TextTrial(ordinal, knob, 0, p, logical, p - physical_target,
+        logical - logical_target, logical + 11, logical + 21, p + 11, p + 51,
+        rejection is None, rejection)
+
+
+class TextEntropyTests(unittest.TestCase):
+    @staticmethod
+    def raw(family_id, rank, position, block):
+        domain = (b"PROGRAM_K_R0B_TEXT_FILL_V1\0" + bytes((family_id, rank))
+                  + position.to_bytes(4, "big") + block.to_bytes(8, "big"))
+        return shake_256(domain).digest(49152)
+
+    def test_exact_tag_empty_entropy_and_small_canonical_base64_lengths(self):
+        self.assertEqual(h._text_filler("primary", 0, 3, 0), "SYNTHETIC_NON_EVIDENCE|L:xxx|H:")
+        self.assertEqual(h._text_filler("primary", 0, 0, 0), "SYNTHETIC_NON_EVIDENCE|L:|H:")
+        self.assertEqual(h._text_entropy("primary", 0, 0), "")
+        for raw_size, encoded_size in ((1, 4), (2, 4), (3, 4), (4, 8)):
+            with self.subTest(raw_size=raw_size):
+                value = h._text_entropy("primary", 0, raw_size)
+                self.assertEqual(len(value), encoded_size)
+                self.assertEqual(value, base64.b64encode(self.raw(0, 0, 0, 0)[:raw_size]).decode("ascii"))
+                self.assertFalse(any(c.isspace() for c in value))
+
+    def test_exact_family_rank_position_and_block_domains_are_repeatable(self):
+        outputs = []
+        for family, family_id, rank, _ in _TEXT_FAMILIES:
+            for position in (0, 9999):
+                with self.subTest(family=family, position=position):
+                    actual = h._text_entropy(family, position, 49153)
+                    expected = base64.b64encode(self.raw(family_id, rank, position, 0)
+                                               + self.raw(family_id, rank, position, 1)[:1]).decode("ascii")
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(h._text_entropy(family, position, 49153), actual)
+                    outputs.append(actual)
+        self.assertEqual(len(set(outputs)), 10)
+
+    def test_full_block_and_partial_concatenation_is_canonical_base64(self):
+        full = h._text_entropy("oracle_repeat", 9999, 49152)
+        self.assertEqual(len(full), 65536)
+        self.assertFalse(full.endswith("="))
+        for tail in (1, 2, 3, 4):
+            expected = full + base64.b64encode(self.raw(3, 1, 9999, 1)[:tail]).decode("ascii")
+            self.assertEqual(h._text_entropy("oracle_repeat", 9999, 49152 + tail), expected)
+            self.assertEqual(base64.b64decode(expected, validate=True),
+                             self.raw(3, 1, 9999, 0) + self.raw(3, 1, 9999, 1)[:tail])
+
+    def test_exact_constructor_local_integer_and_family_domain(self):
+        for position in (-1, 10000, True, 1.0, "0"):
+            with self.subTest(position=position), self.assertRaises(ValueError):
+                h._text_entropy("primary", position, 1)
+        for family in ("reference", "PRIMARY", 0, None):
+            with self.subTest(family=family), self.assertRaises(ValueError):
+                h._text_entropy(family, 0, 1)
+        for value in (-1, True, 1.0):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                h._text_filler("primary", 0, value, 0)
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                h._text_entropy("primary", 0, value)
+
+    def test_no_random_os_entropy_or_clock_source_is_used(self):
+        import random
+        with patch.object(os, "urandom", side_effect=AssertionError("No OS entropy")), \
+             patch.object(random, "random", side_effect=AssertionError("No randomness")), \
+             patch.object(h.time, "time", side_effect=AssertionError("No time salt")), \
+             patch.object(h.time, "time_ns", side_effect=AssertionError("No time salt")), \
+             patch.object(h.time, "monotonic_ns", side_effect=AssertionError("No time salt")), \
+             patch.object(h.time, "perf_counter_ns", side_effect=AssertionError("No time salt")):
+            self.assertEqual(h._text_filler("primary", 0, 7, 4),
+                "SYNTHETIC_NON_EVIDENCE|L:xxxxxxx|H:"
+                + base64.b64encode(self.raw(0, 0, 0, 0)[:4]).decode("ascii"))
+
+    def test_check_callback_observes_each_repetition_and_entropy_chunk(self):
+        checks = []
+        h._text_filler("primary", 0, 2 * 65536 + 1, 2 * 49152 + 1,
+                       _check=lambda: checks.append(1))
+        self.assertGreaterEqual(len(checks), 6)
+        for use_entropy in (False, True):
+            calls = []
+            def stop():
+                calls.append(1)
+                if len(calls) == 2:
+                    raise RuntimeError("private cancellation")
+            with self.subTest(entropy=use_entropy), self.assertRaisesRegex(RuntimeError, "private cancellation"):
+                h._text_filler("primary", 0, 0 if use_entropy else 3 * 65536,
+                               3 * 49152 if use_entropy else 0, _check=stop)
+            self.assertEqual(len(calls), 2)
+
+    def test_q_base64_ell_integer_arithmetic_and_overtaking(self):
+        for multiplicity in (1, 4):
+            for deficit in (-1, 0, 1, 7, 9):
+                target, baseline = 100 + deficit, 100
+                q = (max(0, deficit) + multiplicity - 1) // multiplicity
+                for knob in (0, 1, 2, 3, 4, 6, 7, 9):
+                    b = 4 * ((knob + 2) // 3)
+                    with self.subTest(m=multiplicity, deficit=deficit, knob=knob):
+                        self.assertEqual(h._text_lengths(target, baseline, multiplicity, knob),
+                                         (q, b, max(0, q - b)))
+
+
+class TextSearchSchedulerTests(unittest.TestCase):
+    def run_search(self, upper, function, target=100, check=None):
+        visited = []
+        def evaluate(knob, ordinal):
+            visited.append(knob)
+            return function(knob, ordinal)
+        trials, selected = h._search_text_trials(upper, target, evaluate, _check=check)
+        self.assertEqual(tuple(visited), tuple(trial.h for trial in trials))
+        self.assertEqual(tuple(trial.ordinal for trial in trials), tuple(range(1, len(trials) + 1)))
+        self.assertLessEqual(len(trials), 8)
+        self.assertEqual(len(set(visited)), len(visited))
+        return trials, selected
+
+    def test_first_zero_second_high_and_no_ninth_trial(self):
+        function = lambda knob, ordinal: _text_trial(ordinal, knob, 50)
+        first = self.run_search(100, function)
+        self.assertEqual(first, self.run_search(100, function))
+        self.assertEqual(tuple(t.h for t in first[0])[:2], (0, 100))
+        self.assertEqual(len(first[0]), 8)
+        self.assertIsNone(first[1])
+        singleton, _ = self.run_search(0, function)
+        self.assertEqual(tuple(t.h for t in singleton), (0,))
+        all_values, _ = self.run_search(3, function)
+        self.assertEqual(set(t.h for t in all_values), set(range(4)))
+
+    def test_secant_targets_physical_floor_and_uses_integer_floor(self):
+        trials = (_text_trial(1, 0, 10), _text_trial(2, 10, 40))
+        self.assertEqual(h._next_text_h(trials, 10, 20), 3)
+        negative_slope = (_text_trial(1, 0, 40), _text_trial(2, 10, 10))
+        self.assertEqual(h._next_text_h(negative_slope, 10, 20), 6)
+
+    def test_pair_selection_uses_exact_distance_then_a_then_b(self):
+        trials = (_text_trial(1, 0, 90), _text_trial(2, 100, 110),
+                  _text_trial(3, 20, 99), _text_trial(4, 70, 102))
+        self.assertEqual(h._next_text_h(trials, 100, 100), 36)
+        tied = (_text_trial(1, 0, 90), _text_trial(2, 100, 110),
+                _text_trial(3, 20, 90), _text_trial(4, 70, 110))
+        self.assertEqual(h._next_text_h(tied, 100, 100), 35)
+
+    def test_out_of_range_duplicate_and_equal_physical_fallbacks(self):
+        cases = ((_text_trial(1, 0, 10), _text_trial(2, 10, 11)),
+                 (_text_trial(1, 0, 100), _text_trial(2, 10, 200)),
+                 (_text_trial(1, 0, 10), _text_trial(2, 10, 10)))
+        for trials in cases:
+            with self.subTest(trials=trials):
+                self.assertEqual(h._next_text_h(trials, 10, 100), 5)
+
+    def test_largest_untested_integer_gap_ties_choose_lower_gap(self):
+        trials = tuple(_text_trial(i + 1, knob, 50) for i, knob in enumerate((0, 8, 4)))
+        self.assertEqual(h._next_text_h(trials, 8, 100), 2)
+        full = tuple(_text_trial(i + 1, i, 50) for i in range(4))
+        self.assertIsNone(h._next_text_h(full, 3, 100))
+
+    def test_nonmonotonic_physical_observations_do_not_prune_any_gap(self):
+        values = {0: 110, 16: 110, 8: 90, 4: 101, 12: 99, 2: 100, 6: 80, 10: 120}
+        trials, selected = self.run_search(16,
+            lambda knob, ordinal: _text_trial(ordinal, knob, values.get(knob, 95)))
+        # Equal endpoints first force the midpoint. Subsequent nonmonotonic
+        # measurements must leave both sides of that midpoint available.
+        self.assertEqual(tuple(t.h for t in trials)[:4], (0, 16, 8, 4))
+        self.assertTrue(any(t.h > 8 and t.h < 16 for t in trials))
+        eligible = [t for t in trials if t.eligible]
+        self.assertEqual(selected, min(eligible, key=lambda t: (t.actual_physical_bytes,
+                         t.actual_logical_bytes, t.h)))
+
+    def test_first_eligible_does_not_stop_and_final_lexicographic_minimum(self):
+        trials, selected = self.run_search(20, lambda knob, ordinal:
+            _text_trial(ordinal, knob, 110 if knob == 0 else 100,
+                        101 if knob == 20 else 100))
+        self.assertEqual(len(trials), 8)
+        self.assertTrue(trials[0].eligible)
+        self.assertNotEqual(selected, trials[0])
+        self.assertEqual(selected, min((t for t in trials if t.eligible),
+            key=lambda t: (t.actual_physical_bytes, t.actual_logical_bytes, t.h)))
+
+    def test_callback_failure_after_eligible_trial_aborts_instead_of_returning_it(self):
+        visited, callbacks = [], []
+        def evaluate(knob, ordinal):
+            visited.append(knob)
+            return _text_trial(ordinal, knob)
+        def check():
+            callbacks.append(len(visited))
+            if len(visited) == 1:
+                raise RuntimeError("cancel after eligible")
+        with self.assertRaisesRegex(RuntimeError, "cancel after eligible"):
+            h._search_text_trials(100, 100, evaluate, _check=check)
+        self.assertEqual(visited, [0])
+        self.assertEqual(callbacks[0], 0)
+
+    def test_callback_wraps_each_candidate_and_evaluator_errors_are_fatal(self):
+        calls = []
+        def evaluate(knob, ordinal):
+            calls.append(("trial", knob))
+            return _text_trial(ordinal, knob)
+        h._search_text_trials(1, 100, evaluate, _check=lambda: calls.append(("check", None)))
+        self.assertEqual(calls, [("check", None), ("trial", 0), ("check", None),
+                                 ("check", None), ("trial", 1), ("check", None)])
+        with self.assertRaisesRegex(MemoryError, "resource"):
+            h._search_text_trials(5, 100,
+                lambda *_: (_ for _ in ()).throw(MemoryError("resource")))
+
+    def test_window_and_three_floor_reasons_remain_in_complete_trial_ledger(self):
+        metrics = ((100, 100), (4196, 100), (4197, 100), (100, 99), (99, 100), (99, 99))
+        trials, selected = self.run_search(5, lambda knob, ordinal:
+            _text_trial(ordinal, knob, *metrics[knob]))
+        by_knob = {trial.h: trial for trial in trials}
+        self.assertEqual(set(by_knob), set(range(6)))
+        self.assertTrue(by_knob[0].eligible and by_knob[1].eligible)
+        self.assertEqual(by_knob[2].rejection_reason, "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT")
+        self.assertEqual(by_knob[3].rejection_reason, "SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL")
+        self.assertEqual(by_knob[4].rejection_reason, "SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL")
+        self.assertEqual(by_knob[5].rejection_reason, "SYNTHETIC_BOTH_MINIMA_SHORTFALL")
+        self.assertEqual(selected, by_knob[0])
+
+    def test_terminal_window_and_general_exhaustion_keep_specific_trial_failures(self):
+        window = (_text_trial(1, 0, 4197), _text_trial(2, 2, 4200))
+        self.assertEqual(h._text_terminal_reason(window), "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT")
+        shortfall = (_text_trial(1, 0, 99), _text_trial(2, 2, 98))
+        self.assertEqual(h._text_terminal_reason(shortfall), "SYNTHETIC_SIZING_SEARCH_EXHAUSTED")
+        mixed = (_text_trial(1, 0, 4197), _text_trial(2, 2, 99),
+                 _text_trial(3, 1, 101, reason="SYNTHETIC_TRIAL_SEMANTIC"))
+        before = tuple(t.rejection_reason for t in mixed)
+        self.assertEqual(h._text_terminal_reason(mixed), "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT")
+        self.assertEqual(tuple(t.rejection_reason for t in mixed), before)
+
+
+class TextConstructorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.work, cls.bundles = _text_fixture()
+        cls.envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=_TEXT_CAP)
+        cls.prior = execution.encode_bundle_v2(cls.bundles[execution.WorkerKind.PRIMARY],
+                                                _TEXT_PROFILE, max_payload_bytes=_TEXT_CAP)
+        cls.views, cls.targets, cls.results = {}, {}, {}
+        for family, _, _, kind in _TEXT_FAMILIES:
+            bundle = cls.bundles[kind]
+            wire = execution.encode_bundle_v2(bundle, _TEXT_PROFILE, max_payload_bytes=_TEXT_CAP)
+            view = execution.decode_bundle_view_v2(wire, _TEXT_PROFILE, max_payload_bytes=_TEXT_CAP)
+            p, logical = _text_family_metrics(view, family)
+            targets = max(1, p - 128), logical + 17
+            cls.views[family], cls.targets[family] = view, targets
+            cls.results[family] = h.construct_text_family_v2(cls.work, bundle, family, _TEXT_PROFILE,
+                physical_target=targets[0], logical_target=targets[1], max_payload_bytes=_TEXT_CAP,
+                envelope=cls.envelope,
+                prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else cls.prior)
+
+    def construct(self, family, **changes):
+        kind = next(kind for name, _, _, kind in _TEXT_FAMILIES if name == family)
+        arguments = dict(physical_target=self.targets[family][0], logical_target=self.targets[family][1],
+            max_payload_bytes=_TEXT_CAP, envelope=self.envelope,
+            prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else self.prior)
+        arguments.update(changes)
+        return h.construct_text_family_v2(self.work, self.bundles[kind], family, _TEXT_PROFILE, **arguments)
+
+    def test_five_real_family_results_are_immutable_canonical_and_fresh_validated(self):
+        for family, _, _, kind in _TEXT_FAMILIES:
+            with self.subTest(family=family):
+                baseline, result = self.bundles[kind], self.results[family]
+                self.assertEqual(execution.revalidate_bundle(baseline, self.work, kind,
+                                                            max_payload_bytes=_TEXT_CAP), baseline)
+                self.assertIsNone(result.rejection_reason)
+                self.assertFalse(result.zero_oracle)
+                self.assertIs(type(result.trials), tuple)
+                self.assertGreater(len(result.trials), 1)
+                self.assertLessEqual(len(result.trials), 8)
+                self.assertIs(type(result.selected_wire), bytes)
+                for value in (result, result.selected_trial):
+                    self.assertFalse(hasattr(value, "__dict__"))
+                    with self.assertRaises(FrozenInstanceError):
+                        setattr(value, fields(value)[0].name, None)
+                selected = result.selected_bundle
+                self.assertEqual(execution.revalidate_bundle(selected, self.work, kind,
+                                                             max_payload_bytes=_TEXT_CAP), selected)
+                for _, values in selected.streams:
+                    for data in values:
+                        self.assertEqual(records.encode(records.decode(data)), data)
+                fresh = operational._fresh_wb02_context(result.selected_wire, self.work, kind,
+                    _TEXT_PROFILE, self.envelope,
+                    prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else self.prior)
+                self.assertEqual(fresh.bundle, selected)
+                self.assertEqual(result.selected_wire, execution.encode_bundle_v2(selected, _TEXT_PROFILE,
+                                                                                  max_payload_bytes=_TEXT_CAP))
+
+    def test_only_authorized_text_fields_and_oracle_snapshot_digests_change(self):
+        for family, _, _, kind in _TEXT_FAMILIES:
+            with self.subTest(family=family):
+                result, baseline = self.results[family], self.bundles[kind]
+                chosen = result.selected_trial
+                text = h._text_filler(family, self.work.position, chosen.ell, chosen.h)
+                expected = _text_with_literal(baseline, family, text)
+                self.assertEqual(result.selected_bundle, expected)
+                before, after = dict(baseline.streams), dict(result.selected_bundle.streams)
+                changed = [(name, index) for name, values in before.items()
+                           for index, data in enumerate(values) if data != after[name][index]]
+                name = {"primary": "evaluators", "k_control": "kcontrol_maintenance",
+                        "oracle_primary": "oracle_b_audits", "oracle_repeat": "repeat_oracle_b_audits",
+                        "determinism": "repeat_evaluators"}[family]
+                expected_indices = [0, 1] if family.startswith("oracle_") else [1] if family == "k_control" else [0]
+                self.assertEqual(changed, [(name, index) for index in expected_indices])
+                if family.startswith("oracle_"):
+                    self.assertEqual(before[name.replace("audits", "coverage")],
+                                     after[name.replace("audits", "coverage")])
+                    for data in after[name]:
+                        item = records.decode(data)
+                        self.assertEqual(item.expected, item.actual)
+                        self.assertIs(item.status, records.AuditStatus.PASS)
+                        self.assertEqual(item.expected.shared_kernel_evidence, text)
+                        self.assertEqual(item.expected_digest, records.oracle_b_snapshot_digest(item.expected))
+                        self.assertEqual(item.actual_digest, records.oracle_b_snapshot_digest(item.actual))
+
+    def test_exact_family_and_complete_unit_metrics_match_selected_wire(self):
+        for family, _, _, kind in _TEXT_FAMILIES:
+            with self.subTest(family=family):
+                result = self.results[family]
+                view = execution.decode_bundle_view_v2(result.selected_wire, _TEXT_PROFILE,
+                                                        max_payload_bytes=_TEXT_CAP)
+                p, logical = _text_family_metrics(view, family)
+                trial = result.selected_trial
+                self.assertEqual((trial.actual_physical_bytes, trial.actual_logical_bytes), (p, logical))
+                self.assertEqual((trial.lsum, trial.llegacy, trial.sunit, trial.wnew),
+                    (sum(len(data) for _, values in view.bundle.streams for data in values),
+                     len(execution.encode_bundle(view.bundle)), sum(len(row.frame_bytes) for row in view.rows),
+                     len(result.selected_wire)))
+                self.assertTrue(all(value <= _TEXT_CAP for value in
+                                    (trial.lsum, trial.llegacy, trial.sunit, trial.wnew)))
+                policy = readiness.evaluate_family_size(family, *self.targets[family], p, logical)
+                self.assertEqual((trial.eligible, trial.rejection_reason, trial.physical_margin, trial.logical_margin),
+                                 (policy.eligible, policy.rejection_reason, policy.physical_margin, policy.logical_margin))
+                self.assertEqual(result.selected_trial, min((t for t in result.trials if t.eligible),
+                    key=lambda t: (t.actual_physical_bytes, t.actual_logical_bytes, t.h)))
+                self.assertEqual(trial.lsum, view.logical_bytes)
+                self.assertEqual(trial.llegacy, view.legacy_bytes)
+                self.assertEqual(trial.sunit, view.frame_bytes)
+                self.assertEqual(trial.wnew, view.wire_bytes)
+                if kind is not execution.WorkerKind.PRIMARY:
+                    copied = tuple(row for row in view.rows if "control_maintenance" in row.stream_name)
+                    self.assertTrue(copied)
+                    self.assertTrue(all(_text_owned(row.stream_name, kind, family)
+                                        for row in copied) if not family.startswith("oracle_") else
+                                    all(not _text_owned(row.stream_name, kind, family) for row in copied))
+
+    def test_actual_canonical_logical_construction_matches_multiplicity_for_every_trial(self):
+        for family, _, _, kind in _TEXT_FAMILIES:
+            result = self.results[family]
+            fixed = _text_with_literal(self.bundles[kind], family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+            l0 = _text_logical_bytes(fixed, family)
+            multiplicity = 4 if family.startswith("oracle_") else 1
+            target = self.targets[family][1]
+            q = (max(0, target - l0) + multiplicity - 1) // multiplicity
+            for trial in result.trials:
+                with self.subTest(family=family, knob=trial.h):
+                    encoded_entropy = 4 * ((trial.h + 2) // 3)
+                    self.assertEqual(trial.ell, max(0, q - encoded_entropy))
+                    actual_bundle = _text_with_literal(self.bundles[kind], family,
+                        h._text_filler(family, self.work.position, trial.ell, trial.h))
+                    measured = _text_logical_bytes(actual_bundle, family)
+                    self.assertEqual(measured, l0 + multiplicity * max(q, encoded_entropy))
+                    if trial.actual_logical_bytes is not None:
+                        self.assertEqual(trial.actual_logical_bytes, measured)
+
+    def test_canonical_low_exact_and_nondivisible_logical_targets(self):
+        for family in ("primary", "oracle_primary"):
+            fixed = _text_with_literal(self.bundles[execution.WorkerKind.PRIMARY], family,
+                                       "SYNTHETIC_NON_EVIDENCE|L:|H:")
+            l0 = _text_logical_bytes(fixed, family)
+            m = 4 if family.startswith("oracle_") else 1
+            for deficit in (-1, 0, 7, 33):
+                with self.subTest(family=family, deficit=deficit):
+                    result = self.construct(family, logical_target=l0 + deficit)
+                    low = result.trials[0]
+                    q = (max(0, deficit) + m - 1) // m
+                    self.assertEqual((low.h, low.ell, low.actual_logical_bytes), (0, q, l0 + m * q))
+                    self.assertGreaterEqual(low.actual_logical_bytes, l0 + deficit)
+
+    def test_exact_high_endpoint_is_maximum_expanded_domain_not_a_compressed_search(self):
+        for family, _, _, kind in _TEXT_FAMILIES:
+            result = self.results[family]
+            fixed = _text_with_literal(self.bundles[kind], family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+            m = 4 if family.startswith("oracle_") else 1
+            baseline_lsum = sum(len(data) for _, values in fixed.streams for data in values)
+            baseline_legacy = len(execution.encode_bundle(fixed))
+            stream = {"primary": "evaluators", "k_control": "kcontrol_maintenance",
+                      "oracle_primary": "oracle_b_audits", "oracle_repeat": "repeat_oracle_b_audits",
+                      "determinism": "repeat_evaluators"}[family]
+            indices = (0, 1) if m == 4 else (-1,) if family == "k_control" else (0,)
+            per_record = 2 if m == 4 else 1
+            limits = [(_TEXT_CAP - baseline_lsum) // m, (_TEXT_CAP - baseline_legacy) // m]
+            limits.extend((_TEXT_CAP - len(dict(fixed.streams)[stream][index])) // per_record
+                          for index in indices)
+            expected_high = 3 * (min(limits) // 4)
+            with self.subTest(family=family):
+                self.assertEqual(result.trials[1].h, expected_high)
+                high = _text_with_literal(fixed, family,
+                    h._text_filler(family, self.work.position, 0, expected_high))
+                self.assertLessEqual(sum(len(data) for _, values in high.streams for data in values), _TEXT_CAP)
+                self.assertLessEqual(len(execution.encode_bundle(high)), _TEXT_CAP)
+                too_high = _text_with_literal(fixed, family,
+                    h._text_filler(family, self.work.position, 0, expected_high + 1))
+                sizes = [sum(len(data) for _, values in too_high.streams for data in values),
+                         len(execution.encode_bundle(too_high))]
+                sizes.extend(len(data) for _, values in too_high.streams for data in values)
+                self.assertGreater(max(sizes), _TEXT_CAP)
+
+    def test_actual_canonical_bytes_before_at_and_after_entropy_overtakes_q(self):
+        for family, multiplicity in (("primary", 1), ("oracle_primary", 4)):
+            baseline = self.bundles[execution.WorkerKind.PRIMARY]
+            fixed = _text_with_literal(baseline, family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+            l0 = _text_logical_bytes(fixed, family)
+            target = l0 + (8 if multiplicity == 1 else 29)
+            for knob, b, ell in ((3, 4, 4), (6, 8, 0), (7, 12, 0)):
+                with self.subTest(family=family, knob=knob):
+                    self.assertEqual(h._text_lengths(target, l0, multiplicity, knob), (8, b, ell))
+                    text = h._text_filler(family, self.work.position, ell, knob)
+                    candidate = h._mutate_text_bundle(baseline, family, text)
+                    self.assertEqual(candidate, _text_with_literal(baseline, family, text))
+                    self.assertEqual(_text_logical_bytes(candidate, family), l0 + multiplicity * max(8, b))
+                    self.assertGreaterEqual(_text_logical_bytes(candidate, family), target)
+                    execution.revalidate_bundle(candidate, self.work, candidate.kind, max_payload_bytes=_TEXT_CAP)
+
+    def test_only_changed_rows_are_encoded_per_trial_and_unchanged_frames_are_reused(self):
+        original_search, original_encode = h._search_text_trials, physical.encode_frame
+        for family, _, _, _ in _TEXT_FAMILIES:
+            evaluations, encoded = [], []
+            def encode(*args, **kwargs):
+                encoded.append((args[1], args[2].stream_name))
+                return original_encode(*args, **kwargs)
+            def search(upper, target, evaluate, *, _check=None):
+                def observed(knob, ordinal):
+                    start = len(encoded)
+                    trial = evaluate(knob, ordinal)
+                    evaluations.append(tuple(encoded[start:]))
+                    return trial
+                return original_search(upper, target, observed, _check=_check)
+            with self.subTest(family=family), patch.object(physical, "encode_frame", side_effect=encode), \
+                 patch.object(h, "_search_text_trials", side_effect=search), \
+                 patch.object(execution, "encode_bundle_v2", wraps=execution.encode_bundle_v2) as full:
+                result = self.construct(family)
+                self.assertLessEqual(full.call_count, 1)
+            limit = 2 if family.startswith("oracle_") else 1
+            self.assertEqual(len(evaluations), len(result.trials))
+            self.assertTrue(all(len(calls) <= limit for calls in evaluations))
+            self.assertTrue(any(len(calls) == limit for calls in evaluations))
+            final = execution.decode_bundle_view_v2(result.selected_wire, _TEXT_PROFILE,
+                                                     max_payload_bytes=_TEXT_CAP)
+            old = {(row.stream_name, row.key): row for row in self.views[family].rows}
+            reused = 0
+            for row in final.rows:
+                baseline = old[row.stream_name, row.key]
+                if baseline.logical_bytes == row.logical_bytes:
+                    reused += 1
+                    self.assertEqual(baseline.frame_bytes, row.frame_bytes)
+            self.assertEqual(reused, len(final.rows) - limit)
+
+    def test_readiness_is_called_with_actual_observations_and_selected_wire_is_fresh_checked(self):
+        with patch.object(readiness, "evaluate_family_size", wraps=readiness.evaluate_family_size) as policy, \
+             patch.object(operational, "_fresh_wb02_context", wraps=operational._fresh_wb02_context) as fresh:
+            result = self.construct("primary")
+        for trial in result.trials:
+            if trial.rejection_reason is None or "SHORTFALL" in trial.rejection_reason or "OVERSHOOT" in trial.rejection_reason:
+                self.assertTrue(any(call.args == ("primary", *self.targets["primary"],
+                    trial.actual_physical_bytes, trial.actual_logical_bytes) for call in policy.call_args_list))
+        self.assertTrue(any(call.args[0] == result.selected_wire for call in fresh.call_args_list))
+
+    def test_empty_logical_domain_is_not_a_partial_success_or_extra_search(self):
+        with patch.object(h, "_search_text_trials", side_effect=AssertionError("No admissible domain search")):
+            result = self.construct("primary", logical_target=_TEXT_CAP)
+        self.assertEqual(result.rejection_reason, "SYNTHETIC_LOGICAL_DOMAIN_EMPTY")
+        self.assertEqual(result.trials, ())
+        self.assertIsNone(result.selected_trial)
+        self.assertIsNone(result.selected_bundle)
+        self.assertIsNone(result.selected_wire)
+
+    def test_rejects_wrong_family_kind_profile_nonboard_position_and_mutable_prior(self):
+        baseline = self.bundles[execution.WorkerKind.PRIMARY]
+        common = dict(physical_target=100, logical_target=100, max_payload_bytes=_TEXT_CAP,
+                      envelope=self.envelope)
+        for family in ("reference", "k_control", "determinism", "oracle_repeat", "PRIMARY"):
+            with self.subTest(family=family), self.assertRaises(ValueError):
+                h.construct_text_family_v2(self.work, baseline, family, _TEXT_PROFILE, **common)
+        for profile in (b"x" * 31, bytearray(_TEXT_PROFILE), "x" * 32):
+            with self.subTest(profile=type(profile)), self.assertRaises(ValueError):
+                h.construct_text_family_v2(self.work, baseline, "primary", profile, **common)
+        for work in (replace(self.work, position=10000),
+                     replace(self.work, board=replace(self.work.board, fingerprint="pretend-real-board"))):
+            with self.subTest(work=work), self.assertRaises(ValueError):
+                h.construct_text_family_v2(work, baseline, "primary", _TEXT_PROFILE, **common)
+        with self.assertRaises(ValueError):
+            self.construct("primary", prior_primary_wire=self.prior)
+        for family in ("determinism", "oracle_repeat", "k_control"):
+            for prior in (None, bytearray(self.prior), self.prior[:-1], b"bad prior"):
+                with self.subTest(family=family, prior=type(prior)), self.assertRaises(ValueError):
+                    self.construct(family, prior_primary_wire=prior)
+
+    def test_canonical_but_different_primary_premise_cannot_bind(self):
+        primary = self.bundles[execution.WorkerKind.PRIMARY]
+        values = dict(primary.streams)
+        items = list(values["control_maintenance"])
+        item = records.decode(items[-1])
+        decision = replace(item.v1_decision, constraints=item.v1_decision.constraints * 2)
+        items[-1] = records.encode(replace(item, v1_decision=decision))
+        values["control_maintenance"] = tuple(items)
+        other = replace(primary, streams=tuple((name, values[name]) for name, _ in primary.streams))
+        execution.revalidate_bundle(other, self.work, execution.WorkerKind.PRIMARY, max_payload_bytes=_TEXT_CAP)
+        wrong_prior = execution.encode_bundle_v2(other, _TEXT_PROFILE, max_payload_bytes=_TEXT_CAP)
+        for family in ("determinism", "oracle_repeat", "k_control"):
+            with self.subTest(family=family), self.assertRaises(ValueError):
+                self.construct(family, prior_primary_wire=wrong_prior)
+
+    def test_constructor_cancellation_and_resource_errors_propagate(self):
+        def cancel():
+            raise RuntimeError("constructor cancelled")
+        with self.assertRaisesRegex(RuntimeError, "constructor cancelled"):
+            self.construct("primary", _check=cancel)
+        with patch.object(h, "_text_filler", side_effect=MemoryError("constructor resource")), \
+             self.assertRaisesRegex(MemoryError, "constructor resource"):
+            self.construct("primary")
+
+    def test_trial_semantic_canonical_frame_and_wire_failures_are_static_and_bounded(self):
+        original = h._search_text_trials
+        cases = ((h, "_mutate_text_bundle", records.RecordError("private malformed detail"),
+                  "SYNTHETIC_TEXT_CANONICAL_RECORD_FAILURE"),
+                 (execution, "revalidate_bundle", execution.E2ExecutionError("private semantic detail"),
+                  "SYNTHETIC_TEXT_SEMANTIC_OR_PRIOR_FAILURE"),
+                 (operational, "_bind_prior_bundle", operational.OperationalError("private copied premise"),
+                  "SYNTHETIC_TEXT_SEMANTIC_OR_PRIOR_FAILURE"),
+                 (physical, "encode_frame", physical.PhysicalError("private frame detail"),
+                  "SYNTHETIC_TEXT_FRAME_FAILURE"),
+                 (execution, "_compose_bundle_v2_from_rows", execution.E2ExecutionError("private wire cap"),
+                  "SYNTHETIC_TEXT_WIRE_FAILURE"))
+        for owner, name, error, expected in cases:
+            def search(upper, target, evaluate, *, _check=None):
+                with patch.object(owner, name, side_effect=error):
+                    return original(upper, target, evaluate, _check=_check)
+            with self.subTest(stage=name), patch.object(h, "_search_text_trials", side_effect=search):
+                result = self.construct("primary")
+            self.assertEqual(result.rejection_reason, "SYNTHETIC_SIZING_SEARCH_EXHAUSTED")
+            self.assertEqual(len(result.trials), 8)
+            self.assertEqual({trial.rejection_reason for trial in result.trials}, {expected})
+            self.assertTrue(all(not trial.eligible for trial in result.trials))
+            self.assertIsNone(result.selected_wire)
+
+    def test_physical_unit_cap_is_independent_of_the_logical_floor(self):
+        original = h._search_text_trials
+        def search(upper, target, evaluate, *, _check=None):
+            with patch.object(physical, "encode_frame", return_value=b"x" * _TEXT_CAP):
+                return original(upper, target, evaluate, _check=_check)
+        with patch.object(h, "_search_text_trials", side_effect=search):
+            result = self.construct("primary")
+        self.assertEqual(len(result.trials), 8)
+        self.assertEqual({t.rejection_reason for t in result.trials}, {"SYNTHETIC_TEXT_SUNIT_CAP"})
+        self.assertTrue(all(t.actual_logical_bytes >= self.targets["primary"][1] for t in result.trials))
+        self.assertTrue(all(t.sunit > _TEXT_CAP and not t.eligible for t in result.trials))
+        self.assertTrue(all(t.wnew > t.sunit + 48 for t in result.trials))
+
+    def test_logical_record_sum_legacy_and_wire_caps_fail_independently(self):
+        original_search, original_mutate = h._search_text_trials, h._mutate_text_bundle
+        baseline = self.bundles[execution.WorkerKind.PRIMARY]
+        fixed = _text_with_literal(baseline, "primary", "SYNTHETIC_NON_EVIDENCE|L:|H:")
+        base_sum = sum(len(data) for _, values in fixed.streams for data in values)
+        base_legacy = len(execution.encode_bundle(fixed))
+        cases = ((_TEXT_CAP, "SYNTHETIC_TEXT_LOGICAL_RECORD_CAP"),
+                 (_TEXT_CAP - base_sum + 1, "SYNTHETIC_TEXT_LSUM_CAP"),
+                 (_TEXT_CAP - base_legacy + 1, "SYNTHETIC_TEXT_LLEGACY_CAP"))
+        for ell, expected in cases:
+            def mutation(bundle, family, _text):
+                return original_mutate(bundle, family, "SYNTHETIC_NON_EVIDENCE|L:" + "x" * ell + "|H:")
+            def search(upper, target, evaluate, *, _check=None):
+                with patch.object(h, "_mutate_text_bundle", side_effect=mutation):
+                    return original_search(upper, target, evaluate, _check=_check)
+            with self.subTest(cap=expected), patch.object(h, "_search_text_trials", side_effect=search):
+                result = self.construct("primary")
+            self.assertEqual({t.rejection_reason for t in result.trials}, {expected})
+            self.assertTrue(all(not t.eligible for t in result.trials))
+            if expected == "SYNTHETIC_TEXT_LLEGACY_CAP":
+                self.assertTrue(all(t.lsum <= _TEXT_CAP < t.llegacy for t in result.trials))
+        view = self.views["primary"]
+        old = next(row for row in view.rows if row.stream_name == "evaluators" and row.key[2] == 0)
+        unchanged_size = view.frame_bytes - old.frame_length
+        frame_length = _TEXT_CAP - unchanged_size - 1
+        def search(upper, target, evaluate, *, _check=None):
+            with patch.object(physical, "encode_frame", return_value=b"x" * frame_length):
+                return original_search(upper, target, evaluate, _check=_check)
+        with patch.object(h, "_search_text_trials", side_effect=search):
+            result = self.construct("primary")
+        self.assertEqual({t.rejection_reason for t in result.trials}, {"SYNTHETIC_TEXT_WNEW_CAP"})
+        self.assertTrue(all(t.sunit < _TEXT_CAP < t.wnew for t in result.trials))
+        self.assertTrue(all(t.lsum <= _TEXT_CAP and t.llegacy <= _TEXT_CAP for t in result.trials))
+
+    def test_value_error_callback_inside_candidate_is_fatal_not_a_trial_rejection(self):
+        original = h._search_text_trials
+        def search(upper, target, evaluate, *, _check=None):
+            def stop():
+                raise h.HarnessError("private fatal check")
+            # The constructor's callback is closed over by evaluate; replace
+            # only the filler call boundary to make this a during-trial error.
+            with patch.object(h, "_text_filler", side_effect=lambda *_args, **_kwargs: stop()):
+                return original(upper, target, evaluate, _check=_check)
+        with patch.object(h, "_search_text_trials", side_effect=search), \
+             self.assertRaisesRegex(h.HarnessError, "private fatal check"):
+            self.construct("primary")
+
+
+class ZeroOracleTextConstructorTests(unittest.TestCase):
+    def test_both_zero_oracles_keep_selected_coverage_without_entropy_mutation_or_search(self):
+        work, bundles = _text_fixture(oracle=0)
+        envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=_TEXT_CAP)
+        prior = execution.encode_bundle_v2(bundles[execution.WorkerKind.PRIMARY], _TEXT_PROFILE,
+                                            max_payload_bytes=_TEXT_CAP)
+        for family, kind, stream in (("oracle_primary", execution.WorkerKind.PRIMARY, "oracle_b_audits"),
+                                     ("oracle_repeat", execution.WorkerKind.DETERMINISM, "repeat_oracle_b_audits")):
+            bundle = bundles[kind]
+            encoded_names = []
+            original = physical.encode_frame
+            def encode(data, key, context, **kwargs):
+                encoded_names.append(context.stream_name)
+                return original(data, key, context, **kwargs)
+            with self.subTest(family=family), \
+                 patch.object(h, "_text_entropy", side_effect=AssertionError("No entropy")), \
+                 patch.object(h, "_text_filler", side_effect=AssertionError("No filler")), \
+                 patch.object(h, "_mutate_text_bundle", side_effect=AssertionError("No mutation")), \
+                 patch.object(h, "_search_text_trials", side_effect=AssertionError("No search")), \
+                 patch.object(physical, "encode_frame", side_effect=encode):
+                result = h.construct_text_family_v2(work, bundle, family, _TEXT_PROFILE,
+                    physical_target=0, logical_target=0, max_payload_bytes=_TEXT_CAP, envelope=envelope,
+                    prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else prior)
+            self.assertTrue(result.zero_oracle)
+            self.assertIsNone(result.rejection_reason)
+            self.assertEqual(result.trials, ())
+            self.assertEqual(result.selected_bundle, bundle)
+            self.assertEqual((result.selected_trial.actual_physical_bytes,
+                              result.selected_trial.actual_logical_bytes), (0, 0))
+            self.assertNotIn(stream, encoded_names)
+            self.assertEqual(len(encoded_names), sum(len(rows) for _, rows in bundle.streams))
+            self.assertEqual(dict(result.selected_bundle.streams)[stream], ())
+            view = execution.decode_bundle_view_v2(result.selected_wire, _TEXT_PROFILE,
+                                                    max_payload_bytes=_TEXT_CAP)
+            self.assertEqual(_text_family_metrics(view, family), (0, 0))
+            coverage_name = stream.replace("audits", "coverage")
+            coverage = next(row for row in view.rows if row.stream_name == coverage_name)
+            self.assertEqual(coverage.frame_bytes[0], physical.RAW)
+            value = records.decode(coverage.logical_bytes)
+            self.assertTrue(value.selected)
+            self.assertEqual(value.applicable, ())
+            owner = "primary" if kind is execution.WorkerKind.PRIMARY else "determinism"
+            self.assertTrue(_text_owned(coverage_name, kind, owner))
+            self.assertFalse(_text_owned(coverage_name, kind, family))
+
+    def test_zero_inconsistent_targets_and_nonzero_audits_fail_closed(self):
+        work, nonzero = _text_fixture(oracle=1)
+        _, zero = _text_fixture(oracle=0)
+        envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=_TEXT_CAP)
+        for p, logical, bundles in ((0, 1, zero), (1, 0, zero), (0, 0, nonzero), (1, 1, zero)):
+            for family, kind in (("oracle_primary", execution.WorkerKind.PRIMARY),
+                                 ("oracle_repeat", execution.WorkerKind.DETERMINISM)):
+                prior = None if kind is execution.WorkerKind.PRIMARY else execution.encode_bundle_v2(
+                    bundles[execution.WorkerKind.PRIMARY], _TEXT_PROFILE, max_payload_bytes=_TEXT_CAP)
+                with self.subTest(p=p, logical=logical, family=family), self.assertRaises(ValueError):
+                    h.construct_text_family_v2(work, bundles[kind], family, _TEXT_PROFILE,
+                        physical_target=p, logical_target=logical, max_payload_bytes=_TEXT_CAP,
+                        envelope=envelope, prior_primary_wire=prior)
+
+
+class TextConstructorV1PreservationTests(unittest.TestCase):
+    def test_v1_signatures_and_prechange_canonical_byte_goldens_remain_exact(self):
+        signature = inspect.signature(h.build_synthetic_bundle)
+        self.assertEqual(tuple(signature.parameters), ("work", "kind", "sizes", "primary", "max_payload_bytes"))
+        self.assertIsNone(signature.parameters["primary"].default)
+        self.assertIs(signature.parameters["max_payload_bytes"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertEqual(tuple(inspect.signature(h.synthetic_bundle_family_bytes).parameters), ("bundle",))
+        self.assertEqual(tuple(inspect.signature(h.materialize_synthetic).parameters),
+            ("plan", "sizes", "envelope", "streams_root", "identity_seal", "progress"))
+        # Captured from accepted baseline 172f7aea before Slice 1F edits, with
+        # the fixed literal runtime in _text_fixture (no host/time dependence).
+        expected = {
+            execution.WorkerKind.PRIMARY: (17792,
+                "d92d0d63988d3b2f5071487efac9282fe3fdb12b195395b355184e19c9c1b116",
+                (("primary", 9070), ("reference", 3049), ("oracle_primary", 2566))),
+            execution.WorkerKind.DETERMINISM: (28788,
+                "106f80776cc62443a6254760ea12325318a2b32de14948f29c7f06434106d6b8",
+                (("determinism", 21028), ("oracle_repeat", 2566))),
+            execution.WorkerKind.K_CONTROL: (9655,
+                "3f11417a265dc092c7b6e153defa155363c11a53f0d9485a4ab64b99f6b7de37",
+                (("k_control", 8151),)),
+        }
+        with patch.object(h, "construct_text_family_v2", side_effect=AssertionError("No V2 historical path")), \
+             patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("V1 bytes only")):
+            _, bundles = _text_fixture()
+            for kind, bundle in bundles.items():
+                with self.subTest(kind=kind):
+                    wire = execution.encode_bundle(bundle)
+                    self.assertEqual((len(wire), sha256(wire).hexdigest(), h.synthetic_bundle_family_bytes(bundle)),
+                                     expected[kind])
+
+    def test_historical_materialization_still_writes_only_jsonl_and_never_calls_v2(self):
+        fixture = SyntheticMaterializationTests()
+        plan = fixture.plan()
+        with tempfile.TemporaryDirectory() as directory:
+            seal = fixture._identity(directory, plan)
+            with patch.object(h, "construct_text_family_v2", side_effect=AssertionError("No V2 constructor")), \
+                 patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("No WB02 materialization")), \
+                 patch.object(operational.harness, "_coordinator_private_bytes", return_value=100):
+                result = h.materialize_synthetic(plan, readiness.ComponentSizes(1, 1, 1, 1, 1, 1),
+                                                  fixture.envelope(), directory, seal)
+            self.assertTrue(result.readback_complete and result.cleanup_complete)
+            paths = tuple(Path(directory).iterdir())
+            self.assertTrue(paths)
+            self.assertTrue(all(path.suffix == ".jsonl" for path in paths))
+            self.assertFalse(any(path.suffix == ".pkf" for path in paths))
+
+    def test_new_trial_and_result_facts_are_excluded_from_historical_fact_registry(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        for cls in (h.TextTrial, h.TextConstructionResult):
+            self.assertNotIn(cls, evidence._FACT_TYPES.values())
+            self.assertNotIn(cls.__name__, evidence._FACT_TYPES)
+            with self.assertRaisesRegex(h.HarnessError, "UNSUPPORTED_METADATA_FACT"):
+                h._fact_read({"fact": cls.__name__, "fields": {}})

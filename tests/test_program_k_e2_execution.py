@@ -1467,5 +1467,167 @@ class WB02DecodeViewTests(unittest.TestCase):
                 execution.decode_bundle_view_v2(candidate, self.profile)
 
 
+class WB02CachedCompositionTests(unittest.TestCase):
+    """Cached slices remain untrusted inputs to a shared representation composer."""
+
+    profile = WB02PrimitiveTests.profile
+    _bundle = staticmethod(WB02PrimitiveTests._bundle)
+    _parts = staticmethod(WB02PrimitiveTests._parts)
+
+    def _view(self, bundle):
+        return execution.decode_bundle_view_v2(execution.encode_bundle_v2(bundle, self.profile), self.profile)
+
+    def test_exact_cached_composition_matches_full_encoder_for_all_ranks_and_keys(self):
+        from experiments import program_k_e2_physical as physical
+        for kind in execution.WorkerKind:
+            for position in (0, 9999, identity.UINT64_MAX):
+                bundle = self._bundle('quote"slash\\' * 20, kind=kind, position=position)
+                view = self._view(bundle)
+                with patch.object(physical, "encode_frame", side_effect=AssertionError("Cached row recompressed")):
+                    wire = execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows)
+                self.assertEqual(wire, view.wire)
+                self.assertEqual(execution.decode_bundle_v2(wire, self.profile), bundle)
+                self.assertEqual(self._parts(wire)[0]["streams"][-2:],
+                                 [["oracle_b_audits", 0, 0, 0], ["oracle_b_coverage", 0, 0, 0]])
+
+    def test_one_changed_row_preserves_exact_other_slices_and_canonical_wire(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle()
+        view = self._view(bundle)
+        runtime = records.decode(dict(bundle.streams)["runtime"][0])
+        changed = records.encode(replace(runtime, python_version="changed " + "x" * 1024))
+        candidate = replace(bundle, streams=tuple(
+            (name, (changed,) if name == "runtime" else values) for name, values in bundle.streams))
+        row = view.rows[1]
+        with patch.object(physical, "encode_frame", wraps=physical.encode_frame) as encoded:
+            frame = physical.encode_frame(changed, row.key, physical.context_for("runtime", self.profile))
+            rows = (view.rows[0], replace(row, logical_bytes=changed, frame_bytes=frame, frame_length=len(frame)))
+            wire = execution._compose_bundle_v2_from_rows(candidate, self.profile, rows)
+        self.assertEqual(encoded.call_count, 1)
+        self.assertIs(rows[0], view.rows[0])
+        selected = execution.decode_bundle_view_v2(wire, self.profile)
+        self.assertEqual(selected.rows[0].frame_bytes, view.rows[0].frame_bytes)
+        self.assertEqual(wire, execution.encode_bundle_v2(candidate, self.profile))
+        self.assertEqual((selected.logical_bytes, selected.legacy_bytes, selected.frame_bytes, selected.wire_bytes),
+                         (sum(len(value) for _, values in candidate.streams for value in values),
+                          len(execution.encode_bundle(candidate)), sum(len(row.frame_bytes) for row in rows), len(wire)))
+
+    def test_full_and_cached_encoders_share_one_metadata_and_sha_composer(self):
+        bundle = self._bundle()
+        view = self._view(bundle)
+        for encode in (lambda: execution.encode_bundle_v2(bundle, self.profile),
+                       lambda: execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows)):
+            with patch.object(execution, "_wb02_wire", wraps=execution._wb02_wire) as shared:
+                wire = encode()
+            self.assertEqual(shared.call_count, 1)
+            self.assertEqual(wire, view.wire)
+            self.assertEqual(wire[-32:], sha256(wire[:-32]).digest())
+
+    def test_rows_are_not_authority_and_each_frame_is_independently_decoded(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle()
+        view = self._view(bundle)
+        with patch.object(physical, "decode_frame", wraps=physical.decode_frame) as decoded, \
+                patch.object(physical, "encode_frame", side_effect=AssertionError("Recompression")):
+            execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows)
+        self.assertEqual(decoded.call_count, len(view.rows))
+        for call, row in zip(decoded.call_args_list, view.rows):
+            self.assertIs(call.args[0], row.frame_bytes)
+            self.assertEqual(call.args[1], physical.context_for(row.stream_name, self.profile))
+            self.assertEqual(call.kwargs["expected_key"], row.key)
+
+    def test_cached_row_shape_order_count_and_claimed_fields_are_checked(self):
+        bundle = self._bundle(position=0)
+        view = self._view(bundle)
+        row = view.rows[0]
+        variants = (replace(row, stream_name="runtime"), replace(row, key=(0, 1, 0)),
+                    replace(row, key=(False, 0, 0)), replace(row, key=[0, 0, 0]),
+                    replace(row, logical_bytes=view.rows[1].logical_bytes),
+                    replace(row, logical_bytes=bytearray(row.logical_bytes)),
+                    replace(row, frame_bytes=bytearray(row.frame_bytes)),
+                    replace(row, frame_length=row.frame_length + 1), replace(row, frame_length=True), object())
+        for changed in variants:
+            with self.subTest(changed=changed), self.assertRaises(execution.E2ExecutionError):
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, (changed,) + view.rows[1:])
+        for rows in (list(view.rows), view, view.rows[::-1], view.rows[:-1], view.rows + view.rows[:1]):
+            with self.subTest(rows=type(rows)), self.assertRaises(execution.E2ExecutionError):
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, rows)
+
+    def test_rewrapped_frame_cannot_substitute_profile_key_stream_or_logical_body(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle()
+        view = self._view(bundle)
+        row = view.rows[0]
+        alternate = self._bundle("different logical identity").board
+        frames = (
+            physical.encode_frame(row.logical_bytes, row.key, physical.context_for("boards", b"z" * 32)),
+            physical.encode_frame(row.logical_bytes, (129, 0, 0), physical.context_for("boards", self.profile)),
+            physical.encode_frame(alternate, row.key, physical.context_for("boards", self.profile)),
+            view.rows[1].frame_bytes,
+            row.frame_bytes[:-1] + bytes((row.frame_bytes[-1] ^ 1,)),
+            row.frame_bytes[:-1], row.frame_bytes + b"trailing",
+        )
+        for frame in frames:
+            with self.subTest(length=len(frame)), self.assertRaises(ValueError):
+                forged = replace(row, frame_bytes=frame, frame_length=len(frame))
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, (forged,) + view.rows[1:])
+        for candidate in (replace(bundle, work_position=129), replace(bundle, kind=execution.WorkerKind.DETERMINISM)):
+            with self.assertRaises(ValueError):
+                execution._compose_bundle_v2_from_rows(candidate, self.profile, view.rows)
+
+    def test_cached_composition_preserves_independent_expanded_and_metadata_caps(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle("x" * 2048)
+        view = self._view(bundle)
+        with patch.object(physical, "decode_frame", side_effect=AssertionError("Expanded bounds first")):
+            for limit, reason in ((view.logical_bytes - 1, "PAYLOAD_CAP"),
+                                  (view.logical_bytes, "LEGACY_CAP")):
+                with self.assertRaisesRegex(execution.E2ExecutionError, reason):
+                    execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows, max_payload_bytes=limit)
+        with patch.object(execution, "_json", side_effect=AssertionError("Metadata cap before allocation")):
+            with self.assertRaisesRegex(execution.E2ExecutionError, "METADATA_CAP"):
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows, max_metadata_bytes=1)
+        for digest in (bytearray(self.profile), bytes(31), "x" * 32):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution._compose_bundle_v2_from_rows(bundle, digest, view.rows)
+        for limit in (True, 0, -1, physical.MAX_PAYLOAD_BYTES + 1):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows, max_payload_bytes=limit)
+
+    def test_cached_composer_exposes_no_validation_or_trust_override(self):
+        bundle = self._bundle()
+        view = self._view(bundle)
+        self.assertEqual(tuple(inspect.signature(execution._compose_bundle_v2_from_rows).parameters),
+                         ("bundle", "codec_profile_sha256", "rows", "max_payload_bytes", "max_metadata_bytes"))
+        for keyword in ("validated", "trusted", "admitted", "qualified"):
+            with self.assertRaises(TypeError):
+                execution._compose_bundle_v2_from_rows(bundle, self.profile, view.rows, **{keyword: True})
+
+    def test_shared_layout_counts_exact_wire_and_overcap_preview_without_allocation(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle()
+        view = self._view(bundle)
+        metadata, _ = self._parts(view.wire)
+        with patch.object(execution, "_json", side_effect=AssertionError("Preview allocated metadata")), \
+                patch.object(physical, "encode_frame", side_effect=AssertionError("Preview encoded frame")), \
+                patch.object(physical, "decode_frame", side_effect=AssertionError("Preview admitted frame")):
+            node, size, total = execution._wb02_layout(bundle, self.profile, view.logical_bytes,
+                view.legacy_bytes, metadata["streams"], view.frame_bytes)
+            self.assertEqual((size, total), (view.metadata_bytes, len(view.wire)))
+            # Scalar sizing only: no large frame/body is constructed or admitted.
+            frame_size = physical.MAX_PAYLOAD_BYTES + 1
+            groups = [[name, count, logical, physical_size]
+                      for name, count, logical, physical_size in metadata["streams"]]
+            groups[0][3] += frame_size - view.frame_bytes
+            over_node, over_metadata, over_wire = execution._wb02_layout(bundle, self.profile,
+                view.logical_bytes, view.legacy_bytes, groups, frame_size)
+        self.assertEqual(json.loads(json.dumps(node)), metadata)
+        self.assertGreater(over_wire, physical.MAX_PAYLOAD_BYTES)
+        self.assertEqual(over_wire, 48 + over_metadata + frame_size)
+        self.assertEqual(over_node["wire_bytes"], over_wire)
+        self.assertEqual(len(json.dumps(over_node, sort_keys=True, separators=(",", ":"),
+                                       ensure_ascii=True).encode("ascii")), over_metadata)
+
+
 if __name__ == "__main__":
     unittest.main()

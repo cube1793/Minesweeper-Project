@@ -10,7 +10,8 @@ archive; every archive-local supporting file counts toward its fixed allowance.
 from dataclasses import dataclass, fields, replace
 from enum import Enum
 from fractions import Fraction
-from hashlib import sha256
+from hashlib import sha256, shake_256
+import base64
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ import uuid
 
 from experiments import program_k_e2_identity as identity
 from experiments import program_k_e2_records as records
+from experiments import program_k_e2_physical as physical
 from experiments import program_k_e2_store as store
 from experiments import program_k_e2_execution as execution
 from experiments import program_k_e2_operational as operational
@@ -737,6 +739,366 @@ def build_synthetic_bundle(work, kind, sizes, primary=None, *, max_payload_bytes
         cap.max_payload_bytes = max_payload_bytes
         operational._bind_prior_bundle(bundle, execution.encode_bundle(primary), work, kind, cap)
     return bundle
+
+
+# Separate in-memory V2 foundation. The historical builder/materializer below
+# retains its V1 durable attribution and never invokes this constructor.
+_TEXT_FAMILIES = (
+    ("primary", execution.WorkerKind.PRIMARY, "evaluators", 0, 1),
+    ("k_control", execution.WorkerKind.K_CONTROL, "kcontrol_maintenance", -1, 1),
+    ("oracle_primary", execution.WorkerKind.PRIMARY, "oracle_b_audits", None, 4),
+    ("oracle_repeat", execution.WorkerKind.DETERMINISM, "repeat_oracle_b_audits", None, 4),
+    ("determinism", execution.WorkerKind.DETERMINISM, "repeat_evaluators", 0, 1),
+)
+
+
+def _text_spec(family):
+    _need(type(family) is str, "SYNTHETIC_TEXT_FAMILY_REQUIRED")
+    for family_id, spec in enumerate(_TEXT_FAMILIES):
+        if spec[0] == family:
+            return family_id, spec
+    raise HarnessError("SYNTHETIC_TEXT_FAMILY_REQUIRED")
+
+
+def _text_check(check):
+    _need(check is None or callable(check), "SYNTHETIC_TEXT_CHECK_REQUIRED")
+    if check is not None:
+        check()
+
+
+def _text_entropy(family, position, h, *, _check=None):
+    family_id, spec = _text_spec(family)
+    _need(type(position) is int and 0 <= position < 10_000, "SYNTHETIC_TEXT_POSITION_DOMAIN")
+    _need(type(h) is int and 0 <= h <= physical.MAX_PAYLOAD_BYTES, "SYNTHETIC_TEXT_H_DOMAIN")
+    rank = execution._wb02_rank(spec[1])
+    chunks = []
+    for block_index, offset in enumerate(range(0, h, 49_152)):
+        _text_check(_check)
+        domain = (b"PROGRAM_K_R0B_TEXT_FILL_V1\0" + bytes((family_id, rank))
+                  + position.to_bytes(4, "big") + block_index.to_bytes(8, "big"))
+        raw = shake_256(domain).digest(49_152)[:min(49_152, h - offset)]
+        chunks.append(base64.b64encode(raw).decode("ascii"))
+        _text_check(_check)
+    _text_check(_check)
+    result = "".join(chunks)
+    _text_check(_check)
+    return result
+
+
+def _text_filler(family, position, ell, h, *, _check=None):
+    _need(type(ell) is int and 0 <= ell <= physical.MAX_PAYLOAD_BYTES, "SYNTHETIC_TEXT_ELL_DOMAIN")
+    pieces = ["SYNTHETIC_NON_EVIDENCE|L:"]
+    for offset in range(0, ell, 65_536):
+        _text_check(_check)
+        pieces.append("x" * min(65_536, ell - offset))
+        _text_check(_check)
+    pieces.extend(("|H:", _text_entropy(family, position, h, _check=_check)))
+    _text_check(_check)
+    result = "".join(pieces)
+    _text_check(_check)
+    return result
+
+
+def _text_lengths(logical_target, l0, m, h):
+    for value in (logical_target, l0, h):
+        _integer(value)
+    _need(type(m) is int and m in (1, 4), "SYNTHETIC_TEXT_MULTIPLICITY")
+    q = (max(0, logical_target - l0) + m - 1) // m
+    b = 4 * ((h + 2) // 3)
+    return q, b, max(0, q - b)
+
+
+@dataclass(frozen=True, slots=True)
+class TextTrial:
+    """V2 constructor observations only; None means a preceding trial step failed."""
+
+    ordinal: int
+    h: int
+    ell: int
+    actual_physical_bytes: int | None
+    actual_logical_bytes: int | None
+    physical_margin: int | None
+    logical_margin: int | None
+    lsum: int | None
+    llegacy: int | None
+    sunit: int | None
+    wnew: int | None
+    eligible: bool
+    rejection_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class TextConstructionResult:
+    """Evaluated-set minimum, not profile qualification or materialization authority."""
+
+    family: str
+    selected_bundle: execution.WorkerBundle | None
+    selected_wire: bytes | None
+    selected_trial: TextTrial | None
+    trials: tuple
+    rejection_reason: str | None
+    zero_oracle: bool = False
+
+
+def _next_text_h(trials, h_hi, physical_target):
+    tried = {trial.h for trial in trials}
+    if not tried:
+        return 0
+    if h_hi not in tried:
+        return h_hi
+    ordered = sorted((trial for trial in trials if trial.actual_physical_bytes is not None),
+                     key=lambda trial: trial.h)
+    pairs = [(abs(a.actual_physical_bytes - physical_target)
+              + abs(b.actual_physical_bytes - physical_target), a.h, b.h, a, b)
+             for i, a in enumerate(ordered) for b in ordered[i + 1:]
+             if a.actual_physical_bytes != b.actual_physical_bytes]
+    if pairs:
+        _, _, _, a, b = min(pairs, key=lambda pair: pair[:3])
+        u = a.h + ((physical_target - a.actual_physical_bytes) * (b.h - a.h)
+                   // (b.actual_physical_bytes - a.actual_physical_bytes))
+        if 0 <= u <= h_hi and u not in tried:
+            return u
+    endpoints = [-1] + sorted(tried) + [h_hi + 1]
+    gaps = [(b - a - 1, a + 1, b - 1) for a, b in zip(endpoints, endpoints[1:]) if b - a > 1]
+    if not gaps:
+        return None
+    _, low, high = min(gaps, key=lambda gap: (-gap[0], gap[1]))
+    return (low + high) // 2
+
+
+def _search_text_trials(h_hi, physical_target, evaluate, *, _check=None):
+    _need(type(h_hi) is int and 0 <= h_hi <= physical.MAX_PAYLOAD_BYTES, "SYNTHETIC_TEXT_H_DOMAIN")
+    _integer(physical_target, 1)
+    _need(callable(evaluate), "SYNTHETIC_TEXT_EVALUATOR_REQUIRED")
+    trials = []
+    for ordinal in range(1, 9):
+        h = _next_text_h(trials, h_hi, physical_target)
+        if h is None:
+            break
+        _text_check(_check)
+        trial = evaluate(h, ordinal)
+        _text_check(_check)
+        _need(type(trial) is TextTrial and trial.h == h and trial.ordinal == ordinal,
+              "SYNTHETIC_TEXT_TRIAL_BINDING")
+        trials.append(trial)
+    eligible = [trial for trial in trials if trial.eligible]
+    selected = min(eligible, key=lambda trial: (trial.actual_physical_bytes,
+                   trial.actual_logical_bytes, trial.h)) if eligible else None
+    return tuple(trials), selected
+
+
+def _text_terminal_reason(trials):
+    if any(trial.eligible for trial in trials):
+        return None
+    # Preserve window failure for the otherwise floor/cap/semantic-valid subset;
+    # floor/cap failures in other trials remain individually recorded.
+    if any(trial.rejection_reason == "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT" for trial in trials):
+        return "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT"
+    return "SYNTHETIC_SIZING_SEARCH_EXHAUSTED"
+
+
+def _mutate_text_bundle(bundle, family, text):
+    _, (_, _, name, index, _) = _text_spec(family)
+    streams = dict(bundle.streams)
+    values = list(streams[name])
+    indices = range(len(values)) if index is None else (index % len(values),)
+    for i in indices:
+        item = records.decode(values[i])
+        if family in ("primary", "determinism"):
+            mutated = replace(item, detail=text)
+        elif family == "k_control":
+            _need(sum(key == "detail" for key, _ in item.soundness) == 1,
+                  "SYNTHETIC_TEXT_DETAIL_REQUIRED")
+            mutated = replace(item, soundness=tuple((key, text if key == "detail" else value)
+                                                   for key, value in item.soundness))
+        else:
+            _need(item.status is records.AuditStatus.PASS and item.expected == item.actual,
+                  "SYNTHETIC_TEXT_ORACLE_PASS_REQUIRED")
+            snapshot = replace(item.expected, shared_kernel_evidence=text)
+            digest = records.oracle_b_snapshot_digest(snapshot)
+            mutated = replace(item, expected=snapshot, actual=snapshot,
+                              expected_digest=digest, actual_digest=digest)
+        data = records.encode(mutated)
+        _need(records.decode(data) == mutated, "SYNTHETIC_TEXT_CANONICAL_ROUNDTRIP")
+        values[i] = data
+    return replace(bundle, streams=tuple((stream, tuple(values) if stream == name else rows)
+                                        for stream, rows in bundle.streams))
+
+
+def _text_owned(family, name):
+    if family == "primary":
+        return name not in ("control_maintenance", "oracle_b_audits")
+    if family == "determinism":
+        return name != "repeat_oracle_b_audits"
+    if family == "k_control":
+        return True
+    return name == ("oracle_b_audits" if family == "oracle_primary" else "repeat_oracle_b_audits")
+
+
+def construct_text_family_v2(work, bundle, family, codec_profile_sha256, *, physical_target,
+                             logical_target, max_payload_bytes, envelope,
+                             prior_primary_wire=None, _check=None):
+    """Bounded text-only search with invocation-local exact baseline-frame reuse.
+
+    The caller's existing envelope is required solely by the fresh WB02 validator;
+    it supplies no new time allowance. No files, profile admission or live path
+    are touched. Callback/resource errors propagate, including after success.
+    """
+    _, (_, kind, stream_name, changed_index, multiplicity) = _text_spec(family)
+    _need(type(work) is execution.BoardWork and type(bundle) is execution.WorkerBundle,
+          "SYNTHETIC_TEXT_EXACT_INPUTS_REQUIRED")
+    execution.BoardWork.__post_init__(work)
+    execution.WorkerBundle.__post_init__(bundle)
+    _need(0 <= work.position < 10_000, "SYNTHETIC_TEXT_POSITION_DOMAIN")
+    _need(work.board == synthetic_board_identity(work.board.game_index), "SYNTHETIC_NON_BOARD_IDENTITY_REQUIRED")
+    _need(bundle.kind is kind and kind in operational._kinds(work), "SYNTHETIC_TEXT_WORKER_FAMILY_MISMATCH")
+    _need(type(codec_profile_sha256) is bytes and len(codec_profile_sha256) == 32,
+          "WB02_PROFILE_IDENTITY_REQUIRED")
+    _need(type(max_payload_bytes) is int and 0 < max_payload_bytes <= physical.MAX_PAYLOAD_BYTES,
+          "SYNTHETIC_TEXT_PAYLOAD_CAP")
+    operational._envelope(envelope)
+    _need(envelope.max_payload_bytes == max_payload_bytes, "SYNTHETIC_TEXT_ENVELOPE_CAP_BINDING")
+    readiness.evaluate_family_size(family, physical_target, logical_target, 0, 0)
+    if kind is execution.WorkerKind.PRIMARY:
+        _need(prior_primary_wire is None, "PRIMARY_PRIOR_BINDING")
+    else:
+        _need(type(prior_primary_wire) is bytes, "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+    _text_check(_check)
+    # Fresh context performs semantic/prior admission of this invocation's
+    # baseline; rows never become a caller-supplied authority token.
+    baseline_wire = execution.encode_bundle_v2(bundle, codec_profile_sha256,
+                                               max_payload_bytes=max_payload_bytes)
+    baseline = operational._fresh_wb02_context(baseline_wire, work, kind, codec_profile_sha256,
+                                              envelope, prior_primary_wire=prior_primary_wire)
+    values = dict(bundle.streams).get(stream_name, ())
+    if multiplicity == 4:
+        _need(work.oracle_b_selected, "SYNTHETIC_TEXT_ORACLE_SELECTION_REQUIRED")
+        if physical_target == logical_target == 0:
+            _need(not values, "ZERO_ORACLE_REQUIRES_EXACT_ZERO")
+            trial = TextTrial(0, 0, 0, 0, 0, 0, 0, baseline.logical_bytes,
+                baseline.legacy_bundle_bytes, baseline.physical_frame_bytes,
+                baseline.wb02_wire_bytes, True, None)
+            _text_check(_check)
+            return TextConstructionResult(family, bundle, baseline_wire, trial, (), None, True)
+        _need(len(values) == 2 and tuple(records.decode(v).phase for v in values) == ("D", "E"),
+              "SYNTHETIC_TEXT_TWO_ORACLE_PHASES_REQUIRED")
+    _need(bool(values), "SYNTHETIC_TEXT_SURFACE_REQUIRED")
+    fixed = _mutate_text_bundle(bundle, family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+    l0 = sum(len(data) for name, rows in fixed.streams if _text_owned(family, name) for data in rows)
+    q, _, _ = _text_lengths(logical_target, l0, multiplicity, 0)
+    lsum0 = sum(len(data) for _, rows in fixed.streams for data in rows)
+    legacy0 = execution.legacy_bundle_size(fixed)
+    changed = dict(fixed.streams)[stream_name]
+    indices = tuple(range(len(changed))) if changed_index is None else (changed_index % len(changed),)
+    per_row = 2 if multiplicity == 4 else 1
+    t_max = min((max_payload_bytes - lsum0) // multiplicity,
+                (max_payload_bytes - legacy0) // multiplicity,
+                *((max_payload_bytes - len(changed[i])) // per_row for i in indices))
+    if t_max < q:
+        _text_check(_check)
+        return TextConstructionResult(family, None, None, None, (), "SYNTHETIC_LOGICAL_DOMAIN_EMPTY")
+    h_hi = 3 * (t_max // 4)
+    prior_legacy = None
+    if prior_primary_wire is not None:
+        prior_legacy = execution.encode_bundle(execution.decode_bundle_v2(
+            prior_primary_wire, codec_profile_sha256, max_payload_bytes=max_payload_bytes))
+    best = None
+
+    def evaluate(h, ordinal):
+        nonlocal best
+        _, _, ell = _text_lengths(logical_target, l0, multiplicity, h)
+        # Checks occur outside the ordinary trial-rejection catches, including
+        # callbacks that raise the same ValueError subclasses as validators.
+        text = _text_filler(family, work.position, ell, h, _check=_check)
+        p = logical = lsum = legacy = sunit = wnew = None
+        reason = None
+        candidate = wire = None
+        try:
+            candidate = _mutate_text_bundle(fixed, family, text)
+            logical = sum(len(data) for name, rows in candidate.streams
+                          if _text_owned(family, name) for data in rows)
+            lsum = sum(len(data) for _, rows in candidate.streams for data in rows)
+            legacy = execution.legacy_bundle_size(candidate)
+            if any(len(data) > max_payload_bytes for _, rows in candidate.streams for data in rows):
+                reason = "SYNTHETIC_TEXT_LOGICAL_RECORD_CAP"
+            elif lsum > max_payload_bytes:
+                reason = "SYNTHETIC_TEXT_LSUM_CAP"
+            elif legacy > max_payload_bytes:
+                reason = "SYNTHETIC_TEXT_LLEGACY_CAP"
+            if reason is None:
+                execution.revalidate_bundle(candidate, work, kind, max_payload_bytes=max_payload_bytes)
+                operational._bind_prior_bundle(candidate, prior_legacy, work, kind, envelope)
+        except records.RecordError:
+            reason = "SYNTHETIC_TEXT_CANONICAL_RECORD_FAILURE"
+        except (execution.E2ExecutionError, operational.OperationalError, HarnessError):
+            reason = "SYNTHETIC_TEXT_SEMANTIC_OR_PRIOR_FAILURE"
+        if reason is None:
+            try:
+                rows = []
+                logical_rows = (data for _, group in candidate.streams for data in group)
+                for row, data in zip(baseline.rows, logical_rows):
+                    if data == row.logical_bytes:
+                        rows.append(row)
+                    else:
+                        _need(row.stream_name == stream_name and row.key[2] in indices,
+                              "SYNTHETIC_TEXT_MUTATION_SCOPE")
+                        frame = physical.encode_frame(data, row.key,
+                            physical.context_for(row.stream_name, codec_profile_sha256),
+                            max_payload_bytes=max_payload_bytes)
+                        rows.append(execution.WB02Row(row.stream_name, row.key, data, frame, len(frame)))
+                p = sum(row.frame_length for row in rows if _text_owned(family, row.stream_name))
+                sunit = sum(row.frame_length for row in rows)
+                groups = []
+                cursor = 0
+                for name, values in candidate.streams:
+                    group_rows = rows[cursor:cursor + len(values)]
+                    groups.append((name, len(values), sum(map(len, values)),
+                                   sum(row.frame_length for row in group_rows)))
+                    cursor += len(values)
+                # The shared representation composer owns all metadata fields
+                # and its exact fixed point, even when the wire cannot fit.
+                _, _, wnew = execution._wb02_layout(candidate, codec_profile_sha256,
+                                                    lsum, legacy, groups, sunit)
+                if sunit > max_payload_bytes:
+                    reason = "SYNTHETIC_TEXT_SUNIT_CAP"
+                elif wnew > max_payload_bytes:
+                    reason = "SYNTHETIC_TEXT_WNEW_CAP"
+                else:
+                    wire = execution._compose_bundle_v2_from_rows(candidate, codec_profile_sha256,
+                        tuple(rows), max_payload_bytes=max_payload_bytes)
+                    _need(len(wire) == wnew, "SYNTHETIC_TEXT_WIRE_SIZE_BINDING")
+            except physical.PhysicalError:
+                reason = "SYNTHETIC_TEXT_FRAME_FAILURE"
+            except execution.E2ExecutionError:
+                reason = "SYNTHETIC_TEXT_WIRE_FAILURE"
+        if reason is None:
+            policy = readiness.evaluate_family_size(family, physical_target, logical_target, p, logical)
+            reason = policy.rejection_reason
+        trial = TextTrial(ordinal, h, ell, p, logical,
+            None if p is None else p - physical_target,
+            None if logical is None else logical - logical_target,
+            lsum, legacy, sunit, wnew, reason is None, reason)
+        if trial.eligible and (best is None or (p, logical, h) < (
+                best[0].actual_physical_bytes, best[0].actual_logical_bytes, best[0].h)):
+            best = trial, candidate, wire
+        return trial
+
+    trials, selected = _search_text_trials(h_hi, physical_target, evaluate, _check=_check)
+    if selected is None:
+        return TextConstructionResult(family, None, None, None, trials, _text_terminal_reason(trials))
+    trial, candidate, wire = best
+    _need(trial == selected, "SYNTHETIC_TEXT_SELECTION_BINDING")
+    _text_check(_check)
+    final = operational._fresh_wb02_context(wire, work, kind, codec_profile_sha256, envelope,
+                                           prior_primary_wire=prior_primary_wire)
+    final_p = sum(row.frame_length for row in final.rows if _text_owned(family, row.stream_name))
+    final_l = sum(len(row.logical_bytes) for row in final.rows if _text_owned(family, row.stream_name))
+    _need(final.bundle == candidate and (final_p, final_l, final.logical_bytes, final.legacy_bundle_bytes,
+          final.physical_frame_bytes, final.wb02_wire_bytes) ==
+          (trial.actual_physical_bytes, trial.actual_logical_bytes, trial.lsum, trial.llegacy,
+           trial.sunit, trial.wnew), "SYNTHETIC_TEXT_SELECTED_FACT_BINDING")
+    _text_check(_check)
+    return TextConstructionResult(family, candidate, wire, trial, trials, None)
 
 
 @dataclass(frozen=True, slots=True)
