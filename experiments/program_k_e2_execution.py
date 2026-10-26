@@ -317,6 +317,35 @@ _WB02_KEYS = frozenset(("container", "codec_profile_sha256", "size_basis", "posi
     "frame_bytes", "wire_bytes"))
 
 
+@dataclass(frozen=True, slots=True)
+class WB02Row:
+    """One exact RF02 slice and its decoded logical representation, not authority."""
+
+    stream_name: str
+    key: tuple
+    logical_bytes: bytes
+    frame_bytes: bytes
+    frame_length: int
+
+
+@dataclass(frozen=True, slots=True)
+class WB02DecodeView:
+    """Immutable representation output; each later boundary must decode wire anew.
+
+    This object is neither a qualification result nor transferable permission to
+    persist rows. Its constructor does not replace independent wire validation.
+    """
+
+    wire: bytes
+    bundle: WorkerBundle
+    logical_bytes: int
+    legacy_bytes: int
+    frame_bytes: int
+    wire_bytes: int
+    metadata_bytes: int
+    rows: tuple
+
+
 def legacy_json_string_size(data):
     """Exact V1 JSON-string size for nonempty printable canonical ASCII bytes.
 
@@ -460,6 +489,20 @@ def decode_bundle_v2(data, codec_profile_sha256, *,
     The returned frozen WorkerBundle contains exact immutable logical bytes;
     callers must independently perform their own work/semantic validation.
     """
+    return _decode_bundle_v2(data, codec_profile_sha256,
+        max_payload_bytes=max_payload_bytes, max_metadata_bytes=max_metadata_bytes).bundle
+
+
+def decode_bundle_view_v2(data, codec_profile_sha256, *,
+                          max_payload_bytes=physical.MAX_PAYLOAD_BYTES,
+                          max_metadata_bytes=None):
+    """Decode once and retain exact wire slices, without creating trust authority."""
+    return _decode_bundle_v2(data, codec_profile_sha256,
+        max_payload_bytes=max_payload_bytes, max_metadata_bytes=max_metadata_bytes)
+
+
+def _decode_bundle_v2(data, codec_profile_sha256, *, max_payload_bytes, max_metadata_bytes):
+    """Single WB02 parse shared by logical-only and exact-frame view callers."""
     if max_metadata_bytes is None:
         max_metadata_bytes = max_payload_bytes
     _wb02_limits(codec_profile_sha256, max_payload_bytes, max_metadata_bytes)
@@ -508,19 +551,22 @@ def decode_bundle_v2(data, codec_profile_sha256, *,
             _need(type(header) is dict and set(header) == set(_HEADER_FIELDS)
                   and type(header["diagnostics"]) is list, "IPC_PROJECTION_HEADER_SHAPE")
             headers.append(ProjectionHeader(**dict(header, diagnostics=tuple(header["diagnostics"]))))
-        offset, streams = 16 + metadata_size, []
+        offset, streams, rows = 16 + metadata_size, [], []
         rank = _wb02_rank(kind)
         for name, count, logical_size, group_size in groups:
             group_end, consumed, values = offset + group_size, 0, []
             context = physical.context_for(name, codec_profile_sha256)
             for index in range(count):
                 _need(consumed < logical_size, "WB02_LOGICAL_SIZE_MISMATCH")
+                start = offset
                 frame, offset = physical.decode_frame_from(data, offset, context,
                     expected_key=(node["position"], rank, index),
                     max_payload_bytes=logical_size - consumed)
                 _need(offset <= group_end, "WB02_GROUP_BOUNDARY")
                 consumed += len(frame.logical_bytes)
                 values.append(frame.logical_bytes)
+                rows.append(WB02Row(name, frame.key, frame.logical_bytes,
+                                    data[start:offset], frame.frame_length))
             _need(offset == group_end and consumed == logical_size, "WB02_GROUP_SIZE_MISMATCH")
             streams.append((name, tuple(values)))
         _need(offset == len(data) - 32, "WB02_TRAILING_BYTES")
@@ -529,7 +575,8 @@ def decode_bundle_v2(data, codec_profile_sha256, *,
         bundle = WorkerBundle(node["position"], kind, boards[0], arm_order, tuple(streams),
                               tuple(headers), status, tuple(node["reasons"]))
         _need(legacy_bundle_size(bundle) == node["legacy_bytes"], "WB02_LEGACY_SIZE_MISMATCH")
-        return bundle
+        return WB02DecodeView(data, bundle, node["logical_bytes"], node["legacy_bytes"],
+                              node["frame_bytes"], node["wire_bytes"], metadata_size, tuple(rows))
     except E2ExecutionError:
         raise
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):

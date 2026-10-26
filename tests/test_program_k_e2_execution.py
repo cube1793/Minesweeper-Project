@@ -1325,5 +1325,147 @@ class WB02PrimitiveTests(unittest.TestCase):
             self.assertEqual(json.loads(data)["version"], 1)
 
 
+class WB02DecodeViewTests(unittest.TestCase):
+    """Exact representation facts only; no admission, profile capture or runner."""
+
+    profile = WB02PrimitiveTests.profile
+    _bundle = staticmethod(WB02PrimitiveTests._bundle)
+    _parts = staticmethod(WB02PrimitiveTests._parts)
+    _rewrite = WB02PrimitiveTests._rewrite
+
+    def test_view_retains_exact_wire_rows_order_sizes_and_logical_bundle(self):
+        from experiments import program_k_e2_physical as physical
+        for kind, rank in ((execution.WorkerKind.PRIMARY, 0), (execution.WorkerKind.DETERMINISM, 1),
+                           (execution.WorkerKind.K_CONTROL, 2)):
+            bundle = self._bundle(position=identity.UINT64_MAX, kind=kind)
+            bundle = replace(bundle, streams=tuple(
+                (name, values * 3 if name == "runtime" else values) for name, values in bundle.streams))
+            wire = execution.encode_bundle_v2(bundle, self.profile)
+            node, frames = self._parts(wire)
+            view = execution.decode_bundle_view_v2(wire, self.profile)
+            with self.subTest(kind=kind):
+                self.assertIs(type(view), execution.WB02DecodeView)
+                self.assertIs(view.wire, wire)
+                self.assertIs(type(view.bundle), execution.WorkerBundle)
+                self.assertEqual(view.bundle, bundle)
+                self.assertEqual(execution.decode_bundle_v2(wire, self.profile), view.bundle)
+                self.assertEqual((view.logical_bytes, view.legacy_bytes, view.frame_bytes, view.wire_bytes),
+                                 tuple(node[name] for name in ("logical_bytes", "legacy_bytes", "frame_bytes", "wire_bytes")))
+                self.assertEqual(view.metadata_bytes, int.from_bytes(wire[8:16], "big"))
+                self.assertEqual(view.wire_bytes, 48 + view.metadata_bytes + view.frame_bytes)
+                self.assertEqual(view.legacy_bytes, len(execution.encode_bundle(bundle)))
+                expected = [(name, (bundle.work_position, rank, index), logical)
+                            for name, values in bundle.streams for index, logical in enumerate(values)]
+                self.assertEqual([(row.stream_name, row.key, row.logical_bytes) for row in view.rows], expected)
+                self.assertEqual(len(view.rows), sum(group[1] for group in node["streams"]))
+                self.assertEqual(sum(len(row.logical_bytes) for row in view.rows), view.logical_bytes)
+                self.assertEqual(sum(row.frame_length for row in view.rows), view.frame_bytes)
+                self.assertEqual(b"".join(row.frame_bytes for row in view.rows), frames)
+                offset = 16 + view.metadata_bytes
+                for row in view.rows:
+                    decoded, end = physical.decode_frame_from(wire, offset,
+                        physical.context_for(row.stream_name, self.profile), expected_key=row.key)
+                    self.assertEqual(row.frame_bytes, wire[offset:end])
+                    self.assertEqual(row.frame_length, end - offset)
+                    self.assertEqual(row.frame_length, len(row.frame_bytes))
+                    self.assertEqual(row.logical_bytes, decoded.logical_bytes)
+                    self.assertTrue(type(row.frame_bytes) is bytes and type(row.logical_bytes) is bytes)
+                    offset = end
+                self.assertEqual(offset, len(wire) - 32)
+
+    def test_rich_decode_parses_metadata_and_each_frame_once_without_reencoding(self):
+        from experiments import program_k_e2_physical as physical
+        bundle = self._bundle()
+        wire = execution.encode_bundle_v2(bundle, self.profile)
+        metadata = wire[16:16 + int.from_bytes(wire[8:16], "big")].decode("ascii")
+        real_loads = json.loads
+        metadata_calls = []
+        def observe_loads(data, *args, **kwargs):
+            if data == metadata:
+                metadata_calls.append(data)
+            return real_loads(data, *args, **kwargs)
+        with patch.object(execution.json, "loads", side_effect=observe_loads), \
+                patch.object(physical, "decode_frame_from", wraps=physical.decode_frame_from) as decoded, \
+                patch.object(physical, "encode_frame", side_effect=AssertionError("RF02 re-encoding forbidden")), \
+                patch.object(execution, "decode_bundle_v2", side_effect=AssertionError("Logical-first double parse")):
+            view = execution.decode_bundle_view_v2(wire, self.profile)
+        self.assertEqual(metadata_calls, [metadata])
+        self.assertEqual(decoded.call_count, len(view.rows))
+        self.assertTrue(all(call.args[0] is wire for call in decoded.call_args_list))
+        self.assertEqual(view.bundle, bundle)
+
+    def test_both_entry_points_delegate_to_one_shared_decoder(self):
+        bundle = self._bundle()
+        wire = execution.encode_bundle_v2(bundle, self.profile)
+        decoder = execution._decode_bundle_v2
+        for function in (execution.decode_bundle_v2, execution.decode_bundle_view_v2):
+            with self.subTest(function=function.__name__), \
+                    patch.object(execution, "_decode_bundle_v2", wraps=decoder) as shared:
+                result = function(wire, self.profile, max_payload_bytes=8192, max_metadata_bytes=4096)
+            shared.assert_called_once_with(wire, self.profile, max_payload_bytes=8192, max_metadata_bytes=4096)
+            self.assertEqual(result if type(result) is execution.WorkerBundle else result.bundle, bundle)
+        self.assertEqual(tuple(inspect.signature(execution.decode_bundle_v2).parameters),
+                         ("data", "codec_profile_sha256", "max_payload_bytes", "max_metadata_bytes"))
+
+    def test_rich_view_and_rows_are_frozen_representation_not_authority(self):
+        wire = execution.encode_bundle_v2(self._bundle(), self.profile)
+        view = execution.decode_bundle_view_v2(wire, self.profile)
+        self.assertIs(type(view.rows), tuple)
+        self.assertFalse(hasattr(view, "__dict__"))
+        self.assertFalse(hasattr(view.rows[0], "__dict__"))
+        for value in (view, view.rows[0]):
+            self.assertFalse({"validated", "trusted", "admitted", "qualified", "admission"}.intersection(dir(value)))
+        with self.assertRaises(FrozenInstanceError):
+            view.wire = b"forged"
+        with self.assertRaises(FrozenInstanceError):
+            view.rows[0].frame_bytes = b"forged"
+        for candidate in (view, replace(view, wire=b"forged"), view.bundle, True, sha256(wire).digest()):
+            with self.subTest(candidate=type(candidate)), self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_view_v2(candidate, self.profile)
+        with self.assertRaises(TypeError):
+            execution.decode_bundle_view_v2(wire, self.profile, validated=True)
+
+    def test_rich_decode_rejects_mutability_profile_and_bounds_before_parsing(self):
+        wire = execution.encode_bundle_v2(self._bundle(), self.profile)
+        with patch.object(execution.json, "loads", side_effect=AssertionError("Invalid input reached metadata parser")):
+            for candidate in (bytearray(wire), memoryview(wire)):
+                with self.assertRaises(execution.E2ExecutionError):
+                    execution.decode_bundle_view_v2(candidate, self.profile)
+            for profile in (bytearray(self.profile), bytes(31), "a" * 64, True):
+                with self.assertRaises(execution.E2ExecutionError):
+                    execution.decode_bundle_view_v2(wire, profile)
+            for limits in ({"max_payload_bytes": True}, {"max_payload_bytes": len(wire) - 1},
+                           {"max_metadata_bytes": 1}, {"max_metadata_bytes": 0}):
+                with self.assertRaises(execution.E2ExecutionError):
+                    execution.decode_bundle_view_v2(wire, self.profile, **limits)
+        with self.assertRaises(execution.E2ExecutionError):
+            execution.decode_bundle_view_v2(wire, b"\x00" * 32)
+
+    def test_rich_decode_fails_closed_for_sha_metadata_crc_truncation_and_group_sizes(self):
+        wire = execution.encode_bundle_v2(self._bundle(), self.profile)
+        metadata_size = int.from_bytes(wire[8:16], "big")
+        candidates = [("SHA", wire[:-1] + bytes((wire[-1] ^ 1,))), ("truncation", wire[:-33])]
+        bad_metadata = bytearray(wire[:-32])
+        bad_metadata[16] = ord("!")
+        candidates.append(("metadata", bytes(bad_metadata) + sha256(bad_metadata).digest()))
+        node, _ = self._parts(wire)
+        bad_crc = bytearray(wire[:-32])
+        bad_crc[16 + metadata_size + node["streams"][0][3] - 1] ^= 1
+        candidates.append(("CRC with correct outer SHA", bytes(bad_crc) + sha256(bad_crc).digest()))
+        def shift_group_sizes(node):
+            node["streams"][0][3] -= 1
+            node["streams"][1][3] += 1
+        candidates.append(("group boundary", self._rewrite(wire, shift_group_sizes)))
+        truncated_body = wire[:-33]  # Remove one physical CRC byte before re-signing the container.
+        def shorten_last_frame(node):
+            node["frame_bytes"] -= 1
+            next(group for group in reversed(node["streams"]) if group[1])[3] -= 1
+        candidates.append(("frame truncation with corrected sizes and SHA", self._rewrite(
+            truncated_body + sha256(truncated_body).digest(), shorten_last_frame)))
+        for label, candidate in candidates:
+            with self.subTest(corruption=label), self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_view_v2(candidate, self.profile)
+
+
 if __name__ == "__main__":
     unittest.main()

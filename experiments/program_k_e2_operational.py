@@ -469,6 +469,139 @@ def _missing(work, kind, reason):
                                        reason, 0, None), None, ())
 
 
+@dataclass(frozen=True, slots=True)
+class _WB02StreamObservation:
+    stream_name: str
+    record_count: int
+    logical_bytes: int
+    physical_frame_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _WB02Context:
+    """Invocation-local observations, never authority accepted by another call."""
+
+    work: execution.BoardWork
+    kind: execution.WorkerKind
+    codec_profile_sha256: bytes
+    envelope: OperatingEnvelope
+    wire: bytes
+    bundle: execution.WorkerBundle
+    rows: tuple
+    logical_bytes: int
+    physical_frame_bytes: int
+    legacy_bundle_bytes: int
+    wb02_wire_bytes: int
+    stream_observations: tuple
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("WB02 boundary contexts are invocation-local, not serializable.")
+
+
+def _fresh_wb02_context(wire, work, kind, codec_profile_sha256, envelope, *, prior_primary_wire=None):
+    """Independently validate immutable WB02 bytes for one BoardWork boundary.
+
+    This pre-integration helper performs no I/O and has no live V1 callers. A
+    later boundary must call it again from wire bytes, not from a prior context,
+    decode view, bundle, digest or caller assertion. Supplied profiles remain
+    unqualified; sizes below are observations, not admission policy.
+    """
+    try:
+        _need(type(wire) is bytes, "WB02_IMMUTABLE_WIRE_REQUIRED")
+        _need(type(work) is execution.BoardWork, "WB02_EXACT_BOARD_WORK_REQUIRED")
+        execution.BoardWork.__post_init__(work)
+        _need(type(kind) is execution.WorkerKind, "WB02_EXACT_WORKER_KIND_REQUIRED")
+        _need(type(codec_profile_sha256) is bytes and len(codec_profile_sha256) == 32,
+              "WB02_PROFILE_IDENTITY_REQUIRED")
+        _envelope(envelope)
+        if kind is execution.WorkerKind.PRIMARY:
+            _need(prior_primary_wire is None, "PRIMARY_PRIOR_BINDING")
+        else:
+            _need(type(prior_primary_wire) is bytes, "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+        limit = envelope.max_payload_bytes
+        view = execution.decode_bundle_view_v2(wire, codec_profile_sha256, max_payload_bytes=limit)
+        _need(type(view) is execution.WB02DecodeView and view.wire is wire,
+              "WB02_DECODE_WIRE_BINDING")
+        bundle = view.bundle
+        _need(type(bundle) is execution.WorkerBundle and bundle.work_position == work.position
+              and bundle.kind is kind, "WB02_WORK_KIND_BINDING")
+        execution.revalidate_bundle(bundle, work, kind, max_payload_bytes=limit)
+        for size in (view.logical_bytes, view.legacy_bytes, view.frame_bytes, view.wire_bytes):
+            _integer(size, 0, limit)
+        _integer(view.metadata_bytes, 1, limit)
+        _need(view.wire_bytes == len(wire)
+              and view.wire_bytes == 48 + view.metadata_bytes + view.frame_bytes,
+              "WB02_WIRE_SIZE_BINDING")
+        _need(view.legacy_bytes == execution.legacy_bundle_size(bundle), "WB02_LEGACY_SIZE_BINDING")
+        _need(type(view.rows) is tuple, "WB02_IMMUTABLE_ROWS_REQUIRED")
+        observations = []
+        row_index = logical_total = physical_total = 0
+        offset = 16 + view.metadata_bytes
+        wire_view = memoryview(wire)
+        rank = _kind_rank(kind)
+        for name, values in bundle.streams:
+            logical_size = physical_size = 0
+            for index, logical in enumerate(values):
+                _need(row_index < len(view.rows), "WB02_ROW_COUNT_BINDING")
+                row = view.rows[row_index]
+                _need(type(row) is execution.WB02Row and type(row.stream_name) is str
+                      and row.stream_name == name, "WB02_ROW_STREAM_BINDING")
+                _need(type(row.key) is tuple and len(row.key) == 3, "WB02_ROW_KEY_BINDING")
+                for component in row.key:
+                    _integer(component)
+                _need(row.key == (work.position, rank, index), "WB02_ROW_KEY_BINDING")
+                # The freshly invoked decoder and semantic validator own family
+                # validation. Bind their canonical logical values to this row.
+                _need(type(row.logical_bytes) is bytes and row.logical_bytes == logical,
+                      "WB02_ROW_LOGICAL_BINDING")
+                _integer(row.frame_length, 1, limit)
+                end = offset + row.frame_length
+                _need(type(row.frame_bytes) is bytes and len(row.frame_bytes) == row.frame_length
+                      and end <= len(wire) - 32 and wire_view[offset:end] == row.frame_bytes,
+                      "WB02_ROW_PHYSICAL_BINDING")
+                logical_size += len(logical)
+                physical_size += row.frame_length
+                row_index += 1
+                offset = end
+            observations.append(_WB02StreamObservation(name, len(values), logical_size, physical_size))
+            logical_total += logical_size
+            physical_total += physical_size
+        _need(row_index == len(view.rows) and offset == len(wire) - 32, "WB02_ROW_COVERAGE_BINDING")
+        _need(logical_total == view.logical_bytes and physical_total == view.frame_bytes,
+              "WB02_ROW_TOTALS_BINDING")
+        context = _WB02Context(work, kind, codec_profile_sha256, envelope, wire, bundle, view.rows,
+                               logical_total, physical_total, view.legacy_bytes, view.wire_bytes,
+                               tuple(observations))
+
+        def _bind_prior_wb02():
+            # Only this invocation's freshly constructed candidate is captured;
+            # no callable API accepts a caller-created context as proof.
+            if kind is execution.WorkerKind.PRIMARY:
+                return
+            prior = _fresh_wb02_context(prior_primary_wire, work, execution.WorkerKind.PRIMARY,
+                                        codec_profile_sha256, envelope)
+            actual, expected = dict(context.bundle.streams), dict(prior.bundle.streams)
+            if kind is execution.WorkerKind.DETERMINISM:
+                names = tuple(name for name in expected if name.startswith("control_") or name.startswith("kp0_"))
+                _need(all(actual.get(name) == expected[name] for name in names), "REPEAT_FIRST_PREMISE_BINDING")
+                _need(context.bundle.projection_headers[:len(prior.bundle.projection_headers)]
+                      == prior.bundle.projection_headers, "REPEAT_FIRST_HEADER_BINDING")
+                _need(prior.bundle.status is not records.AuditStatus.FAIL
+                      or context.bundle.status is records.AuditStatus.FAIL, "FIRST_FAILURE_CANNOT_BE_UPGRADED")
+                _need(prior.bundle.status is not records.AuditStatus.INCOMPLETE
+                      or context.bundle.status is not records.AuditStatus.PASS, "FIRST_INCOMPLETE_CANNOT_BE_UPGRADED")
+            else:
+                _need(actual.get("control_maintenance") == expected.get("control_maintenance"),
+                      "KCONTROL_REFERENCE_BINDING")
+
+        _bind_prior_wb02()
+        return context
+    except OperationalError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        raise OperationalError("WB02_BOUNDARY_VALIDATION_FAILED") from None
+
+
 def _bind_prior_bundle(candidate, first_bytes, work, kind, envelope):
     """Bind returned repeat/reference premises to the earlier producer exactly."""
     if kind is execution.WorkerKind.PRIMARY:

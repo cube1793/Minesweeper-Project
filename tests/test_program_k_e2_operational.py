@@ -6,11 +6,14 @@ mocked only for deliberately minimal transport fixtures.
 """
 
 import ast
+import builtins
+from contextlib import ExitStack
 from dataclasses import FrozenInstanceError, fields, replace
 import inspect
 import json
 import os
 from pathlib import Path
+import pickle
 import tempfile
 import threading
 import time
@@ -1761,6 +1764,368 @@ class OperationalPurityTests(unittest.TestCase):
                 self.assertNotIn(name, {"settrace", "setprofile", "generate_board", "run_k_p0", "run_k_control",
                                         "execute_e0", "git", "connect", "analyze_primary", "build_report"})
         self.assertNotIn("RESEARCH_PASS", inspect.getsource(op))
+
+
+_WB02_TEST_PROFILE = bytes.fromhex("36" * 32)  # Synthetic supplied identity; never qualified.
+
+
+def _wb02_context_fixture():
+    """One literal initial win per arm, assembled without engines, solvers or I/O."""
+    board = records.BoardIdentity(700_001, "wb02-literal-one-cell", 1, 1, 0, (0, 0),
+                                  "supplied-literal", "supplied-unit-spec")
+    work = execution.make_work_plan((board,), protocol_seed=b"\x27" * 32, run_id="wb02-context-unit")[0]
+    physical = records.PhysicalInputRecord(0, records.Action.OPEN, (0, 0), (0, 0),
+                                            100_000, 100_000, records.Status.WON)
+    public = records.PublicEffectRecord(0, (records.PublicCellChange((0, 0), "HIDDEN", "CLUE_0"),),
+                                         records.Status.PLAYING, records.Status.WON)
+    terminal = records.TerminalEffectRecord(0, (), records.Status.WON)
+    timings = (("v1_plan_position_ns", None), ("k_analysis_planning_ns", None),
+               ("k_execution_validation_ns", None), ("v1_execution_validation_ns", 2),
+               ("shadow_ns", None), ("evidence_ns", 4), ("comparison_ns", None),
+               ("oracle_ns", None), ("evaluator_ns", None))
+
+    def projection(role):
+        kind = records.Arm.CONTROL if role.endswith("control") else records.Arm.K_P0
+        arm = execution._arm(work, kind, repeat=role.startswith("repeat_"))
+        decision = records.ActionDecisionRecord(arm, 0,
+            "CONTROL_INITIAL_OPEN" if kind is records.Arm.CONTROL else "POLICY_INITIAL_OPEN",
+            "INITIAL", records.Action.OPEN, (0, 0), (), None, None, (), (), (), ())
+        return execution.game.GameProjection(arm, records.Outcome.WIN, (physical,), (public,), (terminal,),
+                                             (), (), (), (), (decision,), 100_000, 0, True, True, True)
+
+    projections = {role: projection(role) for role in ("control", "kp0", "repeat_control", "repeat_kp0")}
+
+    def maintenance(arm):
+        control = arm.arm is records.Arm.CONTROL
+        shadow = None if control else records.KControlShadowState(True, (), None, None, None, False, True)
+        return records.KControlMaintenanceRecord(arm, physical, ((-2,),), public, terminal, None, None,
+            timings, (), (), shadow, None, shadow, "REFERENCE" if control else "NOT_REACHED")
+
+    def pair_streams(roles):
+        streams, headers = {}, []
+        for role in roles:
+            header, values = execution._projection_streams(projections[role], role)
+            headers.append(header)
+            streams.update(values)
+        return streams, tuple(headers)
+
+    def children(streams, role, prefix):
+        arm = projections[role].arm
+        streams[prefix + "certificate_audits"] = ()
+        streams[prefix + "oracle_b_audits"] = ()
+        streams[prefix + "oracle_b_coverage"] = (records.encode(records.OracleBCoverageRecord(
+            arm, work.oracle_b_selected, ())),)
+        streams[prefix + "evaluators"] = tuple(records.encode(records.EvaluatorRecord(
+            arm, category, (), records.EvaluationStatus.PASS, "SYNTHETIC_INITIAL_ONLY", ""))
+            for category in records.AssertionCategory)
+
+    def bundle(kind, streams, headers):
+        streams["boards"] = (records.encode(board),)
+        return execution.WorkerBundle(work.position, kind, records.encode(board), work.arm_order,
+            tuple((name, streams[name]) for name in execution.STREAM_NAMES if name in streams),
+            headers, records.AuditStatus.PASS, ())
+
+    primary_streams, primary_headers = pair_streams(("control", "kp0"))
+    reference = records.encode(maintenance(projections["control"].arm))
+    primary_streams["control_maintenance"] = (reference,)
+    primary_streams["pairs"] = (records.encode(execution.game.pair_projections(
+        projections["control"], projections["kp0"]).pair),)
+    children(primary_streams, "kp0", "")
+    primary = bundle(execution.WorkerKind.PRIMARY, primary_streams, primary_headers)
+
+    repeated_streams, repeated_headers = pair_streams(("control", "kp0", "repeat_control", "repeat_kp0"))
+    repeated_streams["control_maintenance"] = (reference,)
+    repeated_streams["repeat_control_maintenance"] = (records.encode(maintenance(projections["repeat_control"].arm)),)
+    children(repeated_streams, "repeat_kp0", "repeat_")
+    repeated_streams["control_determinism"] = (records.encode(execution._control_determinism(
+        projections["control"], projections["repeat_control"], repeated_streams["control_maintenance"],
+        repeated_streams["repeat_control_maintenance"])),)
+    repeated_streams["kp0_determinism"] = (records.encode(execution.audit.determinism_record(
+        execution.audit.compare_determinism(projections["kp0"], projections["repeat_kp0"], selected=True))),)
+    repeated = bundle(execution.WorkerKind.DETERMINISM, repeated_streams, repeated_headers)
+
+    k_arm = execution._arm(work, records.Arm.K_CONTROL)
+    kcontrol = bundle(execution.WorkerKind.K_CONTROL, {
+        "control_maintenance": (reference,), "kcontrol_arms": (records.encode(k_arm),),
+        "kcontrol_maintenance": (records.encode(maintenance(k_arm)),)}, ())
+    return work, (primary, repeated, kcontrol)
+
+
+class FreshWB02ContextTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.work, cls.bundles = _wb02_context_fixture()
+        cls.envelope = _envelope()
+        cls.wires = tuple(execution.encode_bundle_v2(bundle, _WB02_TEST_PROFILE,
+            max_payload_bytes=cls.envelope.max_payload_bytes) for bundle in cls.bundles)
+
+    def context(self, index=0, **changes):
+        arguments = dict(wire=self.wires[index], work=self.work, kind=self.bundles[index].kind,
+                         codec_profile_sha256=_WB02_TEST_PROFILE, envelope=self.envelope,
+                         prior_primary_wire=None if index == 0 else self.wires[0])
+        arguments.update(changes)
+        return op._fresh_wb02_context(**arguments)
+
+    def wire(self, bundle, profile=_WB02_TEST_PROFILE):
+        return execution.encode_bundle_v2(bundle, profile, max_payload_bytes=self.envelope.max_payload_bytes)
+
+    def test_exact_primary_and_downstream_wire_pass_real_semantic_validation(self):
+        accepted = execution.revalidate_bundle
+        for index, expected in enumerate(self.bundles):
+            with self.subTest(kind=expected.kind), patch.object(execution, "revalidate_bundle", wraps=accepted) as checked:
+                context = self.context(index)
+            self.assertEqual(context.bundle, expected)
+            self.assertEqual(context.work, self.work)
+            self.assertIs(context.kind, expected.kind)
+            self.assertEqual(context.codec_profile_sha256, _WB02_TEST_PROFILE)
+            self.assertIs(context.wire, self.wires[index])
+            self.assertEqual(checked.call_args_list[0].args, (context.bundle, self.work, expected.kind))
+            self.assertEqual(checked.call_args_list[0].kwargs, {"max_payload_bytes": self.envelope.max_payload_bytes})
+            self.assertEqual(checked.call_count, 1 if index == 0 else 2)
+
+    def test_context_reports_exact_unit_and_all_stream_observations_including_empty_groups(self):
+        for index, bundle in enumerate(self.bundles):
+            with self.subTest(kind=bundle.kind):
+                context = self.context(index)
+                logical = sum(len(data) for _, values in bundle.streams for data in values)
+                frames = sum(len(row.frame_bytes) for row in context.rows)
+                self.assertEqual(context.logical_bytes, logical)
+                self.assertEqual(context.physical_frame_bytes, frames)
+                self.assertEqual(context.legacy_bundle_bytes, len(execution.encode_bundle(bundle)))
+                self.assertEqual(context.wb02_wire_bytes, len(self.wires[index]))
+                self.assertEqual(tuple(value.stream_name for value in context.stream_observations),
+                                 tuple(name for name, _ in bundle.streams))
+                expected_rows = [(name, (self.work.position, index, ordinal), data)
+                                 for name, values in bundle.streams for ordinal, data in enumerate(values)]
+                self.assertEqual([(row.stream_name, row.key, row.logical_bytes) for row in context.rows], expected_rows)
+                for observation, (name, values) in zip(context.stream_observations, bundle.streams):
+                    rows = tuple(row for row in context.rows if row.stream_name == name)
+                    self.assertEqual((observation.record_count, observation.logical_bytes, observation.physical_frame_bytes),
+                                     (len(values), sum(map(len, values)), sum(len(row.frame_bytes) for row in rows)))
+                self.assertTrue(any(value.record_count == 0 and value.logical_bytes == value.physical_frame_bytes == 0
+                                    for value in context.stream_observations) if index < 2 else True)
+                for row in context.rows:
+                    decoded = execution.physical.decode_frame(row.frame_bytes,
+                        execution.physical.context_for(row.stream_name, _WB02_TEST_PROFILE))
+                    self.assertEqual((decoded.key, decoded.logical_bytes, decoded.frame_length),
+                                     (row.key, row.logical_bytes, row.frame_length))
+
+    def test_each_boundary_is_fresh_and_neither_context_nor_view_is_wire_authority(self):
+        accepted = execution.decode_bundle_view_v2
+        with patch.object(execution, "decode_bundle_view_v2", wraps=accepted) as decoded:
+            first, second = self.context(), self.context()
+        self.assertIsNot(first, second)
+        self.assertIsNot(first.bundle, second.bundle)
+        self.assertIsNot(first.rows, second.rows)
+        self.assertEqual(decoded.call_count, 2)
+        self.assertTrue(all(call.args[0] is self.wires[0] for call in decoded.call_args_list))
+        view = accepted(self.wires[0], _WB02_TEST_PROFILE)
+        class BytesSubclass(bytes):
+            pass
+        for value in (first, second, view, self.bundles[0], bytearray(self.wires[0]), memoryview(self.wires[0]),
+                      BytesSubclass(self.wires[0]), True, "36" * 32, b"\0" * 32):
+            with self.subTest(input_type=type(value)), self.assertRaises(op.OperationalError):
+                self.context(wire=value)
+
+    def test_private_context_is_immutable_unserializable_and_has_no_authority_flag(self):
+        context = self.context()
+        self.assertTrue(type(context).__name__.startswith("_"))
+        self.assertFalse(hasattr(context, "__dict__"))
+        for value in (context,) + context.stream_observations:
+            self.assertTrue({"validated", "trusted", "admitted"}.isdisjoint(dir(value)))
+        with self.assertRaises(FrozenInstanceError):
+            context.logical_bytes = 0
+        with self.assertRaises(TypeError):
+            pickle.dumps(context)
+        names = inspect.signature(op._fresh_wb02_context).parameters
+        self.assertTrue({"validated", "trusted", "admitted", "token", "context", "bundle", "view"}.isdisjoint(names))
+        with self.assertRaises(TypeError):
+            self.context(validated=True)
+
+    def test_wrong_work_position_board_run_kind_and_exact_types_fail_closed(self):
+        bad_works = (replace(self.work, position=self.work.position + 1),
+                     replace(self.work, board=replace(self.work.board, fingerprint="different-fingerprint")),
+                     replace(self.work, run_id="other-run"), None,
+                     SimpleNamespace(**{field.name: getattr(self.work, field.name) for field in fields(self.work)}))
+        for work in bad_works:
+            with self.subTest(work=work), self.assertRaises(op.OperationalError):
+                self.context(work=work)
+        for kind in (execution.WorkerKind.DETERMINISM, execution.WorkerKind.K_CONTROL):
+            with self.subTest(kind=kind), self.assertRaisesRegex(op.OperationalError, "^WB02_WORK_KIND_BINDING$"):
+                self.context(kind=kind, prior_primary_wire=self.wires[0])
+        for kind in ("PRIMARY", 0, True, None):
+            with self.subTest(kind=kind), self.assertRaises(op.OperationalError):
+                self.context(kind=kind)
+        unselected = replace(self.work, determinism_selected=False)
+        with self.assertRaises(op.OperationalError):
+            self.context(1, work=unselected)
+
+    def test_wrong_profile_type_length_and_current_binding_fail_closed(self):
+        class BytesSubclass(bytes):
+            pass
+        for profile in (b"\x37" * 32, b"", b"x" * 31, b"x" * 33, bytearray(_WB02_TEST_PROFILE),
+                        memoryview(_WB02_TEST_PROFILE), BytesSubclass(_WB02_TEST_PROFILE), True, "36" * 32):
+            with self.subTest(profile_type=type(profile)), self.assertRaises(op.OperationalError):
+                self.context(codec_profile_sha256=profile)
+
+    def test_envelope_bound_and_exact_envelope_type_are_enforced(self):
+        for envelope in (_envelope(max_payload_bytes=len(self.wires[0]) - 1), None,
+                         SimpleNamespace(max_payload_bytes=self.envelope.max_payload_bytes)):
+            with self.subTest(envelope=envelope), self.assertRaises(op.OperationalError):
+                self.context(envelope=envelope)
+        corrupted = replace(self.envelope)
+        object.__setattr__(corrupted, "max_payload_bytes", True)
+        with self.assertRaises(op.OperationalError):
+            self.context(envelope=corrupted)
+
+    def test_semantically_invalid_canonical_wire_is_not_accepted_by_representation_alone(self):
+        bundle = self.bundles[0]
+        arms = dict(bundle.streams)["control_arms"]
+        wrong_arm = replace(records.decode(arms[0]), run_id="different-run")
+        corrupted = replace(bundle, streams=tuple((name, (records.encode(wrong_arm),) if name == "control_arms" else values)
+                                                for name, values in bundle.streams))
+        wire = self.wire(corrupted)
+        self.assertEqual(execution.decode_bundle_view_v2(wire, _WB02_TEST_PROFILE).bundle, corrupted)
+        with self.assertRaises(op.OperationalError):
+            self.context(wire=wire)
+
+    def test_corruption_and_truncation_stay_owned_by_operational_boundary(self):
+        corrupt = bytearray(self.wires[0])
+        corrupt[-1] ^= 1
+        for wire in (bytes(corrupt), self.wires[0][:-1], b"not-wb02"):
+            with self.subTest(size=len(wire)), self.assertRaises(op.OperationalError):
+                self.context(wire=wire)
+
+    def test_fresh_lower_result_rows_and_sizes_are_checked_for_internal_consistency(self):
+        view = execution.decode_bundle_view_v2(self.wires[0], _WB02_TEST_PROFILE)
+        altered = [replace(view, **{name: getattr(view, name) + 1})
+                   for name in ("logical_bytes", "legacy_bytes", "frame_bytes", "wire_bytes", "metadata_bytes")]
+        altered += [replace(view, rows=view.rows[:-1]), replace(view, rows=view.rows[::-1]),
+                    replace(view, rows=(replace(view.rows[0], key=(0, 2, 0)),) + view.rows[1:]),
+                    replace(view, rows=(replace(view.rows[0], logical_bytes=records.encode(self.work.board) + b" "),) + view.rows[1:]),
+                    replace(view, rows=(replace(view.rows[0], frame_length=view.rows[0].frame_length + 1),) + view.rows[1:])]
+        for changed in altered:
+            with self.subTest(view=changed), patch.object(execution, "decode_bundle_view_v2", return_value=changed):
+                with self.assertRaises(op.OperationalError):
+                    self.context()
+
+    def test_primary_forbids_prior_and_downstream_requires_exact_prior_wire(self):
+        with self.assertRaises(op.OperationalError):
+            self.context(prior_primary_wire=self.wires[0])
+        prior_context = self.context()
+        prior_view = execution.decode_bundle_view_v2(self.wires[0], _WB02_TEST_PROFILE)
+        for index in (1, 2):
+            for prior in (None, bytearray(self.wires[0]), memoryview(self.wires[0]), prior_context, prior_view,
+                          self.bundles[0], self.wires[index]):
+                with self.subTest(kind=self.bundles[index].kind, prior_type=type(prior)), self.assertRaises(op.OperationalError):
+                    self.context(index, prior_primary_wire=prior)
+
+    def test_prior_is_freshly_decoded_and_semantically_validated_from_bytes(self):
+        decode = execution.decode_bundle_view_v2
+        validate = execution.revalidate_bundle
+        for index in (1, 2):
+            with self.subTest(kind=self.bundles[index].kind), \
+                    patch.object(execution, "decode_bundle_view_v2", wraps=decode) as decoded, \
+                    patch.object(execution, "revalidate_bundle", wraps=validate) as checked:
+                context = self.context(index)
+            self.assertEqual([call.args[0] for call in decoded.call_args_list], [self.wires[index], self.wires[0]])
+            self.assertEqual([call.args[2] for call in checked.call_args_list],
+                             [context.kind, execution.WorkerKind.PRIMARY])
+
+    def test_copied_logical_premises_pass_while_rank_bound_physical_frames_differ(self):
+        first = self.context()
+        first_rows = {(row.stream_name, row.key[-1]): row for row in first.rows}
+        for index in (1, 2):
+            candidate = self.context(index)
+            copied_names = ({name for name, _ in first.bundle.streams if name.startswith(("control_", "kp0_"))}
+                            if index == 1 else {"control_maintenance"})
+            copied = tuple(row for row in candidate.rows if row.stream_name in copied_names)
+            self.assertTrue(copied)
+            for row in copied:
+                prior = first_rows[(row.stream_name, row.key[-1])]
+                self.assertEqual(row.logical_bytes, prior.logical_bytes)
+                self.assertNotEqual(row.key, prior.key)
+                self.assertNotEqual(row.frame_bytes, prior.frame_bytes)
+
+    def test_wrong_prior_logical_maintenance_fails_even_when_both_bundles_validate(self):
+        first = self.bundles[0]
+        reference = records.decode(dict(first.streams)["control_maintenance"][0])
+        changed = replace(reference, timings=tuple((name, 9 if name == "evidence_ns" else value)
+                                                   for name, value in reference.timings))
+        prior = replace(first, streams=tuple((name, (records.encode(changed),) if name == "control_maintenance" else values)
+                                            for name, values in first.streams))
+        execution.revalidate_bundle(prior, self.work, execution.WorkerKind.PRIMARY,
+                                    max_payload_bytes=self.envelope.max_payload_bytes)
+        for index in (1, 2):
+            with self.subTest(kind=self.bundles[index].kind), self.assertRaises(op.OperationalError):
+                self.context(index, prior_primary_wire=self.wire(prior))
+
+    def test_prior_header_prefix_and_profile_binding_fail_closed(self):
+        first = self.bundles[0]
+        changed = replace(first, projection_headers=(replace(first.projection_headers[0], diagnostics=("different-header",)),)
+                                                    + first.projection_headers[1:])
+        execution.revalidate_bundle(changed, self.work, execution.WorkerKind.PRIMARY,
+                                    max_payload_bytes=self.envelope.max_payload_bytes)
+        with self.assertRaises(op.OperationalError):
+            self.context(1, prior_primary_wire=self.wire(changed))
+        for index in (1, 2):
+            with self.subTest(kind=self.bundles[index].kind), self.assertRaises(op.OperationalError):
+                self.context(index, prior_primary_wire=self.wire(first, b"\x37" * 32))
+
+    def test_prior_fail_and_incomplete_cannot_be_upgraded_but_retained_status_passes(self):
+        for status, disallowed in ((records.AuditStatus.FAIL, (records.AuditStatus.PASS, records.AuditStatus.INCOMPLETE)),
+                                   (records.AuditStatus.INCOMPLETE, (records.AuditStatus.PASS,))):
+            prior = replace(self.bundles[0], status=status, reason_codes=("PRIVATE_ASSERTION_FALSIFIED",))
+            for current in disallowed:
+                candidate = replace(self.bundles[1], status=current,
+                                    reason_codes=() if current is records.AuditStatus.PASS else ("PUBLIC_AUDIT_INCOMPLETE",))
+                with self.subTest(prior=status, current=current), self.assertRaises(op.OperationalError):
+                    self.context(1, wire=self.wire(candidate), prior_primary_wire=self.wire(prior))
+            retained = replace(self.bundles[1], status=status, reason_codes=("PRIVATE_ASSERTION_FALSIFIED",))
+            context = self.context(1, wire=self.wire(retained), prior_primary_wire=self.wire(prior))
+            self.assertIs(context.bundle.status, status)
+
+    def test_fresh_context_has_no_file_store_process_profile_or_reencoding_effects(self):
+        forbidden = AssertionError("fresh WB02 validation performed an external effect")
+        with ExitStack() as stack:
+            for owner, names in ((builtins, ("open",)), (Path, ("open", "read_bytes", "write_bytes", "mkdir", "resolve")),
+                                 (os, ("open", "stat", "lstat")),
+                                 (store, ("StreamWriter", "FramedStreamWriter", "scan_stream", "scan_framed_stream")),
+                                 (op.multiprocessing, ("get_context",)),
+                                 (execution.physical, ("encode_frame", "capture_profile", "require_qualified_profile"))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            for index in range(3):
+                self.assertEqual(self.context(index).bundle, self.bundles[index])
+
+    def test_live_v1_coordinate_persists_jsonl_without_using_new_context_or_rf02(self):
+        def workflow(work, *_):
+            return tuple(op._OperationResult(op.UnitReceipt(work.position, bundle.kind, bundle.status,
+                "ADMITTED", 1, 0), execution.decode_bundle(execution.encode_bundle(bundle)), ())
+                for bundle in self.bundles)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op, "_fresh_wb02_context", side_effect=AssertionError("live V1 called new context")), \
+                patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("live V1 encoded WB02")), \
+                patch.object(execution, "decode_bundle_view_v2", side_effect=AssertionError("live V1 decoded WB02")), \
+                patch.object(store, "FramedStreamWriter", side_effect=AssertionError("live V1 wrote RF02")), \
+                patch.object(op, "_workflow", side_effect=workflow), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200):
+            result = op.coordinate((self.work,), directory, self.envelope)
+            self.assertIs(result.status, records.AuditStatus.PASS, result.reason_codes)
+            self.assertEqual(result.durable_units, 3)
+            self.assertTrue((Path(directory) / "boards.jsonl").is_file())
+            self.assertEqual(list(Path(directory).glob("*.pkf")), [])
+            self.assertEqual(tuple(field.name for field in fields(op._OperationResult)),
+                             ("receipt", "bundle", "samples", "observation"))
+
+    def test_default_live_functions_have_no_new_v2_calls(self):
+        for target in (op._worker_main, op._supervise_operation, op._workflow, op._EvidenceSink,
+                       op._persist_r0, op.coordinate, op.readback_streams):
+            with self.subTest(target=target.__name__):
+                names = {node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                         for node in ast.walk(ast.parse(inspect.getsource(target))) if isinstance(node, ast.Call)}
+                self.assertTrue({"_fresh_wb02_context", "encode_bundle_v2", "decode_bundle_v2",
+                                 "decode_bundle_view_v2", "FramedStreamWriter"}.isdisjoint(names))
 
 
 if __name__ == "__main__":
