@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 
 from experiments import program_k_e2_records as records
+from experiments import program_k_e2_physical as physical
 
 
 _UINT64_MAX = (1 << 64) - 1
@@ -262,6 +263,97 @@ class StreamWriter:
         return False
 
 
+def _framed_context(stream_name, context):
+    _stream_name(stream_name)
+    _need(type(context) is physical.FrameContext, "Expected exact FrameContext.")
+    try:
+        physical.FrameContext.__post_init__(context)
+        _need(context.stream_name == stream_name, "Stream/context name mismatch.")
+        # Own an immutable binding rather than retaining caller-owned context state.
+        return physical.context_for(stream_name, context.codec_profile_sha256)
+    except physical.PhysicalError as error:
+        raise StoreError("Invalid RF02 frame context.") from error
+
+
+def _framed_limit(value):
+    _need(type(value) is int and 0 < value <= physical.MAX_PAYLOAD_BYTES,
+          "Expected positive bounded RF02 payload limit.")
+    return value
+
+
+def _framed_path(root, stream_name):
+    _stream_name(stream_name)
+    filename = stream_name + ".pkf"
+    _need(not Path(filename).is_reserved(), "Reserved device filename is not a stream.")
+    return _root(root) / filename
+
+
+class FramedStreamWriter(StreamWriter):
+    """Explicit RF02 writer with dirty checkpoints; no operational format switch.
+
+    Append accepts exact logical record objects, never caller-supplied frames.
+    State checks, poison, seal and close use the historical writer's mechanics;
+    its JSONL constructor, append and checkpoint behavior remain unchanged.
+    """
+
+    __slots__ = ("_context", "_max_payload_bytes", "_dirty")
+
+    def __init__(self, root, stream_name, context, *, max_payload_bytes=physical.MAX_PAYLOAD_BYTES):
+        self._context = _framed_context(stream_name, context)
+        self._max_payload_bytes = _framed_limit(max_payload_bytes)
+        self._path = _framed_path(root, stream_name)
+        self._stream_name = stream_name
+        self._hash = hashlib.sha256()
+        self._record_count = 0
+        self._byte_length = 0
+        self._last_key = None
+        self._sealed = False
+        self._poisoned = False
+        self._closed = False
+        self._last_durable_checkpoint = None
+        self._dirty = False
+        self._file = _exclusive(self._path)
+
+    @property
+    def dirty(self):
+        return self._dirty
+
+    def append(self, key, record):
+        self._writable()
+        context = _framed_context(self._stream_name, self._context)
+        limit = _framed_limit(self._max_payload_bytes)
+        _key(key)
+        _need(len(key) == context.expected_key_arity, "RF02 key arity mismatch.")
+        _need(self._last_key is None or key > self._last_key, "Duplicate/descending logical key.")
+        _need(type(record) in context.allowed_logical_record_types, "Wrong RF02 logical record family.")
+        logical = _encode_record(record)
+        _need(len(logical) <= limit, "RF02 logical payload cap exceeded.")
+        try:
+            frame = physical.encode_frame(logical, key, context, max_payload_bytes=limit)
+        except physical.PhysicalError as error:
+            raise StoreError("Invalid RF02 record/frame.") from error
+        _need(type(frame) is bytes and 0 < len(frame) <= limit + 13 + 10 * context.expected_key_arity,
+              "RF02 physical frame cap exceeded.")
+        next_bytes, next_count = self._byte_length + len(frame), self._record_count + 1
+        _uint64(next_bytes)
+        _uint64(next_count)
+        try:
+            _write_complete(self._file, frame)
+            self._hash.update(frame)
+        except BaseException as error:
+            self._poison(error, "append")
+        self._byte_length, self._record_count, self._last_key = next_bytes, next_count, key
+        self._dirty = True
+
+    def checkpoint(self):
+        self._writable()
+        if not self._dirty and self._last_durable_checkpoint is not None:
+            return self._last_durable_checkpoint
+        snapshot = super().checkpoint()
+        self._dirty = False
+        return snapshot
+
+
 @contextmanager
 def _reader(path):
     try:
@@ -320,6 +412,83 @@ def scan_stream(root, stream_name, *, visit=None):
             last_key = key
             if visit is not None:
                 visit(key, record)
+    return records.StreamDigest(stream_name, digest.hexdigest(), byte_length, record_count)
+
+
+def _read_framed_component(file, size, *, boundary=False):
+    data = bytearray()
+    while len(data) < size:
+        remaining = size - len(data)
+        try:
+            chunk = file.read(remaining)
+        except (OSError, ValueError) as error:
+            raise StoreError("Sequential RF02 evidence read failed.") from error
+        _need(type(chunk) is bytes and len(chunk) <= remaining, "Indeterminate RF02 read.")
+        if not chunk:
+            _need(boundary and not data, "Truncated RF02 frame component.")
+            return b""
+        data.extend(chunk)
+    return bytes(data)
+
+
+def _read_framed_frame(file, context, limit):
+    prefix = _read_framed_component(file, 9, boundary=True)
+    if not prefix:
+        return None
+    logical_length = int.from_bytes(prefix[1:5], "big")
+    payload_length = int.from_bytes(prefix[5:9], "big")
+    _need(logical_length <= limit and payload_length <= limit, "RF02 declared payload cap exceeded.")
+    encoded_key = bytearray()
+    for _ in range(context.expected_key_arity):
+        component = bytearray()
+        for _ in range(10):
+            byte = _read_framed_component(file, 1)
+            component.extend(byte)
+            if byte[0] < 128:
+                break
+        # Use the representation authority for minimality, termination and uint64.
+        try:
+            physical.decode_uleb128(bytes(component))
+        except physical.PhysicalError as error:
+            raise StoreError("Malformed RF02 key component.") from error
+        encoded_key.extend(component)
+    payload_and_crc = _read_framed_component(file, payload_length + 4)
+    return prefix + bytes(encoded_key) + payload_and_crc
+
+
+def scan_framed_stream(root, stream_name, context, *, max_payload_bytes=physical.MAX_PAYLOAD_BYTES,
+                       visit=None):
+    """Scan only .pkf, bounded to one frame; supplied context selects the format.
+
+    visit(key, record, canonical_logical_bytes, physical_frame_length) observes
+    facts at this validation boundary, without a transferable validation token.
+    """
+    context = _framed_context(stream_name, context)
+    limit = _framed_limit(max_payload_bytes)
+    _need(visit is None or callable(visit), "Visitor must be callable or None.")
+    path = _framed_path(root, stream_name)
+    digest = hashlib.sha256()
+    byte_length = record_count = 0
+    last_key = None
+    with _reader(path) as file:
+        while True:
+            data = _read_framed_frame(file, context, limit)
+            if data is None:
+                break
+            try:
+                frame = physical.decode_frame(data, context, max_payload_bytes=limit)
+            except physical.PhysicalError as error:
+                raise StoreError("Invalid RF02 evidence frame.") from error
+            _need(last_key is None or frame.key > last_key, "Duplicate/descending stream key.")
+            byte_length += len(data)
+            record_count += 1
+            _uint64(byte_length)
+            _uint64(record_count)
+            digest.update(data)
+            last_key = frame.key
+            if visit is not None:
+                visit(frame.key, _decode_record(frame.logical_bytes), frame.logical_bytes, frame.frame_length)
+            del data, frame
     return records.StreamDigest(stream_name, digest.hexdigest(), byte_length, record_count)
 
 

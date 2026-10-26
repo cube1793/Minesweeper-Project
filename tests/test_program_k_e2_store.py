@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 from experiments import program_k_e2_records as records
 from experiments import program_k_e2_store as store
+from experiments import program_k_e2_physical as physical
 
 
 _SHA = "a" * 64
@@ -708,6 +709,9 @@ class PerformanceAndBoundaryTests(_TemporaryRootCase):
             if isinstance(node, ast.ImportFrom):
                 self.assertEqual(node.level, 0)
                 if node.module == "experiments":
+                    if tuple(a.name for a in node.names) == ("program_k_e2_physical",):
+                        self.assertEqual(node.names[0].asname, "physical")
+                        continue
                     self.assertEqual(tuple(a.name for a in node.names), ("program_k_e2_records",))
                 else:
                     self.assertIn(node.module.split(".")[0], sys.stdlib_module_names)
@@ -724,6 +728,9 @@ class PerformanceAndBoundaryTests(_TemporaryRootCase):
         probe = types.ModuleType(name)
         real_import = builtins.__import__
         def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "experiments" and tuple(fromlist) == ("program_k_e2_physical",):
+                self.assertEqual(level, 0)
+                return real_import(name, globals, locals, fromlist, level)
             if name == "experiments":
                 self.assertEqual(tuple(fromlist), ("program_k_e2_records",))
             else:
@@ -739,6 +746,639 @@ class PerformanceAndBoundaryTests(_TemporaryRootCase):
                 stack.enter_context(patch.object(owner, attribute, side_effect=AssertionError("import side effect")))
             stack.enter_context(patch.object(builtins, "__import__", side_effect=guarded_import))
             exec(source, probe.__dict__)
+
+
+_RF02_PROFILE = bytes.fromhex("5a" * 32)  # Supplied synthetic identity; no profile capture.
+
+
+def _frame_context(name="operations"):
+    return physical.context_for(name, _RF02_PROFILE)
+
+
+def _board(seed=101):
+    return records.BoardIdentity(seed, "synthetic", 2, 2, 1, (0, 0), "supplied-generator", "supplied-spec")
+
+
+def _frame(key, record, context=None):
+    return physical.encode_frame(records.encode(record), key, context or _frame_context())
+
+
+class _FramedReadProbe:
+    """Only bounded forward reads; optional fragmentation of actual file reads."""
+
+    def __init__(self, file, limits=None, fragment=None):
+        self.file = file
+        self.limits = limits
+        self.fragment = fragment
+        self.position = 0
+        self.reads = []
+        self.close_error = False
+
+    def read(self, size=-1):
+        if type(size) is not int or size <= 0:
+            raise AssertionError("RF02 scan attempted an unbounded read")
+        if self.limits is not None and size > self.limits.get(self.position, 9):
+            raise AssertionError("Read exceeded the remaining declared frame component")
+        self.reads.append((self.position, size))
+        data = self.file.read(min(size, self.fragment) if self.fragment else size)
+        self.position += len(data)
+        return data
+
+    def close(self):
+        self.file.close()
+        if self.close_error:
+            raise OSError("injected framed reader close failure")
+
+    def forbidden(self, *args, **kwargs):
+        raise AssertionError("RF02 scan must use bounded forward reads only")
+
+    seek = forbidden
+    tell = forbidden
+    readinto = forbidden
+    readline = forbidden
+    readlines = forbidden
+    write = forbidden
+    fileno = forbidden  # Whole-file mmap cannot acquire this reader's descriptor.
+
+
+class _FramedRootCase(_TemporaryRootCase):
+    def framed_writer(self, name="operations", *, root=None, context=None, **kwargs):
+        writer = store.FramedStreamWriter(root or self.root, name, context or _frame_context(name), **kwargs)
+        self.addCleanup(writer.close)
+        return writer
+
+    def framed_probe_writer(self, name="operations", *, root=None, **kwargs):
+        directory = root or self.root
+        probe = _WriteProbe((directory / (name + ".pkf")).open("xb", buffering=0))
+        self.addCleanup(probe.file.close)
+        with patch.object(store.Path, "open", return_value=probe) as opened:
+            writer = self.framed_writer(name, root=directory, **kwargs)
+        opened.assert_called_once_with("xb", buffering=0)
+        return writer, probe
+
+    def put_framed(self, data, name="operations", *, root=None):
+        path = (root or self.root) / (name + ".pkf")
+        path.write_bytes(data)
+        return path
+
+    def assert_framed_poisoned(self, writer, probe, snapshot):
+        self.assertTrue(writer.poisoned)
+        self.assertFalse(writer.sealed)
+        self.assertIs(writer.last_durable_checkpoint, snapshot)
+        calls = tuple(probe.calls)
+        for call in (lambda: writer.append((99,), _event()), writer.checkpoint, writer.seal):
+            with self.assertRaises(store.StoreError):
+                call()
+        self.assertEqual(tuple(probe.calls), calls)
+
+
+class FramedWriterTests(_FramedRootCase):
+    def test_empty_file_has_explicit_pkf_path_no_prologue_or_completion_marker(self):
+        writer = self.framed_writer()
+        self.assertEqual(writer.path, self.root / "operations.pkf")
+        self.assertEqual(writer.path.read_bytes(), b"")
+        digest = writer.seal()
+        self.assertEqual(digest, records.StreamDigest("operations", hashlib.sha256(b"").hexdigest(), 0, 0))
+        self.assertEqual(tuple(path.name for path in self.root.iterdir()), ("operations.pkf",))
+        self.assertEqual(store.scan_framed_stream(self.root, "operations", _frame_context()), digest)
+
+    def test_experiment_and_support_exact_frames_hash_counts_and_numeric_keys(self):
+        cases = (("boards", ((0, 0, 127), (0, 0, 128), (1, 0, 0)), (_board(), _board(102), _board(103))),
+                 ("operations", ((127,), (128,), (255,), (256,), ((1 << 64) - 1,)), tuple(_event(i) for i in range(5))))
+        for name, keys, values in cases:
+            with self.subTest(stream=name):
+                context = _frame_context(name)
+                expected = b"".join(_frame(key, value, context) for key, value in zip(keys, values))
+                writer = self.framed_writer(name, context=context)
+                for key, value in zip(keys, values):
+                    writer.append(key, value)
+                digest = writer.seal()
+                self.assertEqual(writer.path.read_bytes(), expected)
+                self.assertEqual(digest, records.StreamDigest(name, hashlib.sha256(expected).hexdigest(), len(expected), len(keys)))
+                self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (len(keys), len(expected), keys[-1]))
+                fresh = _frame_context(name)
+                self.assertIsNot(fresh, context)
+                visited = []
+                self.assertEqual(store.scan_framed_stream(self.root, name, fresh, visit=lambda *facts: visited.append(facts)), digest)
+                self.assertEqual(visited, [(key, value, records.encode(value), len(_frame(key, value, fresh)))
+                                           for key, value in zip(keys, values)])
+
+    def test_append_constructs_one_frame_and_writes_and_hashes_the_exact_object(self):
+        context = _frame_context()
+        expected = _frame((0,), _event(), context)
+        digest = _HashProbe()
+        with patch.object(store.hashlib, "sha256", return_value=digest):
+            writer, probe = self.framed_probe_writer(context=context)
+        with patch.object(physical, "encode_frame", return_value=expected) as encoded, \
+                patch.object(store.Path, "read_bytes", side_effect=AssertionError("append reread file")), \
+                patch.object(store.os, "fsync") as synced:
+            writer.append((0,), _event())
+            encoded.assert_called_once()
+            self.assertEqual(encoded.call_args.args, (records.encode(_event()), (0,), context))
+            self.assertEqual(encoded.call_args.kwargs, {"max_payload_bytes": physical.MAX_PAYLOAD_BYTES})
+            self.assertIs(probe.writes[0], expected)
+            self.assertEqual(len(probe.writes), 1)
+            self.assertIs(digest.updates[0], expected)
+            self.assertEqual(len(digest.updates), 1)
+            synced.assert_not_called()
+        self.assertEqual(writer.checkpoint().sha256, hashlib.sha256(expected).hexdigest())
+
+    def test_first_empty_checkpoint_syncs_clean_checkpoint_and_seal_reuse_snapshot(self):
+        writer, probe = self.framed_probe_writer()
+        with patch.object(store.os, "fsync") as synced:
+            first = writer.checkpoint()
+            self.assertEqual(first, store.DurableCheckpoint("operations", hashlib.sha256(b"").hexdigest(), 0, 0, None))
+            self.assertEqual(probe.calls, ["flush", "fileno"])
+            self.assertEqual(synced.call_count, 1)
+            self.assertIs(writer.checkpoint(), first)
+            self.assertIs(writer.last_durable_checkpoint, first)
+            digest = writer.seal()
+            self.assertEqual(synced.call_count, 1)
+            self.assertEqual(probe.calls, ["flush", "fileno", "close"])
+            self.assertEqual(digest.sha256, first.sha256)
+
+    def test_append_marks_dirty_and_new_checkpoint_does_not_mutate_old_snapshot(self):
+        writer, probe = self.framed_probe_writer()
+        with patch.object(store.os, "fsync") as synced:
+            first = writer.checkpoint()
+            writer.append((0,), _event())
+            self.assertIs(writer.last_durable_checkpoint, first)
+            self.assertEqual((first.record_count, first.byte_length, first.last_key), (0, 0, None))
+            self.assertEqual(synced.call_count, 1)
+            second = writer.checkpoint()
+            self.assertIsNot(second, first)
+            self.assertEqual(second.record_count, 1)
+            self.assertIs(writer.checkpoint(), second)
+            self.assertEqual(synced.call_count, 2)
+            with self.assertRaises(FrozenInstanceError):
+                second.record_count = 9
+            writer.append((1,), _event(1))
+            self.assertIs(writer.last_durable_checkpoint, second)
+            self.assertEqual(second.record_count, 1)
+            final = writer.seal()
+            self.assertEqual(synced.call_count, 3)
+            self.assertEqual(probe.calls.count("flush"), 3)
+            self.assertEqual(final.record_count, 2)
+            self.assertEqual(writer.last_durable_checkpoint.sha256, final.sha256)
+
+    def test_never_checkpointed_dirty_seal_syncs_once(self):
+        writer, probe = self.framed_probe_writer()
+        writer.append((0,), _event())
+        with patch.object(store.os, "fsync") as synced:
+            writer.seal()
+        self.assertEqual(synced.call_count, 1)
+        self.assertEqual(probe.calls, ["write", "flush", "fileno", "close"])
+
+    def test_invalid_context_and_bounds_rejected_before_filesystem_access(self):
+        class ContextSubclass(physical.FrameContext):
+            pass
+        good = _frame_context()
+        subclass = ContextSubclass(good.codec_profile_sha256, good.stream_name,
+                                   expected_key_arity=good.expected_key_arity,
+                                   allowed_logical_record_types=good.allowed_logical_record_types)
+        corrupted = replace(good)
+        object.__setattr__(corrupted, "expected_key_arity", 3)
+        with patch.object(store.Path, "resolve", side_effect=AssertionError("invalid input accessed root")), \
+                patch.object(store.Path, "open", side_effect=AssertionError("invalid input opened file")):
+            for context in (None, object(), subclass, corrupted, _frame_context("postprocessing_operations")):
+                with self.subTest(context=context), self.assertRaises(store.StoreError):
+                    store.FramedStreamWriter(self.root, "operations", context)
+            for bound in (True, False, 0, -1, 1.0, physical.MAX_PAYLOAD_BYTES + 1):
+                with self.subTest(bound=bound), self.assertRaises(store.StoreError):
+                    store.FramedStreamWriter(self.root, "operations", good, max_payload_bytes=bound)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_invalid_keys_do_not_write_or_poison_and_later_append_succeeds(self):
+        class IntegerSubclass(int):
+            pass
+        class TupleSubclass(tuple):
+            pass
+        writer, probe = self.framed_probe_writer()
+        snapshot = writer.checkpoint()
+        for key in ((), [], [0], (0, 0), (0, 0, 0), (True,), (False,), (IntegerSubclass(0),),
+                    TupleSubclass((0,)), (-1,), (1 << 64,), (0.0,), ("0",), (None,)):
+            with self.subTest(key=key), self.assertRaises(store.StoreError):
+                writer.append(key, _event())
+        self.assertEqual(probe.writes, [])
+        self.assertFalse(writer.poisoned)
+        self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (0, 0, None))
+        self.assertIs(writer.last_durable_checkpoint, snapshot)
+        writer.append((0,), _event())
+        self.assertEqual(writer.seal().record_count, 1)
+
+    def test_duplicate_descending_wrong_family_and_corrupt_records_preserve_state(self):
+        writer, probe = self.framed_probe_writer()
+        writer.append((128,), _event())
+        snapshot = writer.checkpoint()
+        for key in ((128,), (127,)):
+            with self.assertRaises(store.StoreError):
+                writer.append(key, _event())
+        corrupted = replace(_event())
+        object.__setattr__(corrupted, "ordinal", True)
+        for record in (_board(), corrupted, object.__new__(records.OperationEventRecord),
+                       records.encode(_event()), object(), {"kind": "operation_event"}):
+            with self.subTest(record_type=type(record)), self.assertRaises(store.StoreError):
+                writer.append((129,), record)
+        self.assertEqual(len(probe.writes), 1)
+        self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (1, snapshot.byte_length, (128,)))
+        self.assertIs(writer.last_durable_checkpoint, snapshot)
+        self.assertFalse(writer.poisoned)
+        writer.append((129,), _event(1))
+        self.assertEqual(writer.seal().record_count, 2)
+
+    def test_logical_cap_rejection_keeps_writer_usable(self):
+        small = _event()
+        cap = len(records.encode(small))
+        large = replace(small, unit_id="bounded-synthetic-" * 64)
+        writer, probe = self.framed_probe_writer(max_payload_bytes=cap)
+        with self.assertRaises(store.StoreError):
+            writer.append((0,), large)
+        self.assertEqual(probe.writes, [])
+        self.assertFalse(writer.poisoned)
+        self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (0, 0, None))
+        writer.append((0,), small)
+        self.assertEqual(writer.seal().record_count, 1)
+
+    def test_physical_frame_cap_rejected_before_io_without_poison(self):
+        cap = len(records.encode(_event()))
+        writer, probe = self.framed_probe_writer(max_payload_bytes=cap)
+        oversized = b"x" * (cap + 13 + 10 + 1)
+        with patch.object(physical, "encode_frame", return_value=oversized) as encoded:
+            with self.assertRaises(store.StoreError):
+                writer.append((0,), _event())
+        encoded.assert_called_once()
+        self.assertEqual(probe.writes, [])
+        self.assertFalse(writer.poisoned)
+        self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (0, 0, None))
+        writer.append((0,), _event())
+        self.assertEqual(writer.seal().record_count, 1)
+
+    def test_existing_pkf_never_overwritten_or_resumed(self):
+        path = self.put_framed(b"retained-existing-evidence")
+        with self.assertRaises(store.StoreError):
+            self.framed_writer()
+        self.assertEqual(path.read_bytes(), b"retained-existing-evidence")
+
+    def test_close_is_idempotent_without_sync_or_completion(self):
+        writer, probe = self.framed_probe_writer()
+        writer.append((0,), _event())
+        with patch.object(store.os, "fsync", side_effect=AssertionError("close checkpointed")):
+            writer.close()
+            writer.close()
+        self.assertEqual(probe.calls, ["write", "close"])
+        self.assertFalse(writer.sealed)
+        self.assertIsNone(writer.last_durable_checkpoint)
+        for call in (lambda: writer.append((1,), _event()), writer.checkpoint, writer.seal):
+            with self.assertRaises(store.StoreError):
+                call()
+        self.assertEqual([path.name for path in self.root.iterdir()], ["operations.pkf"])
+
+    def test_context_exit_does_not_seal_and_caller_exception_is_unchanged(self):
+        marker = RuntimeError("caller interrupted")
+        with patch.object(store.os, "fsync", side_effect=AssertionError("context exit checkpointed")):
+            with store.FramedStreamWriter(self.root, "operations", _frame_context()) as normal:
+                normal.append((0,), _event())
+            with self.assertRaises(RuntimeError) as caught:
+                with store.FramedStreamWriter(self.root, "postprocessing_operations", _frame_context("postprocessing_operations")) as exceptional:
+                    exceptional.append((0,), _event())
+                    raise marker
+        self.assertIs(caught.exception, marker)
+        self.assertFalse(normal.sealed)
+        self.assertFalse(exceptional.sealed)
+        self.assertIsNone(normal.last_durable_checkpoint)
+        self.assertIsNone(exceptional.last_durable_checkpoint)
+
+    def test_sealed_writer_rejects_further_operations(self):
+        writer = self.framed_writer()
+        writer.seal()
+        for call in (lambda: writer.append((0,), _event()), writer.checkpoint, writer.seal):
+            with self.assertRaises(store.StoreError):
+                call()
+        self.assertTrue(writer.sealed)
+
+
+class FramedFailureTests(_FramedRootCase):
+    def test_write_failures_retain_evidence_without_retry_or_hash_count_advancement(self):
+        prefix = _frame((0,), _event())
+        attempted = _frame((1,), _event(1))
+        for mode, retained in (("short", attempted[:-1]), ("raise", attempted[:3]),
+                               ("none", b""), ("bool", b""), ("ordinary", b"")):
+            with self.subTest(mode=mode):
+                directory = self.root / mode
+                directory.mkdir()
+                digest = _HashProbe()
+                with patch.object(store.hashlib, "sha256", return_value=digest):
+                    writer, probe = self.framed_probe_writer(root=directory)
+                writer.append((0,), _event())
+                snapshot = writer.checkpoint()
+                probe.mode = mode
+                if mode == "ordinary":
+                    def failure(data):
+                        probe.calls.append("write")
+                        raise OSError("injected ordinary write failure")
+                    operation = patch.object(probe, "write", side_effect=failure)
+                else:
+                    operation = ExitStack()
+                with operation, self.assertRaises(store.StoreError):
+                    writer.append((1,), _event(1))
+                self.assert_framed_poisoned(writer, probe, snapshot)
+                self.assertEqual((writer.record_count, writer.byte_length, writer.last_key), (1, len(prefix), (0,)))
+                self.assertEqual(digest.updates, [prefix])
+                self.assertEqual(digest.hexdigest(), hashlib.sha256(prefix).hexdigest())
+                self.assertEqual(probe.calls.count("write"), 2)
+                writer.close()
+                self.assertEqual(writer.path.read_bytes(), prefix + retained)
+
+    def test_flush_and_fsync_failures_keep_last_durable_snapshot(self):
+        for kind in ("flush", "fsync"):
+            with self.subTest(kind=kind):
+                directory = self.root / kind
+                directory.mkdir()
+                writer, probe = self.framed_probe_writer(root=directory)
+                writer.append((0,), _event())
+                snapshot = writer.checkpoint()
+                writer.append((1,), _event(1))
+                probe.flush_error = kind == "flush"
+                with patch.object(store.os, "fsync", side_effect=OSError("injected fsync failure")) as synced:
+                    with self.assertRaises(store.StoreError):
+                        writer.checkpoint()
+                    self.assertEqual(synced.call_count, 0 if kind == "flush" else 1)
+                self.assert_framed_poisoned(writer, probe, snapshot)
+                self.assertEqual(snapshot.record_count, 1)
+                self.assertEqual(writer.record_count, 2)
+
+    def test_seal_checkpoint_failure_has_no_successful_snapshot(self):
+        writer, probe = self.framed_probe_writer()
+        writer.append((0,), _event())
+        with patch.object(store.os, "fsync", side_effect=OSError("seal sync failed")):
+            with self.assertRaises(store.StoreError):
+                writer.seal()
+        self.assert_framed_poisoned(writer, probe, None)
+        self.assertFalse(probe.file.closed)
+
+    def test_clean_seal_close_failure_poisoned_without_extra_sync(self):
+        writer, probe = self.framed_probe_writer()
+        writer.append((0,), _event())
+        snapshot = writer.checkpoint()
+        probe.close_error = True
+        with patch.object(store.os, "fsync", side_effect=AssertionError("clean seal redundantly synced")):
+            with self.assertRaises(store.StoreError):
+                writer.seal()
+        self.assert_framed_poisoned(writer, probe, snapshot)
+        self.assertTrue(probe.file.closed)
+
+    def test_baseexception_during_io_is_preserved_and_poisoned(self):
+        for operation, marker in (("write", KeyboardInterrupt()), ("flush", SystemExit("cancel checkpoint")),
+                                  ("close", KeyboardInterrupt())):
+            with self.subTest(operation=operation):
+                directory = self.root / operation
+                directory.mkdir()
+                writer, probe = self.framed_probe_writer(root=directory)
+                snapshot = None
+                if operation != "write":
+                    writer.append((0,), _event())
+                if operation == "close":
+                    snapshot = writer.checkpoint()
+                with patch.object(probe, operation, side_effect=marker):
+                    with self.assertRaises(type(marker)) as caught:
+                        if operation == "write":
+                            writer.append((0,), _event())
+                        elif operation == "flush":
+                            writer.checkpoint()
+                        else:
+                            writer.seal()
+                self.assertIs(caught.exception, marker)
+                self.assert_framed_poisoned(writer, probe, snapshot)
+
+
+class FramedScannerTests(_FramedRootCase):
+    def test_independent_physical_file_scan_reports_all_visitor_facts(self):
+        context = _frame_context()
+        values = ((127, _event()), (128, _event(1)), (256, _event(2)))
+        frames = [_frame((key,), record, context) for key, record in values]
+        data = b"".join(frames)
+        self.put_framed(data)
+        visited = []
+        fresh = _frame_context()
+        self.assertIsNot(fresh, context)
+        result = store.scan_framed_stream(self.root, "operations", fresh, visit=lambda *facts: visited.append(facts))
+        self.assertEqual(result, records.StreamDigest("operations", hashlib.sha256(data).hexdigest(), len(data), len(values)))
+        self.assertEqual(visited, [((key,), record, records.encode(record), len(frame))
+                                   for (key, record), frame in zip(values, frames)])
+
+    def test_wrong_profile_or_stream_context_fails_without_visits(self):
+        self.put_framed(_frame((0,), _event()))
+        visited = []
+        wrong_profile = physical.context_for("operations", b"\x6b" * 32)
+        for context in (wrong_profile, _frame_context("postprocessing_operations")):
+            with self.subTest(context=context), self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", context, visit=lambda *facts: visited.append(facts))
+        self.assertEqual(visited, [])
+
+    def test_duplicate_and_descending_numeric_keys_fail_at_second_frame(self):
+        for keys in (((128,), (128,)), ((256,), (255,))):
+            self.put_framed(b"".join(_frame(key, _event()) for key in keys))
+            visited = []
+            with self.subTest(keys=keys), self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context(), visit=lambda *facts: visited.append(facts[0]))
+            self.assertEqual(visited, [keys[0]])
+
+    def test_every_nonempty_truncated_prefix_key_payload_and_crc_fails(self):
+        frame = _frame((128,), _event())
+        payload_end = len(frame) - 4
+        # One complete 9-byte prefix, a two-byte ULEB key, payload, and four CRC bytes.
+        classes = {"prefix": range(1, 9), "key": (9, 10),
+                   "payload": (11, 12, payload_end - 1), "crc": range(payload_end, len(frame))}
+        for part, cuts in classes.items():
+            for cut in cuts:
+                with self.subTest(component=part, cut=cut):
+                    self.put_framed(frame[:cut])
+                    with self.assertRaises(store.StoreError):
+                        store.scan_framed_stream(self.root, "operations", _frame_context())
+
+    def test_corrupt_middle_frame_stops_without_resynchronizing_or_repair(self):
+        frames = [_frame((i,), _event(i)) for i in range(3)]
+        bad = bytearray(frames[1])
+        bad[-1] ^= 1
+        data = frames[0] + bytes(bad) + frames[2]
+        path = self.put_framed(data)
+        probe = _FramedReadProbe(path.open("rb"))
+        self.addCleanup(probe.file.close)
+        visited = []
+        with patch.object(store.Path, "open", return_value=probe):
+            with self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context(), visit=lambda *facts: visited.append(facts[0]))
+        self.assertEqual(visited, [(0,)])
+        self.assertEqual(probe.position, len(frames[0]) + len(frames[1]))
+        self.assertEqual(path.read_bytes(), data)
+
+    def test_trailing_garbage_is_not_ignored_or_interpreted_as_another_format(self):
+        frame = _frame((0,), _event())
+        for suffix in (b"\0", b"\n", b"PKE2RF02", b"garbage\n", _line((1,), _event(1))):
+            with self.subTest(suffix=suffix):
+                self.put_framed(frame + suffix)
+                with self.assertRaises(store.StoreError):
+                    store.scan_framed_stream(self.root, "operations", _frame_context())
+
+    def test_visitor_exception_is_unchanged_and_prevents_reading_next_frame(self):
+        frames = [_frame((i,), _event(i)) for i in range(2)]
+        path = self.put_framed(b"".join(frames))
+        probe = _FramedReadProbe(path.open("rb"))
+        self.addCleanup(probe.file.close)
+        probe.close_error = True
+        marker = OSError("exact visitor failure")
+        def visitor(*facts):
+            raise marker
+        with patch.object(store.Path, "open", return_value=probe):
+            with self.assertRaises(OSError) as caught:
+                store.scan_framed_stream(self.root, "operations", _frame_context(), visit=visitor)
+        self.assertIs(caught.exception, marker)
+        self.assertEqual(probe.position, len(frames[0]))
+        self.assertTrue(probe.file.closed)
+
+    def test_bounded_component_reads_and_incremental_hash_under_short_reads(self):
+        keys = ((0,), (128,), ((1 << 64) - 1,))
+        frames = [_frame(key, _event(i)) for i, key in enumerate(keys)]
+        data = b"".join(frames)
+        limits = {}
+        offset = 0
+        for key, frame in zip(keys, frames):
+            for index in range(9):
+                limits[offset + index] = 9 - index
+            key_width = len(physical.encode_uleb128(key[0]))
+            for index in range(key_width):
+                limits[offset + 9 + index] = 1
+            payload_start = offset + 9 + key_width
+            for position in range(payload_start, offset + len(frame)):
+                limits[position] = offset + len(frame) - position
+            offset += len(frame)
+        path = self.put_framed(data)
+        probe = _FramedReadProbe(path.open("rb"), limits, fragment=3)
+        self.addCleanup(probe.file.close)
+        digest = _HashProbe()
+        real_decode = physical.decode_frame
+        with patch.object(store.Path, "open", return_value=probe), \
+                patch.object(store.Path, "read_bytes", side_effect=AssertionError("scanner read all")), \
+                patch.object(store.hashlib, "sha256", return_value=digest), \
+                patch.object(physical, "decode_frame", wraps=real_decode) as decoded:
+            result = store.scan_framed_stream(self.root, "operations", _frame_context())
+        self.assertEqual(decoded.call_count, len(frames))
+        self.assertEqual([call.args[0] for call in decoded.call_args_list], frames)
+        self.assertEqual(digest.updates, frames)
+        self.assertEqual(result.sha256, hashlib.sha256(data).hexdigest())
+        self.assertEqual(result.byte_length, len(data))
+        self.assertEqual(probe.reads[-1], (len(data), 9))
+        self.assertTrue(probe.file.closed)
+
+    def test_unchecked_declared_lengths_fail_before_key_payload_reads_or_decode(self):
+        cap = 256
+        cases = ((0, cap + 1, cap + 1), (1, cap + 1, 1), (0, 0xffffffff, 0xffffffff), (1, 2, 0xffffffff))
+        for mode, logical, payload in cases:
+            prefix = bytes((mode,)) + logical.to_bytes(4, "big") + payload.to_bytes(4, "big")
+            path = self.put_framed(prefix)
+            probe = _FramedReadProbe(path.open("rb"), {0: 9})
+            self.addCleanup(probe.file.close)
+            with self.subTest(logical=logical, payload=payload), \
+                    patch.object(store.Path, "open", return_value=probe), \
+                    patch.object(physical, "decode_frame", side_effect=AssertionError("unbounded declaration reached decoder")):
+                with self.assertRaises(store.StoreError):
+                    store.scan_framed_stream(self.root, "operations", _frame_context(), max_payload_bytes=cap)
+            self.assertEqual(probe.reads, [(0, 9)])
+
+    def test_uleb_key_limit_and_noncanonical_encodings_fail_closed(self):
+        frame = _frame((0,), _event())
+        for encoded_key in (b"\x80" * 10, b"\x80\x00", b"\xff" * 9 + b"\x02"):
+            row = frame[:9] + encoded_key + frame[10:-4]
+            forged = row + physical.contextual_crc32(_frame_context(), row).to_bytes(4, "big")
+            path = self.put_framed(forged)
+            probe = _FramedReadProbe(path.open("rb"))
+            self.addCleanup(probe.file.close)
+            with self.subTest(key=encoded_key), patch.object(store.Path, "open", return_value=probe):
+                with self.assertRaises(store.StoreError):
+                    store.scan_framed_stream(self.root, "operations", _frame_context())
+            if encoded_key == b"\x80" * 10:
+                self.assertEqual(probe.position, 19)
+                self.assertEqual(probe.reads, [(0, 9)] + [(offset, 1) for offset in range(9, 19)])
+
+    def test_crc_valid_wrong_family_and_noncanonical_logical_record_are_rejected(self):
+        context = _frame_context()
+        for logical in (records.encode(_board()), records.encode(_event()) + b" ", b"{}"):
+            row = b"\0" + len(logical).to_bytes(4, "big") * 2 + b"\0" + logical
+            frame = row + physical.contextual_crc32(context, row).to_bytes(4, "big")
+            self.put_framed(frame)
+            with self.subTest(logical=logical), self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", context)
+
+    def test_invalid_context_bound_or_visitor_rejected_before_file_open(self):
+        self.put_framed(b"")
+        with patch.object(store.Path, "open", side_effect=AssertionError("invalid argument opened evidence")):
+            for context in (None, object(), _frame_context("boards")):
+                with self.assertRaises(store.StoreError):
+                    store.scan_framed_stream(self.root, "operations", context)
+            for bound in (True, 0, -1, physical.MAX_PAYLOAD_BYTES + 1):
+                with self.assertRaises(store.StoreError):
+                    store.scan_framed_stream(self.root, "operations", _frame_context(), max_payload_bytes=bound)
+            with self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context(), visit=1)
+
+    def test_missing_file_read_error_and_reparse_target_fail_closed(self):
+        with self.assertRaises(store.StoreError):
+            store.scan_framed_stream(self.root, "operations", _frame_context())
+        path = self.put_framed(_frame((0,), _event()))
+        probe = _FramedReadProbe(path.open("rb"))
+        self.addCleanup(probe.file.close)
+        with patch.object(store.Path, "open", return_value=probe), \
+                patch.object(probe, "read", side_effect=OSError("injected read failure")):
+            with self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context())
+        self.assertTrue(probe.file.closed)
+        info = types.SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        with patch.object(store.Path, "lstat", return_value=info), patch.object(store.Path, "open") as opened:
+            with self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context())
+            opened.assert_not_called()
+
+
+class FramedV1BoundaryTests(_FramedRootCase):
+    def test_v1_and_rf02_same_name_coexist_with_separate_exact_apis(self):
+        legacy = self.writer("operations")
+        framed = self.framed_writer()
+        with patch.object(physical, "encode_frame", side_effect=AssertionError("V1 used RF02 encoder")):
+            legacy.append((0,), _event())
+            legacy_digest = legacy.seal()
+        framed.append((0,), _event())
+        framed_digest = framed.seal()
+        self.assertEqual(legacy.path.name, "operations.jsonl")
+        self.assertEqual(framed.path.name, "operations.pkf")
+        self.assertEqual(legacy.path.read_bytes(), _line((0,), _event()))
+        self.assertEqual(framed.path.read_bytes(), _frame((0,), _event()))
+        with patch.object(store, "scan_framed_stream", side_effect=AssertionError("V1 fell back to RF02")), \
+                patch.object(physical, "decode_frame", side_effect=AssertionError("V1 decoded RF02")):
+            self.assertEqual(store.scan_stream(self.root, "operations"), legacy_digest)
+        with patch.object(store, "scan_stream", side_effect=AssertionError("RF02 fell back to V1")):
+            self.assertEqual(store.scan_framed_stream(self.root, "operations", _frame_context()), framed_digest)
+
+    def test_cross_format_bytes_fail_without_fallback_to_other_existing_file(self):
+        self.put("operations", _frame((0,), _event()))
+        self.put_framed(_line((0,), _event()))
+        with patch.object(store, "scan_framed_stream", side_effect=AssertionError("legacy fallback")):
+            with self.assertRaises(store.StoreError):
+                store.scan_stream(self.root, "operations")
+        with patch.object(store, "scan_stream", side_effect=AssertionError("framed fallback")):
+            with self.assertRaises(store.StoreError):
+                store.scan_framed_stream(self.root, "operations", _frame_context())
+
+    def test_public_framed_api_has_no_raw_frame_or_trust_bypass(self):
+        parameters = tuple(inspect.signature(store.FramedStreamWriter.append).parameters)
+        self.assertEqual(parameters, ("self", "key", "record"))
+        for name in dir(store.FramedStreamWriter):
+            if not name.startswith("_"):
+                self.assertNotIn(name, {"append_validated", "append_trusted", "append_frame", "append_raw"})
+        tree = ast.parse(inspect.getsource(store))
+        forbidden = {"program_k_e2_execution", "program_k_e2_operational", "program_k_e2_readiness", "program_k_e2_r0_harness"}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                self.assertFalse({alias.name for alias in node.names}.intersection(forbidden))
 
 
 if __name__ == "__main__":
