@@ -1987,6 +1987,398 @@ def _reconcile_v2_materialization_totals(targets, unit_counts, family_totals, le
 
 
 @dataclass(frozen=True, slots=True)
+class _V2ConstructorTrial:
+    ordinal: int
+    knob: int
+    actual_physical_bytes: int | None
+    actual_logical_bytes: int | None
+    physical_margin: int | None
+    logical_margin: int | None
+    eligible: bool
+    rejection_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _V2ConstructorObservation:
+    """Compact constructor diagnostics, with no transferable byte authority."""
+
+    position: int
+    family: str
+    constructor_kind: str
+    physical_target: int
+    logical_target: int
+    selected_knob: int
+    selected_trial_ordinal: int
+    actual_physical_bytes: int
+    actual_logical_bytes: int
+    physical_margin: int
+    logical_margin: int
+    physical_excess: int
+    logical_excess: int
+    text_window_applies: bool
+    text_window_upper_bound: int | None
+    zero_oracle: bool
+    trials: tuple
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("V2 constructor observations are local facts, not trust objects.")
+
+
+@dataclass(frozen=True, slots=True)
+class _V2ConstructedWork:
+    """Only the current work's final wires; never retained in a full result."""
+
+    wires: tuple
+    constructor_facts: tuple
+    owned_families: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class _V2SyntheticMaterialization:
+    source_plan: tuple
+    materialization_plan: tuple
+    codec_profile_sha256: bytes
+    coordinator: operational.CoordinatorResult
+    ledger: readiness.ProceduralLedger
+    family_totals: tuple
+    family_counts: tuple
+    constructor_facts: tuple
+    physical_minimum_total: int
+    fixed_allowance_reservation: int
+    b_proc: int
+    remaining_procedural_budget: int
+    max_coordinator_private_bytes: int
+    progress_complete: bool
+    cleanup_complete: bool
+    synthetic_non_evidence: bool = True
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("V2 materialization is not a historical evidence fact.")
+
+
+def _v2_conceptual_families(work):
+    _need(type(work) is execution.BoardWork, "V2_EXACT_BOARD_WORK_REQUIRED")
+    execution.BoardWork.__post_init__(work)
+    present = {"primary"}
+    if work.k_control_selected:
+        present.add("k_control")
+    if work.determinism_selected:
+        present.add("determinism")
+    if work.oracle_b_selected:
+        present.add("oracle_primary")
+        if work.determinism_selected:
+            present.add("oracle_repeat")
+    if work.k_control_selected or work.determinism_selected:
+        present.add("reference")
+    return tuple(family for family in readiness.V2_FAMILIES if family in present)
+
+
+def _v2_materialization_counts(plan):
+    counts = dict.fromkeys(readiness.V2_FAMILIES, 0)
+    for work in plan:
+        for family in _v2_conceptual_families(work):
+            counts[family] += 1
+    return tuple(counts[family] for family in readiness.V2_FAMILIES)
+
+
+def _v2_materialization_plan(source_plan):
+    """Preserve the supplied selection; transform only Reference producers.
+
+    The full owner separately authenticates accepted selector membership. This
+    local mapping also supports small exact non-board plans for bounded tests.
+    """
+    _need(type(source_plan) is tuple and 0 < len(source_plan) <= identity.CANDIDATE_MAX,
+          "V2_SYNTHETIC_SOURCE_PLAN_REQUIRED")
+    for work in source_plan:
+        _need(type(work) is execution.BoardWork, "V2_EXACT_BOARD_WORK_REQUIRED")
+        execution.BoardWork.__post_init__(work)
+        _need(work.board == synthetic_board_identity(work.board.game_index),
+              "V2_SYNTHETIC_SOURCE_IDENTITY_REQUIRED")
+    first = source_plan[0]
+    _need(tuple(work.position for work in source_plan) == tuple(range(len(source_plan)))
+          and len({work.board.game_index for work in source_plan}) == len(source_plan)
+          and all((work.protocol_seed, work.run_id, work.runtime) ==
+                  (first.protocol_seed, first.run_id, first.runtime) for work in source_plan),
+          "V2_SYNTHETIC_SOURCE_PLAN_BINDING")
+    return tuple(replace(work, board=reference_board_identity(work.board.game_index))
+                 if work.k_control_selected or work.determinism_selected else work for work in source_plan)
+
+
+def _build_primary_v2_baseline(work, targets, profile, envelope):
+    """Minimal PRIMARY schemas, with V2 framing and no historical size filler."""
+    profile_sha256 = _v2_materialization_boundary(work, profile, envelope)
+    _need(work.board == synthetic_board_identity(work.board.game_index)
+          and not work.k_control_selected and not work.determinism_selected,
+          "V2_PRIMARY_ONLY_BASE_REQUIRED")
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    projections = tuple(_synthetic_projection(work, arm, exact=bool(targets.physical.oracle_primary))
+                        for arm in (records.Arm.CONTROL, records.Arm.K_P0))
+    streams, headers = {}, []
+    for projection, role in zip(projections, ("control", "kp0")):
+        header, values = execution._projection_streams(projection, role)
+        headers.append(header)
+        streams.update(values)
+    streams.update(_synthetic_children(projections[1], work.oracle_b_selected,
+                                       targets.physical.oracle_primary))
+    streams["pairs"] = (records.encode(game.pair_projections(*projections).pair),)
+    bundle = execution._bundle(work, execution.WorkerKind.PRIMARY, streams, headers,
+                               records.AuditStatus.PASS, ())
+    execution.revalidate_bundle(bundle, work, execution.WorkerKind.PRIMARY,
+                                max_payload_bytes=envelope.max_payload_bytes)
+    return bundle, execution.encode_bundle_v2(bundle, profile_sha256,
+                                               max_payload_bytes=envelope.max_payload_bytes)
+
+
+def _v2_constructor_observation(work, family, targets, result):
+    reference = family == "reference"
+    expected_type = ReferenceConstructionResult if reference else TextConstructionResult
+    trial_type = ReferenceTrial if reference else TextTrial
+    _need(type(result) is expected_type, "V2_CONSTRUCTOR_RESULT_REQUIRED")
+    if not reference:
+        _need(result.family == family, "V2_CONSTRUCTOR_FAMILY_BINDING")
+    _need(result.rejection_reason is None,
+          (result.cause or result.rejection_reason) if reference else result.rejection_reason)
+    selected = result.selected_trial
+    _need(type(selected) is trial_type and selected.eligible and type(result.trials) is tuple
+          and len(result.trials) <= 8 and all(type(trial) is trial_type for trial in result.trials),
+          "V2_CONSTRUCTOR_SELECTION_REQUIRED")
+    zero_oracle = False if reference else result.zero_oracle
+    _need(type(zero_oracle) is bool and (not zero_oracle or family in ("oracle_primary", "oracle_repeat")),
+          "V2_ZERO_ORACLE_CONSTRUCTOR_BINDING")
+    _need(tuple(trial.ordinal for trial in result.trials) == tuple(range(1, len(result.trials) + 1))
+          and ((zero_oracle and not result.trials and selected.ordinal == 0)
+               or (not zero_oracle and selected in result.trials)), "V2_CONSTRUCTOR_TRIAL_BINDING")
+    policy = readiness.evaluate_family_size(family, getattr(targets.physical, family),
+        getattr(targets.logical, family), selected.actual_physical_bytes, selected.actual_logical_bytes)
+    _need(policy.eligible and (selected.physical_margin, selected.logical_margin) ==
+          (policy.physical_margin, policy.logical_margin), "V2_CONSTRUCTOR_SELECTED_SIZE_BINDING")
+    knob = "q" if reference else "h"
+    trials = tuple(_V2ConstructorTrial(trial.ordinal, getattr(trial, knob),
+        trial.actual_physical_bytes, trial.actual_logical_bytes, trial.physical_margin,
+        trial.logical_margin, trial.eligible, trial.rejection_reason) for trial in result.trials)
+    return _V2ConstructorObservation(work.position, family, "reference" if reference else "text",
+        policy.physical_target, policy.logical_target, getattr(selected, knob), selected.ordinal,
+        policy.actual_physical_bytes, policy.actual_logical_bytes, policy.physical_margin,
+        policy.logical_margin, policy.physical_excess, policy.logical_excess, policy.text_window_applies,
+        policy.text_window_upper_bound, zero_oracle, trials)
+
+
+def _construct_v2_materialization_work(work, targets, profile, envelope, *, check=None):
+    """Reference first, then P/O/D/O-repeat/K, preserving final PRIMARY bytes."""
+    profile_sha256 = _v2_materialization_boundary(work, profile, envelope)
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    _text_check(check)
+    facts = []
+    kinds = operational._kinds(work)
+    if work.k_control_selected or work.determinism_selected:
+        _need(work.board == reference_board_identity(work.board.game_index), "REFERENCE_NON_BOARD_IDENTITY_REQUIRED")
+        result = construct_reference_v2(work, targets, profile_sha256,
+            max_payload_bytes=envelope.max_payload_bytes, envelope=envelope, _check=check)
+        facts.append(_v2_constructor_observation(work, "reference", targets, result))
+        _need(type(result.selected_bundles) is tuple and type(result.selected_wires) is tuple
+              and tuple(bundle.kind for bundle in result.selected_bundles) == kinds
+              and len(result.selected_wires) == len(kinds), "V2_REFERENCE_WORKFLOW_BINDING")
+        bundles = dict(zip(kinds, result.selected_bundles))
+        wires = dict(zip(kinds, result.selected_wires))
+    else:
+        bundle, wire = _build_primary_v2_baseline(work, targets, profile, envelope)
+        bundles, wires = {execution.WorkerKind.PRIMARY: bundle}, {execution.WorkerKind.PRIMARY: wire}
+    order = ("primary",) + (("oracle_primary",) if work.oracle_b_selected else ())
+    order += (("determinism",) + (("oracle_repeat",) if work.oracle_b_selected else ())
+              if work.determinism_selected else ())
+    order += ("k_control",) if work.k_control_selected else ()
+    for family in order:
+        _text_check(check)
+        _, (_, kind, _, _, _) = _text_spec(family)
+        result = construct_text_family_v2(work, bundles[kind], family, profile_sha256,
+            physical_target=getattr(targets.physical, family), logical_target=getattr(targets.logical, family),
+            max_payload_bytes=envelope.max_payload_bytes, envelope=envelope,
+            prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else wires[execution.WorkerKind.PRIMARY],
+            _check=check)
+        facts.append(_v2_constructor_observation(work, family, targets, result))
+        _need(type(result.selected_bundle) is execution.WorkerBundle
+              and result.selected_bundle.kind is kind and type(result.selected_wire) is bytes,
+              "V2_TEXT_WORKFLOW_BINDING")
+        bundles[kind], wires[kind] = result.selected_bundle, result.selected_wire
+        _text_check(check)
+    present = set()
+    final_wires = tuple(wires[kind] for kind in kinds)
+    for kind, wire in zip(kinds, final_wires):
+        _text_check(check)
+        context = operational._fresh_wb02_context(wire, work, kind, profile_sha256, envelope,
+            prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else final_wires[0])
+        _need(context.bundle == bundles[kind], "V2_CONSTRUCTOR_FINAL_WIRE_BINDING")
+        present.update(_reference_text_families(context.bundle))
+        if kind is execution.WorkerKind.PRIMARY and any(row.stream_name == "control_maintenance" for row in context.rows):
+            present.add("reference")
+        _text_check(check)
+    _need(len(facts) == len(_v2_conceptual_families(work))
+          and {fact.family for fact in facts} == set(_v2_conceptual_families(work)),
+          "V2_CONSTRUCTOR_FAMILY_COVERAGE")
+    return _V2ConstructedWork(final_wires, tuple(facts),
+                              tuple(family for family in readiness.V2_FAMILIES if family in present))
+
+
+class _V2MaterializationMonitor:
+    """Serial constructor-only containment; no worker or background sampler."""
+
+    def __init__(self, envelope, cancel=None):
+        self.envelope = operational._envelope(envelope)
+        _need(cancel is None or callable(getattr(cancel, "is_set", None)), "CANCELLATION_TOKEN")
+        self.cancel = cancel
+        self.started_ns = time.monotonic_ns()
+        self.max_coordinator_private_bytes = 0
+
+    def check(self):
+        _need(self.cancel is None or not self.cancel.is_set(), "CANCELLED")
+        now = time.monotonic_ns()
+        _need(now - self.started_ns < self.envelope.max_launcher_wall_ms * 1_000_000,
+              "SYNTHETIC_MATERIALIZATION_TIMEOUT")
+        current = operational.harness._coordinator_private_bytes()
+        _integer(current, 1)
+        self.max_coordinator_private_bytes = max(self.max_coordinator_private_bytes, current)
+        _need(current <= self.envelope.coordinator_memory_cap_bytes, "SYNTHETIC_COORDINATOR_MEMORY_CAP")
+        _need(current <= self.envelope.memory_cap_bytes, "SYNTHETIC_COMBINED_MEMORY_CAP")
+        return now, current
+
+    def sample(self, work, kind):
+        now, current = self.check()
+        return records.ResourceSampleRecord(operational._unit_id(work.position, kind),
+            records.ProcessRole.COMBINED, 0, current, current, "monotonic_ns:" + str(now),
+            now - self.started_ns, records.MemoryMethod.PRIVATE_BYTES)
+
+
+def _v2_empty_materialization_root(streams_root):
+    root = Path(streams_root)
+    _need(root.is_dir() and not any(root.iterdir()), "V2_EMPTY_STREAM_ROOT_REQUIRED")
+    return root
+
+
+def _materialize_synthetic_v2(plan, workload, targets, profile, envelope, streams_root, *,
+                               cancel=None, progress=None):
+    """Full accepted-plan entry point; execution requires separate run approval."""
+    _need(type(workload) is readiness.SyntheticWorkload, "V2_SYNTHETIC_WORKLOAD_REQUIRED")
+    readiness.SyntheticWorkload.__post_init__(workload)
+    readiness.validate_synthetic_work_plan(plan, workload)
+    materialization_plan = _v2_materialization_plan(plan)
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    counts = _v2_materialization_counts(materialization_plan)
+    _need(counts == workload.unit_counts, "V2_MATERIALIZATION_FAMILY_COUNTS")
+    readiness.validate_dual_payload_fit(workload, targets, envelope.max_payload_bytes)
+    minimum = readiness.minimum_archive_preflight(targets.physical, workload.unit_counts, 0)
+    ledger = _new_v2_materialization_ledger(targets, workload.unit_counts)
+    root = _v2_empty_materialization_root(streams_root)
+    return _materialize_v2_plan(plan, materialization_plan, targets, profile, envelope, root,
+        workload.unit_counts, ledger, minimum, cancel=cancel, progress=progress)
+
+
+def _materialize_v2_plan(source_plan, materialization_plan, targets, profile, envelope, streams_root,
+                         unit_counts, ledger, physical_minimum_total, *, cancel=None, progress=None):
+    """Serial lower owner shared by the full path and small bounded fixtures.
+
+    The production caller owns accepted-workload preflight. This layer always
+    checks mapping/counts and delegates final reconciliation to the accepted
+    policy; it has no test bypass, retry, recovery or independent readback path.
+    """
+    _need(type(materialization_plan) is tuple
+          and materialization_plan == _v2_materialization_plan(source_plan), "V2_MATERIALIZATION_PLAN_BINDING")
+    _need(type(unit_counts) is tuple and len(unit_counts) == len(readiness.V2_FAMILIES)
+          and all(type(count) is int and count >= 0 for count in unit_counts)
+          and _v2_materialization_counts(materialization_plan) == unit_counts,
+          "V2_MATERIALIZATION_FAMILY_COUNTS")
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    _need(type(ledger) is readiness.ProceduralLedger, "EXACT_PROCEDURALLEDGER_REQUIRED")
+    readiness.ProceduralLedger.__post_init__(ledger)
+    _need(not ledger.reservation_pending and ledger.committed_excess == 0, "V2_FRESH_PROCEDURAL_LEDGER_REQUIRED")
+    _integer(physical_minimum_total)
+    _need(progress is None or callable(progress), "SYNTHETIC_PROGRESS_CALLBACK")
+    root = _v2_empty_materialization_root(streams_root)
+    monitor = _V2MaterializationMonitor(envelope, cancel)
+    monitor.check()
+    totals = tuple(_V2FamilyTotal(family, 0, 0, 0) for family in readiness.V2_FAMILIES)
+    counts = dict.fromkeys(readiness.V2_FAMILIES, 0)
+    receipts, facts = [], []
+    sink = operational._V2EvidenceSink(root, envelope, profile)
+    try:
+        sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING, checkpoint=True)
+        monitor.check()
+        if progress is not None:
+            progress(0, len(materialization_plan))
+        for work in materialization_plan:
+            monitor.check()
+            constructed = _construct_v2_materialization_work(work, targets, profile, envelope, check=monitor.check)
+            _need(type(constructed) is _V2ConstructedWork, "V2_CONSTRUCTED_WORK_REQUIRED")
+            operations = tuple(_synthetic_v2_operation_result(work, kind, wire, profile, envelope,
+                prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else constructed.wires[0],
+                samples=(monitor.sample(work, kind),))
+                for kind, wire in zip(operational._kinds(work), constructed.wires))
+            monitor.check()
+            committed = _materialize_v2_unit(work, operations, targets, profile, envelope,
+                constructed.owned_families, ledger, sink, family_totals=totals)
+            ledger, totals = committed.ledger, committed.family_totals
+            receipts.extend(committed.receipts)
+            for family in _v2_conceptual_families(work):
+                counts[family] += 1
+            facts.extend(constructed.constructor_facts)
+            # No prepared unit, context, bundle or wire survives into the next
+            # constructor invocation; only compact facts and receipts accumulate.
+            del committed, operations, constructed
+            monitor.check()
+            if progress is not None:
+                progress(work.position + 1, len(materialization_plan))
+        monitor.check()
+        _need(tuple(counts[family] for family in readiness.V2_FAMILIES) == unit_counts
+              and len(facts) == sum(unit_counts), "V2_MATERIALIZATION_FAMILY_COUNTS")
+        _need(tuple(value.family for value in totals) == readiness.V2_FAMILIES
+              and sum(value.physical_excess for value in totals) == ledger.committed_excess,
+              "V2_MATERIALIZATION_EXCESS_TOTALS")
+        excess = _reconcile_v2_materialization_totals(targets, unit_counts, totals, ledger)
+        _need(excess == ledger.committed_excess and not ledger.reservation_pending
+              and ledger.committed_excess <= ledger.capacity, "PROCEDURAL_EXCESS_RECONCILIATION")
+        _need(tuple((receipt.position, receipt.kind) for receipt in receipts) ==
+              tuple((work.position, kind) for work in materialization_plan for kind in operational._kinds(work))
+              and all(receipt.status is records.AuditStatus.PASS for receipt in receipts)
+              and sink.durable_units == len(receipts)
+              and sink.durable_primary_boards == len(materialization_plan), "V2_MATERIALIZATION_DURABILITY_BINDING")
+        _need(sum(value.physical_bytes for value in totals) ==
+              sum(sink.writers[name].byte_length for name in execution.STREAM_NAMES), "V2_MATERIALIZATION_BYTE_PARTITION")
+        monitor.check()
+        sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                   records.OperationStatus.COMPLETED, checkpoint=True)
+        monitor.check()
+        seals = sink.seal()
+        monitor.check()
+        sink.close()
+        coordinator = operational.CoordinatorResult(tuple(receipts), seals, sink.durable_units,
+            sink.durable_primary_boards, sum(value.byte_length for value in seals), records.AuditStatus.PASS, ())
+        return _V2SyntheticMaterialization(source_plan, materialization_plan, profile.sha256, coordinator,
+            ledger, totals, tuple((family, counts[family]) for family in readiness.V2_FAMILIES), tuple(facts),
+            physical_minimum_total, identity.FIXED_REPORT_RECEIPT_ALLOWANCE, ledger.capacity,
+            ledger.capacity - ledger.committed_excess, monitor.max_coordinator_private_bytes, True, True)
+    except BaseException:
+        if not sink.poisoned and not sink.sealed and not sink.closed:
+            try:
+                sink.event("coordinator:SYNTHETIC_V2_MATERIALIZATION_INCOMPLETE", records.EventKind.ERROR,
+                           records.OperationStatus.INCOMPLETE, checkpoint=True)
+            except BaseException:
+                pass
+        if not sink.closed:
+            try:
+                sink.close()
+            except BaseException:
+                pass
+        raise
+
+
+@dataclass(frozen=True, slots=True)
 class SyntheticMaterialization:
     coordinator: operational.CoordinatorResult
     identity_seal: records.StreamDigest

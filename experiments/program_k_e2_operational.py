@@ -1159,6 +1159,25 @@ class _V2EvidenceSink:
             max_payload_bytes=self.envelope.max_payload_bytes)
         return name, key, logical, frame
 
+    def event(self, unit_id, event_kind, status, phase=records.Phase.EXECUTION, *, checkpoint=False):
+        """Append one canonical coordinator event without admitting a work unit."""
+        self._writable()
+        _need(type(checkpoint) is bool, "V2_EVENT_CHECKPOINT_BOOLEAN_REQUIRED")
+        value = records.OperationEventRecord(phase, unit_id, event_kind,
+            time.monotonic_ns() - self.started, self.event_ordinal, status)
+        name, key, logical, frame = self._support_frame("operations", (self.event_ordinal,), value)
+        _need(self.byte_length + len(frame) <= self.envelope.archive_cap_bytes, "ARCHIVE_CAP")
+        writer = self.writers[name]
+        _need(writer.last_key is None or key > writer.last_key, "V2_SINK_KEY_ORDER")
+        try:
+            writer.append_frame(key, logical, frame)
+            if checkpoint:
+                writer.checkpoint()
+        except BaseException:
+            self.poisoned = True
+            raise
+        self.event_ordinal += 1
+
     def checkpoint(self):
         self._writable()
         try:

@@ -3136,5 +3136,280 @@ class V2AdmissionFoundationTests(unittest.TestCase):
                 self.assertFalse(list(Path(directory).rglob("*.pkf")))
 
 
+class V2SupportEventTests(unittest.TestCase):
+    """Canonical support events around bounded accepted V2 admissions."""
+
+    @classmethod
+    def setUpClass(cls):
+        V2AdmissionFoundationTests.setUpClass.__func__(cls)
+
+    sink = V2AdmissionFoundationTests.sink
+    snapshot = staticmethod(V2AdmissionFoundationTests.snapshot)
+    seed_archive = V2AdmissionFoundationTests.seed_archive
+
+    def test_canonical_start_and_generic_error_are_exact_rf02_without_unit_admission(self):
+        physical = execution.physical
+        with patch.object(op.time, "monotonic_ns", return_value=1000), self.sink() as (root, sink), \
+                patch.object(store.FramedStreamWriter, "append", side_effect=AssertionError("No re-encoding")), \
+                patch.object(physical, "capture_qualified_profile", side_effect=AssertionError("No capture")):
+            expected = (
+                records.OperationEventRecord(records.Phase.EXECUTION, "coordinator", records.EventKind.START,
+                    0, 0, records.OperationStatus.RUNNING),
+                records.OperationEventRecord(records.Phase.EXECUTION,
+                    "coordinator:SYNTHETIC_V2_MATERIALIZATION_INCOMPLETE", records.EventKind.ERROR,
+                    0, 1, records.OperationStatus.INCOMPLETE))
+            raw = b""
+            for event in expected:
+                sink.event(event.unit_id, event.event_kind, event.status, checkpoint=True)
+                raw += physical.encode_frame(records.encode(event), (event.ordinal,),
+                    physical.context_for("operations", self.profile.sha256),
+                    max_payload_bytes=self.envelope.max_payload_bytes)
+                self.assertEqual((root / "operations.pkf").read_bytes(), raw)
+                self.assertFalse(sink.writers["operations"].dirty)
+            self.assertEqual((sink.event_ordinal, sink.resource_ordinal,
+                sink.durable_units, sink.durable_primary_boards), (2, 0, 0, 0))
+            self.assertEqual(sink.byte_length, len(raw))
+            seals = sink.seal()
+            rows = []
+            digest = store.scan_framed_stream(root, "operations",
+                physical.context_for("operations", self.profile.sha256),
+                visit=lambda key, value, logical, length: rows.append((key, value, logical, length)))
+            self.assertEqual(digest, next(value for value in seals if value.name == "operations"))
+            self.assertEqual([(key, value) for key, value, _, _ in rows],
+                             [((event.ordinal,), event) for event in expected])
+            self.assertTrue(all(logical == records.encode(value) for _, value, logical, _ in rows))
+            self.assertEqual(sum(length for _, _, _, length in rows), len(raw))
+            self.assertTrue(all((root / (name + ".pkf")).read_bytes() == b""
+                                for name in sink.names if name != "operations"))
+            self.assertFalse(list(root.glob("*.jsonl")))
+            self.assertFalse((root / "COMPLETE.json").exists())
+
+    def test_start_admission_end_share_one_ordinal_owner_and_end_is_durable_before_seal(self):
+        with self.sink() as (root, sink):
+            sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING, checkpoint=True)
+            self.assertEqual(sink.writers["operations"].last_durable_checkpoint.record_count, 1)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (0, 0))
+            receipt = sink.admit(self.work, self.results[0])
+            self.assertIs(receipt, self.results[0].receipt)
+            before = sink.durable_units, sink.durable_primary_boards, sink.resource_ordinal
+            sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                       records.OperationStatus.COMPLETED, checkpoint=True)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards, sink.resource_ordinal), before)
+            self.assertEqual(sink.event_ordinal, 4)
+            self.assertFalse(sink.writers["operations"].dirty)
+            self.assertEqual(sink.writers["operations"].last_durable_checkpoint.last_key, (3,))
+            sink.seal()
+            events = []
+            store.scan_framed_stream(root, "operations",
+                execution.physical.context_for("operations", self.profile.sha256),
+                visit=lambda key, value, logical, length: events.append((key, value)))
+            self.assertEqual([key for key, _ in events], [(0,), (1,), (2,), (3,)])
+            self.assertEqual([value.event_kind for _, value in events],
+                [records.EventKind.START, records.EventKind.END, records.EventKind.PROGRESS, records.EventKind.END])
+            self.assertEqual(events[-1][1].unit_id, "coordinator:ADMISSION_END")
+            self.assertEqual(events[-1][1].status, records.OperationStatus.COMPLETED)
+
+    def test_event_ordinal_advances_only_after_requested_checkpoint_returns(self):
+        calls = []
+        append, checkpoint = store.FramedStreamWriter.append_frame, store.FramedStreamWriter.checkpoint
+        with self.sink() as (_, sink):
+            def appended(writer, *args):
+                calls.append(("append", sink.event_ordinal))
+                return append(writer, *args)
+            def durable(writer):
+                value = checkpoint(writer)
+                calls.append(("checkpoint", sink.event_ordinal))
+                return value
+            with patch.object(store.FramedStreamWriter, "append_frame", new=appended), \
+                    patch.object(store.FramedStreamWriter, "checkpoint", new=durable):
+                sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING, checkpoint=True)
+            self.assertEqual(calls, [("append", 0), ("checkpoint", 0)])
+            self.assertEqual(sink.event_ordinal, 1)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (0, 0))
+
+    def test_optional_checkpoint_and_explicit_phase_keep_canonical_record_semantics(self):
+        original = store.FramedStreamWriter.checkpoint
+        with self.sink() as (root, sink), patch.object(store.FramedStreamWriter, "checkpoint",
+                autospec=True, side_effect=original) as checkpoint:
+            sink.event("coordinator:phase", records.EventKind.START, records.OperationStatus.RUNNING,
+                       records.Phase.PREFLIGHT)
+            checkpoint.assert_not_called()
+            self.assertTrue(sink.writers["operations"].dirty)
+            self.assertEqual(sink.event_ordinal, 1)
+            sink.checkpoint()
+            rows = []
+            store.scan_framed_stream(root, "operations",
+                execution.physical.context_for("operations", self.profile.sha256),
+                visit=lambda key, value, logical, length: rows.append(value))
+            self.assertEqual(rows[0].phase, records.Phase.PREFLIGHT)
+
+    def test_event_archive_equality_and_one_byte_overflow_preserve_prewrite_state(self):
+        with patch.object(op.time, "monotonic_ns", return_value=1000):
+            with self.sink() as (_, sink):
+                sink.admit(self.work, self.results[0])
+                self.seed_archive(sink)
+                sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                           records.OperationStatus.COMPLETED, checkpoint=True)
+                total = sink.byte_length
+            for cap, fits in ((total, True), (total - 1, False)):
+                with self.subTest(fits=fits), self.sink(replace(self.envelope, archive_cap_bytes=cap)) as (_, sink):
+                    sink.admit(self.work, self.results[0])
+                    self.seed_archive(sink)
+                    before = self.snapshot(sink)
+                    if fits:
+                        sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                                   records.OperationStatus.COMPLETED, checkpoint=True)
+                        self.assertEqual(sink.byte_length, cap)
+                        self.assertEqual(sink.event_ordinal, before[3] + 1)
+                    else:
+                        with patch.object(store.FramedStreamWriter, "append_frame",
+                                side_effect=AssertionError("Archive rejection wrote a frame")) as append, \
+                                self.assertRaisesRegex(op.OperationalError, "^ARCHIVE_CAP$"):
+                            sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                                       records.OperationStatus.COMPLETED, checkpoint=True)
+                        append.assert_not_called()
+                        self.assertEqual(self.snapshot(sink), before)
+                        self.assertFalse(sink.poisoned)
+                    self.assertEqual((sink.durable_units, sink.durable_primary_boards), (1, 1))
+
+    def test_invalid_event_fields_and_checkpoint_type_reject_before_append(self):
+        standard = dict(unit_id="coordinator", event_kind=records.EventKind.START,
+                        status=records.OperationStatus.RUNNING)
+        for changes in ({"unit_id": None}, {"event_kind": "START"}, {"status": "RUNNING"},
+                        {"phase": "EXECUTION"}, {"checkpoint": 1}, {"checkpoint": None}):
+            with self.subTest(changes=changes), self.sink() as (_, sink), \
+                    patch.object(store.FramedStreamWriter, "append_frame",
+                        side_effect=AssertionError("Invalid event reached writer")) as append:
+                before = self.snapshot(sink)
+                with self.assertRaises(ValueError):
+                    sink.event(**dict(standard, **changes))
+                append.assert_not_called()
+                self.assertEqual(self.snapshot(sink), before)
+                self.assertFalse(sink.poisoned)
+
+    def test_event_key_order_rejects_before_write_without_poison(self):
+        with self.sink() as (_, sink):
+            sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING, checkpoint=True)
+            sink.event_ordinal = 0
+            before = self.snapshot(sink)
+            with patch.object(store.FramedStreamWriter, "append_frame",
+                    side_effect=AssertionError("Duplicate event reached writer")) as append, \
+                    self.assertRaisesRegex(op.OperationalError, "^V2_SINK_KEY_ORDER$"):
+                sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                           records.OperationStatus.COMPLETED, checkpoint=True)
+            append.assert_not_called()
+            self.assertEqual(self.snapshot(sink), before)
+            self.assertFalse(sink.poisoned)
+
+    def test_start_and_end_append_checkpoint_and_fsync_failures_poison_and_retain_bytes(self):
+        append = store.FramedStreamWriter.append_frame
+        for stage in ("start", "end"):
+            for failure in ("append", "checkpoint", "fsync"):
+                with self.subTest(stage=stage, failure=failure), self.sink() as (root, sink):
+                    if stage == "end":
+                        sink.event("coordinator", records.EventKind.START,
+                                   records.OperationStatus.RUNNING, checkpoint=True)
+                        sink.admit(self.work, self.results[0])
+                    before = self.snapshot(sink)
+                    prefix = {name: writer.path.read_bytes() for name, writer in sink.writers.items()}
+                    def broken_append(writer, *args):
+                        append(writer, *args)
+                        raise store.StoreError("INJECTED_EVENT_APPEND_FAILURE")
+                    with ExitStack() as stack:
+                        if failure == "append":
+                            failing = stack.enter_context(patch.object(store.FramedStreamWriter,
+                                "append_frame", side_effect=broken_append, autospec=True))
+                        elif failure == "checkpoint":
+                            failing = stack.enter_context(patch.object(store.FramedStreamWriter, "checkpoint",
+                                side_effect=store.StoreError("INJECTED_EVENT_CHECKPOINT_FAILURE")))
+                        else:
+                            failing = stack.enter_context(patch.object(store.os, "fsync",
+                                side_effect=OSError("private injected fsync detail")))
+                        with self.assertRaises(store.StoreError):
+                            sink.event("coordinator" if stage == "start" else "coordinator:ADMISSION_END",
+                                records.EventKind.START if stage == "start" else records.EventKind.END,
+                                records.OperationStatus.RUNNING if stage == "start" else records.OperationStatus.COMPLETED,
+                                checkpoint=True)
+                        self.assertEqual(failing.call_count, 1)
+                    self.assertTrue(sink.poisoned)
+                    self.assertEqual((sink.durable_units, sink.durable_primary_boards,
+                        sink.event_ordinal, sink.resource_ordinal), before[1:5])
+                    with self.assertRaisesRegex(op.OperationalError, "V2_SINK_NOT_WRITABLE"):
+                        sink.event("coordinator:SYNTHETIC_V2_MATERIALIZATION_INCOMPLETE",
+                            records.EventKind.ERROR, records.OperationStatus.INCOMPLETE, checkpoint=True)
+                    with self.assertRaisesRegex(op.OperationalError, "V2_SINK_NOT_WRITABLE"):
+                        sink.seal()
+                    sink.close()
+                    retained = {path.stem: path.read_bytes() for path in root.glob("*.pkf")}
+                    self.assertTrue(all(retained[name].startswith(data) for name, data in prefix.items()))
+                    self.assertGreater(sum(map(len, retained.values())), sum(map(len, prefix.values())))
+                    self.assertFalse(sink.sealed)
+                    self.assertFalse((root / "COMPLETE.json").exists())
+
+    def test_baseexception_in_event_write_is_preserved_and_poisoned(self):
+        with self.sink() as (_, sink), patch.object(store.FramedStreamWriter, "append_frame",
+                side_effect=KeyboardInterrupt("synthetic cancellation")):
+            with self.assertRaises(KeyboardInterrupt):
+                sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING)
+            self.assertTrue(sink.poisoned)
+            self.assertEqual((sink.event_ordinal, sink.durable_units, sink.durable_primary_boards), (0, 0, 0))
+
+    def test_seal_failure_after_durable_end_retains_prefix_without_successful_seal(self):
+        original = store.FramedStreamWriter.seal
+        with self.sink() as (root, sink):
+            sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING, checkpoint=True)
+            sink.admit(self.work, self.results[0])
+            sink.event("coordinator:ADMISSION_END", records.EventKind.END,
+                       records.OperationStatus.COMPLETED, checkpoint=True)
+            prefix = {name: writer.path.read_bytes() for name, writer in sink.writers.items()}
+            counters = sink.event_ordinal, sink.durable_units, sink.durable_primary_boards
+            def fail_last(writer):
+                if writer.stream_name == "resources":
+                    raise store.StoreError("INJECTED_EVENT_SEAL_FAILURE")
+                return original(writer)
+            with patch.object(store.FramedStreamWriter, "seal", autospec=True,
+                    side_effect=fail_last) as seal, \
+                    self.assertRaisesRegex(store.StoreError, "INJECTED_EVENT_SEAL_FAILURE"):
+                sink.seal()
+            self.assertEqual(seal.call_count, len(sink.names))
+            self.assertTrue(sink.poisoned)
+            self.assertFalse(sink.sealed)
+            self.assertEqual((sink.event_ordinal, sink.durable_units, sink.durable_primary_boards), counters)
+            sink.close()
+            self.assertEqual({path.stem: path.read_bytes() for path in root.glob("*.pkf")}, prefix)
+
+    def test_event_rechecks_profile_and_closed_sealed_poisoned_lifecycle(self):
+        for state in ("profile", "closed", "sealed", "poisoned"):
+            with self.subTest(state=state), self.sink() as (_, sink):
+                if state == "profile":
+                    sink.profile_sha256 = b"x" * 32
+                elif state == "closed":
+                    sink.close()
+                elif state == "sealed":
+                    sink.seal()
+                else:
+                    sink.poisoned = True
+                before = self.snapshot(sink)
+                with patch.object(store.FramedStreamWriter, "append_frame",
+                        side_effect=AssertionError("Unwritable event reached writer")) as append, self.assertRaises(ValueError):
+                    sink.event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING)
+                append.assert_not_called()
+                self.assertEqual(self.snapshot(sink), before)
+
+    def test_public_v1_coordinate_and_r0_do_not_call_new_event_seam(self):
+        with patch.object(op._V2EvidenceSink, "event", side_effect=AssertionError("V1 called V2 event")), \
+                patch.object(execution.physical, "capture_qualified_profile", side_effect=AssertionError("V1 profile capture")):
+            with tempfile.TemporaryDirectory() as directory:
+                result = StreamingCoordinatorTests().run_plan(_plan(), directory)
+                self.assertIs(result.status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).glob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            with tempfile.TemporaryDirectory() as directory:
+                result = R0ComponentTests().run_component(directory, op.R0Component.PRIMARY)
+                self.assertIs(result.units[0].status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).rglob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+
+
 if __name__ == "__main__":
     unittest.main()

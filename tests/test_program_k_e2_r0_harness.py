@@ -4499,3 +4499,796 @@ class V2TransactionV1IsolationTests(unittest.TestCase):
                          h.synthetic_bundle_family_bytes):
             source = inspect.getsource(function)
             self.assertFalse(any(name in source for name in names))
+
+
+class V2SyntheticMaterializerTests(unittest.TestCase):
+    """Four real units only; complete-count policy checks use arithmetic padding."""
+
+    _full_counts = (10000, 256, 128, 4, 256, 506)
+
+    @staticmethod
+    def source_plan():
+        runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os",
+                                          "fixture-platform", "fixture-arch", None)
+        return tuple(execution.BoardWork(position,
+            h.synthetic_board_identity(2_000_000_080_000 + position),
+            bytes.fromhex(identity.PROTOCOL_SHA256), "slice1m-bounded-fixture",
+            oracle, determinism, k_control, runtime)
+            for position, (oracle, determinism, k_control) in enumerate(
+                ((False, False, False), (True, False, False),
+                 (False, False, True), (True, True, False))))
+
+    @staticmethod
+    def counts(plan):
+        return (len(plan), sum(work.k_control_selected for work in plan),
+            sum(work.oracle_b_selected for work in plan),
+            sum(work.oracle_b_selected and work.determinism_selected for work in plan),
+            sum(work.determinism_selected for work in plan),
+            sum(work.k_control_selected or work.determinism_selected for work in plan))
+
+    @staticmethod
+    @contextmanager
+    def forbidden_workloads():
+        import socket
+        with _EvidenceExitStack() as stack:
+            for owner, name in ((execution, "_materialize_board"),
+                    (execution, "MinesweeperEngine"),
+                    (execution.runner, "run_k_p0"), (execution.runner, "run_k_control"),
+                    (readiness, "search_synthetic_corpus"), (readiness, "target_counts"),
+                    (h.analysis, "_shared_bootstrap"), (socket, "create_connection"),
+                    (socket.socket, "connect")):
+                stack.enter_context(patch.object(owner, name,
+                    side_effect=AssertionError("No Slice 1M research workload")))
+            stack.enter_context(patch("benchmark_board.generate_board",
+                                      side_effect=AssertionError("No benchmark generation")))
+            yield
+
+    @classmethod
+    def padded_reconciliation(cls, targets, counts, totals, ledger):
+        # Only this test adapter adds unmaterialized minima. Actual four-unit
+        # counts and exact durable totals are independently asserted below.
+        padded = tuple(replace(value,
+            physical_bytes=value.physical_bytes + (full - small) * getattr(targets.physical, value.family),
+            logical_bytes=value.logical_bytes + (full - small) * getattr(targets.logical, value.family))
+            for value, full, small in zip(totals, cls._full_counts, counts))
+        return cls._real_reconcile(targets, cls._full_counts, padded, ledger)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = h._capture_qualified_codec_profile()
+        cls.plan = cls.source_plan()
+        cls.materialization_plan = h._v2_materialization_plan(cls.plan)
+        cls._real_reconcile = staticmethod(h._reconcile_v2_materialization_totals)
+        provisional = readiness.DualComponentSizes(
+            readiness.ComponentSizes(1, 1, 1, 1, 1, 1),
+            readiness.ComponentSizes(1, 1, 1, 1, 1, 1))
+        initial_envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=1048576)
+        baselines = []
+        with cls.forbidden_workloads():
+            for work in cls.materialization_plan:
+                if work.k_control_selected or work.determinism_selected:
+                    baselines.extend(h._reference_bundles(work, h._reference_prefix(0), 0))
+                else:
+                    baselines.append(h._build_primary_v2_baseline(
+                        work, provisional, cls.profile, initial_envelope)[0])
+        cap = max(execution.legacy_bundle_size(bundle) for bundle in baselines) + 4096
+        cls.envelope = replace(initial_envelope, max_payload_bytes=cap)
+        views = tuple(execution.decode_bundle_view_v2(
+            execution.encode_bundle_v2(bundle, cls.profile.sha256, max_payload_bytes=cap),
+            cls.profile.sha256, max_payload_bytes=cap) for bundle in baselines)
+        bases = tuple(readiness.ComponentSizes(*(max(
+            _text_family_metrics(view, family)[axis] for view in views)
+            for family in readiness.V2_FAMILIES)) for axis in (0, 1))
+        # Calibrate Oracle floors from the canonical h=0 text at the shared
+        # logical minimum. The original prose's compressed size can fall just
+        # outside the accepted eight-trial schedule's evaluated set.
+        oracle_physical, cls.oracle_h0 = {}, {}
+        for family in ("oracle_primary", "oracle_repeat"):
+            sizes = []
+            for bundle, view in zip(baselines, views):
+                if not _text_family_metrics(view, family)[1]:
+                    continue
+                fixed = _text_with_literal(bundle, family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+                ell = (max(0, getattr(bases[1], family) - _text_logical_bytes(fixed, family)) + 3) // 4
+                candidate = _text_with_literal(fixed, family,
+                    "SYNTHETIC_NON_EVIDENCE|L:" + "x" * ell + "|H:")
+                candidate_view = execution.decode_bundle_view_v2(
+                    execution.encode_bundle_v2(candidate, cls.profile.sha256, max_payload_bytes=cap),
+                    cls.profile.sha256, max_payload_bytes=cap)
+                measured = _text_family_metrics(candidate_view, family)
+                cls.oracle_h0[bundle.work_position, family] = measured
+                sizes.append(measured)
+            target = min(physical_bytes for physical_bytes, _ in sizes)
+            if not all(target <= physical_bytes <= target + 4096
+                       and logical_bytes >= getattr(bases[1], family)
+                       for physical_bytes, logical_bytes in sizes):
+                raise AssertionError(("No common bounded Oracle h=0 window", family, sizes))
+            oracle_physical[family] = target
+        cls.targets = readiness.DualComponentSizes(
+            replace(bases[0], reference=1, **oracle_physical),
+            replace(bases[1], reference=bases[1].reference + h._reference_prefix(7).added_length(7)))
+        # Prove the real Reference calls cannot accidentally enter the large
+        # diagnostic domain, without changing the accepted constructor scheduler.
+        cls.reference_bounds = {}
+        for work in cls.materialization_plan:
+            if work.k_control_selected or work.determinism_selected:
+                prefix = h._reference_prefix(cap // 26)
+                bundle_group = tuple(bundle for bundle in baselines if bundle.work_position == work.position)
+                low, high = h._reference_q_bounds(bundle_group, cls.targets, prefix, cap)
+                if high is None or not 0 <= low <= high < 10000:
+                    raise AssertionError(("Unbounded Slice 1M fixture", low, high))
+                cls.reference_bounds[work.position] = (low, high)
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.root = Path(cls.directory.name)
+        cls.progress, cls.constructor_calls = [], []
+        cls.constructed, cls.reference_results, cls.text_results, cls.transactions = {}, {}, {}, []
+        cls.text_priors = {}
+        cls.reconciliation_calls = []
+        reference = h.construct_reference_v2
+        text = h.construct_text_family_v2
+        construct = h._construct_v2_materialization_work
+        transact = h._materialize_v2_unit
+        def reference_call(work, *args, **kwargs):
+            if not callable(kwargs.get("_check")):
+                raise AssertionError("Reference constructor must receive the materialization monitor")
+            cls.constructor_calls.append((work.position, "reference"))
+            result = reference(work, *args, **kwargs)
+            cls.reference_results[work.position] = result
+            return result
+        def text_call(work, bundle, family, *args, **kwargs):
+            if not callable(kwargs.get("_check")):
+                raise AssertionError("Text constructor must receive the materialization monitor")
+            cls.constructor_calls.append((work.position, family))
+            cls.text_priors[work.position, family] = kwargs.get("prior_primary_wire")
+            result = text(work, bundle, family, *args, **kwargs)
+            cls.text_results[work.position, family] = result
+            return result
+        def construct_call(work, *args, **kwargs):
+            result = construct(work, *args, **kwargs)
+            cls.constructed[work.position] = result
+            return result
+        def transaction_call(*args, **kwargs):
+            result = transact(*args, **kwargs)
+            cls.transactions.append((args, kwargs, result))
+            return result
+        def reconcile(*args):
+            cls.reconciliation_calls.append(args)
+            return cls.padded_reconciliation(*args)
+        with cls.forbidden_workloads(), \
+                patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                patch.object(h, "construct_reference_v2", side_effect=reference_call), \
+                patch.object(h, "construct_text_family_v2", side_effect=text_call), \
+                patch.object(h, "_construct_v2_materialization_work", side_effect=construct_call), \
+                patch.object(h, "_materialize_v2_unit", side_effect=transaction_call), \
+                patch.object(h, "_reconcile_v2_materialization_totals", side_effect=reconcile):
+            cls.result = cls.run_lower(cls.root, progress=lambda done, total: cls.progress.append((done, total)))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    @classmethod
+    def run_lower(cls, root, *, plan=None, targets=None, envelope=None, **kwargs):
+        plan = cls.plan if plan is None else plan
+        targets = cls.targets if targets is None else targets
+        return h._materialize_v2_plan(plan, h._v2_materialization_plan(plan), targets,
+            cls.profile, cls.envelope if envelope is None else envelope, root,
+            cls.counts(plan), h._new_v2_materialization_ledger(targets, cls._full_counts),
+            readiness.minimum_archive_preflight(targets.physical, cls._full_counts, 0), **kwargs)
+
+    @contextmanager
+    def cached_lower(self):
+        with self.forbidden_workloads(), \
+                patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                patch.object(h, "_construct_v2_materialization_work",
+                    side_effect=lambda work, *args, **kwargs: self.constructed[work.position]), \
+                patch.object(h, "_reconcile_v2_materialization_totals",
+                    side_effect=self.padded_reconciliation):
+            yield
+
+    def scan(self, root, name):
+        values = []
+        digest = h.store.scan_framed_stream(root, name, physical.context_for(name, self.profile.sha256),
+            visit=lambda key, value, logical, length: values.append((key, value, logical, length)))
+        return digest, values
+
+    def test_real_four_work_mapping_constructor_order_and_final_primary_binding(self):
+        self.assertEqual(self.counts(self.plan), (4, 1, 2, 1, 1, 2))
+        self.assertEqual(self.result.source_plan, self.plan)
+        self.assertEqual(self.result.materialization_plan, self.materialization_plan)
+        for source, derived in zip(self.plan, self.materialization_plan):
+            self.assertEqual(source.board, h.synthetic_board_identity(source.board.game_index))
+            expected = (h.reference_board_identity(source.board.game_index)
+                        if source.k_control_selected or source.determinism_selected else source.board)
+            self.assertEqual(derived.board, expected)
+            self.assertEqual(replace(derived, board=source.board), source)
+        self.assertEqual(self.constructor_calls, [(0, "primary"), (1, "primary"), (1, "oracle_primary"),
+            (2, "reference"), (2, "primary"), (2, "k_control"), (3, "reference"),
+            (3, "primary"), (3, "oracle_primary"), (3, "determinism"), (3, "oracle_repeat")])
+        for key, measured in self.oracle_h0.items():
+            low = self.text_results[key].trials[0]
+            self.assertEqual((low.h, low.actual_physical_bytes, low.actual_logical_bytes), (0, *measured))
+            self.assertTrue(low.eligible)
+        for work in self.materialization_plan:
+            final = self.constructed[work.position]
+            for kind, wire in zip(operational._kinds(work), final.wires):
+                context = operational._fresh_wb02_context(wire, work, kind, self.profile.sha256,
+                    self.envelope, prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else final.wires[0])
+                self.assertEqual(context.bundle.work_position, work.position)
+            if work.position in self.reference_results:
+                original = self.reference_results[work.position]
+                self.assertEqual((original.q_lo, original.q_hi), self.reference_bounds[work.position])
+                self.assertLessEqual(len(original.trials), 8)
+                self.assertIsNot(final.wires[0], original.selected_wires[0])
+            for family in ("determinism", "oracle_repeat", "k_control"):
+                if (work.position, family) in self.text_priors:
+                    self.assertIs(self.text_priors[work.position, family], final.wires[0])
+
+    def test_actual_rf02_seals_totals_resource_samples_and_events(self):
+        result = self.result
+        self.assertEqual(tuple(value.name for value in result.coordinator.streams),
+                         execution.STREAM_NAMES + ("operations", "resources"))
+        expected = {name: b"" for name in execution.STREAM_NAMES}
+        measured = {family: [0, 0] for family in readiness.V2_FAMILIES}
+        for work in self.materialization_plan:
+            for wire in self.constructed[work.position].wires:
+                view = execution.decode_bundle_view_v2(wire, self.profile.sha256,
+                                                        max_payload_bytes=self.envelope.max_payload_bytes)
+                for row in view.rows:
+                    expected[row.stream_name] += row.frame_bytes
+                for family in measured:
+                    for axis, amount in enumerate(_text_family_metrics(view, family)):
+                        measured[family][axis] += amount
+        for name, data in expected.items():
+            self.assertEqual((self.root / (name + ".pkf")).read_bytes(), data, name)
+        for digest in result.coordinator.streams:
+            self.assertEqual(self.scan(self.root, digest.name)[0], digest)
+        self.assertEqual(tuple((value.family, value.physical_bytes, value.logical_bytes)
+            for value in result.family_totals),
+            tuple((family, *measured[family]) for family in readiness.V2_FAMILIES))
+        self.assertEqual(dict(result.family_counts), dict(zip(readiness.V2_FAMILIES, (4, 1, 2, 1, 1, 2))))
+        self.assertEqual(result.coordinator.durable_units, 6)
+        self.assertEqual(result.coordinator.durable_primary_boards, 4)
+        self.assertEqual(result.coordinator.archive_bytes,
+                         sum(path.stat().st_size for path in self.root.glob("*.pkf")))
+        self.assertEqual((result.coordinator.status, result.coordinator.reason_codes), (records.AuditStatus.PASS, ()))
+        events = [row[1] for row in self.scan(self.root, "operations")[1]]
+        self.assertEqual((events[0].unit_id, events[0].event_kind, events[0].status),
+            ("coordinator", records.EventKind.START, records.OperationStatus.RUNNING))
+        self.assertEqual((events[-1].unit_id, events[-1].event_kind, events[-1].status),
+            ("coordinator:ADMISSION_END", records.EventKind.END, records.OperationStatus.COMPLETED))
+        samples = [row[1] for row in self.scan(self.root, "resources")[1]]
+        self.assertEqual(len(samples), 6)
+        expected_ids = tuple(operational._unit_id(work.position, kind)
+            for work in self.materialization_plan for kind in operational._kinds(work))
+        self.assertEqual(tuple(sample.unit_id for sample in samples), expected_ids)
+        self.assertTrue(all((sample.worker_bytes, sample.coordinator_bytes, sample.combined_bytes) == (0, 100, 100)
+            and sample.process_role is records.ProcessRole.COMBINED
+            and sample.method is records.MemoryMethod.PRIVATE_BYTES for sample in samples))
+        self.assertTrue(all(sample.elapsed_ns >= 0 for sample in samples))
+        self.assertEqual(self.progress, [(index, 4) for index in range(5)])
+        self.assertEqual({path.suffix for path in self.root.iterdir()}, {".pkf"})
+        self.assertFalse((self.root / "COMPLETE.json").exists())
+
+    def test_compact_constructor_facts_have_exact_trials_and_no_validation_authority(self):
+        facts = self.result.constructor_facts
+        self.assertEqual(len(facts), 11)
+        self.assertEqual({(fact.position, fact.family) for fact in facts},
+            {(work.position, family) for work in self.plan for family in h._v2_conceptual_families(work)})
+        import pickle
+        from experiments import program_k_e2_r0_evidence as evidence
+        for fact in facts:
+            original = (self.reference_results[fact.position] if fact.family == "reference"
+                        else self.text_results[fact.position, fact.family])
+            trial = original.selected_trial
+            self.assertEqual((fact.selected_knob, fact.selected_trial_ordinal),
+                (trial.q if fact.family == "reference" else trial.h, trial.ordinal))
+            self.assertEqual((fact.actual_physical_bytes, fact.actual_logical_bytes,
+                fact.physical_margin, fact.logical_margin),
+                (trial.actual_physical_bytes, trial.actual_logical_bytes, trial.physical_margin, trial.logical_margin))
+            self.assertEqual((fact.physical_excess, fact.logical_excess),
+                             (max(0, fact.physical_margin), max(0, fact.logical_margin)))
+            self.assertEqual(len(fact.trials), len(original.trials))
+            self.assertLessEqual(len(fact.trials), 8)
+            self.assertEqual(fact.constructor_kind, "reference" if fact.family == "reference" else "text")
+            self.assertEqual(fact.text_window_applies, fact.family != "reference")
+            self.assertEqual(fact.text_window_upper_bound,
+                             None if fact.family == "reference" else fact.physical_target + 4096)
+            for observed, raw in zip(fact.trials, original.trials):
+                self.assertEqual((observed.ordinal, observed.knob, observed.actual_physical_bytes,
+                    observed.actual_logical_bytes, observed.physical_margin, observed.logical_margin,
+                    observed.eligible, observed.rejection_reason), (raw.ordinal,
+                    raw.q if fact.family == "reference" else raw.h, raw.actual_physical_bytes,
+                    raw.actual_logical_bytes, raw.physical_margin, raw.logical_margin,
+                    raw.eligible, raw.rejection_reason))
+            self.assertFalse(hasattr(fact, "__dict__"))
+            self.assertTrue({"bundle", "wire", "context", "rows", "path", "trusted", "token"}.isdisjoint(
+                field.name for field in fields(fact)))
+            self.assertNotIn(type(fact), evidence._FACT_TYPES.values())
+            with self.assertRaises(FrozenInstanceError):
+                fact.physical_excess = 0
+            with self.assertRaises(TypeError):
+                pickle.dumps(fact)
+
+    def test_serial_transaction_state_progress_and_final_policy_reconciliation(self):
+        previous = h._new_v2_materialization_ledger(self.targets, self._full_counts)
+        prior_totals = None
+        for args, kwargs, transaction in self.transactions:
+            self.assertEqual(args[6], previous)
+            if prior_totals is not None:
+                self.assertIs(args[6], previous)
+                self.assertIs(kwargs["family_totals"], prior_totals)
+            previous, prior_totals = transaction.ledger, transaction.family_totals
+        result = self.result
+        self.assertEqual(result.ledger, previous)
+        self.assertEqual(result.family_totals, prior_totals)
+        self.assertEqual(len(self.reconciliation_calls), 1)
+        self.assertEqual(self.reconciliation_calls[0][1], (4, 1, 2, 1, 1, 2))
+        self.assertEqual(sum(value.physical_excess for value in result.family_totals),
+                         result.ledger.committed_excess)
+        self.assertFalse(result.ledger.reservation_pending)
+        self.assertEqual(result.fixed_allowance_reservation, 268435456)
+        self.assertEqual(result.b_proc, result.ledger.capacity)
+        self.assertEqual(result.remaining_procedural_budget, result.b_proc - result.ledger.committed_excess)
+        self.assertEqual(result.max_coordinator_private_bytes, 100)
+        self.assertTrue(result.progress_complete and result.cleanup_complete and result.synthetic_non_evidence)
+        self.assertFalse(getattr(result, "readback_complete", False))
+
+    @classmethod
+    def full_metadata_fixture(cls):
+        if not hasattr(cls, "_metadata_fixture"):
+            with tempfile.TemporaryDirectory() as directory, cls.forbidden_workloads(), \
+                    patch.object(h, "_construct_v2_materialization_work",
+                                 side_effect=AssertionError("No 10000-unit construction")), \
+                    patch.object(h, "_materialize_v2_plan",
+                                 side_effect=AssertionError("No 10000-unit loop")), \
+                    patch.object(operational._V2EvidenceSink, "__init__",
+                                 side_effect=AssertionError("No metadata-only sink")):
+                path = Path(directory) / "receipt.json"
+                path.write_bytes(_accepted_receipt_bytes())
+                receipt = h.load_selection_receipt(path)
+                plan = h.build_selected_work_plan(receipt, "synthetic-i7-slice1m-metadata-only")
+                cls._metadata_fixture = plan, receipt.workload
+        return cls._metadata_fixture
+
+    def test_full_owner_metadata_only_routes_exact_accepted_counts_without_construction(self):
+        plan, workload = self.full_metadata_fixture()
+        marker = object()
+        with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
+                patch.object(h, "_materialize_v2_plan", return_value=marker) as lower, \
+                patch.object(h, "_construct_v2_materialization_work",
+                             side_effect=AssertionError("No full constructor")) as constructor, \
+                patch.object(operational._V2EvidenceSink, "__init__",
+                             side_effect=AssertionError("No metadata-only sink")) as sink, \
+                patch.object(readiness, "validate_synthetic_work_plan",
+                             wraps=readiness.validate_synthetic_work_plan) as validate, \
+                patch.object(readiness, "validate_dual_payload_fit",
+                             wraps=readiness.validate_dual_payload_fit) as payload, \
+                patch.object(readiness, "minimum_archive_preflight",
+                             wraps=readiness.minimum_archive_preflight) as minimum, \
+                patch.object(h, "_new_v2_materialization_ledger",
+                             wraps=h._new_v2_materialization_ledger) as ledger:
+            self.assertIs(h._materialize_synthetic_v2(plan, workload, self.targets,
+                self.profile, self.envelope, directory), marker)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+        validate.assert_called_once_with(plan, workload)
+        payload.assert_called_once_with(workload, self.targets, self.envelope.max_payload_bytes)
+        minimum.assert_called_once_with(self.targets.physical, workload.unit_counts, 0)
+        ledger.assert_called_once_with(self.targets, workload.unit_counts)
+        constructor.assert_not_called()
+        sink.assert_not_called()
+        self.assertEqual(lower.call_count, 1)
+        args = lower.call_args.args
+        self.assertIs(args[0], plan)
+        self.assertEqual(len(args[1]), 10000)
+        self.assertEqual(args[6], (10000, 256, 128, 4, 256, 506))
+        self.assertEqual(sum(args[6]), 11150)
+        self.assertEqual(self.counts(args[1]), workload.unit_counts)
+        self.assertEqual(sum(work.board.width == 30 for work in args[1]), 506)
+        self.assertEqual(tuple(work.board.game_index for work in args[1]),
+                         tuple(work.board.game_index for work in plan))
+        self.assertEqual(args[7], h._new_v2_materialization_ledger(self.targets, workload.unit_counts))
+
+    def test_full_owner_changed_flags_counts_positions_identity_and_types_fail_before_lower(self):
+        plan, workload = self.full_metadata_fixture()
+        changed_selection = replace(workload.selection)
+        object.__setattr__(changed_selection, "counts", replace(workload.selection.counts,
+                                                              u_kd=workload.selection.counts.u_kd + 1))
+        changed_workload = replace(workload)
+        object.__setattr__(changed_workload, "selection", changed_selection)
+        cases = ((list(plan), workload), (plan, object()), (plan, changed_workload),
+            ((replace(plan[0], oracle_b_selected=not plan[0].oracle_b_selected),) + plan[1:], workload),
+            ((replace(plan[0], position=1),) + plan[1:], workload),
+            ((replace(plan[0], board=h.reference_board_identity(plan[0].board.game_index)),) + plan[1:], workload))
+        with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
+                patch.object(h, "_materialize_v2_plan", side_effect=AssertionError("No lower loop")) as lower, \
+                patch.object(operational._V2EvidenceSink, "__init__",
+                             side_effect=AssertionError("No sink")) as sink:
+            for bad_plan, bad_workload in cases:
+                with self.subTest(plan_type=type(bad_plan), workload_type=type(bad_workload)), \
+                        self.assertRaises(ValueError):
+                    h._materialize_synthetic_v2(bad_plan, bad_workload, self.targets,
+                                               self.profile, self.envelope, directory)
+                self.assertEqual(list(Path(directory).iterdir()), [])
+        lower.assert_not_called()
+        sink.assert_not_called()
+
+    def test_full_owner_minimum_and_procedural_infeasibility_are_prewrite(self):
+        plan, workload = self.full_metadata_fixture()
+        other_minima = workload.unit_counts[1] + workload.unit_counts[4] + workload.unit_counts[5]
+        for boundary, reason in (
+                (identity.MAX_ARCHIVE_BYTES, "SYNTHETIC_MINIMUM_ARCHIVE_CAP"),
+                (identity.MAX_ARCHIVE_BYTES - identity.FIXED_REPORT_RECEIPT_ALLOWANCE,
+                 "SYNTHETIC_PROCEDURAL_FIXED_RESERVATION_INFEASIBLE")):
+            basis = readiness.ComponentSizes((boundary - other_minima) // 10000 + 1, 1, 0, 0, 1, 1)
+            targets = readiness.DualComponentSizes(basis, basis)
+            envelope = replace(self.envelope, max_payload_bytes=physical.MAX_PAYLOAD_BYTES)
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(h, "_materialize_v2_plan", side_effect=AssertionError("No lower loop")) as lower, \
+                    patch.object(operational._V2EvidenceSink, "__init__",
+                                 side_effect=AssertionError("No sink")) as sink:
+                with self.assertRaisesRegex(readiness.ReadinessError, reason):
+                    h._materialize_synthetic_v2(plan, workload, targets, self.profile, envelope, directory)
+                self.assertEqual(list(Path(directory).iterdir()), [])
+            lower.assert_not_called()
+            sink.assert_not_called()
+
+    def test_missing_file_nonempty_and_historical_roots_are_rejected_without_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            file_root = parent / "file"
+            file_root.write_bytes(b"preserved")
+            nonempty = parent / "nonempty"
+            nonempty.mkdir()
+            (nonempty / "operations.jsonl").write_bytes(b"historical")
+            subtree = parent / "subtree"
+            subtree.mkdir()
+            (subtree / "child").mkdir()
+            for root in (parent / "missing" / "nested", file_root, nonempty, subtree):
+                with self.subTest(root=root.name), \
+                        patch.object(operational._V2EvidenceSink, "__init__",
+                                     side_effect=AssertionError("No sink")) as sink, \
+                        self.assertRaisesRegex(ValueError, "V2_EMPTY_STREAM_ROOT_REQUIRED"):
+                    self.run_lower(root, plan=self.plan[:1])
+                sink.assert_not_called()
+            self.assertFalse((parent / "missing").exists())
+            self.assertEqual(file_root.read_bytes(), b"preserved")
+            self.assertEqual((nonempty / "operations.jsonl").read_bytes(), b"historical")
+
+    def test_zero_oracle_preserves_conceptual_fact_count_and_no_attributable_rows(self):
+        plan = (replace(self.plan[0], oracle_b_selected=True),)
+        targets = replace(self.targets,
+            physical=replace(self.targets.physical, oracle_primary=0, oracle_repeat=0),
+            logical=replace(self.targets.logical, oracle_primary=0, oracle_repeat=0))
+        with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
+                patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                patch.object(h, "_reconcile_v2_materialization_totals",
+                             side_effect=self.padded_reconciliation), \
+                patch.object(h, "construct_text_family_v2", wraps=h.construct_text_family_v2) as text, \
+                patch.object(h, "_materialize_v2_unit", wraps=h._materialize_v2_unit) as transaction:
+            result = self.run_lower(directory, plan=plan, targets=targets)
+            self.assertEqual([call.args[2] for call in text.call_args_list], ["primary", "oracle_primary"])
+            self.assertEqual(transaction.call_args.args[5], ("primary",))
+            self.assertEqual(dict(result.family_counts)["oracle_primary"], 1)
+            oracle = next(value for value in result.family_totals if value.family == "oracle_primary")
+            self.assertEqual((oracle.physical_bytes, oracle.logical_bytes, oracle.physical_excess), (0, 0, 0))
+            fact = next(value for value in result.constructor_facts if value.family == "oracle_primary")
+            self.assertTrue(fact.zero_oracle)
+            self.assertEqual((fact.selected_knob, fact.selected_trial_ordinal, fact.trials), (0, 0, ()))
+            self.assertFalse(fact.text_window_applies)
+            self.assertEqual(self.scan(directory, "oracle_b_audits")[1], [])
+            coverage = self.scan(directory, "oracle_b_coverage")[1][0][1]
+            self.assertTrue(coverage.selected)
+            self.assertEqual(coverage.applicable, ())
+        reference = replace(self.materialization_plan[3], position=0)
+        with self.forbidden_workloads(), \
+                patch.object(h, "construct_text_family_v2", side_effect=AssertionError("No text call")) as text, \
+                self.assertRaisesRegex(ValueError, "REFERENCE_REACHED_ORACLE_TARGET_REQUIRED"):
+            h._construct_v2_materialization_work(reference, targets, self.profile, self.envelope)
+        text.assert_not_called()
+
+    @contextmanager
+    def capture_sinks(self):
+        captured = []
+        original = operational._V2EvidenceSink.__init__
+        def initialize(sink, *args, **kwargs):
+            original(sink, *args, **kwargs)
+            captured.append(sink)
+        with patch.object(operational._V2EvidenceSink, "__init__", new=initialize):
+            yield captured
+
+    def assert_failed_prefix(self, root, sink, completed):
+        self.assertTrue(sink.closed)
+        self.assertFalse(sink.sealed)
+        self.assertEqual(sink.durable_primary_boards, completed)
+        self.assertFalse((Path(root) / "COMPLETE.json").exists())
+        self.assertFalse(list(Path(root).glob("*.jsonl")))
+        for name in execution.STREAM_NAMES:
+            rows = self.scan(root, name)[1]
+            self.assertTrue(all(key[0] < completed for key, _, _, _ in rows), name)
+
+    def test_constructor_rejections_stop_current_reservation_and_preserve_prior_work(self):
+        original_construct = h._construct_v2_materialization_work
+        for kind, reason in (("reference", "SYNTHETIC_SIZING_SEARCH_EXHAUSTED"),
+                ("text", "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT"),
+                ("text", "SYNTHETIC_SIZING_SEARCH_EXHAUSTED"),
+                ("text", "SYNTHETIC_LOGICAL_DOMAIN_EMPTY"),
+                ("text", "SYNTHETIC_TEXT_LSUM_CAP")):
+            calls = []
+            def construct(work, *args, **kwargs):
+                calls.append(work.position)
+                return (self.constructed[work.position] if work.position < 2
+                        else original_construct(work, *args, **kwargs))
+            reference_result = (h._reference_failure(None, None, (), reason) if kind == "reference"
+                                else self.reference_results[2])
+            def text(work, bundle, family, *args, **kwargs):
+                return h.TextConstructionResult(family, None, None, None, (), reason)
+            with self.subTest(kind=kind, reason=reason), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(h, "_construct_v2_materialization_work", side_effect=construct), \
+                    patch.object(h, "construct_reference_v2", return_value=reference_result) as reference, \
+                    patch.object(h, "construct_text_family_v2", side_effect=text) as text_call, \
+                    patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve, \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                with self.assertRaisesRegex(ValueError, "^" + reason + "$"):
+                    self.run_lower(directory)
+                self.assertEqual(calls, [0, 1, 2])
+                self.assertEqual((reserve.call_count, commit.call_count), (2, 2))
+                self.assertEqual(reference.call_count, 1)
+                self.assertEqual(text_call.call_count, 0 if kind == "reference" else 1)
+                self.assert_failed_prefix(directory, sinks[0], 2)
+                events = [row[1] for row in self.scan(directory, "operations")[1]]
+                errors = [value for value in events if value.event_kind is records.EventKind.ERROR]
+                self.assertEqual(len(errors), 1)
+                self.assertEqual(errors[0].unit_id, "coordinator:SYNTHETIC_V2_MATERIALIZATION_INCOMPLETE")
+                self.assertEqual(errors[0].status, records.OperationStatus.INCOMPLETE)
+                self.assertNotIn("coordinator:ADMISSION_END", [value.unit_id for value in events])
+
+    def test_inside_constructor_cancel_memory_and_wall_checks_abort_without_current_reservation(self):
+        import threading
+        for case, reason in (("cancel", "CANCELLED"), ("coordinator", "SYNTHETIC_COORDINATOR_MEMORY_CAP"),
+                ("combined", "SYNTHETIC_COORDINATOR_MEMORY_CAP"), ("wall", "SYNTHETIC_MATERIALIZATION_TIMEOUT")):
+            cancel = threading.Event()
+            state = {"current": 100, "now": 1000}
+            calls = []
+            # Accepted envelopes require coordinator <= combined. A combined
+            # breach necessarily hits the coordinator guard first with worker=0.
+            envelope = replace(self.envelope, worker_memory_cap_bytes=100,
+                coordinator_memory_cap_bytes=101 if case in ("coordinator", "combined") else 1000,
+                memory_cap_bytes=101 if case == "combined" else 1000)
+            def construct(work, *args, check=None, **kwargs):
+                calls.append(work.position)
+                if work.position == 1:
+                    if case == "cancel":
+                        cancel.set()
+                    elif case == "wall":
+                        state["now"] += envelope.max_launcher_wall_ms * 1000000
+                    else:
+                        state["current"] = 102
+                    check()
+                    raise AssertionError("Containment check must abort")
+                return self.constructed[work.position]
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(h.time, "monotonic_ns", side_effect=lambda: state["now"]), \
+                    patch.object(operational.harness, "_coordinator_private_bytes",
+                                 side_effect=lambda: state["current"]), \
+                    patch.object(h, "_construct_v2_materialization_work", side_effect=construct), \
+                    patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve:
+                with self.assertRaisesRegex(ValueError, "^" + reason + "$"):
+                    self.run_lower(directory, envelope=envelope, cancel=cancel)
+                self.assertEqual(calls, [0, 1])
+                self.assertEqual(reserve.call_count, 1)
+                self.assert_failed_prefix(directory, sinks[0], 1)
+
+    def test_containment_callback_reaches_both_actual_constructor_types(self):
+        for work in (self.materialization_plan[0], self.materialization_plan[2]):
+            inside = []
+            reference, text = h.construct_reference_v2, h.construct_text_family_v2
+            def reference_call(*args, **kwargs):
+                inside.append("reference")
+                return reference(*args, **kwargs)
+            def text_call(*args, **kwargs):
+                inside.append("text")
+                return text(*args, **kwargs)
+            def check():
+                if inside:
+                    raise h.HarnessError("SLICE1M_CALLBACK_ABORT")
+            with self.subTest(position=work.position), self.forbidden_workloads(), \
+                    patch.object(h, "construct_reference_v2", side_effect=reference_call), \
+                    patch.object(h, "construct_text_family_v2", side_effect=text_call), \
+                    patch.object(readiness, "reserve_procedural_unit",
+                                 side_effect=AssertionError("No reservation")) as reserve, \
+                    self.assertRaisesRegex(ValueError, "SLICE1M_CALLBACK_ABORT"):
+                h._construct_v2_materialization_work(work, self.targets, self.profile, self.envelope, check=check)
+            self.assertEqual(inside, ["text"] if work.position == 0 else ["reference"])
+            reserve.assert_not_called()
+
+    def test_precancelled_or_memory_breach_before_sink_leaves_empty_root(self):
+        import threading
+        cancelled = threading.Event()
+        cancelled.set()
+        for cancel, memory, reason in ((cancelled, 100, "CANCELLED"),
+                (None, self.envelope.coordinator_memory_cap_bytes + 1, "SYNTHETIC_COORDINATOR_MEMORY_CAP")):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(operational.harness, "_coordinator_private_bytes", return_value=memory), \
+                    patch.object(operational._V2EvidenceSink, "__init__", side_effect=AssertionError("No sink")) as sink:
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.run_lower(directory, cancel=cancel)
+                sink.assert_not_called()
+                self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_start_end_checkpoint_and_seal_failures_retain_bytes_without_success(self):
+        append = h.store.FramedStreamWriter.append_frame
+        checkpoint = h.store.FramedStreamWriter.checkpoint
+        seal = h.store.FramedStreamWriter.seal
+        for case in ("start_append", "start_checkpoint", "end_append", "end_checkpoint", "seal"):
+            state = {"last_event": None, "fired": False}
+            def append_frame(writer, key, logical, frame):
+                value = append(writer, key, logical, frame)
+                if writer.stream_name == "operations":
+                    state["last_event"] = records.decode(logical).unit_id
+                    matching = ((case == "start_append" and state["last_event"] == "coordinator")
+                        or (case == "end_append" and state["last_event"] == "coordinator:ADMISSION_END"))
+                    if matching and not state["fired"]:
+                        state["fired"] = True
+                        raise h.store.StoreError("SLICE1M_EVENT_WRITE_FAILURE")
+                return value
+            def checkpoint_stream(writer):
+                value = checkpoint(writer)
+                matching = writer.stream_name == "operations" and (
+                    (case == "start_checkpoint" and state["last_event"] == "coordinator")
+                    or (case == "end_checkpoint" and state["last_event"] == "coordinator:ADMISSION_END"))
+                if matching and not state["fired"]:
+                    state["fired"] = True
+                    raise h.store.StoreError("SLICE1M_EVENT_CHECKPOINT_FAILURE")
+                return value
+            def seal_stream(writer):
+                value = seal(writer)
+                if case == "seal" and not state["fired"]:
+                    state["fired"] = True
+                    raise h.store.StoreError("SLICE1M_SEAL_FAILURE")
+                return value
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(h.store.FramedStreamWriter, "append_frame", new=append_frame), \
+                    patch.object(h.store.FramedStreamWriter, "checkpoint", new=checkpoint_stream), \
+                    patch.object(h.store.FramedStreamWriter, "seal", new=seal_stream):
+                with self.assertRaisesRegex(h.store.StoreError, "SLICE1M_"):
+                    self.run_lower(directory, plan=self.plan[:1])
+                self.assertTrue(state["fired"])
+                self.assertTrue(sinks[0].poisoned and sinks[0].closed)
+                self.assertFalse(sinks[0].sealed)
+                self.assertEqual(sinks[0].durable_primary_boards, 0 if case.startswith("start") else 1)
+                retained = {path.name: path.read_bytes() for path in Path(directory).glob("*.pkf")}
+                self.assertGreater(sum(map(len, retained.values())), 0)
+                self.assertFalse((Path(directory) / "COMPLETE.json").exists())
+                sinks[0].close()
+                self.assertEqual({path.name: path.read_bytes() for path in Path(directory).glob("*.pkf")}, retained)
+
+    def test_progress_exception_after_durability_aborts_without_rollback_or_later_work(self):
+        for fail_at in (0, 1):
+            updates = []
+            def progress(done, total):
+                updates.append((done, total))
+                if done == fail_at:
+                    raise RuntimeError("private progress diagnostic")
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                with self.assertRaisesRegex(RuntimeError, "private progress diagnostic"):
+                    self.run_lower(directory, progress=progress)
+                self.assertEqual(updates, [(done, 4) for done in range(fail_at + 1)])
+                self.assertEqual(commit.call_count, fail_at)
+                self.assert_failed_prefix(directory, sinks[0], fail_at)
+                events = [row[1] for row in self.scan(directory, "operations")[1]]
+                self.assertEqual(events[-1].unit_id, "coordinator:SYNTHETIC_V2_MATERIALIZATION_INCOMPLETE")
+                self.assertTrue(all("private progress diagnostic" not in event.unit_id for event in events))
+
+    def test_reconciliation_failure_or_wrong_excess_prevents_end_and_seal(self):
+        for case in ("raises", "wrong"):
+            def reconcile(targets, counts, totals, ledger):
+                if case == "raises":
+                    raise readiness.ReadinessError("PROCEDURAL_EXCESS_RECONCILIATION")
+                return ledger.committed_excess + 1
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(h, "_reconcile_v2_materialization_totals", side_effect=reconcile), \
+                    patch.object(operational._V2EvidenceSink, "seal",
+                                 side_effect=AssertionError("No success seal")) as seal:
+                with self.assertRaisesRegex(ValueError, "PROCEDURAL_EXCESS_RECONCILIATION"):
+                    self.run_lower(directory, plan=self.plan[:1])
+                seal.assert_not_called()
+                self.assert_failed_prefix(directory, sinks[0], 1)
+                events = [row[1] for row in self.scan(directory, "operations")[1]]
+                self.assertNotIn("coordinator:ADMISSION_END", [value.unit_id for value in events])
+
+    def test_partial_transaction_poison_preserves_prefix_and_never_writes_error_or_later_work(self):
+        append = h.store.FramedStreamWriter.append_frame
+        prefix, constructed = {}, []
+        def progress(done, total):
+            if done == 1:
+                prefix.update({path.name: path.read_bytes() for path in Path(directory).glob("*.pkf")})
+        def construct(work, *args, **kwargs):
+            constructed.append(work.position)
+            return self.constructed[work.position]
+        def fail_append(writer, key, logical, frame):
+            value = append(writer, key, logical, frame)
+            if writer.stream_name == "boards" and key[0] == 1:
+                raise h.store.StoreError("SLICE1M_PARTIAL_UNIT_FAILURE")
+            return value
+        with tempfile.TemporaryDirectory() as directory, self.capture_sinks() as sinks, self.cached_lower(), \
+                patch.object(h, "_construct_v2_materialization_work", side_effect=construct), \
+                patch.object(h.store.FramedStreamWriter, "append_frame", new=fail_append), \
+                patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve, \
+                patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+            with self.assertRaisesRegex(h.store.StoreError, "SLICE1M_PARTIAL_UNIT_FAILURE"):
+                self.run_lower(directory, progress=progress)
+            self.assertEqual(constructed, [0, 1])
+            self.assertEqual((reserve.call_count, commit.call_count), (2, 1))
+            self.assertTrue(sinks[0].poisoned and sinks[0].closed)
+            self.assertFalse(sinks[0].sealed)
+            self.assertEqual(sinks[0].durable_primary_boards, 1)
+            retained = {path.name: path.read_bytes() for path in Path(directory).glob("*.pkf")}
+            self.assertTrue(prefix and all(retained[name].startswith(raw) for name, raw in prefix.items()))
+            self.assertGreater(sum(map(len, retained.values())), sum(map(len, prefix.values())))
+            events = [row[1] for row in self.scan(directory, "operations")[1]]
+            self.assertFalse(any(event.event_kind is records.EventKind.ERROR for event in events))
+            self.assertFalse((Path(directory) / "COMPLETE.json").exists())
+
+    def test_final_count_fact_and_total_tampering_cannot_publish_success(self):
+        for case in ("facts", "totals"):
+            def construct(work, *args, **kwargs):
+                value = self.constructed[work.position]
+                return replace(value, constructor_facts=()) if case == "facts" else value
+            transaction = h._materialize_v2_unit
+            def transact(*args, **kwargs):
+                result = transaction(*args, **kwargs)
+                if case == "totals":
+                    first = result.family_totals[0]
+                    return replace(result, family_totals=(replace(first,
+                        physical_excess=first.physical_excess + 1),) + result.family_totals[1:])
+                return result
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory, \
+                    self.capture_sinks() as sinks, self.cached_lower(), \
+                    patch.object(h, "_construct_v2_materialization_work", side_effect=construct), \
+                    patch.object(h, "_materialize_v2_unit", side_effect=transact), \
+                    patch.object(operational._V2EvidenceSink, "seal",
+                                 side_effect=AssertionError("No success seal")) as seal:
+                with self.assertRaisesRegex(ValueError, "V2_MATERIALIZATION_(FAMILY_COUNTS|EXCESS_TOTALS)"):
+                    self.run_lower(directory, plan=self.plan[:1])
+                seal.assert_not_called()
+                self.assert_failed_prefix(directory, sinks[0], 1)
+
+
+class V2FullMaterializerV1IsolationTests(unittest.TestCase):
+    def test_historical_materializer_coordinator_and_r0_never_activate_full_v2_path(self):
+        from tests.test_program_k_e2_operational import StreamingCoordinatorTests, R0ComponentTests, _plan
+        names = ("_materialize_synthetic_v2", "_materialize_v2_plan", "_construct_v2_materialization_work",
+                 "_build_primary_v2_baseline", "_materialize_v2_unit", "_capture_qualified_codec_profile")
+        with _EvidenceExitStack() as stack:
+            for name in names:
+                stack.enter_context(patch.object(h, name, side_effect=AssertionError("No full V2 historical path")))
+            stack.enter_context(patch.object(physical, "capture_qualified_profile",
+                                             side_effect=AssertionError("No V1 profile capture")))
+            stack.enter_context(patch.object(operational.harness, "_coordinator_private_bytes", return_value=100))
+            fixture = SyntheticMaterializationTests()
+            with tempfile.TemporaryDirectory() as directory:
+                plan = fixture.plan()
+                seal = fixture._identity(directory, plan)
+                result = h.materialize_synthetic(plan, readiness.ComponentSizes(1, 1, 1, 1, 1, 1),
+                                                fixture.envelope(), directory, seal)
+                self.assertTrue(result.readback_complete and result.cleanup_complete)
+                self.assertTrue(list(Path(directory).glob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            with tempfile.TemporaryDirectory() as directory:
+                result = StreamingCoordinatorTests().run_plan(_plan(), directory)
+                self.assertIs(result.status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).glob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            with tempfile.TemporaryDirectory() as directory:
+                result = R0ComponentTests().run_component(directory, operational.R0Component.PRIMARY)
+                self.assertIs(result.units[0].status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).rglob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
