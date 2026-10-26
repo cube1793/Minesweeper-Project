@@ -617,6 +617,226 @@ def validate_payload_fit(workload, sizes, max_payload_bytes):
           "R0B_COMPOSITE_PAYLOAD_CAP")
 
 
+V2_FAMILIES = ("primary", "k_control", "oracle_primary", "oracle_repeat", "determinism", "reference")
+
+
+@dataclass(frozen=True, slots=True)
+class DualComponentSizes:
+    """Supplied independent V2 bases, not a historical V1 measurement adapter."""
+
+    physical: ComponentSizes
+    logical: ComponentSizes
+
+    def __post_init__(self):
+        _record(self.physical, ComponentSizes)
+        _record(self.logical, ComponentSizes)
+        for family in ("oracle_primary", "oracle_repeat"):
+            _need((getattr(self.physical, family) == 0) == (getattr(self.logical, family) == 0),
+                  "ZERO_ORACLE_BASES_MUST_AGREE")
+
+
+def derive_dual_targets(maxima):
+    """Exact independent ceil(3/2) floors from supplied authenticated maxima.
+
+    No measurement collection, witness coupling, constructor or qualification
+    occurs here. These values are not added to the historical V1 fact registry.
+    """
+    _constants()
+    _record(maxima, DualComponentSizes)
+    return DualComponentSizes(*(ComponentSizes(*((3 * value + 1) // 2 for value in _sizes(basis)))
+                                for basis in (maxima.physical, maxima.logical)))
+
+
+@dataclass(frozen=True, slots=True)
+class FamilySizeEvaluation:
+    """Exact size-policy facts; eligibility is not run admission or evidence."""
+
+    family: str
+    physical_target: int
+    logical_target: int
+    actual_physical_bytes: int
+    actual_logical_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.family) is str and self.family in V2_FAMILIES, "EXACT_V2_FAMILY_REQUIRED")
+        oracle = self.family in ("oracle_primary", "oracle_repeat")
+        _integer(self.physical_target, 0 if oracle else 1)
+        _integer(self.logical_target, 0 if oracle else 1)
+        _integer(self.actual_physical_bytes)
+        _integer(self.actual_logical_bytes)
+        if oracle and (self.physical_target == 0 or self.logical_target == 0):
+            _need(self.physical_target == self.logical_target == 0
+                  and self.actual_physical_bytes == self.actual_logical_bytes == 0,
+                  "ZERO_ORACLE_REQUIRES_EXACT_ZERO")
+
+    @property
+    def physical_margin(self):
+        return self.actual_physical_bytes - self.physical_target
+
+    @property
+    def logical_margin(self):
+        return self.actual_logical_bytes - self.logical_target
+
+    @property
+    def physical_excess(self):
+        return max(self.physical_margin, 0)
+
+    @property
+    def logical_excess(self):
+        return max(self.logical_margin, 0)
+
+    @property
+    def text_window_applies(self):
+        return self.family != "reference" and self.physical_target > 0
+
+    @property
+    def text_window_upper_bound(self):
+        return self.physical_target + 4096 if self.text_window_applies else None
+
+    @property
+    def rejection_reason(self):
+        if self.physical_margin < 0 and self.logical_margin < 0:
+            return "SYNTHETIC_BOTH_MINIMA_SHORTFALL"
+        if self.physical_margin < 0:
+            return "SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL"
+        if self.logical_margin < 0:
+            return "SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL"
+        if self.text_window_applies and self.actual_physical_bytes > self.text_window_upper_bound:
+            return "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT"
+        return None
+
+    @property
+    def eligible(self):
+        return self.rejection_reason is None
+
+
+def evaluate_family_size(family, physical_target, logical_target, actual_physical_bytes, actual_logical_bytes):
+    return FamilySizeEvaluation(family, physical_target, logical_target, actual_physical_bytes, actual_logical_bytes)
+
+
+def validate_dual_payload_fit(workload, targets, max_payload_bytes):
+    """Both bases must fit every actual unit; retain V1 physical diagnostics."""
+    _record(targets, DualComponentSizes)
+    validate_payload_fit(workload, targets.physical, max_payload_bytes)
+    _need(all(unit[3] <= max_payload_bytes for unit in synthetic_unit_payloads(workload, targets.logical)),
+          "LOGICAL_MINIMUM_COMPOSITE_CAP")
+
+
+def _unit_counts_v2(unit_counts):
+    """Closed order of supplied accepted workload.unit_counts, never a recount."""
+    _need(type(unit_counts) is tuple and len(unit_counts) == len(V2_FAMILIES), "EXACT_V2_UNIT_COUNTS_REQUIRED")
+    for count in unit_counts:
+        _integer(count)
+    _need(unit_counts[:3] == (identity.CANDIDATE_MAX, identity.KCONTROL_CAP, identity.ORACLE_B_CAP)
+          and unit_counts[4] == identity.DETERMINISM_CAP
+          and unit_counts[3] <= identity.ORACLE_B_CAP
+          and max(identity.KCONTROL_CAP, identity.DETERMINISM_CAP) <= unit_counts[5]
+              <= identity.KCONTROL_CAP + identity.DETERMINISM_CAP, "V2_UNIT_COUNT_DOMAIN")
+    return unit_counts
+
+
+def _physical_minimum_v2(physical_targets, unit_counts):
+    _constants()
+    _record(physical_targets, ComponentSizes)
+    _unit_counts_v2(unit_counts)
+    return sum(count * target for count, target in zip(unit_counts, _sizes(physical_targets)))
+
+
+def minimum_archive_preflight(physical_targets, unit_counts, proven_support_bytes=0):
+    """Only proven physical lower bounds; no full fixed-allowance reservation."""
+    minimum = _physical_minimum_v2(physical_targets, unit_counts)
+    _integer(proven_support_bytes)
+    archive_minimum = minimum + proven_support_bytes
+    _need(archive_minimum <= identity.MAX_ARCHIVE_BYTES, "SYNTHETIC_MINIMUM_ARCHIVE_CAP")
+    return archive_minimum
+
+
+def procedural_excess_capacity(physical_targets, unit_counts):
+    """Procedural fixed reservation only, not a scientific impossibility verdict."""
+    minimum = _physical_minimum_v2(physical_targets, unit_counts)
+    capacity = identity.MAX_ARCHIVE_BYTES - identity.FIXED_REPORT_RECEIPT_ALLOWANCE - minimum
+    _need(capacity >= 0, "SYNTHETIC_PROCEDURAL_FIXED_RESERVATION_INFEASIBLE")
+    return capacity
+
+
+def unit_physical_excess(observations):
+    """One complete unit's supplied owned families; no copied-reference inference.
+
+    Only eligible physical excess is chargeable. Logical surplus, rejected
+    candidates and unused window/allowance cannot become credits or offsets.
+    """
+    _need(type(observations) is tuple and 0 < len(observations) <= len(V2_FAMILIES),
+          "COMPLETE_UNIT_FAMILY_OBSERVATIONS_REQUIRED")
+    names = []
+    total = 0
+    for observation in observations:
+        _record(observation, FamilySizeEvaluation)
+        _need(observation.family not in names, "DUPLICATE_UNIT_FAMILY")
+        _need(observation.eligible, observation.rejection_reason)
+        names.append(observation.family)
+        total += observation.physical_excess
+    return total
+
+
+@dataclass(frozen=True, slots=True)
+class ProceduralLedger:
+    """Pure serial state; reserving is not durable and there is no refund path."""
+
+    capacity: int
+    committed_excess: int = 0
+    reserved_excess: int = 0
+    reservation_pending: bool = False
+
+    def __post_init__(self):
+        _constants()
+        for amount in (self.capacity, self.committed_excess, self.reserved_excess):
+            _integer(amount)
+        _boolean(self.reservation_pending)
+        _need(self.capacity <= identity.MAX_ARCHIVE_BYTES - identity.FIXED_REPORT_RECEIPT_ALLOWANCE,
+              "PROCEDURAL_CAPACITY_DOMAIN")
+        _need(self.reservation_pending or self.reserved_excess == 0, "RESERVATION_STATE_MISMATCH")
+        _need(self.committed_excess + self.reserved_excess <= self.capacity,
+              "SYNTHETIC_PROCEDURAL_EXCESS_BUDGET")
+
+
+def reserve_procedural_unit(ledger, observations):
+    """Reserve the whole unit before its first attributable persistence call."""
+    _record(ledger, ProceduralLedger)
+    _need(not ledger.reservation_pending, "PROCEDURAL_RESERVATION_ALREADY_PENDING")
+    delta = unit_physical_excess(observations)
+    _need(ledger.committed_excess + delta <= ledger.capacity, "SYNTHETIC_PROCEDURAL_EXCESS_BUDGET")
+    return replace(ledger, reserved_excess=delta, reservation_pending=True)
+
+
+def commit_procedural_unit(ledger):
+    """Caller invokes only after required durability; this function performs no I/O."""
+    _record(ledger, ProceduralLedger)
+    _need(ledger.reservation_pending, "PROCEDURAL_RESERVATION_REQUIRED")
+    return ProceduralLedger(ledger.capacity, ledger.committed_excess + ledger.reserved_excess)
+
+
+def reconcile_procedural_excess(physical_targets, unit_counts, physical_totals, ledger):
+    """Reconcile attributable physical excess only; final archive checks remain.
+
+    Future close must independently check realized fixed allowance and actual
+    total archive caps. Neither support nor logical bytes are excess terms here.
+    """
+    capacity = procedural_excess_capacity(physical_targets, unit_counts)
+    _record(physical_totals, ComponentSizes)
+    _record(ledger, ProceduralLedger)
+    _need(not ledger.reservation_pending, "PROCEDURAL_RESERVATION_STILL_PENDING")
+    _need(ledger.capacity == capacity, "PROCEDURAL_CAPACITY_BINDING")
+    excess = 0
+    for count, target, actual in zip(unit_counts, _sizes(physical_targets), _sizes(physical_totals)):
+        minimum = count * target
+        _need(actual >= minimum, "SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL")
+        _need((count > 0 and target > 0) or actual == 0, "ZERO_FAMILY_REQUIRES_EXACT_TOTAL_ZERO")
+        excess += actual - minimum
+    _need(excess <= capacity, "SYNTHETIC_PROCEDURAL_EXCESS_BUDGET")
+    _need(excess == ledger.committed_excess, "PROCEDURAL_EXCESS_RECONCILIATION")
+    return excess
+
+
 @dataclass(frozen=True, slots=True)
 class SupportingStreams:
     """Actual sealed I7 supports; receipt/status claims stay outside bundle sizes."""

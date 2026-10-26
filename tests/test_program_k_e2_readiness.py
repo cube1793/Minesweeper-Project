@@ -11,6 +11,14 @@ from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+import ast
+import builtins
+import inspect
+import io
+import os
+import subprocess
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -833,6 +841,516 @@ class SourceReviewTests(unittest.TestCase):
         for race in ('head', 'status', r.AMENDMENT_PATH, *_CANDIDATES):
             with self.subTest(race=race), self.source_capture(race=race), self.assertRaises(ValueError):
                 r.capture_review_sources()
+
+
+_V2_FAMILIES = ('primary', 'k_control', 'oracle_primary', 'oracle_repeat', 'determinism', 'reference')
+_V2_TEXT_FAMILIES = _V2_FAMILIES[:-1]
+_V2_COUNTS = (10000, 256, 128, 1, 256, 256)  # Supplied synthetic policy fixture, not measured counts.
+
+
+def _v2_sizes(*values):
+    return r.ComponentSizes(*(values or (2, 3, 0, 0, 5, 7)))
+
+
+def _v2_observation(family='primary', physical_excess=0, logical_excess=0):
+    return r.evaluate_family_size(family, 2, 3, 2 + physical_excess, 3 + logical_excess)
+
+
+def _v2_minimum_totals(targets, counts=_V2_COUNTS):
+    return r.ComponentSizes(*(getattr(targets, name) * count for name, count in zip(_V2_FAMILIES, counts)))
+
+
+def _v2_zero_budget_targets():
+    # Scalar arithmetic only. The unit coefficient on oracle_repeat permits an
+    # exact archive boundary without allocating a payload or constructing a run.
+    return r.ComponentSizes(1, 1, 1, 16_911_433_728 - 10_896, 1, 1)
+
+
+class DualSizingPolicyTests(unittest.TestCase):
+    """Supplied synthetic policy maxima only; no fresh R0 measurement adapter."""
+
+    def test_exact_family_order_and_immutable_dual_maxima_and_targets(self):
+        maxima = r.DualComponentSizes(_v2_sizes(), _v2_sizes(11, 13, 0, 0, 17, 19))
+        targets = r.derive_dual_targets(maxima)
+        self.assertEqual(tuple(field.name for field in fields(r.ComponentSizes)), _V2_FAMILIES)
+        self.assertEqual(tuple(field.name for field in fields(r.DualComponentSizes)), ('physical', 'logical'))
+        for dual in (maxima, targets):
+            self.assertFalse(hasattr(dual, '__dict__'))
+            with self.assertRaises(FrozenInstanceError):
+                dual.physical = _v2_sizes()
+            with self.assertRaises(FrozenInstanceError):
+                dual.logical.primary = 99
+
+    def test_exact_ceil_three_halves_zero_small_and_large_integers(self):
+        for value, expected in ((1, 2), (2, 3), (3, 5), (10_000_000_000_000_001, 15_000_000_000_000_002)):
+            maxima = r.DualComponentSizes(_v2_sizes(value, value, 0, value, value, value),
+                                          _v2_sizes(value, value, 0, value, value, value))
+            with self.subTest(maximum=value):
+                target = r.derive_dual_targets(maxima)
+                wanted = r.ComponentSizes(expected, expected, 0, expected, expected, expected)
+                self.assertEqual(target.physical, wanted)
+                self.assertEqual(target.logical, wanted)
+                self.assertTrue(all(type(getattr(target.physical, name)) is int for name in _V2_FAMILIES))
+
+    def test_physical_and_logical_maxima_are_independent(self):
+        maxima = r.DualComponentSizes(_v2_sizes(), _v2_sizes(11, 13, 0, 0, 17, 19))
+        baseline = r.derive_dual_targets(maxima)
+        changed_logical = r.derive_dual_targets(replace(maxima, logical=replace(maxima.logical, primary=101)))
+        changed_physical = r.derive_dual_targets(replace(maxima, physical=replace(maxima.physical, primary=103)))
+        self.assertEqual(changed_logical.physical, baseline.physical)
+        self.assertNotEqual(changed_logical.logical, baseline.logical)
+        self.assertEqual(changed_physical.logical, baseline.logical)
+        self.assertNotEqual(changed_physical.physical, baseline.physical)
+
+    def test_dual_model_rejects_impostors_subclasses_and_corrupt_integer_fields(self):
+        class SizesSubclass(r.ComponentSizes):
+            pass
+        class DualSubclass(r.DualComponentSizes):
+            pass
+        class IntegerSubclass(int):
+            pass
+        good = _v2_sizes()
+        impostors = (list(_V2_FAMILIES), {name: getattr(good, name) for name in _V2_FAMILIES},
+                     SimpleNamespace(**{name: getattr(good, name) for name in _V2_FAMILIES}),
+                     SizesSubclass(2, 3, 0, 0, 5, 7))
+        for value in impostors:
+            with self.subTest(input_type=type(value)), self.assertRaises(r.ReadinessError):
+                r.DualComponentSizes(value, good)
+        for value in (True, 1.0, IntegerSubclass(2), -1):
+            corrupted = replace(good)
+            object.__setattr__(corrupted, 'primary', value)
+            with self.subTest(integer=value), self.assertRaises(r.ReadinessError):
+                r.DualComponentSizes(good, corrupted)
+        for value in (good, _measurement(), (good, good), DualSubclass(good, good)):
+            with self.subTest(input_type=type(value)), self.assertRaises(r.ReadinessError):
+                r.derive_dual_targets(value)
+
+    def test_zero_row_oracle_bases_must_agree_and_uint64_overflow_fails_closed(self):
+        for name in ('oracle_primary', 'oracle_repeat'):
+            for physical, logical in ((0, 1), (1, 0)):
+                with self.subTest(family=name, bases=(physical, logical)), self.assertRaises(r.ReadinessError):
+                    r.DualComponentSizes(replace(_v2_sizes(), **{name: physical}),
+                                         replace(_v2_sizes(), **{name: logical}))
+        maximum = replace(_v2_sizes(), primary=identity.UINT64_MAX)
+        with self.assertRaises(r.ReadinessError):
+            r.derive_dual_targets(r.DualComponentSizes(maximum, maximum))
+
+    def test_factor_and_text_window_cannot_be_configured(self):
+        maxima = r.DualComponentSizes(_v2_sizes(), _v2_sizes())
+        with self.assertRaises(TypeError):
+            r.derive_dual_targets(maxima, safety_factor=Fraction(2))
+        with self.assertRaises(TypeError):
+            r.evaluate_family_size('primary', 2, 3, 2, 3, window=8192)
+        self.assertEqual(tuple(inspect.signature(r.derive_dual_targets).parameters), ('maxima',))
+
+
+class FamilySizingPolicyTests(unittest.TestCase):
+    def test_each_text_family_accepts_inclusive_window_and_rejects_one_byte_over(self):
+        for family in _V2_TEXT_FAMILIES:
+            for extra in (0, 4096):
+                with self.subTest(family=family, extra=extra):
+                    value = r.evaluate_family_size(family, 10, 20, 10 + extra, 20)
+                    self.assertTrue(value.eligible)
+                    self.assertIsNone(value.rejection_reason)
+                    self.assertTrue(value.text_window_applies)
+                    self.assertEqual(value.text_window_upper_bound, 4106)
+                    self.assertEqual((value.physical_margin, value.logical_margin), (extra, 0))
+                    self.assertEqual((value.physical_excess, value.logical_excess), (extra, 0))
+            rejected = r.evaluate_family_size(family, 10, 20, 4107, 20)
+            self.assertFalse(rejected.eligible)
+            self.assertEqual(rejected.rejection_reason, 'SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT')
+
+    def test_each_text_family_rejects_independent_shortfalls_before_window_policy(self):
+        cases = ((10, 19, 'SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL'),
+                 (9, 20, 'SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL'),
+                 (9, 19, 'SYNTHETIC_BOTH_MINIMA_SHORTFALL'),
+                 (9, 10**12, 'SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL'),
+                 (10**12, 19, 'SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL'),
+                 (4107, 19, 'SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL'))
+        for family in _V2_TEXT_FAMILIES:
+            for physical, logical, reason in cases:
+                with self.subTest(family=family, actual=(physical, logical)):
+                    value = r.evaluate_family_size(family, 10, 20, physical, logical)
+                    self.assertFalse(value.eligible)
+                    self.assertEqual(value.rejection_reason, reason)
+                    self.assertEqual((value.physical_margin, value.logical_margin), (physical - 10, logical - 20))
+
+    def test_reference_has_no_text_window_but_keeps_both_floors(self):
+        value = r.evaluate_family_size('reference', 10, 20, 4107, 20)
+        self.assertTrue(value.eligible)
+        self.assertFalse(value.text_window_applies)
+        self.assertIsNone(value.text_window_upper_bound)
+        self.assertEqual(value.physical_excess, 4097)
+        for physical, logical, reason in ((9, 20, 'SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL'),
+                                          (10, 19, 'SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL'),
+                                          (9, 19, 'SYNTHETIC_BOTH_MINIMA_SHORTFALL')):
+            self.assertEqual(r.evaluate_family_size('reference', 10, 20, physical, logical).rejection_reason, reason)
+
+    def test_zero_row_oracle_accepts_only_exact_zero_without_window_or_filler(self):
+        for family in ('oracle_primary', 'oracle_repeat'):
+            value = r.evaluate_family_size(family, 0, 0, 0, 0)
+            self.assertTrue(value.eligible)
+            self.assertIsNone(value.rejection_reason)
+            self.assertFalse(value.text_window_applies)
+            self.assertIsNone(value.text_window_upper_bound)
+            self.assertEqual((value.physical_excess, value.logical_excess), (0, 0))
+            for actual in ((1, 0), (0, 1), (4096, 4096)):
+                with self.subTest(family=family, actual=actual), self.assertRaises(r.ReadinessError):
+                    r.evaluate_family_size(family, 0, 0, *actual)
+            for targets in ((0, 1), (1, 0)):
+                with self.assertRaises(r.ReadinessError):
+                    r.evaluate_family_size(family, *targets, 0, 0)
+
+    def test_family_facts_are_immutable_closed_and_exactly_typed(self):
+        class IntegerSubclass(int):
+            pass
+        class StringSubclass(str):
+            pass
+        value = _v2_observation()
+        self.assertFalse(hasattr(value, '__dict__'))
+        with self.assertRaises(FrozenInstanceError):
+            value.actual_physical_bytes = 0
+        for family in ('P', 'oracle', 'PRIMARY', '', None, StringSubclass('primary')):
+            with self.subTest(family=family), self.assertRaises(r.ReadinessError):
+                r.evaluate_family_size(family, 2, 3, 2, 3)
+        for index in range(4):
+            for bad in (True, 2.0, IntegerSubclass(2), -1):
+                args = [2, 3, 2, 3]
+                args[index] = bad
+                with self.subTest(index=index, bad=bad), self.assertRaises(r.ReadinessError):
+                    r.evaluate_family_size('primary', *args)
+        for family in ('primary', 'k_control', 'determinism', 'reference'):
+            with self.assertRaises(r.ReadinessError):
+                r.evaluate_family_size(family, 0, 0, 0, 0)
+
+
+class DualCompositePolicyTests(unittest.TestCase):
+    def test_physical_composite_exact_cap_and_cap_plus_one_preserve_v1_reason(self):
+        workload = _workload()
+        physical = _v2_sizes(10, 13, 5, 7, 11, 3)
+        logical = _v2_sizes(1, 1, 1, 1, 1, 1)
+        targets = r.DualComponentSizes(physical, logical)
+        self.assertIsNone(r.validate_dual_payload_fit(workload, targets, 18))
+        with self.assertRaisesRegex(r.ReadinessError, '^R0B_COMPOSITE_PAYLOAD_CAP$'):
+            r.validate_dual_payload_fit(workload, targets, 17)
+        for changed in (logical, replace(logical, primary=17)):
+            with self.assertRaisesRegex(r.ReadinessError, '^R0B_COMPOSITE_PAYLOAD_CAP$'):
+                r.validate_dual_payload_fit(workload, r.DualComponentSizes(physical, changed), 17)
+
+    def test_logical_composite_exact_cap_and_one_over_are_independent(self):
+        workload = _workload()
+        physical = _v2_sizes(1, 1, 1, 1, 1, 1)
+        logical = _v2_sizes(20, 21, 4, 6, 14, 2)
+        self.assertIsNone(r.validate_dual_payload_fit(workload, r.DualComponentSizes(physical, logical), 26))
+        with self.assertRaisesRegex(r.ReadinessError, '^LOGICAL_MINIMUM_COMPOSITE_CAP$'):
+            r.validate_dual_payload_fit(workload, r.DualComponentSizes(physical, logical), 25)
+        with self.assertRaisesRegex(r.ReadinessError, '^LOGICAL_MINIMUM_COMPOSITE_CAP$'):
+            r.validate_dual_payload_fit(workload, r.DualComponentSizes(replace(physical, primary=10), logical), 25)
+
+    def test_zero_oracle_contributes_no_bytes_and_topology_is_existing_ownership(self):
+        workload = _workload()
+        sizes = _v2_sizes(10, 13, 0, 0, 11, 3)
+        targets = r.DualComponentSizes(sizes, sizes)
+        payloads = r.synthetic_unit_payloads(workload, sizes)
+        self.assertEqual(max(row[3] for row in payloads), 13)
+        self.assertEqual(sum('oracle_primary' in row[2] for row in payloads), 128)
+        self.assertEqual(sum('reference' in row[2] for row in payloads), workload.unit_counts[-1])
+        self.assertIsNone(r.validate_dual_payload_fit(workload, targets, 13))
+        for row in payloads:
+            self.assertEqual(row[3], sum(getattr(sizes, name) for name in row[2]))
+            if row[1] == 'K_CONTROL':
+                self.assertEqual(row[2], ('k_control',))
+
+    def test_composite_requires_closed_inputs_and_exact_positive_cap(self):
+        targets = r.DualComponentSizes(_v2_sizes(), _v2_sizes())
+        for bad in (True, 1.0, 0, -1):
+            with self.assertRaises(r.ReadinessError):
+                r.validate_dual_payload_fit(_workload(), targets, bad)
+        with self.assertRaises(r.ReadinessError):
+            r.validate_dual_payload_fit(_workload(), targets.physical, 100)
+        with self.assertRaises(r.ReadinessError):
+            r.validate_dual_payload_fit(SimpleNamespace(unit_counts=_V2_COUNTS), targets, 100)
+
+
+class ArchiveAndProceduralBudgetTests(unittest.TestCase):
+    def test_minimum_archive_support_zero_exact_cap_and_cap_plus_one(self):
+        targets = _v2_sizes()
+        minimum = sum(count * getattr(targets, name) for name, count in zip(_V2_FAMILIES, _V2_COUNTS))
+        self.assertEqual(r.minimum_archive_preflight(targets, _V2_COUNTS, 0), minimum)
+        support = identity.MAX_ARCHIVE_BYTES - minimum
+        self.assertEqual(r.minimum_archive_preflight(targets, _V2_COUNTS, support), identity.MAX_ARCHIVE_BYTES)
+        with self.assertRaises(r.ReadinessError):
+            r.minimum_archive_preflight(targets, _V2_COUNTS, support + 1)
+        for bad in (-1, True, 1.0):
+            with self.assertRaises(r.ReadinessError):
+                r.minimum_archive_preflight(targets, _V2_COUNTS, bad)
+
+    def test_procedural_full_reservation_is_distinct_from_proven_support_lower_bound(self):
+        targets = _v2_zero_budget_targets()
+        self.assertEqual(identity.MAX_ARCHIVE_BYTES - identity.FIXED_REPORT_RECEIPT_ALLOWANCE, 16_911_433_728)
+        self.assertEqual(r.minimum_archive_preflight(targets, _V2_COUNTS), 16_911_433_728)
+        self.assertEqual(r.procedural_excess_capacity(targets, _V2_COUNTS), 0)
+        too_large = replace(targets, oracle_repeat=targets.oracle_repeat + 1)
+        self.assertEqual(r.minimum_archive_preflight(too_large, _V2_COUNTS), 16_911_433_729)
+        with self.assertRaises(r.ReadinessError) as caught:
+            r.procedural_excess_capacity(too_large, _V2_COUNTS)
+        self.assertIn('RESERVATION', str(caught.exception))
+        self.assertNotIn('R0B_', str(caught.exception))
+
+    def test_logical_target_changes_never_change_archive_or_procedural_capacity(self):
+        base = r.DualComponentSizes(_v2_sizes(), _v2_sizes())
+        changed = replace(base, logical=_v2_sizes(10**9, 10**8, 0, 0, 10**7, 10**6))
+        expected_minimum = 23_840
+        for targets in (base, changed):
+            self.assertEqual(r.minimum_archive_preflight(targets.physical, _V2_COUNTS), expected_minimum)
+            self.assertEqual(r.procedural_excess_capacity(targets.physical, _V2_COUNTS), 16_911_433_728 - expected_minimum)
+        for function in (r.minimum_archive_preflight, r.procedural_excess_capacity):
+            with self.assertRaises(r.ReadinessError):
+                function(base, _V2_COUNTS)
+
+    def test_counts_are_exact_closed_order_and_preserve_workload_counts(self):
+        counts = _workload().unit_counts
+        self.assertEqual(counts[:3], (10000, 256, 128))
+        self.assertEqual(counts[4], 256)
+        self.assertEqual(r.minimum_archive_preflight(_v2_sizes(), counts),
+                         sum(count * getattr(_v2_sizes(), name) for name, count in zip(_V2_FAMILIES, counts)))
+        invalid = (list(_V2_COUNTS), _V2_COUNTS[:-1], _V2_COUNTS + (0,),
+                   (9999,) + _V2_COUNTS[1:], (10000, 256, 128, True, 256, 256),
+                   (10000, 256, 128, 129, 256, 256), (10000, 256, 128, 1, 256, 255),
+                   (10000, 256, 128, 1, 256, 513))
+        for value in invalid:
+            with self.subTest(counts=value), self.assertRaises(r.ReadinessError):
+                r.procedural_excess_capacity(_v2_sizes(), value)
+
+    def test_archive_fixed_constants_cannot_be_enlarged_or_supplied_by_caller(self):
+        targets = _v2_sizes()
+        for function in (r.minimum_archive_preflight, r.procedural_excess_capacity):
+            with self.assertRaises(TypeError):
+                function(targets, _V2_COUNTS, archive_cap=identity.MAX_ARCHIVE_BYTES + 1)
+            with self.assertRaises(TypeError):
+                function(targets, _V2_COUNTS, fixed_allowance=0)
+            for name, replacement in (('MAX_ARCHIVE_BYTES', identity.MAX_ARCHIVE_BYTES + 1),
+                                      ('FIXED_REPORT_RECEIPT_ALLOWANCE', 0)):
+                with self.subTest(function=function.__name__, name=name), patch.object(identity, name, replacement):
+                    with self.assertRaises(r.ReadinessError):
+                        function(targets, _V2_COUNTS)
+
+
+class ProceduralLedgerPolicyTests(unittest.TestCase):
+    def test_complete_unit_reserve_then_commit_is_immutable_and_not_implicitly_durable(self):
+        original = r.ProceduralLedger(10)
+        observations = (_v2_observation('primary', 3), _v2_observation('reference', 4))
+        self.assertEqual(r.unit_physical_excess(observations), 7)
+        self.assertEqual((original.committed_excess, original.reserved_excess, original.reservation_pending), (0, 0, False))
+        reserved = r.reserve_procedural_unit(original, observations)
+        self.assertEqual((reserved.committed_excess, reserved.reserved_excess, reserved.reservation_pending), (0, 7, True))
+        committed = r.commit_procedural_unit(reserved)
+        self.assertEqual((committed.committed_excess, committed.reserved_excess, committed.reservation_pending), (7, 0, False))
+        self.assertEqual((original.committed_excess, original.reserved_excess), (0, 0))
+        self.assertEqual((reserved.committed_excess, reserved.reserved_excess), (0, 7))
+        for value in (original, reserved, committed):
+            self.assertFalse(hasattr(value, '__dict__'))
+            with self.assertRaises(FrozenInstanceError):
+                value.capacity = 11
+
+    def test_capacity_and_capacity_plus_one_use_exact_budget_boundary(self):
+        state = r.commit_procedural_unit(r.reserve_procedural_unit(r.ProceduralLedger(10), (_v2_observation(physical_excess=7),)))
+        at = r.reserve_procedural_unit(state, (_v2_observation(physical_excess=3),))
+        self.assertEqual(r.commit_procedural_unit(at).committed_excess, 10)
+        with self.assertRaisesRegex(r.ReadinessError, '^SYNTHETIC_PROCEDURAL_EXCESS_BUDGET$'):
+            r.reserve_procedural_unit(state, (_v2_observation(physical_excess=4),))
+
+    def test_complete_unit_sum_beyond_uint64_rejects_with_budget_reason(self):
+        observations = (r.evaluate_family_size('primary', 1, 1, 3, 1),
+                        r.evaluate_family_size('reference', 1, 1, (1 << 64) - 1, 1))
+        self.assertTrue(all(value.eligible for value in observations))
+        self.assertEqual(r.unit_physical_excess(observations), 1 << 64)
+        with self.assertRaisesRegex(r.ReadinessError, '^SYNTHETIC_PROCEDURAL_EXCESS_BUDGET$'):
+            r.reserve_procedural_unit(r.ProceduralLedger(0), observations)
+
+    def test_zero_capacity_zero_delta_reservation_remains_pending_until_commit(self):
+        state = r.ProceduralLedger(0)
+        pending = r.reserve_procedural_unit(state, (_v2_observation(),))
+        self.assertEqual(pending.reserved_excess, 0)
+        self.assertTrue(pending.reservation_pending)
+        with self.assertRaises(r.ReadinessError):
+            r.reserve_procedural_unit(pending, (_v2_observation(),))
+        final = r.commit_procedural_unit(pending)
+        self.assertEqual(final, state)
+        with self.assertRaises(r.ReadinessError):
+            r.commit_procedural_unit(final)
+        with self.assertRaisesRegex(r.ReadinessError, '^SYNTHETIC_PROCEDURAL_EXCESS_BUDGET$'):
+            r.reserve_procedural_unit(state, (_v2_observation(physical_excess=1),))
+
+    def test_only_eligible_physical_excess_counts_without_logical_or_unused_allowance_credit(self):
+        logical_only = _v2_observation(logical_excess=10**12)
+        self.assertEqual(r.unit_physical_excess((logical_only,)), 0)
+        zero = r.reserve_procedural_unit(r.ProceduralLedger(0), (logical_only,))
+        self.assertEqual(zero.reserved_excess, 0)
+        with self.assertRaisesRegex(r.ReadinessError, '^SYNTHETIC_PROCEDURAL_EXCESS_BUDGET$'):
+            r.reserve_procedural_unit(r.ProceduralLedger(0), (_v2_observation(physical_excess=1, logical_excess=10**12),))
+        for unsupported in (-1, logical_only.logical_excess, [], (), (logical_only, logical_only)):
+            with self.subTest(input_type=type(unsupported)), self.assertRaises(r.ReadinessError):
+                r.reserve_procedural_unit(r.ProceduralLedger(10), unsupported)
+        with self.assertRaises(TypeError):
+            r.reserve_procedural_unit(r.ProceduralLedger(0), (logical_only,), logical_credit=logical_only.logical_excess)
+
+    def test_rejected_family_cannot_offset_another_family_or_contribute_budget(self):
+        shortfall = r.evaluate_family_size('primary', 10, 20, 9, 20)
+        overshoot = r.evaluate_family_size('primary', 10, 20, 4107, 20)
+        surplus = r.evaluate_family_size('reference', 10, 20, 10_000, 20)
+        for rejected in (shortfall, overshoot):
+            with self.assertRaises(r.ReadinessError):
+                r.unit_physical_excess((rejected, surplus))
+        class ObservationSubclass(r.FamilySizeEvaluation):
+            pass
+        with self.assertRaises(r.ReadinessError):
+            r.unit_physical_excess((ObservationSubclass('primary', 2, 3, 2, 3),))
+
+    def test_invalid_ledger_states_and_negative_or_mutable_reservations_are_rejected(self):
+        for changes in ({'capacity': True}, {'capacity': -1}, {'committed_excess': -1},
+                        {'reserved_excess': -1}, {'reserved_excess': 1}, {'reservation_pending': 1},
+                        {'committed_excess': 11}):
+            with self.subTest(changes=changes), self.assertRaises(r.ReadinessError):
+                replace(r.ProceduralLedger(10), **changes)
+        for value in (SimpleNamespace(capacity=10, committed_excess=0, reserved_excess=0), None):
+            with self.assertRaises(r.ReadinessError):
+                r.reserve_procedural_unit(value, (_v2_observation(),))
+        for name in ('refund', 'release', 'retry', 'cancel'):
+            self.assertFalse(hasattr(r.ProceduralLedger, name))
+            self.assertFalse(hasattr(r, name + '_procedural_unit'))
+
+
+class ProceduralReconciliationTests(unittest.TestCase):
+    def test_exact_minima_reconcile_to_zero(self):
+        targets = _v2_sizes()
+        capacity = r.procedural_excess_capacity(targets, _V2_COUNTS)
+        self.assertEqual(r.reconcile_procedural_excess(targets, _V2_COUNTS,
+            _v2_minimum_totals(targets), r.ProceduralLedger(capacity)), 0)
+
+    def test_exact_positive_sum_and_large_reference_excess_reconcile(self):
+        targets = _v2_sizes()
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, _V2_COUNTS))
+        observations = (_v2_observation('primary', 3), _v2_observation('reference', 5001))
+        ledger = r.commit_procedural_unit(r.reserve_procedural_unit(ledger, observations))
+        minima = _v2_minimum_totals(targets)
+        totals = replace(minima, primary=minima.primary + 3, reference=minima.reference + 5001)
+        self.assertEqual(r.reconcile_procedural_excess(targets, _V2_COUNTS, totals, ledger), 5004)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS, totals, replace(ledger, committed_excess=5003))
+
+    def test_final_excess_over_budget_or_one_family_shortfall_cannot_be_offset(self):
+        targets = _v2_zero_budget_targets()
+        totals = _v2_minimum_totals(targets)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS, replace(totals, primary=totals.primary + 1), r.ProceduralLedger(0))
+        targets = _v2_sizes()
+        minimum = _v2_minimum_totals(targets)
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, _V2_COUNTS), committed_excess=1)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS,
+                replace(minimum, primary=minimum.primary - 1, reference=minimum.reference + 2), ledger)
+
+    def test_pending_zero_reservation_and_capacity_drift_prevent_final_reconciliation(self):
+        targets = _v2_sizes()
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, _V2_COUNTS))
+        pending = r.reserve_procedural_unit(ledger, (_v2_observation(),))
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS, _v2_minimum_totals(targets), pending)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS, _v2_minimum_totals(targets), replace(ledger, capacity=ledger.capacity + 1))
+
+    def test_zero_target_and_zero_count_families_cannot_gain_final_bytes(self):
+        targets = _v2_sizes()
+        minimum = _v2_minimum_totals(targets)
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, _V2_COUNTS), committed_excess=1)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, _V2_COUNTS, replace(minimum, oracle_primary=1), ledger)
+        counts = (10000, 256, 128, 0, 256, 256)
+        targets = replace(targets, oracle_repeat=3)
+        minimum = _v2_minimum_totals(targets, counts)
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, counts))
+        self.assertEqual(r.reconcile_procedural_excess(targets, counts, minimum, ledger), 0)
+        with self.assertRaises(r.ReadinessError):
+            r.reconcile_procedural_excess(targets, counts, replace(minimum, oracle_repeat=1), replace(ledger, committed_excess=1))
+
+    def test_logical_fixed_and_support_totals_are_not_reconciliation_inputs(self):
+        targets = _v2_sizes()
+        ledger = r.ProceduralLedger(r.procedural_excess_capacity(targets, _V2_COUNTS))
+        for name in ('logical_totals', 'fixed_bytes', 'support_bytes'):
+            with self.assertRaises(TypeError):
+                r.reconcile_procedural_excess(targets, _V2_COUNTS, _v2_minimum_totals(targets), ledger, **{name: 10**12})
+
+
+class V2PolicyIsolationTests(unittest.TestCase):
+    def test_v1_sizing_measurement_and_component_contracts_are_unchanged(self):
+        values = _measurements()
+        values = (replace(values[0], primary=_component(durable_bytes=65)),
+                  replace(values[1], k_control=_component(durable_bytes=129)),
+                  replace(values[2], oracle_primary=_oracle(durable_bytes=193)))
+        expected = r.R0BSizingPlan(_SEED, r.ComponentSizes(3, 5, 6, 6, 2, 2))
+        self.assertEqual(r.derive_r0b_sizing_plan(values), expected)
+        measured = _r0b(values)
+        self.assertIs(r.validate_r0b_measurement(measured, values), measured)
+        self.assertEqual(r.ComponentSizes(1, 1, 0, 0, 1, 1).oracle_repeat, 0)
+        for name in ('primary', 'k_control', 'determinism', 'reference'):
+            with self.assertRaises(r.ReadinessError):
+                replace(_v2_sizes(), **{name: 0})
+        r.derive_dual_targets(r.DualComponentSizes(_v2_sizes(), _v2_sizes(99, 98, 0, 0, 97, 96)))
+        self.assertEqual(r.derive_r0b_sizing_plan(values), expected)
+
+    def test_v1_closed_fact_registry_does_not_admit_new_policy_types(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        values = (r.DualComponentSizes(_v2_sizes(), _v2_sizes()), _v2_observation(), r.ProceduralLedger(0))
+        for value in values:
+            with self.subTest(value=type(value).__name__):
+                self.assertNotIn(type(value).__name__, evidence._FACT_TYPES)
+                with self.assertRaises(evidence.EvidenceError):
+                    evidence.fact_node_v1(value)
+                with self.assertRaises(evidence.EvidenceError):
+                    evidence.fact_read_v1({'fact': type(value).__name__, 'fields': {}})
+        legacy = _v2_sizes()
+        node = evidence.fact_node_v1(legacy)
+        self.assertEqual(node, {'fact': 'ComponentSizes', 'fields': dict(zip(_V2_FAMILIES, (2, 3, 0, 0, 5, 7)))})
+        self.assertEqual(evidence.fact_read_v1(node), legacy)
+
+    def test_pure_policy_functions_introduce_no_io_capture_or_operational_side_effects(self):
+        workload = _workload()
+        targets = r.DualComponentSizes(_v2_sizes(), _v2_sizes())
+        with ExitStack() as stack:
+            for owner, names in ((builtins, ('open',)), (Path, ('open', 'read_bytes', 'write_bytes', 'mkdir')),
+                                 (r, ('capture_review_sources', 'search_synthetic_corpus', 'target_counts', '_git', '_blobs')),
+                                 (op, ('coordinate', 'measure_r0_component', '_fresh_wb02_context')),
+                                 (op.store, ('StreamWriter', 'FramedStreamWriter', 'scan_stream', 'scan_framed_stream')),
+                                 (q.execution, ('execute_primary', 'execute_repeat', 'execute_k_control'))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError('policy performed an effect')))
+            derived = r.derive_dual_targets(targets)
+            r.validate_dual_payload_fit(workload, derived, 100)
+            r.minimum_archive_preflight(derived.physical, workload.unit_counts)
+            capacity = r.procedural_excess_capacity(derived.physical, workload.unit_counts)
+            observations = (_v2_observation(physical_excess=3),)
+            state = r.commit_procedural_unit(r.reserve_procedural_unit(r.ProceduralLedger(capacity), observations))
+            minimum = _v2_minimum_totals(derived.physical, workload.unit_counts)
+            self.assertEqual(r.reconcile_procedural_excess(derived.physical, workload.unit_counts,
+                replace(minimum, primary=minimum.primary + 3), state), 3)
+
+    def test_readiness_import_remains_side_effect_free_and_new_policy_adds_no_imports(self):
+        source = inspect.getsource(r)
+        code = compile(source, r.__file__, 'exec')
+        name = '_slice1e_readiness_import_probe'
+        module = types.ModuleType(name)
+        blocked = ((builtins, 'open'), (io, 'open'), (os, 'open'), (os, 'stat'), (os, 'lstat'),
+                   (os, 'mkdir'), (os, 'makedirs'), (os, 'getenv'), (os, 'urandom'),
+                   (Path, 'open'), (Path, 'resolve'), (Path, 'read_bytes'), (Path, 'write_bytes'),
+                   (Path, 'mkdir'), (subprocess, 'run'), (subprocess, 'Popen'),
+                   (op, 'coordinate'), (op, 'measure_r0_component'))
+        with patch.dict(sys.modules, {name: module}), ExitStack() as stack:
+            for owner, attribute in blocked:
+                stack.enter_context(patch.object(owner, attribute, side_effect=AssertionError('import side effect')))
+            exec(code, module.__dict__)
+        imports = {node.module for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom)}
+        self.assertEqual(imports, {'dataclasses', 'enum', 'fractions', 'hashlib', 'experiments'})
 
 
 if __name__ == '__main__':
