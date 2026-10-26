@@ -1101,6 +1101,191 @@ def _workflow_v2(work, envelope, ledger, cancel, job_started, launcher_started, 
     return tuple(outcomes)
 
 
+class _V2EvidenceSink:
+    """Private qualified RF02 admission; no live coordinator or R0 callers.
+
+    Each admission owns a fresh WB02 boundary and an exact, complete physical
+    append plan. A partial multi-stream write permanently poisons this sink.
+    """
+
+    def __init__(self, root, envelope, profile):
+        self.envelope = _envelope(envelope)
+        physical = execution.physical
+        _need(type(profile) is physical.CodecProfile, "V2_EXACT_QUALIFIED_PROFILE_REQUIRED")
+        physical.require_qualified_profile(profile)
+        # Freeze the canonical identity once; never recapture the environment.
+        self.profile = physical.decode_profile(profile.canonical_bytes)
+        self.profile_sha256 = self.profile.sha256
+        self.names = tuple(execution.STREAM_NAMES) + ("operations", "resources")
+        _need(len(self.names) == len(set(self.names)), "DUPLICATE_STREAM_NAME")
+        self.writers = {}
+        self.event_ordinal = self.resource_ordinal = 0
+        self.durable_units = self.durable_primary_boards = 0
+        self.poisoned = self.sealed = self.closed = False
+        self.started = time.monotonic_ns()
+        try:
+            for name in self.names:
+                self.writers[name] = store.FramedStreamWriter(root, name,
+                    physical.context_for(name, self.profile_sha256),
+                    max_payload_bytes=self.envelope.max_payload_bytes)
+        except BaseException:
+            self.poisoned = True
+            self.close()
+            raise
+
+    @property
+    def byte_length(self):
+        return sum(writer.byte_length for writer in self.writers.values())
+
+    def _writable(self):
+        _need(not (self.poisoned or self.sealed or self.closed), "V2_SINK_NOT_WRITABLE")
+        _envelope(self.envelope)
+        execution.physical.require_qualified_profile(self.profile)
+        _need(self.profile.sha256 == self.profile_sha256, "V2_SINK_PROFILE_BINDING")
+
+    def _result(self, work, result):
+        _need(type(work) is execution.BoardWork, "V2_EXACT_BOARD_WORK_REQUIRED")
+        execution.BoardWork.__post_init__(work)
+        _need(type(result) is _V2OperationResult, "V2_EXACT_OPERATION_RESULT_REQUIRED")
+        _V2OperationResult.__post_init__(result)
+        _need(result.receipt.position == work.position and result.receipt.kind in _kinds(work),
+              "V2_RESULT_WORK_BINDING")
+        _need(result.codec_profile_sha256 == self.profile_sha256, "V2_RESULT_PROFILE_BINDING")
+
+    def _support_frame(self, name, key, record):
+        logical = records.encode(record)
+        frame = execution.physical.encode_frame(logical, key,
+            execution.physical.context_for(name, self.profile_sha256),
+            max_payload_bytes=self.envelope.max_payload_bytes)
+        return name, key, logical, frame
+
+    def checkpoint(self):
+        self._writable()
+        try:
+            for name in self.names:
+                self.writers[name].checkpoint()
+        except BaseException:
+            self.poisoned = True
+            raise
+
+    def admit(self, work, result, *, prior_primary_wire=None):
+        self._writable()
+        self._result(work, result)
+        receipt = result.receipt
+        if receipt.kind is execution.WorkerKind.PRIMARY:
+            _need(prior_primary_wire is None, "PRIMARY_PRIOR_BINDING")
+        else:
+            _need(prior_primary_wire is None or type(prior_primary_wire) is bytes,
+                  "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+        experiment = ()
+        if result.wire is not None:
+            context = _fresh_wb02_context(result.wire, work, receipt.kind,
+                self.profile_sha256, self.envelope, prior_primary_wire=prior_primary_wire)
+            _need(type(context) is _WB02Context and context.work == work
+                  and context.kind is receipt.kind and context.codec_profile_sha256 == self.profile_sha256
+                  and context.wire is result.wire and context.envelope is self.envelope,
+                  "V2_COORDINATOR_CONTEXT_BINDING")
+            _need(type(context.bundle) is execution.WorkerBundle
+                  and context.bundle.work_position == receipt.position and context.bundle.kind is receipt.kind
+                  and context.bundle.status is receipt.status, "V2_COORDINATOR_RECEIPT_BINDING")
+            _need((result.logical_bytes, result.physical_frame_bytes, result.legacy_bundle_bytes,
+                   result.wb02_wire_bytes) == (context.logical_bytes, context.physical_frame_bytes,
+                   context.legacy_bundle_bytes, context.wb02_wire_bytes), "V2_COORDINATOR_SIZE_BINDING")
+            experiment = tuple((row.stream_name, row.key, row.logical_bytes, row.frame_bytes)
+                               for row in context.rows)
+        resources = tuple(self._support_frame("resources", (self.resource_ordinal + index,), sample)
+                          for index, sample in enumerate(result.samples))
+        state = (records.OperationStatus.COMPLETED if receipt.status is records.AuditStatus.PASS else
+                 records.OperationStatus.FAILED if receipt.status is records.AuditStatus.FAIL else
+                 records.OperationStatus.INCOMPLETE)
+        elapsed = time.monotonic_ns() - self.started
+        terminal = self._support_frame("operations", (self.event_ordinal,), records.OperationEventRecord(
+            records.Phase.EXECUTION, _unit_id(receipt.position, receipt.kind) + ":" + receipt.reason,
+            records.EventKind.END if state is records.OperationStatus.COMPLETED else records.EventKind.ERROR,
+            elapsed, self.event_ordinal, state))
+        primary = receipt.kind is execution.WorkerKind.PRIMARY and bool(experiment)
+        progress = () if not primary else (self._support_frame("operations", (self.event_ordinal + 1,),
+            records.OperationEventRecord(records.Phase.EXECUTION,
+                "durable_primary_count:" + str(self.durable_primary_boards + 1), records.EventKind.PROGRESS,
+                elapsed, self.event_ordinal + 1, records.OperationStatus.RUNNING)),)
+        pending = experiment + resources + (terminal,)
+        complete = pending + progress
+        if self.byte_length + sum(len(frame) for _, _, _, frame in complete) > self.envelope.archive_cap_bytes:
+            status = (records.AuditStatus.FAIL if receipt.status is records.AuditStatus.FAIL
+                      else records.AuditStatus.INCOMPLETE)
+            return UnitReceipt(receipt.position, receipt.kind, status, "ARCHIVE_CAP", receipt.elapsed_ns,
+                               receipt.exit_code)
+        # Reject an ordering error before the first write of a multi-stream unit.
+        last = {name: writer.last_key for name, writer in self.writers.items()}
+        for name, key, _, _ in complete:
+            _need(name in last and (last[name] is None or key > last[name]), "V2_SINK_KEY_ORDER")
+            last[name] = key
+        previous = self.durable_units, self.durable_primary_boards
+        try:
+            for name, key, logical, frame in pending:
+                self.writers[name].append_frame(key, logical, frame)
+            self.checkpoint()
+            self.durable_units += 1
+            if primary:
+                self.durable_primary_boards += 1
+                name, key, logical, frame = progress[0]
+                self.writers[name].append_frame(key, logical, frame)
+                self.writers[name].checkpoint()
+        except BaseException:
+            # Restore only accounting for this failed admission. Partial files
+            # remain untouched, and poison forbids any retry, resume or seal.
+            self.durable_units, self.durable_primary_boards = previous
+            self.poisoned = True
+            raise
+        self.resource_ordinal += len(resources)
+        self.event_ordinal += 1 + int(primary)
+        return receipt
+
+    def seal(self):
+        self._writable()
+        try:
+            digests = tuple(self.writers[name].seal() for name in self.names)
+        except BaseException:
+            self.poisoned = True
+            raise
+        self.sealed = self.closed = True
+        return digests
+
+    def close(self):
+        """Release every writer; neither checkpoint nor claim successful seal."""
+        first_error = None
+        for writer in self.writers.values():
+            try:
+                writer.close()
+                self.poisoned = self.poisoned or writer.poisoned
+            except BaseException as error:
+                self.poisoned = True
+                if first_error is None:
+                    first_error = error
+        self.closed = True
+        if first_error is not None:
+            raise first_error
+
+
+def _admit_v2_workflow_results(work, results, sink):
+    """Admit one complete scheduled tuple without executing or converting it."""
+    _need(type(sink) is _V2EvidenceSink and type(results) is tuple, "V2_WORKFLOW_ADMISSION_TYPES")
+    sink._writable()
+    _need(type(work) is execution.BoardWork, "V2_EXACT_BOARD_WORK_REQUIRED")
+    execution.BoardWork.__post_init__(work)
+    for result in results:
+        sink._result(work, result)
+    _need(tuple(result.receipt.kind for result in results) == _kinds(work), "V2_WORKFLOW_RESULT_ORDER")
+    _need(results[0].wire is not None or all(result.wire is None for result in results[1:]),
+          "V2_WORKFLOW_PRIMARY_PREMISES_MISSING")
+    receipts, first = [], None
+    for result in results:
+        receipts.append(sink.admit(work, result, prior_primary_wire=first))
+        if result.receipt.kind is execution.WorkerKind.PRIMARY:
+            first = result.wire
+    return tuple(receipts)
+
+
 class _EvidenceSink:
     """One I2 writer per centrally declared stream; no rescan or alternate store."""
 

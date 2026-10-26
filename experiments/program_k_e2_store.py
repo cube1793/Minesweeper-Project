@@ -291,7 +291,8 @@ def _framed_path(root, stream_name):
 class FramedStreamWriter(StreamWriter):
     """Explicit RF02 writer with dirty checkpoints; no operational format switch.
 
-    Append accepts exact logical record objects, never caller-supplied frames.
+    Append accepts exact logical record objects. The additive append_frame seam
+    independently validates supplied RF02 bytes before persisting them exactly.
     State checks, poison, seal and close use the historical writer's mechanics;
     its JSONL constructor, append and checkpoint behavior remain unchanged.
     """
@@ -342,6 +343,36 @@ class FramedStreamWriter(StreamWriter):
             self._hash.update(frame)
         except BaseException as error:
             self._poison(error, "append")
+        self._byte_length, self._record_count, self._last_key = next_bytes, next_count, key
+        self._dirty = True
+
+    def append_frame(self, key, logical_bytes, frame_bytes):
+        """Validate this frame anew; neither supplied bytes nor context grant trust."""
+        self._writable()
+        context = _framed_context(self._stream_name, self._context)
+        limit = _framed_limit(self._max_payload_bytes)
+        _key(key)
+        _need(len(key) == context.expected_key_arity, "RF02 key arity mismatch.")
+        _need(self._last_key is None or key > self._last_key, "Duplicate/descending logical key.")
+        _need(type(logical_bytes) is bytes and len(logical_bytes) <= limit,
+              "Expected immutable bounded RF02 logical bytes.")
+        _need(type(frame_bytes) is bytes
+              and 0 < len(frame_bytes) <= limit + 13 + 10 * context.expected_key_arity,
+              "Expected immutable bounded RF02 frame bytes.")
+        try:
+            decoded = physical.decode_frame(frame_bytes, context, expected_key=key,
+                                            max_payload_bytes=limit)
+        except physical.PhysicalError as error:
+            raise StoreError("Invalid supplied RF02 frame.") from error
+        _need(decoded.logical_bytes == logical_bytes, "RF02 supplied logical bytes mismatch.")
+        next_bytes, next_count = self._byte_length + len(frame_bytes), self._record_count + 1
+        _uint64(next_bytes)
+        _uint64(next_count)
+        try:
+            _write_complete(self._file, frame_bytes)
+            self._hash.update(frame_bytes)
+        except BaseException as error:
+            self._poison(error, "append frame")
         self._byte_length, self._record_count, self._last_key = next_bytes, next_count, key
         self._dirty = True
 

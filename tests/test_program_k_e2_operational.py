@@ -7,7 +7,7 @@ mocked only for deliberately minimal transport fixtures.
 
 import ast
 import builtins
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import FrozenInstanceError, fields, replace
 from functools import partial
 from hashlib import sha256
@@ -2661,6 +2661,479 @@ class V2ResultAndWorkflowTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 result = R0ComponentTests().run_component(directory, op.R0Component.PRIMARY)
                 self.assertIs(result.units[0].status, records.AuditStatus.PASS)
+
+
+class V2AdmissionFoundationTests(unittest.TestCase):
+    """Tiny real WB02/RF02 boundaries; no engine, worker, corpus or q search."""
+
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_e2_r0_harness as r0_harness
+        cls.profile = r0_harness._capture_qualified_codec_profile()
+        cls.work, cls.bundles = _wb02_context_fixture()
+        cls.envelope = _envelope()
+        cls.wires = tuple(execution.encode_bundle_v2(bundle, cls.profile.sha256,
+            max_payload_bytes=cls.envelope.max_payload_bytes) for bundle in cls.bundles)
+        cls.views = tuple(execution.decode_bundle_view_v2(wire, cls.profile.sha256,
+            max_payload_bytes=cls.envelope.max_payload_bytes) for wire in cls.wires)
+        cls.results = tuple(op._V2OperationResult(
+            op.UnitReceipt(cls.work.position, bundle.kind, records.AuditStatus.PASS, "ADMITTED", 7, 0),
+            wire, cls.profile.sha256, (records.ResourceSampleRecord(
+                op._unit_id(cls.work.position, bundle.kind), records.ProcessRole.COMBINED,
+                100, 200, 300, "synthetic:0", 7, records.MemoryMethod.PRIVATE_BYTES),), None,
+            view.logical_bytes, view.frame_bytes, view.legacy_bytes, view.wire_bytes)
+            for bundle, wire, view in zip(cls.bundles, cls.wires, cls.views))
+
+    @contextmanager
+    def sink(self, envelope=None):
+        with tempfile.TemporaryDirectory() as directory:
+            sink = op._V2EvidenceSink(directory, self.envelope if envelope is None else envelope,
+                                      self.profile)
+            try:
+                yield Path(directory), sink
+            finally:
+                sink.close()
+
+    def missing(self, index=0, status=records.AuditStatus.INCOMPLETE):
+        return replace(self.results[index], receipt=replace(self.results[index].receipt,
+            status=status, reason="AUDIT_FAIL" if status is records.AuditStatus.FAIL else "CASE_TIMEOUT"),
+            wire=None, logical_bytes=0, physical_frame_bytes=0, legacy_bundle_bytes=0, wb02_wire_bytes=0)
+
+    @staticmethod
+    def snapshot(sink):
+        return (sink.byte_length, sink.durable_units, sink.durable_primary_boards,
+                sink.event_ordinal, sink.resource_ordinal, tuple(
+                    (name, writer.path.read_bytes(), writer.byte_length, writer.record_count,
+                     writer.last_key, writer._hash.hexdigest(), writer.dirty)
+                    for name, writer in sink.writers.items()))
+
+    def assert_prewrite_rejection(self, work, result, *, prior=None, boundary=None):
+        with self.sink() as (_, sink), ExitStack() as stack:
+            if boundary is not None:
+                stack.enter_context(patch.object(op, "_fresh_wb02_context", return_value=boundary))
+            append = stack.enter_context(patch.object(store.FramedStreamWriter, "append_frame",
+                side_effect=AssertionError("Rejected admission wrote a frame")))
+            before = self.snapshot(sink)
+            with self.assertRaises((ValueError, TypeError)):
+                sink.admit(work, result, prior_primary_wire=prior)
+            append.assert_not_called()
+            self.assertEqual(self.snapshot(sink), before)
+            self.assertFalse(sink.poisoned)
+
+    def test_exact_qualified_profile_required_before_any_file_creation(self):
+        physical = execution.physical
+        node = json.loads(self.profile.canonical_bytes)
+        node["status"] = "UNQUALIFIED_SLICE_1A"
+        unqualified = physical.CodecProfile(json.dumps(node, sort_keys=True,
+            separators=(",", ":"), ensure_ascii=True).encode("ascii"))
+        class ProfileSubclass(physical.CodecProfile):
+            pass
+        corrupted = physical.decode_profile(self.profile.canonical_bytes)
+        object.__setattr__(corrupted, "canonical_bytes", b"{}")
+        for profile in (self.profile.sha256, None, SimpleNamespace(qualified=True,
+                sha256=self.profile.sha256), unqualified, ProfileSubclass(self.profile.canonical_bytes), corrupted):
+            with self.subTest(type=type(profile)), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(ValueError):
+                    op._V2EvidenceSink(directory, self.envelope, profile)
+                self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_sink_owns_frozen_profile_pkf_contexts_and_never_recaptures_per_unit(self):
+        from experiments import program_k_e2_r0_harness as r0_harness
+        with self.sink() as (root, sink), ExitStack() as stack:
+            self.assertEqual(sink.profile.canonical_bytes, self.profile.canonical_bytes)
+            self.assertIsNot(sink.profile, self.profile)
+            self.assertEqual(sink.profile_sha256, self.profile.sha256)
+            self.assertEqual(sink.names, tuple(execution.STREAM_NAMES) + ("operations", "resources"))
+            self.assertEqual({path.name for path in root.iterdir()}, {name + ".pkf" for name in sink.names})
+            for name, writer in sink.writers.items():
+                self.assertEqual(writer._context, execution.physical.context_for(name, self.profile.sha256))
+            for owner, name in ((r0_harness, "_capture_qualified_codec_profile"),
+                                (execution.physical, "capture_profile"),
+                                (execution.physical, "capture_qualified_profile")):
+                stack.enter_context(patch.object(owner, name, side_effect=AssertionError("Profile recapture")))
+            op._admit_v2_workflow_results(self.work, self.results, sink)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (3, 1))
+            self.assertFalse(list(root.glob("*.jsonl")))
+            self.assertFalse((root / "codec-profile.json").exists())
+            self.assertFalse((root / "COMPLETE.json").exists())
+
+    def test_each_coordinator_admission_revalidates_exact_received_wire_and_primary_prior(self):
+        parent_contexts = tuple(op._fresh_wb02_context(wire, self.work, bundle.kind,
+            self.profile.sha256, self.envelope, prior_primary_wire=None if index == 0 else self.wires[0])
+            for index, (wire, bundle) in enumerate(zip(self.wires, self.bundles)))
+        accepted, fresh = op._fresh_wb02_context, []
+        def boundary(*args, **kwargs):
+            value = accepted(*args, **kwargs)
+            fresh.append(value)
+            return value
+        with self.sink() as (_, sink), patch.object(op, "_fresh_wb02_context", side_effect=boundary) as called:
+            receipts = op._admit_v2_workflow_results(self.work, self.results, sink)
+        self.assertEqual(receipts, tuple(result.receipt for result in self.results))
+        self.assertEqual([call.args[2] for call in called.call_args_list],
+            [execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM, execution.WorkerKind.PRIMARY,
+             execution.WorkerKind.K_CONTROL, execution.WorkerKind.PRIMARY])
+        top = [call for call in called.call_args_list if "prior_primary_wire" in call.kwargs]
+        self.assertEqual(len(top), 3)
+        for index, call in enumerate(top):
+            self.assertIs(call.args[0], self.results[index].wire)
+            self.assertIs(call.kwargs["prior_primary_wire"], None if index == 0 else self.results[0].wire)
+        self.assertTrue(all(all(value is not old for old in parent_contexts) for value in fresh))
+
+    def test_scalar_size_mismatch_rejects_without_any_append_or_poison(self):
+        for name in ("logical_bytes", "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"):
+            bad = replace(self.results[0])
+            object.__setattr__(bad, name, getattr(bad, name) + 1)
+            with self.subTest(name=name):
+                self.assert_prewrite_rejection(self.work, bad)
+
+    def test_wrong_profile_work_position_kind_and_mutated_result_reject_before_write(self):
+        for work, result in (
+                (self.work, replace(self.results[0], codec_profile_sha256=b"x" * 32)),
+                (replace(self.work, position=1), self.results[0]),
+                (replace(self.work, run_id="different-run"), self.results[0]),
+                (replace(self.work, board=replace(self.work.board, fingerprint="different")), self.results[0]),
+                (replace(self.work, determinism_selected=False), self.results[1]),
+                (self.work, replace(self.results[0], receipt=replace(self.results[0].receipt,
+                    kind=execution.WorkerKind.K_CONTROL))),
+                (SimpleNamespace(position=0), self.results[0])):
+            with self.subTest(work=work, kind=result.receipt.kind):
+                self.assert_prewrite_rejection(work, result)
+        for name, value in (("wire", bytearray(self.wires[0])), ("samples", []),
+                             ("logical_bytes", True), ("codec_profile_sha256", bytearray(self.profile.sha256))):
+            bad = replace(self.results[0])
+            object.__setattr__(bad, name, value)
+            with self.subTest(field=name):
+                self.assert_prewrite_rejection(self.work, bad)
+
+    def test_corrupt_and_syntactically_valid_wrong_semantic_wires_reject_before_write(self):
+        bad_wires = [self.wires[0][:-1] + bytes((self.wires[0][-1] ^ 1,)), self.wires[0][:-1]]
+        arm = records.decode(dict(self.bundles[0].streams)["control_arms"][0])
+        wrong = replace(self.bundles[0], streams=tuple(
+            (name, (records.encode(replace(arm, run_id="wrong-semantic-run")),) if name == "control_arms" else values)
+            for name, values in self.bundles[0].streams))
+        bad_wires.append(execution.encode_bundle_v2(wrong, self.profile.sha256))
+        failed = replace(self.bundles[0], status=records.AuditStatus.FAIL,
+                         reason_codes=("PRIVATE_ASSERTION_FALSIFIED",))
+        bad_wires.append(execution.encode_bundle_v2(failed, self.profile.sha256))
+        for index, wire in enumerate(bad_wires):
+            bad = replace(self.results[0], wire=wire, wb02_wire_bytes=len(wire))
+            if index >= 2:
+                view = execution.decode_bundle_view_v2(wire, self.profile.sha256)
+                bad = replace(bad, logical_bytes=view.logical_bytes, physical_frame_bytes=view.frame_bytes,
+                              legacy_bundle_bytes=view.legacy_bytes)
+            with self.subTest(index=index):
+                self.assert_prewrite_rejection(self.work, bad)
+
+    def test_coordinator_rejects_wrong_context_identity_and_receipt_status(self):
+        context = op._fresh_wb02_context(self.wires[0], self.work, execution.WorkerKind.PRIMARY,
+                                         self.profile.sha256, self.envelope)
+        bad_contexts = [SimpleNamespace(**{field.name: getattr(context, field.name) for field in fields(context)})]
+        for name, value in (("work", replace(self.work, position=1)),
+                             ("kind", execution.WorkerKind.DETERMINISM), ("codec_profile_sha256", b"x" * 32),
+                             ("wire", bytes(bytearray(self.wires[0]))), ("envelope", replace(self.envelope)),
+                             ("bundle", replace(self.bundles[0], status=records.AuditStatus.FAIL,
+                                reason_codes=("PRIVATE_ASSERTION_FALSIFIED",)))):
+            bad_contexts.append(replace(context, **{name: value}))
+        for index, bad in enumerate(bad_contexts):
+            with self.subTest(index=index):
+                self.assert_prewrite_rejection(self.work, self.results[0], boundary=bad)
+
+    def test_context_bundle_view_and_result_impostors_are_not_admission_tokens(self):
+        context = op._fresh_wb02_context(self.wires[0], self.work, execution.WorkerKind.PRIMARY,
+                                         self.profile.sha256, self.envelope)
+        class ResultSubclass(op._V2OperationResult):
+            pass
+        impostor = ResultSubclass(*(getattr(self.results[0], field.name) for field in fields(self.results[0])))
+        for result in (context, self.bundles[0], self.views[0], impostor,
+                       SimpleNamespace(**{field.name: getattr(self.results[0], field.name)
+                                           for field in fields(self.results[0])})):
+            with self.subTest(type=type(result)):
+                self.assert_prewrite_rejection(self.work, result)
+        self.assertTrue({"validated", "trusted", "admitted", "qualified", "token", "context_token"}.isdisjoint(
+            inspect.signature(op._V2EvidenceSink.admit).parameters))
+
+    def test_exact_received_experiment_frames_and_support_rf02_are_the_durable_bytes(self):
+        expected = {name: b"" for name in execution.STREAM_NAMES}
+        for view in self.views:
+            for row in view.rows:
+                expected[row.stream_name] += row.frame_bytes
+        original = execution.physical.encode_frame
+        encoded_support = []
+        def encode(logical, key, context, **kwargs):
+            self.assertIn(context.stream_name, ("operations", "resources"))
+            encoded_support.append((context.stream_name, key))
+            return original(logical, key, context, **kwargs)
+        with self.sink() as (root, sink), patch.object(execution.physical, "encode_frame", side_effect=encode), \
+                patch.object(store.FramedStreamWriter, "append", side_effect=AssertionError("Experiment re-encoded")):
+            op._admit_v2_workflow_results(self.work, self.results, sink)
+            for name, raw in expected.items():
+                self.assertEqual((root / (name + ".pkf")).read_bytes(), raw, name)
+            self.assertEqual(sink.byte_length, sum(path.stat().st_size for path in root.glob("*.pkf")))
+            self.assertNotEqual(sink.byte_length, sum(result.wb02_wire_bytes for result in self.results))
+            seals = sink.seal()
+            self.assertEqual(tuple(digest.name for digest in seals), sink.names)
+            for digest in seals:
+                raw = (root / (digest.name + ".pkf")).read_bytes()
+                self.assertEqual((digest.byte_length, digest.sha256), (len(raw), sha256(raw).hexdigest()))
+                scanned = store.scan_framed_stream(root, digest.name,
+                    execution.physical.context_for(digest.name, self.profile.sha256))
+                self.assertEqual(scanned, digest)
+            events, samples = [], []
+            for name, output in (("operations", events), ("resources", samples)):
+                store.scan_framed_stream(root, name, execution.physical.context_for(name, self.profile.sha256),
+                    visit=lambda key, value, logical, length: output.append((key, value)))
+            self.assertEqual([key for key, _ in events], [(0,), (1,), (2,), (3,)])
+            self.assertEqual([value.event_kind for _, value in events],
+                [records.EventKind.END, records.EventKind.PROGRESS, records.EventKind.END, records.EventKind.END])
+            self.assertEqual([value for _, value in samples], [result.samples[0] for result in self.results])
+            self.assertEqual([key for key, _ in samples], [(0,), (1,), (2,)])
+            self.assertTrue(sink.sealed and sink.closed)
+            self.assertFalse(list(root.glob("*.jsonl")))
+        self.assertEqual(len(encoded_support), 7)
+
+    def test_fail_and_incomplete_results_are_support_only_with_exact_event_status(self):
+        results = (self.missing(0, records.AuditStatus.FAIL), self.missing(1), self.missing(2))
+        with self.sink() as (root, sink), \
+                patch.object(op, "_fresh_wb02_context", side_effect=AssertionError("Missing wire decoded")):
+            receipts = op._admit_v2_workflow_results(self.work, results, sink)
+            self.assertEqual(receipts, tuple(value.receipt for value in results))
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (3, 0))
+            self.assertTrue(all((root / (name + ".pkf")).stat().st_size == 0 for name in execution.STREAM_NAMES))
+            events = []
+            store.scan_framed_stream(root, "operations", execution.physical.context_for("operations", self.profile.sha256),
+                visit=lambda key, value, logical, length: events.append(value))
+            self.assertEqual([value.event_kind for value in events], [records.EventKind.ERROR] * 3)
+            self.assertEqual([value.status for value in events],
+                [records.OperationStatus.FAILED, records.OperationStatus.INCOMPLETE, records.OperationStatus.INCOMPLETE])
+            self.assertEqual([value.unit_id for value in events],
+                [op._unit_id(self.work.position, result.receipt.kind) + ":" + result.receipt.reason for result in results])
+
+    def seed_archive(self, sink):
+        """A bounded pre-existing RF02 support prefix keeps payload and archive caps distinct."""
+        text = "".join(sha256(str(index).encode("ascii")).hexdigest() for index in range(256))
+        while sink.byte_length < self.envelope.max_payload_bytes:
+            ordinal = sink.event_ordinal
+            event = records.OperationEventRecord(records.Phase.EXECUTION, "fixture-prefix:" + text,
+                records.EventKind.START, 0, ordinal, records.OperationStatus.RUNNING)
+            sink.writers["operations"].append((ordinal,), event)
+            sink.event_ordinal += 1
+        sink.checkpoint()
+
+    def test_archive_cap_counts_complete_unit_including_resources_terminal_and_progress(self):
+        with patch.object(op.time, "monotonic_ns", return_value=1000):
+            with self.sink() as (_, sink):
+                self.seed_archive(sink)
+                before = sink.byte_length
+                sink.admit(self.work, self.results[0])
+                total = sink.byte_length
+                self.assertGreater(total - before, self.results[0].physical_frame_bytes)
+            for cap, fits in ((total, True), (total - 1, False)):
+                with self.subTest(fits=fits), self.sink(replace(self.envelope, archive_cap_bytes=cap)) as (_, sink):
+                    self.seed_archive(sink)
+                    before = self.snapshot(sink)
+                    receipt = sink.admit(self.work, self.results[0])
+                    if fits:
+                        self.assertIs(receipt.status, records.AuditStatus.PASS)
+                        self.assertEqual(sink.byte_length, cap)
+                        self.assertEqual((sink.durable_units, sink.durable_primary_boards), (1, 1))
+                    else:
+                        self.assertEqual((receipt.status, receipt.reason), (records.AuditStatus.INCOMPLETE, "ARCHIVE_CAP"))
+                        self.assertEqual(self.snapshot(sink), before)
+                        self.assertFalse(sink.poisoned)
+
+    def test_archive_rejection_preserves_fail_and_writes_no_support_subset(self):
+        failed = self.missing(0, records.AuditStatus.FAIL)
+        with patch.object(op.time, "monotonic_ns", return_value=1000):
+            with self.sink() as (_, sink):
+                self.seed_archive(sink)
+                sink.admit(self.work, failed)
+                total = sink.byte_length
+            with self.sink(replace(self.envelope, archive_cap_bytes=total - 1)) as (_, sink):
+                self.seed_archive(sink)
+                before = self.snapshot(sink)
+                with patch.object(store.FramedStreamWriter, "append_frame",
+                        side_effect=AssertionError("Archive reject wrote support")):
+                    receipt = sink.admit(self.work, failed)
+                self.assertEqual((receipt.status, receipt.reason), (records.AuditStatus.FAIL, "ARCHIVE_CAP"))
+                self.assertEqual(self.snapshot(sink), before)
+                self.assertFalse(sink.poisoned)
+
+    def test_every_partial_write_checkpoint_and_progress_failure_poisons_whole_sink(self):
+        cases = ("first_experiment", "later_experiment", "resource", "terminal", "progress",
+                 "first_checkpoint", "last_checkpoint", "progress_checkpoint")
+        original_append, original_checkpoint = store.FramedStreamWriter.append_frame, store.FramedStreamWriter.checkpoint
+        for case in cases:
+            state = dict(experiment=0, progress=False, fired=False)
+            def append(writer, key, logical, frame):
+                event = records.decode(logical) if writer.stream_name == "operations" else None
+                if writer.stream_name in execution.STREAM_NAMES:
+                    state["experiment"] += 1
+                is_progress = event is not None and event.event_kind is records.EventKind.PROGRESS
+                state["progress"] = state["progress"] or is_progress
+                selected = ((case == "first_experiment" and state["experiment"] == 1)
+                    or (case == "later_experiment" and state["experiment"] == 2)
+                    or (case == "resource" and writer.stream_name == "resources")
+                    or (case == "terminal" and event is not None and event.event_kind is records.EventKind.END)
+                    or (case == "progress" and is_progress))
+                original_append(writer, key, logical, frame)
+                if selected and not state["fired"]:
+                    state["fired"] = True
+                    raise store.StoreError("synthetic append failure")
+            def checkpoint(writer):
+                selected = ((case == "first_checkpoint" and writer.stream_name == execution.STREAM_NAMES[0])
+                    or (case == "last_checkpoint" and writer.stream_name == "resources")
+                    or (case == "progress_checkpoint" and writer.stream_name == "operations" and state["progress"]))
+                if selected and not state["fired"]:
+                    state["fired"] = True
+                    raise store.StoreError("synthetic fsync failure")
+                return original_checkpoint(writer)
+            with self.subTest(case=case), self.sink() as (root, sink):
+                with patch.object(store.FramedStreamWriter, "append_frame", new=append), \
+                        patch.object(store.FramedStreamWriter, "checkpoint", new=checkpoint), \
+                        self.assertRaises(store.StoreError):
+                    sink.admit(self.work, self.results[0])
+                self.assertTrue(state["fired"] and sink.poisoned)
+                self.assertEqual((sink.durable_units, sink.durable_primary_boards), (0, 0))
+                with self.assertRaises(ValueError):
+                    sink.admit(self.work, self.results[1], prior_primary_wire=self.wires[0])
+                with self.assertRaises(ValueError):
+                    sink.seal()
+                sink.close()
+                retained = {path.name: path.read_bytes() for path in root.glob("*.pkf")}
+                self.assertGreater(sum(map(len, retained.values())), 0)
+                sink.close()
+                self.assertEqual({path.name: path.read_bytes() for path in root.glob("*.pkf")}, retained)
+                self.assertFalse(sink.sealed)
+
+    def test_later_failed_unit_retains_prior_durable_counters_and_file_prefixes(self):
+        original = store.FramedStreamWriter.append_frame
+        with self.sink() as (root, sink):
+            sink.admit(self.work, self.results[0])
+            prefix = {name: writer.path.read_bytes() for name, writer in sink.writers.items()}
+            def fail_resource(writer, key, logical, frame):
+                original(writer, key, logical, frame)
+                if writer.stream_name == "resources":
+                    raise store.StoreError("later unit resource failure")
+            with patch.object(store.FramedStreamWriter, "append_frame", new=fail_resource), self.assertRaises(store.StoreError):
+                sink.admit(self.work, self.results[1], prior_primary_wire=self.wires[0])
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (1, 1))
+            self.assertTrue(sink.poisoned)
+            sink.close()
+            self.assertTrue(all((root / (name + ".pkf")).read_bytes().startswith(raw)
+                                for name, raw in prefix.items()))
+
+    def test_all_stream_fsync_precedes_counters_and_primary_progress_is_checkpointed_last(self):
+        events = []
+        original_append, original_checkpoint = store.FramedStreamWriter.append_frame, store.FramedStreamWriter.checkpoint
+        original_setattr = op._V2EvidenceSink.__setattr__
+        with self.sink() as (_, sink):
+            def assign(owner, name, value):
+                original_setattr(owner, name, value)
+                if owner is sink and name in ("durable_units", "durable_primary_boards"):
+                    events.append(("counter", name, value))
+            def append(writer, key, logical, frame):
+                event = records.decode(logical) if writer.stream_name == "operations" else None
+                label = event.event_kind.value if event is not None else writer.stream_name
+                events.append(("append", label, sink.durable_units, sink.durable_primary_boards))
+                return original_append(writer, key, logical, frame)
+            def checkpoint(writer):
+                value = original_checkpoint(writer)
+                events.append(("durable", writer.stream_name, sink.durable_units, sink.durable_primary_boards))
+                return value
+            with patch.object(op._V2EvidenceSink, "__setattr__", new=assign), \
+                    patch.object(store.FramedStreamWriter, "append_frame", new=append), \
+                    patch.object(store.FramedStreamWriter, "checkpoint", new=checkpoint), \
+                    patch.object(store.os, "fsync", wraps=store.os.fsync) as fsync:
+                sink.admit(self.work, self.results[0])
+            units = events.index(("counter", "durable_units", 1))
+            primary = events.index(("counter", "durable_primary_boards", 1))
+            progress = next(i for i, value in enumerate(events) if value[:2] == ("append", "PROGRESS"))
+            prior_checkpoints = [value for value in events[:units] if value[0] == "durable"]
+            self.assertEqual([value[1] for value in prior_checkpoints], list(sink.names))
+            self.assertTrue(all(value[2:] == (0, 0) for value in prior_checkpoints))
+            self.assertLess(units, primary)
+            self.assertLess(primary, progress)
+            self.assertEqual(events[progress][2:], (1, 1))
+            self.assertEqual(events[-1], ("durable", "operations", 1, 1))
+            self.assertEqual(fsync.call_count, len(sink.names) + 1)
+            self.assertTrue(all(value[2:] == (0, 0) for value in events[:units] if value[0] == "append"))
+
+    def test_duplicate_admission_is_prewrite_rejection_and_seal_close_are_terminal(self):
+        with self.sink() as (_, sink):
+            sink.admit(self.work, self.results[0])
+            before = self.snapshot(sink)
+            with self.assertRaises(ValueError):
+                sink.admit(self.work, self.results[0])
+            self.assertEqual(self.snapshot(sink), before)
+            self.assertFalse(sink.poisoned)
+            sink.seal()
+            with self.assertRaises(ValueError):
+                sink.admit(self.work, self.results[1], prior_primary_wire=self.wires[0])
+            with self.assertRaises(ValueError):
+                sink.seal()
+        with self.sink() as (root, sink):
+            sink.close()
+            self.assertFalse(sink.sealed)
+            with self.assertRaises(ValueError):
+                sink.admit(self.work, self.results[0])
+            with self.assertRaises(ValueError):
+                op._V2EvidenceSink(root, self.envelope, self.profile)
+
+    def test_workflow_helper_requires_exact_complete_order_positions_and_primary_availability(self):
+        cases = (list(self.results), (), self.results[:-1], self.results[::-1],
+                 self.results + (self.results[0],),
+                 (self.results[0], replace(self.results[1], receipt=replace(self.results[1].receipt, position=1)),
+                  self.results[2]), (self.missing(),) + self.results[1:])
+        for results in cases:
+            with self.subTest(shape=type(results), size=len(results)), self.sink() as (_, sink), \
+                    patch.object(sink, "admit", side_effect=AssertionError("Invalid workflow partly admitted")) as admit:
+                with self.assertRaises(ValueError):
+                    op._admit_v2_workflow_results(self.work, results, sink)
+                admit.assert_not_called()
+
+    def test_workflow_helper_passes_same_primary_object_without_conversion_or_execution(self):
+        with self.sink() as (_, sink), ExitStack() as stack:
+            calls = []
+            def admit(work, result, *, prior_primary_wire=None):
+                calls.append((work, result, prior_primary_wire))
+                return result.receipt
+            stack.enter_context(patch.object(sink, "admit", side_effect=admit))
+            for name in ("encode_bundle", "encode_bundle_v2", "decode_bundle", "decode_bundle_v2", "decode_bundle_view_v2"):
+                stack.enter_context(patch.object(execution, name, side_effect=AssertionError("Admission helper converted bytes")))
+            for name in ("_fresh_wb02_context", "_workflow_v2", "_supervise_operation_v2"):
+                stack.enter_context(patch.object(op, name, side_effect=AssertionError("Admission helper performed worker/boundary work")))
+            stack.enter_context(patch.object(op.multiprocessing, "get_context", side_effect=AssertionError("Admission helper spawned")))
+            receipts = op._admit_v2_workflow_results(self.work, self.results, sink)
+            self.assertEqual(receipts, tuple(value.receipt for value in self.results))
+            self.assertEqual([value[1].receipt.kind for value in calls], list(op._kinds(self.work)))
+            self.assertIsNone(calls[0][2])
+            self.assertTrue(all(value[2] is self.results[0].wire for value in calls[1:]))
+
+    def test_new_sink_helper_and_exact_frame_path_have_no_v1_worker_workflow_coordinate_or_r0_callers(self):
+        from experiments import program_k_e2_r0_harness as r0_harness
+        with ExitStack() as stack:
+            for owner, names in ((op, ("_V2EvidenceSink", "_admit_v2_workflow_results")),
+                                 (store.FramedStreamWriter, ("append_frame",)),
+                                 (execution.physical, ("capture_qualified_profile",)),
+                                 (r0_harness, ("_capture_qualified_codec_profile",))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("Historical V1 activated Slice 1K")))
+            frames = WorkerAdapterTests().run_worker(execution.WorkerKind.PRIMARY,
+                lambda work, kind, kwargs: _bundle(work, kind))
+            self.assertEqual(frames[-1], b"F")
+            with patch.object(op, "_supervise_operation", side_effect=lambda work, kind, *args, **kwargs: _result(work, kind)):
+                values = op._workflow(_plan()[0], self.envelope, None, threading.Event(), 1, 1)
+                self.assertTrue(all(type(value) is op._OperationResult for value in values))
+            with tempfile.TemporaryDirectory() as directory:
+                value = StreamingCoordinatorTests().run_plan(_plan(), directory)
+                self.assertIs(value.status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).glob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            with tempfile.TemporaryDirectory() as directory:
+                value = R0ComponentTests().run_component(directory, op.R0Component.PRIMARY)
+                self.assertIs(value.units[0].status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).rglob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
 
 
 if __name__ == "__main__":
