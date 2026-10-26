@@ -481,6 +481,302 @@ class HistoricalV1CodecTests(unittest.TestCase):
                 _encode(value)
 
 
+class V2MaterializationEvidenceTests(unittest.TestCase):
+    """Pure metadata fixtures: no constructor, persistence or runtime capture."""
+
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_program_k_e2_physical import _qualified_node
+        cls.profile = physical.decode_profile(_json(_qualified_node()))
+        cls.runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os", "fixture-platform",
+                                              "fixture-arch", None)
+        cls.plan = (execution.BoardWork(0, h.synthetic_board_identity(2_000_000_090_000),
+            b"\x12" * 32, "slice1n-evidence-fixture", False, False, False, cls.runtime),)
+        trial = e.V2ConstructorTrialEvidence(1, 0, 100, 200, 0, 0, True, None)
+        cls.fact = e.V2ConstructorEvidence(0, "primary", "text", 100, 200, 0, 1,
+            100, 200, 0, 0, 0, 0, True, 4196, False, (trial,))
+        cls.value = e.V2MaterializationEvidence(
+            schema=e.R0B_EXPERIMENT_V2, size_basis=e.SizeBasisV2(cls.profile.sha256.hex()),
+            codec_profile_bytes=cls.profile.canonical_bytes, codec_profile_sha256=cls.profile.sha256.hex(),
+            source_plan_identity=e.plan_identity_v2(cls.plan),
+            materialization_plan_identity=e.plan_identity_v2(cls.plan),
+            mapping_policy=e.V2_MATERIALIZATION_MAPPING_POLICY, protocol_seed=cls.plan[0].protocol_seed,
+            run_id=cls.plan[0].run_id, runtime=cls.runtime, work_count=1,
+            family_counts=tuple(zip(readiness.V2_FAMILIES, (1, 0, 0, 0, 0, 0))),
+            targets=readiness.DualComponentSizes(readiness.ComponentSizes(100, 1, 0, 0, 1, 1),
+                                                 readiness.ComponentSizes(200, 1, 0, 0, 1, 1)),
+            streams=tuple(records.StreamDigest(name, "a" * 64, 0, 0)
+                          for name in execution.STREAM_NAMES + ("operations", "resources")),
+            constructor_facts=(cls.fact,),
+            family_totals=tuple(e.V2FamilyTotalEvidence(name, 100 if name == "primary" else 0,
+                200 if name == "primary" else 0, 0) for name in readiness.V2_FAMILIES),
+            physical_minimum_total=100, fixed_allowance_reservation=268435456, b_proc=1000,
+            committed_procedural_excess=0, remaining_procedural_budget=1000, durable_operation_count=1,
+            durable_primary_count=1, attributable_experiment_bytes=100, current_sealed_pkf_bytes=100,
+            runtime_monitor_peak_coordinator_private_bytes=300,
+            progress_complete=True, cleanup_complete=True, synthetic_non_evidence=True)
+        cls.raw = e.encode_materialization_v2(cls.value)
+
+    def node(self):
+        return json.loads(self.raw)
+
+    def decode_node(self, node):
+        return e.decode_materialization_v2(_json(node) + b"\n")
+
+    def test_canonical_ascii_final_lf_exact_roundtrip_and_profile_bytes(self):
+        self.assertTrue(self.raw.isascii())
+        self.assertTrue(self.raw.endswith(b"\n") and not self.raw.endswith(b"\n\n"))
+        self.assertEqual(self.raw, _json(self.node()) + b"\n")
+        value = e.decode_materialization_v2(self.raw, expected_profile_sha256=self.profile.sha256.hex())
+        self.assertEqual(value, self.value)
+        self.assertEqual(e.encode_materialization_v2(value), self.raw)
+        self.assertEqual(value.codec_profile_bytes, self.profile.canonical_bytes)
+        self.assertEqual(physical.decode_profile(value.codec_profile_bytes).sha256.hex(), value.codec_profile_sha256)
+        self.assertNotIn("readback_complete", self.node())
+        self.assertNotIn("durable_sample_max_coordinator_private_bytes", self.node())
+        self.assertEqual(self.node()["runtime_monitor_peak_coordinator_private_bytes"], 300)
+
+    def test_v2_metadata_types_are_frozen_closed_and_excluded_from_v1(self):
+        for value in (self.value, self.fact, self.fact.trials[0], self.value.family_totals[0]):
+            self.assertFalse(hasattr(value, "__dict__"))
+            self.assertNotIn(type(value), e._FACT_TYPES.values())
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+            with self.assertRaises(e.EvidenceError):
+                e.fact_node_v1(value)
+            with self.assertRaises(e.EvidenceError):
+                e.fact_read_v1({"fact": type(value).__name__, "fields": {}})
+        class Derived(e.V2MaterializationEvidence):
+            pass
+        values = {field.name: getattr(self.value, field.name) for field in fields(self.value)}
+        with self.assertRaises(e.EvidenceError):
+            e.encode_materialization_v2(Derived(**values))
+
+    def test_every_closed_nested_shape_rejects_unknown_and_missing_fields(self):
+        paths = ((), ("size_basis",), ("targets",), ("targets", "physical"),
+                 ("streams", 0), ("constructor_facts", 0), ("constructor_facts", 0, "trials", 0),
+                 ("family_totals", 0))
+        for path in paths:
+            node = self.node()
+            shape = node
+            for key in path:
+                shape = shape[key]
+            for field in tuple(shape):
+                candidate = self.node()
+                changed = candidate
+                for key in path:
+                    changed = changed[key]
+                del changed[field]
+                with self.subTest(path=path, missing=field), self.assertRaises(e.EvidenceError):
+                    self.decode_node(candidate)
+            shape["unexpected"] = None
+            with self.subTest(path=path, extra=True), self.assertRaises(e.EvidenceError):
+                self.decode_node(node)
+
+    def test_duplicate_fields_noncanonical_spacing_lf_and_non_ascii_wire_fail(self):
+        duplicate = b'{"schema":"' + e.R0B_EXPERIMENT_V2.encode("ascii") + b'",' + self.raw[1:]
+        nested = self.raw.replace(b'"ordinal":1', b'"ordinal":1,"ordinal":1', 1)
+        for raw in (self.raw[:-1], self.raw + b"\n", self.raw + b" ", b" " + self.raw,
+                    self.raw.replace(b'"work_count":1', b'"work_count": 1'), duplicate, nested,
+                    self.raw.replace(b'"run_id":', b'"r\xffn_id":')):
+            with self.subTest(raw=raw[:40]), self.assertRaises(e.EvidenceError):
+                e.decode_materialization_v2(raw)
+        for value in (bytearray(self.raw), memoryview(self.raw), self.raw.decode("ascii"), None):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_materialization_v2(value)
+
+    def test_float_nan_bool_as_int_and_scalar_coercion_fail_at_every_depth(self):
+        paths = (("work_count",), ("family_counts", 0, 1), ("targets", "physical", "primary"),
+                 ("streams", 0, "byte_length"), ("constructor_facts", 0, "position"),
+                 ("constructor_facts", 0, "trials", 0, "knob"), ("family_totals", 0, "physical_bytes"),
+                 ("runtime_monitor_peak_coordinator_private_bytes",))
+        for path in paths:
+            for bad in (True, False, 1.0, "1", None):
+                node = self.node()
+                parent = node
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = bad
+                with self.subTest(path=path, bad=bad), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        for token in (b"NaN", b"Infinity", b"-Infinity", b"1e0"):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_materialization_v2(self.raw.replace(b'"work_count":1', b'"work_count":' + token))
+        for field in ("progress_complete", "cleanup_complete", "synthetic_non_evidence"):
+            for bad in (1, "true", False):
+                node = self.node()
+                node[field] = bad
+                with self.subTest(field=field, bad=bad), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+
+    def test_explicit_schema_basis_profile_bytes_and_expected_profile_are_all_bound(self):
+        for schema in (e.R0B_EXPERIMENT_V1, e.R0_RUN_V2, e.R0A_OBSERVATIONS_V2, "unknown", True):
+            node = self.node()
+            node["schema"] = schema
+            with self.assertRaises(e.EvidenceError):
+                self.decode_node(node)
+        for field, invalid in (("size_basis", None), ("codec_profile_bytes", "7b7d"),
+                               ("codec_profile_sha256", "b" * 64), ("mapping_policy", "unapproved")):
+            node = self.node()
+            node[field] = invalid
+            with self.assertRaises(e.EvidenceError):
+                self.decode_node(node)
+        node = self.node()
+        node["size_basis"]["codec_profile_sha256"] = "c" * 64
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+        profile_node = json.loads(self.profile.canonical_bytes)
+        profile_node["status"] = "UNQUALIFIED_SLICE_1A"
+        raw = _json(profile_node)
+        import hashlib
+        node = self.node()
+        node["codec_profile_bytes"] = raw.hex()
+        node["codec_profile_sha256"] = node["size_basis"]["codec_profile_sha256"] = hashlib.sha256(raw).hexdigest()
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+        for expected in ("0" * 64, self.profile.sha256, True, "A" * 64):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_materialization_v2(self.raw, expected_profile_sha256=expected)
+
+    def test_canonical_hex_runtime_and_digest_fields_have_no_permissive_coercion(self):
+        for field in ("protocol_seed", "codec_profile_bytes"):
+            for mutation in (lambda value: value.upper(), lambda value: value + " ", lambda value: "g0",
+                             lambda value: "0", lambda value: True):
+                node = self.node()
+                # The seed fixture is numeric hex, so introduce a noncanonical
+                # letter explicitly for its uppercase case.
+                node[field] = mutation(node[field] if field != "protocol_seed" else "ab" * 32)
+                with self.subTest(field=field), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        for field in ("source_plan_identity", "materialization_plan_identity", "codec_profile_sha256"):
+            for value in ("A" * 64, "a" * 63, "g" * 64, True):
+                node = self.node()
+                node[field] = value
+                with self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        for runtime in ({}, records.encode(self.plan[0].board).decode("ascii"),
+                        records.encode(self.runtime).decode("ascii") + "\n", True):
+            node = self.node()
+            node["runtime"] = runtime
+            with self.assertRaises(e.EvidenceError):
+                self.decode_node(node)
+
+    def test_stream_family_order_shape_and_constructor_position_are_closed(self):
+        for field in ("streams", "family_counts", "family_totals"):
+            for mutation in (lambda value: value[::-1], lambda value: value[:-1],
+                             lambda value: value + value[:1], lambda value: {}):
+                node = self.node()
+                node[field] = mutation(node[field])
+                with self.subTest(field=field), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        node = self.node()
+        node["constructor_facts"][0]["position"] = 1
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+        node = self.node()
+        node["family_counts"][0][1] = 2
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+
+    def test_closed_rejected_trial_provenance_is_distinct_from_family_policy(self):
+        rejected = e.V2ConstructorTrialEvidence(2, 1, 100, 200, 0, 0, False, "SYNTHETIC_TEXT_WNEW_CAP")
+        fact = replace(self.fact, trials=self.fact.trials + (rejected,))
+        value = replace(self.value, constructor_facts=(fact,))
+        decoded = e.decode_materialization_v2(e.encode_materialization_v2(value))
+        self.assertEqual(decoded.constructor_facts[0].trials[1], rejected)
+        self.assertTrue(readiness.evaluate_family_size("primary", 100, 200, 100, 200).eligible)
+        self.assertNotIn(rejected.rejection_reason, e.V2_FAMILY_POLICY_REASONS)
+        for reason in ("private arbitrary error", "SYNTHETIC_SIZING_SEARCH_EXHAUSTED",
+                       "SYNTHETIC_LOGICAL_DOMAIN_EMPTY", "SYNTHETIC_TEXT_WNEW_CAP ", True, None):
+            with self.subTest(reason=reason), self.assertRaises(e.EvidenceError):
+                replace(rejected, rejection_reason=reason)
+        with self.assertRaises(e.EvidenceError):
+            replace(self.fact, trials=(replace(rejected, ordinal=1, rejection_reason="REFERENCE_SUNIT_CAP"),))
+
+    def test_trial_domains_ordinals_availability_and_exact_boolean_are_closed(self):
+        trial = self.fact.trials[0]
+        for changes in ({"ordinal": 0}, {"ordinal": 9}, {"ordinal": True}, {"knob": -1},
+                        {"knob": physical.MAX_PAYLOAD_BYTES + 1}, {"eligible": 1},
+                        {"rejection_reason": "SYNTHETIC_TEXT_WNEW_CAP"},
+                        {"actual_physical_bytes": None}, {"physical_margin": None}):
+            with self.subTest(changes=changes), self.assertRaises(e.EvidenceError):
+                replace(trial, **changes)
+        for trials in (list(self.fact.trials), (), (replace(trial, ordinal=2),),
+                       (trial, replace(trial, ordinal=2)), self.fact.trials * 9):
+            with self.assertRaises(e.EvidenceError):
+                replace(self.fact, trials=trials)
+        reference_trial = replace(trial, knob=2_581_111)
+        with self.assertRaises(e.EvidenceError):
+            replace(self.fact, family="reference", constructor_kind="reference", trials=(reference_trial,))
+        partial = e.V2ConstructorTrialEvidence(1, 0, None, 200, None, 0, False,
+                                              "REFERENCE_CANONICAL_RECORD_FAILURE")
+        self.assertIsNone(partial.actual_physical_bytes)
+
+    def test_zero_oracle_evidence_retains_ordinal_zero_without_fake_trial(self):
+        zero = replace(self.fact, family="oracle_primary", physical_target=0, logical_target=0,
+            actual_physical_bytes=0, actual_logical_bytes=0, selected_knob=0, selected_trial_ordinal=0,
+            text_window_applies=False, text_window_upper_bound=None, zero_oracle=True, trials=())
+        value = replace(self.value, constructor_facts=(self.fact, zero),
+            family_counts=tuple(zip(readiness.V2_FAMILIES, (1, 0, 1, 0, 0, 0))))
+        self.assertEqual(e.decode_materialization_v2(e.encode_materialization_v2(value)), value)
+        for changes in ({"selected_knob": 1}, {"selected_trial_ordinal": 1},
+                        {"actual_physical_bytes": 1}, {"trials": self.fact.trials}, {"family": "primary"}):
+            with self.assertRaises(e.EvidenceError):
+                replace(zero, **changes)
+
+    def test_encoder_revalidates_frozen_objects_after_external_corruption(self):
+        for field, invalid in (("work_count", True), ("constructor_facts", []), ("family_totals", []),
+                               ("runtime_monitor_peak_coordinator_private_bytes", 0), ("codec_profile_bytes", b"{}")):
+            value = replace(self.value)
+            object.__setattr__(value, field, invalid)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                e.encode_materialization_v2(value)
+        fact = replace(self.fact)
+        object.__setattr__(fact, "trials", (object(),))
+        value = replace(self.value)
+        object.__setattr__(value, "constructor_facts", (fact,))
+        with self.assertRaises(e.EvidenceError):
+            e.encode_materialization_v2(value)
+
+    def test_plan_digest_independently_matches_closed_bytes_and_binds_every_work_field(self):
+        import hashlib
+        work = self.plan[0]
+        node = {"position": work.position, "board": records.encode(work.board).decode("ascii"),
+            "protocol_seed": work.protocol_seed.hex(), "run_id": work.run_id,
+            "runtime": records.encode(work.runtime).decode("ascii"),
+            "oracle_b_selected": work.oracle_b_selected, "determinism_selected": work.determinism_selected,
+            "k_control_selected": work.k_control_selected}
+        expected = hashlib.sha256(b"PROGRAM_K_V2_MATERIALIZATION_PLAN_IDENTITY_V1\0" + _json(node) + b"\n").hexdigest()
+        self.assertEqual(e.plan_identity_v2(self.plan), expected)
+        for changes in ({"board": h.reference_board_identity(work.board.game_index)},
+                        {"protocol_seed": b"\x13" * 32}, {"run_id": work.run_id + "x"},
+                        {"runtime": replace(work.runtime, host="other")}, {"oracle_b_selected": True},
+                        {"determinism_selected": True}, {"k_control_selected": True}):
+            with self.subTest(changes=changes):
+                self.assertNotEqual(e.plan_identity_v2((replace(work, **changes),)), expected)
+        for plan in ([], list(self.plan), (), (replace(work, position=1),),
+                     (replace(work, runtime=None),), (object(),)):
+            with self.assertRaises(e.EvidenceError):
+                e.plan_identity_v2(plan)
+
+    def test_v2_codec_and_plan_identity_are_pure_and_v1_remains_independent(self):
+        forbidden = AssertionError("Evidence codec must not perform execution or I/O")
+        with ExitStack() as stack:
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "write_bytes"),
+                    (physical, "capture_profile"), (physical, "capture_qualified_profile"),
+                    (h, "_capture_qualified_codec_profile"), (h, "construct_reference_v2"),
+                    (h, "construct_text_family_v2"), (h, "_materialize_v2_plan")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            self.assertEqual(e.decode_materialization_v2(e.encode_materialization_v2(self.value)), self.value)
+            self.assertEqual(e.plan_identity_v2(self.plan), self.value.source_plan_identity)
+        with patch.object(e, "decode_materialization_v2", side_effect=forbidden), \
+                patch.object(e, "encode_materialization_v2", side_effect=forbidden), \
+                patch.object(e, "plan_identity_v2", side_effect=forbidden), \
+                patch.object(physical, "require_qualified_profile", side_effect=forbidden):
+            self.assertEqual(_decode(_encode(_facts()[0])), _facts()[0])
+            self.assertEqual(e.encode_size_basis(e.SizeBasisV2(PROFILE)), _json(BASIS_FIELDS))
+
+
 class ImportPurityTests(unittest.TestCase):
     def test_no_harness_import_dynamic_registry_or_side_effect_calls(self):
         source = Path(e.__file__).read_text(encoding="utf-8")

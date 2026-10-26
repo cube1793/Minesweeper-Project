@@ -1669,5 +1669,523 @@ class FramedV1BoundaryTests(_FramedRootCase):
                 self.assertFalse({alias.name for alias in node.names}.intersection(forbidden))
 
 
+class _PullReadProbe(_FramedReadProbe):
+    def __init__(self, file, **kwargs):
+        super().__init__(file, **kwargs)
+        self.close_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+        super().close()
+
+
+class FramedPullReaderTests(_FramedRootCase):
+    def reader(self, name="operations", *, context=None, **kwargs):
+        reader = store.FramedStreamPullReader(self.root, name, context or _frame_context(name), **kwargs)
+        self.addCleanup(reader.invalidate)
+        return reader
+
+    def probe_reader(self, name="operations", *, fragment=None, **kwargs):
+        probe = _PullReadProbe((self.root / (name + ".pkf")).open("rb", buffering=0), fragment=fragment)
+        self.addCleanup(probe.file.close)
+        with patch.object(store.Path, "open", return_value=probe) as opened:
+            reader = self.reader(name, **kwargs)
+        opened.assert_called_once_with("rb", buffering=0)
+        return reader, probe
+
+    def raw_coverage_frame(self, payload_bytes):
+        # Coverage is an existing raw-only family. A canonical ASCII identity
+        # gives an exact serialized size without entropy or compression search.
+        arm = records.ArmIdentity(records.Arm.K_P0, _board(), "x", "synthetic-unit")
+        record = records.OracleBCoverageRecord(arm, True, ())
+        baseline = len(records.encode(record))
+        self.assertGreaterEqual(payload_bytes, baseline)
+        record = replace(record, arm=replace(arm, run_id="x" * (payload_bytes - baseline + 1)))
+        logical = records.encode(record)
+        self.assertEqual(len(logical), payload_bytes)
+        frame = physical.encode_frame(logical, (0, 0, 0), _frame_context("oracle_b_coverage"))
+        self.assertEqual(frame[0], physical.RAW)
+        self.assertEqual(int.from_bytes(frame[1:5], "big"), payload_bytes)
+        self.assertEqual(int.from_bytes(frame[5:9], "big"), payload_bytes)
+        return record, logical, frame
+
+    def test_large_raw_payload_reads_in_bounded_chunks_and_matches_eager_scanner(self):
+        record, logical, frame = self.raw_coverage_frame(3 * 65536 + 13)
+        self.put_framed(frame, "oracle_b_coverage")
+        eager_rows = []
+        eager_digest = store.scan_framed_stream(self.root, "oracle_b_coverage",
+            _frame_context("oracle_b_coverage"),
+            visit=lambda key, value, raw, length: eager_rows.append((key, value, raw, length)))
+        expected = ((0, 0, 0), record, logical, len(frame))
+        self.assertEqual(eager_rows, [expected])
+        for fragment in (None, 16381):
+            with self.subTest(fragment=fragment):
+                reader, probe = self.probe_reader("oracle_b_coverage", fragment=fragment)
+                self.assertEqual(reader.peek_key(), (0, 0, 0))
+                prefix_reads = len(probe.reads)
+                self.assertEqual(probe.position, 12)
+                row = reader.pull()
+                self.assertEqual((row.key, row.record, row.logical_bytes, row.frame_length), expected)
+                self.assertEqual(probe.position, len(frame))
+                remainder_reads = probe.reads[prefix_reads:]
+                self.assertGreaterEqual(sum(size == 65536 for _, size in remainder_reads), 3)
+                if fragment is None:
+                    self.assertEqual([size for _, size in remainder_reads], [65536, 65536, 65536, 17])
+                self.assertTrue(all(1 <= size <= 65536 for _, size in probe.reads))
+                self.assertIsNone(reader.completed_digest)
+                self.assertIsNone(reader.pull())
+                self.assertTrue(all(1 <= size <= 65536 for _, size in probe.reads))
+                self.assertEqual(reader.close(), eager_digest)
+                self.assertEqual(reader.completed_digest, eager_digest)
+                self.assertEqual(probe.close_calls, 1)
+                self.assertTrue(probe.file.closed)
+
+    def test_payload_and_remainder_chunk_boundaries_before_exact_and_after_65536(self):
+        for boundary_kind in ("payload", "payload_plus_crc"):
+            for size in (65535, 65536, 65537):
+                payload = size if boundary_kind == "payload" else size - 4
+                record, logical, frame = self.raw_coverage_frame(payload)
+                self.put_framed(frame, "oracle_b_coverage")
+                reader, probe = self.probe_reader("oracle_b_coverage")
+                with self.subTest(boundary=boundary_kind, size=size):
+                    self.assertEqual(reader.peek_key(), (0, 0, 0))
+                    prefix_reads = len(probe.reads)
+                    row = reader.pull()
+                    self.assertEqual((row.key, row.record, row.logical_bytes, row.frame_length),
+                                     ((0, 0, 0), record, logical, len(frame)))
+                    remainder = payload + 4
+                    expected_reads = [65536] * (remainder // 65536)
+                    if remainder % 65536:
+                        expected_reads.append(remainder % 65536)
+                    self.assertEqual([count for _, count in probe.reads[prefix_reads:]], expected_reads)
+                    self.assertTrue(all(1 <= count <= 65536 for _, count in probe.reads))
+                    self.assertEqual(probe.position, len(frame))
+                    self.assertIsNone(reader.pull())
+                    expected = records.StreamDigest("oracle_b_coverage",
+                        hashlib.sha256(frame).hexdigest(), len(frame), 1)
+                    self.assertEqual(reader.close(), expected)
+
+    def test_large_raw_payload_truncated_final_chunk_invalidates_without_decode_or_digest(self):
+        _, _, frame = self.raw_coverage_frame(2 * 65536 + 1)
+        truncated = frame[:-1]
+        path = self.put_framed(truncated, "oracle_b_coverage")
+        digest = _HashProbe()
+        with patch.object(store.hashlib, "sha256", return_value=digest):
+            reader, probe = self.probe_reader("oracle_b_coverage")
+        self.assertEqual(reader.peek_key(), (0, 0, 0))
+        prefix_reads = len(probe.reads)
+        with patch.object(physical, "decode_frame", side_effect=AssertionError("Truncated frame decoded")) as decoded:
+            with self.assertRaises(store.StoreError):
+                reader.pull()
+            decoded.assert_not_called()
+        self.assertEqual([count for _, count in probe.reads[prefix_reads:]], [65536, 65536, 5, 1])
+        self.assertTrue(all(1 <= count <= 65536 for _, count in probe.reads))
+        self.assertEqual(probe.position, len(truncated))
+        self.assertEqual(digest.updates, [])
+        self.assertTrue(probe.file.closed)
+        self.assertEqual(probe.close_calls, 1)
+        self.assertIsNone(reader.close())
+        self.assertIsNone(reader.completed_digest)
+        reads = tuple(probe.reads)
+        with self.assertRaises(store.StoreError):
+            reader.pull()
+        self.assertEqual(tuple(probe.reads), reads)
+        self.assertEqual(path.read_bytes(), truncated)
+
+    def test_large_raw_payload_mid_chunk_interrupt_and_io_failure_do_not_retry(self):
+        _, _, frame = self.raw_coverage_frame(3 * 65536 + 13)
+        for fault in (KeyboardInterrupt, OSError):
+            path = self.put_framed(frame, "oracle_b_coverage")
+            digest = _HashProbe()
+            with patch.object(store.hashlib, "sha256", return_value=digest):
+                reader, probe = self.probe_reader("oracle_b_coverage")
+            self.assertEqual(reader.peek_key(), (0, 0, 0))
+            original_read = probe.read
+            attempted = []
+            marker = fault("injected second payload-chunk failure")
+            def read(size):
+                attempted.append((probe.position, size))
+                if len(attempted) == 2:
+                    probe.reads.append((probe.position, size))
+                    raise marker
+                return original_read(size)
+            expected_error = KeyboardInterrupt if fault is KeyboardInterrupt else store.StoreError
+            with self.subTest(fault=fault.__name__), patch.object(probe, "read", side_effect=read), \
+                    patch.object(physical, "decode_frame", side_effect=AssertionError("Partial frame decoded")) as decoded:
+                with self.assertRaises(expected_error) as caught:
+                    reader.pull()
+                decoded.assert_not_called()
+            if fault is KeyboardInterrupt:
+                self.assertIs(caught.exception, marker)
+            else:
+                self.assertIs(caught.exception.__cause__, marker)
+            self.assertEqual(attempted, [(12, 65536), (12 + 65536, 65536)])
+            self.assertTrue(all(1 <= count <= 65536 for _, count in probe.reads))
+            self.assertEqual(probe.position, 12 + 65536)
+            self.assertEqual(digest.updates, [])
+            self.assertTrue(probe.file.closed)
+            self.assertEqual(probe.close_calls, 1)
+            self.assertIsNone(reader.close())
+            self.assertIsNone(reader.completed_digest)
+            reads = tuple(probe.reads)
+            with self.assertRaises(store.StoreError):
+                reader.pull()
+            self.assertEqual(tuple(probe.reads), reads)
+            self.assertEqual(path.read_bytes(), frame)
+
+    def test_exact_current_rows_incremental_digest_and_no_next_prefix_prefetch(self):
+        frames = [_frame((index,), _event(index)) for index in (127, 128, 256)]
+        data = b"".join(frames)
+        self.put_framed(data)
+        digest = _HashProbe()
+        with patch.object(store.hashlib, "sha256", return_value=digest):
+            reader, probe = self.probe_reader(fragment=3)
+        self.assertEqual(probe.reads, [])
+        offset = 0
+        real_decode = physical.decode_frame
+        with patch.object(physical, "decode_frame", wraps=real_decode) as decoded:
+            for index, frame in zip((127, 128, 256), frames):
+                row = reader.pull()
+                self.assertIs(type(row), store.FramedStreamRow)
+                self.assertEqual((row.key, row.record, row.logical_bytes, row.frame_length),
+                                 ((index,), _event(index), records.encode(_event(index)), len(frame)))
+                with self.assertRaises(FrozenInstanceError):
+                    row.key = (0,)
+                self.assertFalse(hasattr(row, "validated"))
+                offset += len(frame)
+                self.assertEqual(probe.position, offset)
+                self.assertEqual(reader._pending_prefix, b"")
+                self.assertIsNone(reader.completed_digest)
+                del row
+            self.assertEqual(decoded.call_count, 3)
+            self.assertEqual([call.args[0] for call in decoded.call_args_list], frames)
+            self.assertEqual([call.kwargs["expected_key"] for call in decoded.call_args_list],
+                             [(127,), (128,), (256,)])
+            self.assertIsNone(reader.pull())
+            self.assertIsNone(reader.peek_key())
+            self.assertEqual(decoded.call_count, 3)
+        self.assertIsNone(reader.completed_digest)
+        self.assertEqual(digest.updates, frames)
+        expected = records.StreamDigest("operations", hashlib.sha256(data).hexdigest(), len(data), 3)
+        self.assertEqual(reader.close(), expected)
+        self.assertEqual(reader.completed_digest, expected)
+        self.assertIs(reader.close(), reader.completed_digest)
+        self.assertEqual(probe.close_calls, 1)
+        self.assertTrue(probe.file.closed)
+        for call in (reader.peek_key, reader.pull):
+            with self.assertRaises(store.StoreError):
+                call()
+
+    def test_maximum_39_byte_pending_prefix_does_not_decode_or_inflate(self):
+        key = ((1 << 64) - 1,) * 3
+        frame = _frame(key, _board(), _frame_context("boards"))
+        self.put_framed(frame, "boards")
+        with patch.object(physical, "decode_frame", side_effect=AssertionError("peek decoded frame")), \
+                patch.object(physical, "decode_payload", side_effect=AssertionError("peek inflated")), \
+                patch.object(records, "decode", side_effect=AssertionError("peek decoded record")):
+            reader, probe = self.probe_reader("boards")
+            self.assertEqual(probe.position, 0)
+            self.assertEqual(reader.peek_key(), key)
+            self.assertEqual(reader.peek_key(), key)
+            self.assertEqual(probe.position, 39)
+            self.assertEqual(reader._pending_prefix, frame[:39])
+            self.assertEqual(probe.reads, [(0, 9)] + [(index, 1) for index in range(9, 39)])
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+
+    def test_all_current_materializer_streams_peek_within_57_prefix_reservation_without_inflation(self):
+        from experiments import program_k_e2_execution as execution
+
+        specs = tuple(spec for spec in physical.STREAM_REGISTRY
+                      if spec.name not in ("qualification_identity", "postprocessing_operations"))
+        self.assertEqual(tuple(spec.name for spec in specs), execution.STREAM_NAMES + ("operations", "resources"))
+        self.assertLessEqual(len(specs), 57)
+        frames = {}
+        for spec in specs:
+            # A prefix is deliberately not evidence: most payloads below are not
+            # records for their stream, yet discovery must not interpret them.
+            context = _frame_context(spec.name)
+            logical = records.encode(_event())
+            prefix = b"\0" + len(logical).to_bytes(4, "big") * 2 + b"\0" * spec.key_arity
+            body = prefix + logical
+            frames[spec.name] = body + physical.contextual_crc32(context, body).to_bytes(4, "big")
+            self.put_framed(frames[spec.name], spec.name)
+        readers = []
+        real_decode = physical.decode_frame
+        with patch.object(physical, "decode_frame", wraps=real_decode) as decoded, \
+                patch.object(physical, "decode_payload", wraps=physical.decode_payload) as inflated:
+            for spec in specs:
+                reader = self.reader(spec.name)
+                readers.append(reader)
+                self.assertEqual(reader.peek_key(), (0,) * spec.key_arity)
+                self.assertLessEqual(len(reader._pending_prefix), 39)
+            self.assertLessEqual(sum(len(reader._pending_prefix) for reader in readers), 57 * 39)
+            decoded.assert_not_called()
+            inflated.assert_not_called()
+            chosen = readers[next(index for index, spec in enumerate(specs) if spec.name == "operations")]
+            row = chosen.pull()
+            self.assertEqual(row.record, _event())
+            self.assertEqual(decoded.call_count, 1)
+            self.assertEqual(inflated.call_count, 1)
+            self.assertEqual(decoded.call_args.args[0], frames["operations"])
+            del row
+        for reader in readers:
+            self.assertIsNone(reader.completed_digest)
+            reader.invalidate()
+
+    def test_peek_is_unauthenticated_and_bad_crc_fails_only_at_full_pull(self):
+        frame = bytearray(_frame((128,), _event()))
+        frame[-1] ^= 1
+        data = bytes(frame)
+        path = self.put_framed(data)
+        reader, probe = self.probe_reader()
+        self.assertEqual(reader.peek_key(), (128,))
+        self.assertEqual(probe.position, 11)
+        with self.assertRaises(store.StoreError):
+            reader.pull()
+        self.assertEqual(probe.position, len(data))
+        self.assertTrue(probe.file.closed)
+        self.assertEqual(probe.close_calls, 1)
+        self.assertIsNone(reader.close())
+        self.assertIsNone(reader.completed_digest)
+        self.assertEqual(path.read_bytes(), data)
+
+    def test_strict_numeric_order_is_checked_only_after_complete_frame_validation(self):
+        for keys in (((128,), (128,)), ((256,), (255,))):
+            frames = [_frame(key, _event(index)) for index, key in enumerate(keys)]
+            self.put_framed(b"".join(frames))
+            reader, probe = self.probe_reader()
+            reader.pull()
+            self.assertEqual(reader.peek_key(), keys[1])
+            with self.subTest(keys=keys), \
+                    patch.object(physical, "decode_frame", wraps=physical.decode_frame) as decoded:
+                with self.assertRaisesRegex(store.StoreError, "Duplicate/descending"):
+                    reader.pull()
+                decoded.assert_called_once()
+            self.assertEqual(probe.position, sum(map(len, frames)))
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+
+    def test_empty_eof_requires_successful_close_and_early_close_is_not_completion(self):
+        self.put_framed(b"")
+        reader = self.reader()
+        self.assertIsNone(reader.completed_digest)
+        self.assertIsNone(reader.peek_key())
+        self.assertIsNone(reader.completed_digest)
+        self.assertEqual(reader.close(), records.StreamDigest("operations", hashlib.sha256(b"").hexdigest(), 0, 0))
+        for consumed in (False, True):
+            self.put_framed(_frame((0,), _event()))
+            reader = self.reader()
+            if consumed:
+                reader.pull()
+            self.assertIsNone(reader.close())  # Even a complete row is not observed EOF.
+            self.assertIsNone(reader.completed_digest)
+
+    def test_successful_context_exit_publishes_digest_and_early_exit_does_not(self):
+        frame = _frame((0,), _event())
+        self.put_framed(frame)
+        with self.reader() as reader:
+            self.assertEqual(reader.pull().record, _event())
+            self.assertIsNone(reader.pull())
+            self.assertIsNone(reader.completed_digest)
+        self.assertEqual(reader.completed_digest.byte_length, len(frame))
+        with self.reader() as early:
+            early.peek_key()
+        self.assertIsNone(early.completed_digest)
+
+    def test_outer_user_failure_invalidates_and_preserves_exact_exception(self):
+        frames = [_frame((index,), _event(index)) for index in range(2)]
+        self.put_framed(b"".join(frames))
+        reader, probe = self.probe_reader()
+        probe.close_error = True
+        marker = OSError("outer semantic/user failure")
+        with self.assertRaises(OSError) as caught:
+            with reader:
+                reader.pull()
+                raise marker
+        self.assertIs(caught.exception, marker)
+        self.assertEqual(probe.position, len(frames[0]))
+        self.assertTrue(probe.file.closed)
+        self.assertEqual(probe.close_calls, 1)
+        self.assertIsNone(reader.completed_digest)
+
+    def test_later_outer_failure_can_invalidate_an_already_closed_reader_digest(self):
+        self.put_framed(b"")
+        reader = self.reader()
+        marker = RuntimeError("another stream failed")
+        with self.assertRaises(RuntimeError) as caught:
+            with reader:
+                self.assertIsNone(reader.peek_key())
+                self.assertIsNotNone(reader.close())
+                raise marker
+        self.assertIs(caught.exception, marker)
+        self.assertIsNone(reader.completed_digest)
+        self.assertIsNone(reader.close())
+        reader.invalidate()
+        for call in (reader.peek_key, reader.pull, reader.__enter__):
+            with self.assertRaises(store.StoreError):
+                call()
+
+    def test_close_failure_cannot_publish_digest_and_never_retries_close(self):
+        self.put_framed(b"")
+        reader, probe = self.probe_reader()
+        self.assertIsNone(reader.pull())
+        probe.close_error = True
+        with self.assertRaises(store.StoreError):
+            reader.close()
+        self.assertIsNone(reader.completed_digest)
+        self.assertIsNone(reader.close())
+        reader.invalidate()
+        self.assertEqual(probe.close_calls, 1)
+
+    def test_read_and_decode_cancellation_preserve_exception_and_invalidate(self):
+        for stage in ("peek", "pull"):
+            self.put_framed(_frame((0,), _event()))
+            reader, probe = self.probe_reader()
+            marker = KeyboardInterrupt("cancelled " + stage)
+            if stage == "pull":
+                reader.peek_key()
+            owner, attribute = (probe, "read") if stage == "peek" else (physical, "decode_frame")
+            with self.subTest(stage=stage), patch.object(owner, attribute, side_effect=marker):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    reader.peek_key() if stage == "peek" else reader.pull()
+            self.assertIs(caught.exception, marker)
+            self.assertTrue(probe.file.closed)
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+
+    def test_truncated_prefix_key_payload_and_crc_and_trailing_bytes_fail_closed(self):
+        frame = _frame((128,), _event())
+        cuts = tuple(range(1, 12)) + (len(frame) - 5,) + tuple(range(len(frame) - 4, len(frame)))
+        for data in tuple(frame[:cut] for cut in cuts) + (frame + b"\0", frame + _line((129,), _event())):
+            path = self.put_framed(data)
+            reader, probe = self.probe_reader()
+            with self.subTest(length=len(data)), self.assertRaises(store.StoreError):
+                while reader.pull() is not None:
+                    pass
+            self.assertTrue(probe.file.closed)
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+            self.assertEqual(path.read_bytes(), data)
+
+    def test_declared_cap_rejected_before_key_or_payload_read(self):
+        for logical, payload in ((257, 1), (1, 257), (0xffffffff, 0xffffffff)):
+            self.put_framed(b"\0" + logical.to_bytes(4, "big") + payload.to_bytes(4, "big"))
+            reader, probe = self.probe_reader(max_payload_bytes=256)
+            with self.subTest(logical=logical, payload=payload), \
+                    patch.object(physical, "decode_frame", side_effect=AssertionError("decoded oversized declaration")):
+                with self.assertRaises(store.StoreError):
+                    reader.peek_key()
+            self.assertEqual(probe.reads, [(0, 9)])
+            self.assertIsNone(reader.completed_digest)
+
+    def test_noncanonical_overlong_and_overflowing_keys_fail_in_bounded_prefix(self):
+        frame = _frame((0,), _event())
+        for key in (b"\x80\0", b"\x80" * 10, b"\xff" * 9 + b"\x02"):
+            self.put_framed(frame[:9] + key + frame[10:])
+            reader, probe = self.probe_reader()
+            with self.subTest(key=key), \
+                    patch.object(physical, "decode_frame", side_effect=AssertionError("decoded malformed key")):
+                with self.assertRaises(store.StoreError):
+                    reader.peek_key()
+            self.assertLessEqual(probe.position, 19)
+            self.assertIsNone(reader.completed_digest)
+
+    def test_wrong_profile_mode_arity_family_and_noncanonical_record_never_return_row(self):
+        context = _frame_context()
+        cases = [(_frame((0,), _event()), physical.context_for("operations", b"\x6b" * 32))]
+        for logical in (records.encode(_board()), records.encode(_event()) + b" ", b"{}"):
+            row = b"\0" + len(logical).to_bytes(4, "big") * 2 + b"\0" + logical
+            cases.append((row + physical.contextual_crc32(context, row).to_bytes(4, "big"), context))
+        for mode in (1, 2):
+            logical = records.encode(_event())
+            row = bytes((mode,)) + len(logical).to_bytes(4, "big") * 2 + b"\0" + logical
+            cases.append((row + physical.contextual_crc32(context, row).to_bytes(4, "big"), context))
+        cases.append((_frame((0, 0, 0), _board(), _frame_context("boards")), context))
+        for data, supplied in cases:
+            self.put_framed(data)
+            reader = self.reader(context=supplied)
+            self.assertEqual(reader.peek_key(), (0,))
+            with self.subTest(data=data, supplied=supplied), self.assertRaises(store.StoreError):
+                reader.pull()
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+
+    def test_corrupt_middle_row_never_resynchronizes_or_hashes_invalid_frame(self):
+        frames = [_frame((index,), _event(index)) for index in range(3)]
+        bad = bytearray(frames[1])
+        bad[-1] ^= 1
+        data = frames[0] + bytes(bad) + frames[2]
+        self.put_framed(data)
+        digest = _HashProbe()
+        with patch.object(store.hashlib, "sha256", return_value=digest):
+            reader, probe = self.probe_reader()
+        self.assertEqual(reader.pull().key, (0,))
+        with self.assertRaises(store.StoreError):
+            reader.pull()
+        self.assertEqual(probe.position, len(frames[0]) + len(frames[1]))
+        self.assertEqual(digest.updates, frames[:1])
+        reads = tuple(probe.reads)
+        with self.assertRaises(store.StoreError):
+            reader.pull()
+        self.assertEqual(tuple(probe.reads), reads)
+        self.assertIsNone(reader.completed_digest)
+
+    def test_read_fault_indeterminate_read_hash_fault_and_counter_overflow_fail_closed(self):
+        for fault in ("read", "indeterminate", "hash", "count"):
+            self.put_framed(_frame((0,), _event()))
+            reader, probe = self.probe_reader()
+            with self.subTest(fault=fault), ExitStack() as stack:
+                if fault == "read":
+                    stack.enter_context(patch.object(probe, "read", side_effect=OSError("read failed")))
+                elif fault == "indeterminate":
+                    stack.enter_context(patch.object(probe, "read", return_value=None))
+                elif fault == "hash":
+                    def fail_hash(data):
+                        raise RuntimeError("hash failed")
+                    reader._hash = types.SimpleNamespace(update=fail_hash)
+                else:
+                    reader._record_count = (1 << 64) - 1
+                with self.assertRaises((store.StoreError, RuntimeError)):
+                    reader.pull()
+            self.assertTrue(probe.file.closed)
+            self.assertIsNone(reader.completed_digest)
+            self.assertIsNone(reader.close())
+
+    def test_invalid_context_limit_missing_file_and_reparse_fail_before_read(self):
+        with patch.object(store.Path, "open", side_effect=AssertionError("invalid input opened file")):
+            for context in (None, object(), _frame_context("boards")):
+                with self.assertRaises(store.StoreError):
+                    store.FramedStreamPullReader(self.root, "operations", context)
+            for limit in (True, 0, -1, physical.MAX_PAYLOAD_BYTES + 1):
+                with self.assertRaises(store.StoreError):
+                    self.reader(max_payload_bytes=limit)
+        with self.assertRaises(store.StoreError):
+            self.reader()
+        self.put_framed(b"")
+        for info in (types.SimpleNamespace(st_mode=stat.S_IFLNK, st_file_attributes=0),
+                     types.SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)):
+            with patch.object(store.Path, "lstat", return_value=info), patch.object(store.Path, "open") as opened:
+                with self.assertRaises(store.StoreError):
+                    self.reader()
+                opened.assert_not_called()
+
+    def test_reader_owns_context_copy_and_never_uses_legacy_or_scan_api(self):
+        context = _frame_context()
+        self.put_framed(_frame((0,), _event(), context))
+        reader = self.reader(context=context)
+        object.__setattr__(context, "codec_profile_sha256", b"\x6b" * 32)
+        with patch.object(store, "scan_stream", side_effect=AssertionError("pull fell back to JSONL")), \
+                patch.object(store, "scan_framed_stream", side_effect=AssertionError("pull invoked eager scanner")), \
+                patch.object(store.Path, "read_bytes", side_effect=AssertionError("pull read all bytes")):
+            self.assertEqual(reader.pull().record, _event())
+            self.assertIsNone(reader.pull())
+            self.assertIsNotNone(reader.close())
+        self.put("events", _line((0,), _event()))
+        with patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("V1 opened pull reader")), \
+                patch.object(physical, "decode_frame", side_effect=AssertionError("V1 decoded RF02")):
+            self.assertEqual(store.scan_stream(self.root, "events").record_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2273,8 +2273,10 @@ def _materialize_synthetic_v2(plan, workload, targets, profile, envelope, stream
     minimum = readiness.minimum_archive_preflight(targets.physical, workload.unit_counts, 0)
     ledger = _new_v2_materialization_ledger(targets, workload.unit_counts)
     root = _v2_empty_materialization_root(streams_root)
-    return _materialize_v2_plan(plan, materialization_plan, targets, profile, envelope, root,
+    result = _materialize_v2_plan(plan, materialization_plan, targets, profile, envelope, root,
         workload.unit_counts, ledger, minimum, cancel=cancel, progress=progress)
+    _publish_v2_materialization(root, result, targets, profile, envelope)
+    return result
 
 
 def _materialize_v2_plan(source_plan, materialization_plan, targets, profile, envelope, streams_root,
@@ -2373,6 +2375,408 @@ def _materialize_v2_plan(source_plan, materialization_plan, targets, profile, en
         if not sink.closed:
             try:
                 sink.close()
+            except BaseException:
+                pass
+        raise
+
+
+def _v2_materialization_evidence(result, targets, profile, envelope):
+    """Adapt sealed runtime observations; this never establishes readback trust."""
+    _need(type(result) is _V2SyntheticMaterialization, "V2_SEALED_MATERIALIZATION_REQUIRED")
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    _need(result.codec_profile_sha256 == profile.sha256
+          and result.materialization_plan == _v2_materialization_plan(result.source_plan)
+          and result.coordinator.status is records.AuditStatus.PASS
+          and not result.coordinator.reason_codes and result.progress_complete
+          and result.cleanup_complete and result.synthetic_non_evidence,
+          "V2_SEALED_MATERIALIZATION_REQUIRED")
+    facts = []
+    for fact in result.constructor_facts:
+        _need(type(fact) is _V2ConstructorObservation, "V2_CONSTRUCTOR_OBSERVATION_REQUIRED")
+        trials = tuple(evidence.V2ConstructorTrialEvidence(trial.ordinal, trial.knob,
+            trial.actual_physical_bytes, trial.actual_logical_bytes, trial.physical_margin,
+            trial.logical_margin, trial.eligible, trial.rejection_reason) for trial in fact.trials)
+        facts.append(evidence.V2ConstructorEvidence(fact.position, fact.family, fact.constructor_kind,
+            fact.physical_target, fact.logical_target, fact.selected_knob, fact.selected_trial_ordinal,
+            fact.actual_physical_bytes, fact.actual_logical_bytes, fact.physical_margin,
+            fact.logical_margin, fact.physical_excess, fact.logical_excess, fact.text_window_applies,
+            fact.text_window_upper_bound, fact.zero_oracle, trials))
+    first = result.source_plan[0]
+    return evidence.V2MaterializationEvidence(
+        schema=evidence.R0B_EXPERIMENT_V2, size_basis=evidence.SizeBasisV2(profile.sha256.hex()),
+        codec_profile_bytes=profile.canonical_bytes, codec_profile_sha256=profile.sha256.hex(),
+        source_plan_identity=evidence.plan_identity_v2(result.source_plan),
+        materialization_plan_identity=evidence.plan_identity_v2(result.materialization_plan),
+        mapping_policy=evidence.V2_MATERIALIZATION_MAPPING_POLICY,
+        protocol_seed=first.protocol_seed, run_id=first.run_id, runtime=first.runtime,
+        work_count=len(result.source_plan), family_counts=result.family_counts, targets=targets,
+        streams=result.coordinator.streams, constructor_facts=tuple(facts),
+        family_totals=tuple(evidence.V2FamilyTotalEvidence(value.family, value.physical_bytes,
+            value.logical_bytes, value.physical_excess) for value in result.family_totals),
+        physical_minimum_total=result.physical_minimum_total,
+        fixed_allowance_reservation=result.fixed_allowance_reservation, b_proc=result.b_proc,
+        committed_procedural_excess=result.ledger.committed_excess,
+        remaining_procedural_budget=result.remaining_procedural_budget,
+        durable_operation_count=result.coordinator.durable_units,
+        durable_primary_count=result.coordinator.durable_primary_boards,
+        attributable_experiment_bytes=sum(value.physical_bytes for value in result.family_totals),
+        current_sealed_pkf_bytes=result.coordinator.archive_bytes,
+        runtime_monitor_peak_coordinator_private_bytes=result.max_coordinator_private_bytes,
+        progress_complete=result.progress_complete, cleanup_complete=result.cleanup_complete,
+        synthetic_non_evidence=True)
+
+
+def _publish_v2_materialization(root, result, targets, profile, envelope):
+    """Exclusive durable support publication, after the full owner's seal only."""
+    metadata = _v2_materialization_evidence(result, targets, profile, envelope)
+    data = evidence.encode_materialization_v2(metadata)
+    _need(len(data) <= envelope.max_payload_bytes, "V2_METADATA_PAYLOAD_CAP")
+    _need(metadata.current_sealed_pkf_bytes + len(data) <= envelope.archive_cap_bytes, "ARCHIVE_CAP")
+    _exclusive_bytes(Path(root) / "materialization-v2.json", data)
+    return metadata
+
+
+def _v2_serialized_reservation(max_payload_bytes, context_bytes):
+    """Serialized buffers only, not a Python heap estimate or a new cap."""
+    _need(type(max_payload_bytes) is int and 0 < max_payload_bytes <= physical.MAX_PAYLOAD_BYTES
+          and type(context_bytes) is int and 0 < context_bytes <= max_payload_bytes,
+          "V2_SERIALIZED_RESERVATION_DOMAIN")
+    return 5 * max_payload_bytes + context_bytes + 131072 + 2223 + 1
+
+
+class _V2ReadbackMonitor:
+    def __init__(self, envelope, cancel):
+        self.envelope = operational._envelope(envelope)
+        _need(cancel is None or callable(getattr(cancel, "is_set", None)), "CANCELLATION_TOKEN")
+        self.cancel = cancel
+        self.started = time.monotonic_ns()
+
+    def check(self):
+        _need(self.cancel is None or not self.cancel.is_set(), "CANCELLED")
+        _need(time.monotonic_ns() - self.started < self.envelope.readback_wall_ms * 1_000_000,
+              "V2_READBACK_TIMEOUT")
+        current = operational.harness._coordinator_private_bytes()
+        _integer(current, 1)
+        _need(current <= self.envelope.coordinator_memory_cap_bytes, "V2_READBACK_COORDINATOR_MEMORY_CAP")
+        _need(current <= self.envelope.memory_cap_bytes, "V2_READBACK_COMBINED_MEMORY_CAP")
+
+
+@dataclass(frozen=True, slots=True)
+class _V2ReadbackResult:
+    """Independent disk facts, with explicitly separate runtime provenance."""
+    streams: tuple
+    source_plan_identity: str
+    materialization_plan_identity: str
+    family_counts: tuple
+    family_totals: tuple
+    physical_minimum_total: int
+    b_proc: int
+    e_final: int
+    remaining_procedural_budget: int
+    durable_operation_count: int
+    durable_primary_count: int
+    durable_sample_max_coordinator_private_bytes: int
+    runtime_monitor_peak_coordinator_private_bytes: int
+    constructor_fact_count: int
+    serialized_reservation_bytes: int
+    progress_complete: bool = True
+    readback_complete: bool = True
+    synthetic_non_evidence: bool = True
+    runtime_peak_is_independent: bool = False
+    constructor_rejections_are_runtime_provenance: bool = True
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("V2 structural readback is not a historical qualification fact.")
+
+
+def _v2_readback_constructor(fact, policy):
+    """Durable selected sizing, plus closed runtime-log consistency only."""
+    _need(type(fact) is evidence.V2ConstructorEvidence, "V2_CONSTRUCTOR_EVIDENCE_REQUIRED")
+    evidence.V2ConstructorEvidence.__post_init__(fact)
+    _need(policy.eligible, policy.rejection_reason)
+    _need((fact.family, fact.physical_target, fact.logical_target, fact.actual_physical_bytes,
+        fact.actual_logical_bytes, fact.physical_margin, fact.logical_margin, fact.physical_excess,
+        fact.logical_excess, fact.text_window_applies, fact.text_window_upper_bound) ==
+        (policy.family, policy.physical_target, policy.logical_target, policy.actual_physical_bytes,
+        policy.actual_logical_bytes, policy.physical_margin, policy.logical_margin, policy.physical_excess,
+        policy.logical_excess, policy.text_window_applies, policy.text_window_upper_bound),
+        "V2_DURABLE_CONSTRUCTOR_FACT_MISMATCH")
+    zero = policy.family in ("oracle_primary", "oracle_repeat") and policy.physical_target == 0
+    _need(fact.zero_oracle == zero, "V2_ZERO_ORACLE_FACT_MISMATCH")
+    if zero:
+        return  # Exact ordinal-0/empty-log/zero-byte shape is enforced by the codec.
+    eligible = []
+    for trial in fact.trials:
+        for actual, margin, target in ((trial.actual_physical_bytes, trial.physical_margin, policy.physical_target),
+                                      (trial.actual_logical_bytes, trial.logical_margin, policy.logical_target)):
+            _need(margin == (None if actual is None else actual - target), "V2_TRIAL_MARGIN_MISMATCH")
+        if trial.eligible or trial.rejection_reason in evidence.V2_FAMILY_POLICY_REASONS:
+            _need(trial.actual_physical_bytes is not None and trial.actual_logical_bytes is not None,
+                  "V2_FAMILY_POLICY_TRIAL_SIZES_REQUIRED")
+            evaluated = readiness.evaluate_family_size(fact.family, policy.physical_target, policy.logical_target,
+                trial.actual_physical_bytes, trial.actual_logical_bytes)
+            _need(evaluated.eligible == trial.eligible and evaluated.rejection_reason == trial.rejection_reason,
+                  "V2_TRIAL_FAMILY_POLICY_MISMATCH")
+        # Constructor-specific failures remain provenance, without recreating
+        # rejected bundles or substituting the family policy for those checks.
+        if trial.eligible:
+            eligible.append(trial)
+    _need(bool(eligible), "V2_SELECTED_CONSTRUCTOR_TRIAL_REQUIRED")
+    selected = min(eligible, key=lambda trial: (
+        trial.actual_physical_bytes, trial.actual_logical_bytes, trial.knob))
+    _need((selected.ordinal, selected.knob, selected.actual_physical_bytes, selected.actual_logical_bytes,
+           selected.physical_margin, selected.logical_margin) ==
+          (fact.selected_trial_ordinal, fact.selected_knob, policy.actual_physical_bytes,
+           policy.actual_logical_bytes, policy.physical_margin, policy.logical_margin),
+          "V2_CONSTRUCTOR_SELECTION_LOG_MISMATCH")
+
+
+def _v2_readback_prior(bundle, primary, kind):
+    """Compare required canonical logical premises, without WB02 re-encoding."""
+    _need(primary is not None, "MISSING_PRIMARY_PREMISE")
+    actual, expected = dict(bundle.streams), dict(primary.streams)
+    if kind is execution.WorkerKind.DETERMINISM:
+        names = tuple(name for name in expected if name.startswith("control_") or name.startswith("kp0_"))
+        _need(all(actual.get(name) == expected[name] for name in names), "REPEAT_FIRST_PREMISE_BINDING")
+        _need(bundle.projection_headers[:len(primary.projection_headers)] == primary.projection_headers,
+              "REPEAT_FIRST_HEADER_BINDING")
+    else:
+        _need(actual.get("control_maintenance") == expected.get("control_maintenance"),
+              "KCONTROL_REFERENCE_BINDING")
+
+
+def _v2_readback_unit(readers, work, kind, profile, envelope, monitor, table):
+    values, sizes, total_logical, total_physical = {}, {}, 0, 0
+    rank = operational._kind_rank(kind)
+    for name in execution.STREAM_NAMES:
+        data, local, frame_bytes = [], 0, 0
+        reader = readers[name]
+        while True:
+            monitor.check()
+            key = reader.peek_key()
+            if key is None:
+                break
+            _need(len(key) == 3 and key[:2] >= (work.position, rank), "V2_UNIT_KEY_ORDER")
+            if key[:2] != (work.position, rank):
+                break
+            _need(key == (work.position, rank, local), "V2_UNIT_LOCAL_KEY")
+            row = reader.pull()
+            _need(row.key == key and type(row.record) is execution._family(name), "V2_UNIT_ROW_IDENTITY")
+            total_logical += len(row.logical_bytes)
+            total_physical += row.frame_length
+            _need(total_logical <= envelope.max_payload_bytes
+                  and total_physical <= envelope.max_payload_bytes, "V2_READBACK_UNIT_PAYLOAD_CAP")
+            data.append(row.logical_bytes)
+            frame_bytes += row.frame_length
+            local += 1
+            del row
+            monitor.check()
+        values[name] = tuple(data)
+        sizes[name] = frame_bytes, sum(map(len, data))
+    monitor.check()
+    bundle = qualification._reconstruct(work, kind, values, table, envelope)
+    legacy = execution.legacy_bundle_size(bundle)
+    groups = tuple((name, len(rows), sizes[name][1], sizes[name][0]) for name, rows in bundle.streams)
+    _, _, wire_size = execution._wb02_layout(bundle, profile.sha256, total_logical, legacy, groups, total_physical)
+    _need(legacy <= envelope.max_payload_bytes and wire_size <= envelope.max_payload_bytes,
+          "V2_READBACK_RECONSTRUCTED_UNIT_CAP")
+    monitor.check()
+    return bundle, sizes, total_physical, total_logical
+
+
+def _v2_readback_support(readers, plan, envelope, monitor):
+    events = readers["operations"]
+    ordinal, elapsed = 0, -1
+    def event(unit_id, kind, status):
+        nonlocal ordinal, elapsed
+        monitor.check()
+        row = events.pull()
+        _need(row is not None and row.key == (ordinal,) and type(row.record) is records.OperationEventRecord,
+              "V2_OPERATION_KEY_OR_TYPE")
+        value = row.record
+        _need((value.phase, value.unit_id, value.event_kind, value.ordinal, value.status) ==
+              (records.Phase.EXECUTION, unit_id, kind, ordinal, status)
+              and value.elapsed_ns >= elapsed, "V2_OPERATION_STRUCTURE")
+        elapsed, ordinal = value.elapsed_ns, ordinal + 1
+        monitor.check()
+    event("coordinator", records.EventKind.START, records.OperationStatus.RUNNING)
+    operations, primary_count = 0, 0
+    for work in plan:
+        for kind in operational._kinds(work):
+            event(operational._unit_id(work.position, kind) + ":SYNTHETIC_MATERIALIZATION",
+                  records.EventKind.END, records.OperationStatus.COMPLETED)
+            operations += 1
+            if kind is execution.WorkerKind.PRIMARY:
+                primary_count += 1
+                event("durable_primary_count:" + str(primary_count), records.EventKind.PROGRESS,
+                      records.OperationStatus.RUNNING)
+    event("coordinator:ADMISSION_END", records.EventKind.END, records.OperationStatus.COMPLETED)
+    _need(events.peek_key() is None, "V2_EXTRA_OPERATION_EVENT")
+    resources = readers["resources"]
+    ordinal, maximum, elapsed = 0, 0, -1
+    for work in plan:
+        for kind in operational._kinds(work):
+            monitor.check()
+            row = resources.pull()
+            _need(row is not None and row.key == (ordinal,) and type(row.record) is records.ResourceSampleRecord,
+                  "V2_RESOURCE_KEY_OR_TYPE")
+            sample = row.record
+            _need(sample.unit_id == operational._unit_id(work.position, kind)
+                  and sample.worker_bytes == 0 and sample.process_role is records.ProcessRole.COMBINED
+                  and sample.method is records.MemoryMethod.PRIVATE_BYTES
+                  and 0 < sample.coordinator_bytes == sample.combined_bytes
+                  and sample.coordinator_bytes <= envelope.coordinator_memory_cap_bytes
+                  and sample.combined_bytes <= envelope.memory_cap_bytes and sample.elapsed_ns >= elapsed,
+                  "V2_RESOURCE_IDENTITY_OR_MEMORY")
+            maximum = max(maximum, sample.coordinator_bytes)
+            elapsed, ordinal = sample.elapsed_ns, ordinal + 1
+            del row, sample
+            monitor.check()
+    _need(resources.peek_key() is None, "V2_EXTRA_RESOURCE_SAMPLE")
+    return operations, primary_count, maximum
+
+
+def _readback_synthetic_v2(root, source_plan, workload, targets, profile, envelope, *, cancel=None):
+    """Full accepted-plan structural qualification, with no R0-B admission."""
+    _need(type(workload) is readiness.SyntheticWorkload, "V2_SYNTHETIC_WORKLOAD_REQUIRED")
+    readiness.SyntheticWorkload.__post_init__(workload)
+    readiness.validate_synthetic_work_plan(source_plan, workload)
+    readiness.validate_dual_payload_fit(workload, targets, envelope.max_payload_bytes)
+    return _readback_v2_plan(root, source_plan, targets, profile, envelope, workload.unit_counts, cancel=cancel)
+
+
+def _readback_v2_plan(root, source_plan, targets, profile, envelope, unit_counts, *, cancel=None):
+    """Independent disk owner; bounded fixtures use only test-side policy adapters."""
+    plan = _v2_materialization_plan(source_plan)
+    _need(type(unit_counts) is tuple and all(type(count) is int for count in unit_counts)
+          and unit_counts == _v2_materialization_counts(plan), "V2_READBACK_FAMILY_COUNTS")
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    monitor = _V2ReadbackMonitor(envelope, cancel)
+    monitor.check()
+    fresh_ledger = _new_v2_materialization_ledger(targets, unit_counts)
+    minimum = readiness.minimum_archive_preflight(targets.physical, unit_counts, 0)
+    root = store._root(root)
+    names = execution.STREAM_NAMES + ("operations", "resources")
+    _need({path.name for path in root.iterdir()} == {name + ".pkf" for name in names} | {"materialization-v2.json"},
+          "V2_READBACK_FILE_SET")
+    path = root / "materialization-v2.json"
+    context_bytes = path.stat().st_size
+    reservation = _v2_serialized_reservation(envelope.max_payload_bytes, context_bytes)
+    _need(reservation <= envelope.coordinator_memory_cap_bytes and reservation <= envelope.memory_cap_bytes,
+          "V2_SERIALIZED_RESERVATION_CAP")
+    monitor.check()
+    with store._reader(path) as stream:
+        data = stream.read(context_bytes + 1)
+        _need(type(data) is bytes and len(data) == context_bytes, "V2_METADATA_READ_LENGTH")
+    metadata = evidence.decode_materialization_v2(data, expected_profile_sha256=profile.sha256.hex())
+    del data
+    monitor.check()
+    source_identity, materialization_identity = evidence.plan_identity_v2(source_plan), evidence.plan_identity_v2(plan)
+    first = source_plan[0]
+    _need((metadata.source_plan_identity, metadata.materialization_plan_identity, metadata.protocol_seed,
+           metadata.run_id, metadata.runtime, metadata.work_count, metadata.family_counts, metadata.targets) ==
+          (source_identity, materialization_identity, first.protocol_seed, first.run_id, first.runtime,
+           len(plan), tuple(zip(readiness.V2_FAMILIES, unit_counts)), targets), "V2_METADATA_PLAN_OR_TARGET_BINDING")
+    _need(metadata.fixed_allowance_reservation == identity.FIXED_REPORT_RECEIPT_ALLOWANCE
+          and metadata.physical_minimum_total == minimum and metadata.b_proc == fresh_ledger.capacity,
+          "V2_METADATA_BUDGET_BINDING")
+    peak = metadata.runtime_monitor_peak_coordinator_private_bytes
+    _need(0 < peak <= envelope.coordinator_memory_cap_bytes and peak <= envelope.memory_cap_bytes,
+          "V2_RUNTIME_MONITOR_PEAK_CAP")
+    _need(metadata.current_sealed_pkf_bytes == sum(seal.byte_length for seal in metadata.streams)
+          and metadata.current_sealed_pkf_bytes + context_bytes <= envelope.archive_cap_bytes,
+          "V2_READBACK_ARCHIVE_CAP")
+    expected_facts = {(work.position, family) for work in plan for family in _v2_conceptual_families(work)}
+    facts = {(fact.position, fact.family): fact for fact in metadata.constructor_facts}
+    _need(len(facts) == len(metadata.constructor_facts) and set(facts) == expected_facts,
+          "V2_CONSTRUCTOR_FACT_COVERAGE")
+    totals = {family: [0, 0, 0] for family in readiness.V2_FAMILIES}
+    counts = dict.fromkeys(readiness.V2_FAMILIES, 0)
+    readers = {}
+    try:
+        for name in names:
+            monitor.check()
+            reader = store.FramedStreamPullReader(root, name, physical.context_for(name, profile.sha256),
+                                                  max_payload_bytes=envelope.max_payload_bytes)
+            readers[name] = reader
+            reader.peek_key()  # Routing hint only; no frame/record inflation here.
+        table = qualification.load_timing_table()
+        for work in plan:
+            primary = None
+            for kind in operational._kinds(work):
+                bundle, sizes, unit_physical, unit_logical = _v2_readback_unit(
+                    readers, work, kind, profile, envelope, monitor, table)
+                if kind is execution.WorkerKind.PRIMARY:
+                    primary = bundle
+                    families = ("primary",) + (("oracle_primary",) if work.oracle_b_selected else ())
+                    families += ("reference",) if work.k_control_selected or work.determinism_selected else ()
+                else:
+                    _v2_readback_prior(bundle, primary, kind)
+                    families = (("determinism",) + (("oracle_repeat",) if work.oracle_b_selected else ())
+                                if kind is execution.WorkerKind.DETERMINISM else ("k_control",))
+                partition_physical = partition_logical = 0
+                for family in families:
+                    owned = tuple(name for name, _ in bundle.streams if
+                                  (name == "control_maintenance" if family == "reference" else _text_owned(family, name)))
+                    actual_p = sum(sizes[name][0] for name in owned)
+                    actual_l = sum(sizes[name][1] for name in owned)
+                    policy = readiness.evaluate_family_size(family, getattr(targets.physical, family),
+                        getattr(targets.logical, family), actual_p, actual_l)
+                    _v2_readback_constructor(facts[work.position, family], policy)
+                    total = totals[family]
+                    total[0] += actual_p
+                    total[1] += actual_l
+                    total[2] += policy.physical_excess
+                    counts[family] += 1
+                    partition_physical += actual_p
+                    partition_logical += actual_l
+                    monitor.check()
+                _need((partition_physical, partition_logical) == (unit_physical, unit_logical),
+                      "V2_READBACK_FAMILY_PARTITION")
+                del bundle, sizes
+            del primary
+        for name in execution.STREAM_NAMES:
+            _need(readers[name].peek_key() is None, "V2_EXTRA_EXPERIMENT_ROW")
+        operations, primaries, sample_max = _v2_readback_support(readers, plan, envelope, monitor)
+        _need(sample_max <= peak, "V2_RUNTIME_PEAK_BELOW_DURABLE_SAMPLE")
+        seals = []
+        for name, expected in zip(names, metadata.streams):
+            monitor.check()
+            digest = readers[name].close()
+            _need(type(digest) is records.StreamDigest and digest == expected, "V2_STREAM_SEAL_MISMATCH")
+            seals.append(digest)
+        family_totals = tuple(_V2FamilyTotal(family, *totals[family]) for family in readiness.V2_FAMILIES)
+        _need(tuple(counts[family] for family in readiness.V2_FAMILIES) == unit_counts,
+              "V2_READBACK_FAMILY_COUNTS")
+        _need(tuple((v.family, v.physical_bytes, v.logical_bytes, v.physical_excess) for v in family_totals) ==
+              tuple((v.family, v.physical_bytes, v.logical_bytes, v.physical_excess) for v in metadata.family_totals),
+              "V2_READBACK_FAMILY_TOTALS")
+        excess = sum(value.physical_excess for value in family_totals)
+        _need(excess == sum(value.physical_bytes - count * getattr(targets.physical, value.family)
+              for value, count in zip(family_totals, unit_counts)), "V2_READBACK_EXCESS_PARTITION")
+        ledger = readiness.ProceduralLedger(fresh_ledger.capacity, excess)
+        final_excess = _reconcile_v2_materialization_totals(targets, unit_counts, family_totals, ledger)
+        _need(final_excess == excess == metadata.committed_procedural_excess
+              and metadata.remaining_procedural_budget == ledger.capacity - excess,
+              "V2_READBACK_EXCESS_RECONCILIATION")
+        attributable = sum(value.physical_bytes for value in family_totals)
+        _need(attributable == metadata.attributable_experiment_bytes
+              == sum(seal.byte_length for seal in seals if seal.name in execution.STREAM_NAMES)
+              and operations == metadata.durable_operation_count
+              and primaries == metadata.durable_primary_count == len(plan), "V2_READBACK_DURABILITY_TOTALS")
+        monitor.check()
+        return _V2ReadbackResult(tuple(seals), source_identity, materialization_identity,
+            tuple((family, counts[family]) for family in readiness.V2_FAMILIES), family_totals,
+            minimum, ledger.capacity, final_excess, ledger.capacity - final_excess, operations, primaries,
+            sample_max, peak, len(facts), reservation)
+    except BaseException:
+        for reader in readers.values():
+            try:
+                reader.invalidate()
             except BaseException:
                 pass
         raise

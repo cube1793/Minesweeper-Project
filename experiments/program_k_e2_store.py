@@ -523,6 +523,182 @@ def scan_framed_stream(root, stream_name, context, *, max_payload_bytes=physical
     return records.StreamDigest(stream_name, digest.hexdigest(), byte_length, record_count)
 
 
+@dataclass(frozen=True, slots=True)
+class FramedStreamRow:
+    """One current row observed after full RF02 validation, never a trust token."""
+
+    key: tuple
+    record: object
+    logical_bytes: bytes
+    frame_length: int
+
+
+def _read_pull_remainder(file, size):
+    """Read one frame remainder within the pull reader's 64 KiB I/O bound."""
+    data = bytearray()
+    while len(data) < size:
+        request_size = min(size - len(data), 65536)
+        try:
+            chunk = file.read(request_size)
+        except (OSError, ValueError) as error:
+            raise StoreError("Sequential RF02 evidence read failed.") from error
+        _need(type(chunk) is bytes and len(chunk) <= request_size, "Indeterminate RF02 read.")
+        _need(bool(chunk), "Truncated RF02 frame component.")
+        data.extend(chunk)
+    return bytes(data)
+
+
+class FramedStreamPullReader:
+    """Demand-driven RF02 input with only an unauthenticated pending prefix.
+
+    Opening and peeking do not decode or inflate a record. The caller consumes
+    each returned current row before choosing another stream to pull. Only an
+    observed EOF followed by successful close publishes a detached digest;
+    outer semantic/user failures must invalidate every opened reader.
+    """
+
+    __slots__ = ("_stream_name", "_context", "_max_payload_bytes", "_file", "_hash",
+                 "_byte_length", "_record_count", "_last_key", "_pending_prefix",
+                 "_pending_key", "_eof", "_closed", "_poisoned", "_completed_digest")
+
+    def __init__(self, root, stream_name, context, *, max_payload_bytes=physical.MAX_PAYLOAD_BYTES):
+        self._context = _framed_context(stream_name, context)
+        self._max_payload_bytes = _framed_limit(max_payload_bytes)
+        path = _framed_path(root, stream_name)
+        self._stream_name = stream_name
+        self._hash = hashlib.sha256()
+        self._byte_length = self._record_count = 0
+        self._last_key = self._pending_key = None
+        self._pending_prefix = b""
+        self._eof = self._closed = self._poisoned = False
+        self._completed_digest = None
+        try:
+            info = path.lstat()
+            _need(stat.S_ISREG(info.st_mode)
+                  and not (getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT),
+                  "Read target must be a regular file, not a symlink/reparse point.")
+            # No hidden buffered read-ahead beyond the reserved pending prefix.
+            self._file = path.open("rb", buffering=0)
+        except (OSError, ValueError) as error:
+            raise StoreError("Cannot open RF02 evidence file read-only.") from error
+
+    @property
+    def completed_digest(self):
+        return self._completed_digest
+
+    def _readable(self):
+        _need(not (self._closed or self._poisoned), "RF02 reader is closed or invalidated.")
+
+    def peek_key(self):
+        """Return an unauthenticated scheduling hint, not evidence of this row."""
+        self._readable()
+        if self._eof:
+            return None
+        if self._pending_key is not None:
+            return self._pending_key
+        try:
+            prefix = _read_framed_component(self._file, 9, boundary=True)
+            if not prefix:
+                self._eof = True
+                return None
+            logical_length = int.from_bytes(prefix[1:5], "big")
+            payload_length = int.from_bytes(prefix[5:9], "big")
+            _need(logical_length <= self._max_payload_bytes and payload_length <= self._max_payload_bytes,
+                  "RF02 declared payload cap exceeded.")
+            encoded_key, values = bytearray(), []
+            for _ in range(self._context.expected_key_arity):
+                component = bytearray()
+                for _ in range(10):
+                    byte = _read_framed_component(self._file, 1)
+                    component.extend(byte)
+                    if byte[0] < 128:
+                        break
+                try:
+                    value, _ = physical.decode_uleb128(bytes(component))
+                except physical.PhysicalError as error:
+                    raise StoreError("Malformed RF02 pending key component.") from error
+                encoded_key.extend(component)
+                values.append(value)
+            self._pending_prefix = prefix + bytes(encoded_key)
+            _need(len(self._pending_prefix) <= 39, "RF02 pending prefix reservation exceeded.")
+            self._pending_key = tuple(values)
+            return self._pending_key
+        except BaseException:
+            self.invalidate()
+            raise
+
+    def pull(self):
+        """Validate and return exactly one row; never prefetch the next prefix."""
+        self._readable()
+        try:
+            key = self.peek_key()
+            if key is None:
+                return None
+            payload_length = int.from_bytes(self._pending_prefix[5:9], "big")
+            data = self._pending_prefix + _read_pull_remainder(self._file, payload_length + 4)
+            try:
+                frame = physical.decode_frame(data, self._context, expected_key=key,
+                                              max_payload_bytes=self._max_payload_bytes)
+            except physical.PhysicalError as error:
+                raise StoreError("Invalid RF02 evidence frame.") from error
+            record = _decode_record(frame.logical_bytes)
+            _need(self._last_key is None or frame.key > self._last_key, "Duplicate/descending stream key.")
+            next_bytes, next_count = self._byte_length + len(data), self._record_count + 1
+            _uint64(next_bytes)
+            _uint64(next_count)
+            row = FramedStreamRow(frame.key, record, frame.logical_bytes, frame.frame_length)
+            self._hash.update(data)
+            self._byte_length, self._record_count, self._last_key = next_bytes, next_count, frame.key
+            self._pending_prefix, self._pending_key = b"", None
+            del data, frame
+            return row
+        except BaseException:
+            self.invalidate()
+            raise
+
+    def close(self):
+        """Close once; only a completely validated EOF can yield a digest."""
+        if self._closed:
+            return self._completed_digest
+        self._closed = True
+        self._pending_prefix, self._pending_key = b"", None
+        try:
+            self._file.close()
+            if self._eof and not self._poisoned:
+                self._completed_digest = records.StreamDigest(self._stream_name, self._hash.hexdigest(),
+                                                              self._byte_length, self._record_count)
+        except BaseException as error:
+            self._poisoned = True
+            self._completed_digest = None
+            if isinstance(error, Exception):
+                raise StoreError("RF02 read-only close/completion failed.") from error
+            raise
+        return self._completed_digest
+
+    def invalidate(self):
+        """Discard success, including after EOF/close, and preserve outer errors."""
+        self._poisoned = True
+        self._completed_digest = None
+        self._pending_prefix, self._pending_key = b"", None
+        if not self._closed:
+            self._closed = True
+            try:
+                self._file.close()
+            except BaseException:
+                pass
+
+    def __enter__(self):
+        self._readable()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None:
+            self.close()
+        else:
+            self.invalidate()
+        return False
+
+
 def write_completion_receipt(root, receipt):
     """Persist exactly the supplied receipt; successful return follows flush/fsync.
 

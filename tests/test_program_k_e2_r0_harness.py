@@ -4857,6 +4857,7 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
         marker = object()
         with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
                 patch.object(h, "_materialize_v2_plan", return_value=marker) as lower, \
+                patch.object(h, "_publish_v2_materialization", return_value=object()) as publish, \
                 patch.object(h, "_construct_v2_materialization_work",
                              side_effect=AssertionError("No full constructor")) as constructor, \
                 patch.object(operational._V2EvidenceSink, "__init__",
@@ -4889,6 +4890,7 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
         self.assertEqual(tuple(work.board.game_index for work in args[1]),
                          tuple(work.board.game_index for work in plan))
         self.assertEqual(args[7], h._new_v2_materialization_ledger(self.targets, workload.unit_counts))
+        publish.assert_called_once_with(Path(directory), marker, self.targets, self.profile, self.envelope)
 
     def test_full_owner_changed_flags_counts_positions_identity_and_types_fail_before_lower(self):
         plan, workload = self.full_metadata_fixture()
@@ -4981,6 +4983,12 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
             coverage = self.scan(directory, "oracle_b_coverage")[1][0][1]
             self.assertTrue(coverage.selected)
             self.assertEqual(coverage.applicable, ())
+            h._publish_v2_materialization(directory, result, targets, self.profile, self.envelope)
+            observed = self.readback_fixture(directory, plan=plan, targets=targets)
+            self.assertEqual(dict(observed.family_counts)["oracle_primary"], 1)
+            self.assertEqual(observed.constructor_fact_count, 2)
+            oracle = next(value for value in observed.family_totals if value.family == "oracle_primary")
+            self.assertEqual((oracle.physical_bytes, oracle.logical_bytes, oracle.physical_excess), (0, 0, 0))
         reference = replace(self.materialization_plan[3], position=0)
         with self.forbidden_workloads(), \
                 patch.object(h, "construct_text_family_v2", side_effect=AssertionError("No text call")) as text, \
@@ -5261,17 +5269,558 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
                 seal.assert_not_called()
                 self.assert_failed_prefix(directory, sinks[0], 1)
 
+    @contextmanager
+    def bounded_readback_policy(self):
+        # The accepted readiness arithmetic has a full-10000 count domain.
+        # Lift only pure arithmetic inputs; metadata and RF02 totals stay exact.
+        new_ledger = h._new_v2_materialization_ledger
+        minimum = readiness.minimum_archive_preflight
+        with patch.object(h, "_new_v2_materialization_ledger",
+                side_effect=lambda targets, counts: new_ledger(targets, self._full_counts)), \
+                patch.object(readiness, "minimum_archive_preflight",
+                    side_effect=lambda sizes, counts, supporting: minimum(sizes, self._full_counts, supporting)), \
+                patch.object(h, "_reconcile_v2_materialization_totals", side_effect=self.padded_reconciliation):
+            yield
+
+    @contextmanager
+    def independent_readback_guards(self):
+        with self.forbidden_workloads(), _EvidenceExitStack() as stack:
+            for name in ("construct_reference_v2", "construct_text_family_v2",
+                    "_construct_v2_materialization_work", "_materialize_synthetic_v2",
+                    "_materialize_v2_plan", "_reference_bundles", "_search_reference_trials",
+                    "_search_text_trials", "_capture_qualified_codec_profile"):
+                stack.enter_context(patch.object(h, name,
+                    side_effect=AssertionError("Independent readback cannot construct or materialize")))
+            for owner, name in ((execution, "encode_bundle_v2"), (physical, "encode_payload"),
+                    (physical, "encode_frame"), (physical, "capture_qualified_profile")):
+                stack.enter_context(patch.object(owner, name,
+                    side_effect=AssertionError("Independent readback cannot re-encode or recapture")))
+            yield
+
+    def readback_fixture(self, root, *, plan=None, targets=None, envelope=None, memory_probe=None, **kwargs):
+        plan = self.plan if plan is None else plan
+        with self.independent_readback_guards(), self.bounded_readback_policy(), \
+                patch.object(operational.harness, "_coordinator_private_bytes",
+                    side_effect=(lambda: 100) if memory_probe is None else memory_probe):
+            return h._readback_v2_plan(root, plan, self.targets if targets is None else targets,
+                self.profile, self.envelope if envelope is None else envelope, self.counts(plan), **kwargs)
+
+    @contextmanager
+    def sealed_four_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for source in self.root.glob("*.pkf"):
+                (root / source.name).write_bytes(source.read_bytes())
+            yield root
+
+    @contextmanager
+    def published_four_work(self):
+        with self.sealed_four_work() as root:
+            metadata = h._publish_v2_materialization(root, self.result, self.targets,
+                                                   self.profile, self.envelope)
+            yield root, metadata
+
+    @staticmethod
+    def metadata_node(root):
+        return json.loads((Path(root) / "materialization-v2.json").read_bytes())
+
+    @staticmethod
+    def write_metadata_node(root, node):
+        # Tamper fixtures deliberately replace an already published file. The
+        # production exclusive-create publication path is never used to repair it.
+        (Path(root) / "materialization-v2.json").write_bytes(json.dumps(node,
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii") + b"\n")
+
+    def rewrite_v2_stream(self, root, name, transform):
+        rows = [(key, record) for key, record, _, _ in self.scan(root, name)[1]]
+        updated = transform(rows)
+        context = physical.context_for(name, self.profile.sha256)
+        raw = b"".join(physical.encode_frame(records.encode(record), key, context,
+            max_payload_bytes=self.envelope.max_payload_bytes) for key, record in updated)
+        (Path(root) / (name + ".pkf")).write_bytes(raw)
+        node = self.metadata_node(root)
+        seal = next(value for value in node["streams"] if value["name"] == name)
+        seal.update(sha256=h.sha256(raw).hexdigest(), byte_length=len(raw), record_count=len(updated))
+        node["current_sealed_pkf_bytes"] = sum(value["byte_length"] for value in node["streams"])
+        node["attributable_experiment_bytes"] = sum(value["byte_length"] for value in node["streams"]
+                                                    if value["name"] in execution.STREAM_NAMES)
+        self.write_metadata_node(root, node)
+
+    def test_v2_four_work_publication_and_independent_readback_reproduce_exact_disk_facts(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        with self.published_four_work() as (root, metadata):
+            data = (root / "materialization-v2.json").read_bytes()
+            self.assertEqual(data, evidence.encode_materialization_v2(metadata))
+            self.assertTrue(data.endswith(b"\n") and not data.endswith(b"\n\n"))
+            self.assertEqual(evidence.decode_materialization_v2(data,
+                expected_profile_sha256=self.profile.sha256.hex()), metadata)
+            self.assertEqual(metadata.codec_profile_bytes, self.profile.canonical_bytes)
+            self.assertFalse(hasattr(metadata, "readback_complete"))
+            self.assertEqual(dict(metadata.family_counts), dict(zip(readiness.V2_FAMILIES, (4, 1, 2, 1, 1, 2))))
+            self.assertEqual(tuple((value.family, value.physical_bytes, value.logical_bytes, value.physical_excess)
+                for value in metadata.family_totals), tuple((value.family, value.physical_bytes,
+                value.logical_bytes, value.physical_excess) for value in self.result.family_totals))
+            self.assertEqual(metadata.attributable_experiment_bytes,
+                             sum(value.physical_bytes for value in self.result.family_totals))
+            self.assertEqual(metadata.current_sealed_pkf_bytes, self.result.coordinator.archive_bytes)
+            self.assertEqual({path.name for path in root.iterdir()},
+                {name + ".pkf" for name in execution.STREAM_NAMES + ("operations", "resources")}
+                | {"materialization-v2.json"})
+            observed = self.readback_fixture(root)
+            self.assertEqual(observed.streams, metadata.streams)
+            self.assertEqual(observed.source_plan_identity, metadata.source_plan_identity)
+            self.assertEqual(observed.materialization_plan_identity, metadata.materialization_plan_identity)
+            self.assertEqual(observed.family_counts, metadata.family_counts)
+            self.assertEqual(tuple((value.family, value.physical_bytes, value.logical_bytes, value.physical_excess)
+                for value in observed.family_totals), tuple((value.family, value.physical_bytes,
+                value.logical_bytes, value.physical_excess) for value in metadata.family_totals))
+            self.assertEqual((observed.b_proc, observed.e_final,
+                observed.remaining_procedural_budget), (metadata.b_proc, metadata.committed_procedural_excess,
+                metadata.remaining_procedural_budget))
+            self.assertEqual((observed.durable_operation_count, observed.durable_primary_count,
+                              observed.constructor_fact_count), (6, 4, 11))
+            self.assertEqual(observed.durable_sample_max_coordinator_private_bytes, 100)
+            self.assertEqual(observed.runtime_monitor_peak_coordinator_private_bytes, 100)
+            self.assertFalse(observed.runtime_peak_is_independent)
+            self.assertTrue(observed.constructor_rejections_are_runtime_provenance)
+            self.assertTrue(observed.progress_complete and observed.readback_complete and observed.synthetic_non_evidence)
+            self.assertFalse(hasattr(observed, "__dict__"))
+            self.assertTrue({"root", "path", "readers", "contexts", "bundles", "materialization"}.isdisjoint(
+                field.name for field in fields(observed)))
+            with self.assertRaises(FrozenInstanceError):
+                observed.readback_complete = False
+            self.assertEqual(data, (root / "materialization-v2.json").read_bytes())
+
+    def test_v2_readback_opens_and_peeks_all_streams_without_eager_inflate(self):
+        reader_type = h.store.FramedStreamPullReader
+        original_init, original_decode = reader_type.__init__, physical.decode_frame
+        opened, calls, active = [], [], [0]
+        def initialize(reader, *args, **kwargs):
+            original_init(reader, *args, **kwargs)
+            opened.append(reader)
+            before = len(calls)
+            reader.peek_key()
+            self.assertEqual(len(calls), before)
+        def decode(*args, **kwargs):
+            self.assertEqual(len(opened), len(execution.STREAM_NAMES) + 2)
+            self.assertEqual(active[0], 0)
+            active[0] += 1
+            calls.append(1)
+            try:
+                return original_decode(*args, **kwargs)
+            finally:
+                active[0] -= 1
+        with self.published_four_work() as (root, metadata), \
+                patch.object(reader_type, "__init__", new=initialize), \
+                patch.object(physical, "decode_frame", side_effect=decode):
+            self.readback_fixture(root)
+        self.assertEqual(len(calls), sum(value.record_count for value in metadata.streams))
+        self.assertTrue(all(reader.completed_digest is not None for reader in opened))
+
+    def test_v2_metadata_tampering_fails_without_rewriting_disk_evidence(self):
+        def first_fact(node):
+            return node["constructor_facts"][0]
+        def selected_trial(node):
+            fact = first_fact(node)
+            return next(trial for trial in fact["trials"] if trial["ordinal"] == fact["selected_trial_ordinal"])
+        cases = {
+            "schema": lambda n: n.update(schema="program-k-e2-r0b-experiment/v1"),
+            "basis": lambda n: n["size_basis"].update(record_frame_format="PKE2RF01"),
+            "profile_bytes": lambda n: n.update(codec_profile_bytes="7b7d"),
+            "profile_sha": lambda n: n.update(codec_profile_sha256="0" * 64),
+            "dual_target": lambda n: n["targets"]["physical"].update(primary=n["targets"]["physical"]["primary"] + 1),
+            "family_count": lambda n: n["family_counts"][0].__setitem__(1, 5),
+            "physical_total": lambda n: n["family_totals"][0].update(physical_bytes=n["family_totals"][0]["physical_bytes"] + 1),
+            "logical_total": lambda n: n["family_totals"][0].update(logical_bytes=n["family_totals"][0]["logical_bytes"] + 1),
+            "physical_excess": lambda n: n["family_totals"][0].update(physical_excess=n["family_totals"][0]["physical_excess"] + 1),
+            "b_proc": lambda n: n.update(b_proc=n["b_proc"] + 1),
+            "committed": lambda n: n.update(committed_procedural_excess=n["committed_procedural_excess"] + 1),
+            "remaining": lambda n: n.update(remaining_procedural_budget=n["remaining_procedural_budget"] - 1),
+            "knob": lambda n: first_fact(n).update(selected_knob=first_fact(n)["selected_knob"] + 1),
+            "selected_trial": lambda n: selected_trial(n).update(actual_physical_bytes=selected_trial(n)["actual_physical_bytes"] + 1),
+            "trial_reason": lambda n: selected_trial(n).update(eligible=False, rejection_reason="PRIVATE_FREE_FORM_FAILURE"),
+            "stream_seal": lambda n: n["streams"][0].update(sha256="0" * 64),
+            "source_identity": lambda n: n.update(source_plan_identity="0" * 64),
+            "materialization_identity": lambda n: n.update(materialization_plan_identity="0" * 64),
+            "runtime_peak_below_samples": lambda n: n.update(runtime_monitor_peak_coordinator_private_bytes=99),
+            "runtime_peak_above_cap": lambda n: n.update(runtime_monitor_peak_coordinator_private_bytes=self.envelope.coordinator_memory_cap_bytes + 1),
+        }
+        for case, mutate in cases.items():
+            with self.subTest(case=case), self.published_four_work() as (root, _):
+                node = self.metadata_node(root)
+                mutate(node)
+                self.write_metadata_node(root, node)
+                before = {path.name: path.read_bytes() for path in root.iterdir()}
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root)
+                self.assertEqual({path.name: path.read_bytes() for path in root.iterdir()}, before)
+
+    def test_v2_rf02_crc_and_canonical_semantic_key_and_frame_tampering_fail_closed(self):
+        def changed_key(rows, axis, value):
+            key, record = rows[0]
+            key = tuple(value if index == axis else part for index, part in enumerate(key))
+            return [(key, record)] + rows[1:]
+        cases = {
+            "logical_board_identity": lambda rows: [(rows[0][0], replace(rows[0][1], fingerprint="tampered-board"))] + rows[1:],
+            "position": lambda rows: changed_key(rows, 0, 9),
+            "rank": lambda rows: changed_key(rows, 1, 2),
+            "index": lambda rows: changed_key(rows, 2, 1),
+            "missing_frame": lambda rows: rows[1:],
+            "trailing_frame": lambda rows: rows + [rows[0]],
+        }
+        for case, transform in cases.items():
+            with self.subTest(case=case), self.published_four_work() as (root, _):
+                self.rewrite_v2_stream(root, "boards", transform)
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root)
+        with self.published_four_work() as (root, _):
+            path = root / "boards.pkf"
+            raw = bytearray(path.read_bytes())
+            raw[-1] ^= 1
+            path.write_bytes(raw)
+            with self.assertRaises(ValueError):
+                self.readback_fixture(root)
+
+    def test_v2_operations_resources_and_file_set_tampering_fail_closed(self):
+        def change_event(rows, predicate, **fields):
+            index = next(index for index, (_, record) in enumerate(rows) if predicate(record))
+            key, record = rows[index]
+            return rows[:index] + [(key, replace(record, **fields))] + rows[index + 1:]
+        cases = (
+            ("terminal", "operations", lambda rows: change_event(rows,
+                lambda event: event.event_kind is records.EventKind.END and event.unit_id.startswith("0:"),
+                status=records.OperationStatus.FAILED)),
+            ("progress", "operations", lambda rows: change_event(rows,
+                lambda event: event.event_kind is records.EventKind.PROGRESS, unit_id="durable_primary_count:9")),
+            ("resource_owner", "resources", lambda rows: [(rows[0][0], replace(rows[0][1], unit_id="unexpected-owner"))] + rows[1:]),
+            ("resource_memory", "resources", lambda rows: [(rows[0][0], replace(rows[0][1], coordinator_bytes=101, combined_bytes=101))] + rows[1:]),
+        )
+        for case, name, transform in cases:
+            with self.subTest(case=case), self.published_four_work() as (root, _):
+                self.rewrite_v2_stream(root, name, transform)
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root)
+        for case in ("unexpected_jsonl", "missing_pkf", "extra_pkf", "complete_marker"):
+            with self.subTest(case=case), self.published_four_work() as (root, _):
+                if case == "missing_pkf":
+                    (root / "boards.pkf").unlink()
+                else:
+                    name = {"unexpected_jsonl": "boards.jsonl", "extra_pkf": "extra.pkf",
+                            "complete_marker": "COMPLETE.json"}[case]
+                    (root / name).write_bytes(b"")
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root)
+
+    def test_v2_runtime_monitor_peak_is_distinct_from_durable_samples(self):
+        inside_constructor = [False]
+        checked_inside = []
+        original_text = h.construct_text_family_v2
+        def observed_text(*args, **kwargs):
+            check = kwargs["_check"]
+            def observed_check():
+                checked_inside.append(True)
+                return check()
+            kwargs["_check"] = observed_check
+            inside_constructor[0] = True
+            try:
+                return original_text(*args, **kwargs)
+            finally:
+                inside_constructor[0] = False
+        def memory():
+            return 200 if inside_constructor[0] else 100
+        plan = self.plan[:1]
+        with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
+                patch.object(operational.harness, "_coordinator_private_bytes", side_effect=memory), \
+                patch.object(h, "construct_text_family_v2", side_effect=observed_text), \
+                patch.object(h, "_reconcile_v2_materialization_totals", side_effect=self.padded_reconciliation):
+            result = self.run_lower(directory, plan=plan)
+            self.assertTrue(checked_inside)
+            self.assertEqual(result.max_coordinator_private_bytes, 200)
+            samples = self.scan(directory, "resources")[1]
+            self.assertEqual(len(samples), 1)
+            self.assertEqual(samples[0][1].coordinator_bytes, 100)
+            metadata = h._publish_v2_materialization(directory, result, self.targets, self.profile, self.envelope)
+            self.assertEqual(metadata.runtime_monitor_peak_coordinator_private_bytes, 200)
+            observed = self.readback_fixture(directory, plan=plan)
+            self.assertEqual(observed.durable_sample_max_coordinator_private_bytes, 100)
+            self.assertEqual(observed.runtime_monitor_peak_coordinator_private_bytes, 200)
+            self.assertFalse(observed.runtime_peak_is_independent)
+            node = self.metadata_node(directory)
+            node["runtime_monitor_peak_coordinator_private_bytes"] = 99
+            self.write_metadata_node(directory, node)
+            with self.assertRaises(ValueError):
+                self.readback_fixture(directory, plan=plan)
+
+    def test_v2_serialized_reservation_exact_max_and_preopen_cap_enforcement(self):
+        maximum = physical.MAX_PAYLOAD_BYTES
+        self.assertEqual(h._v2_serialized_reservation(maximum, maximum), 402786480)
+        for maximum, context in ((0, 1), (1, 0), (1, 2), (True, 1), (1, True)):
+            with self.subTest(maximum=maximum, context=context), self.assertRaises(ValueError):
+                h._v2_serialized_reservation(maximum, context)
+        with self.published_four_work() as (root, _):
+            context = len((root / "materialization-v2.json").read_bytes())
+            reservation = h._v2_serialized_reservation(self.envelope.max_payload_bytes, context)
+            self.assertEqual(reservation, 5 * self.envelope.max_payload_bytes + context + 131072 + 57 * 39 + 1)
+            envelope = replace(self.envelope, coordinator_memory_cap_bytes=reservation - 1)
+            with patch.object(h.store, "FramedStreamPullReader",
+                    side_effect=AssertionError("Reservation must fail before opening PKF")) as reader, \
+                    self.assertRaises(ValueError):
+                self.readback_fixture(root, envelope=envelope)
+            reader.assert_not_called()
+
+    def test_v2_pre_cancel_and_pre_memory_breach_do_not_open_streams(self):
+        class Cancelled:
+            def is_set(self):
+                return True
+        with self.published_four_work() as (root, _):
+            for options in ({"cancel": Cancelled()},
+                    {"memory_probe": lambda: self.envelope.coordinator_memory_cap_bytes + 1}):
+                with self.subTest(options=tuple(options)), \
+                        patch.object(h.store, "FramedStreamPullReader",
+                            side_effect=AssertionError("Containment must precede opening PKF")) as reader, \
+                        self.assertRaises(ValueError):
+                    self.readback_fixture(root, **options)
+                reader.assert_not_called()
+
+    def test_v2_mid_pull_cancel_wall_memory_and_pull_failure_close_every_reader(self):
+        reader_type = h.store.FramedStreamPullReader
+        original_init, original_pull = reader_type.__init__, reader_type.pull
+        for case in ("cancel", "wall", "memory", "pull"):
+            opened, pulled = [], [0]
+            def initialize(reader, *args, **kwargs):
+                original_init(reader, *args, **kwargs)
+                opened.append(reader)
+            def pull(reader):
+                result = original_pull(reader)
+                if result is not None:
+                    pulled[0] += 1
+                    if case == "pull":
+                        raise h.store.StoreError("SLICE1N_PULL_FAILURE")
+                return result
+            class Cancel:
+                def is_set(self):
+                    return case == "cancel" and pulled[0] > 0
+            def memory():
+                return self.envelope.coordinator_memory_cap_bytes + 1 if case == "memory" and pulled[0] else 100
+            def clock():
+                return self.envelope.readback_wall_ms * 1_000_000 if case == "wall" and pulled[0] else 0
+            with self.subTest(case=case), self.published_four_work() as (root, _), \
+                    patch.object(reader_type, "__init__", new=initialize), \
+                    patch.object(reader_type, "pull", new=pull), \
+                    patch.object(h.time, "monotonic_ns", side_effect=clock):
+                before = {path.name: path.read_bytes() for path in root.iterdir()}
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root, cancel=Cancel(), memory_probe=memory)
+                self.assertGreater(pulled[0], 0)
+                self.assertEqual(len(opened), len(execution.STREAM_NAMES) + 2)
+                self.assertTrue(all(reader.completed_digest is None for reader in opened))
+                self.assertTrue(all(reader._closed and reader._file.closed for reader in opened))
+                self.assertEqual({path.name: path.read_bytes() for path in root.iterdir()}, before)
+
+    def test_v2_full_readback_owner_routes_only_exact_accepted_metadata_counts(self):
+        plan, workload = self.full_metadata_fixture()
+        marker = object()
+        with self.forbidden_workloads(), tempfile.TemporaryDirectory() as directory, \
+                patch.object(h, "_readback_v2_plan", return_value=marker) as lower, \
+                patch.object(h.store, "FramedStreamPullReader", side_effect=AssertionError("Metadata route only")), \
+                patch.object(h, "_construct_v2_materialization_work", side_effect=AssertionError("No full constructor")):
+            self.assertIs(h._readback_synthetic_v2(directory, plan, workload, self.targets,
+                                                 self.profile, self.envelope), marker)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+        self.assertEqual(lower.call_count, 1)
+        self.assertIs(lower.call_args.args[1], plan)
+        self.assertEqual(lower.call_args.args[5], (10000, 256, 128, 4, 256, 506))
+        for bad_plan, bad_workload in ((list(plan), workload), (plan, object()),
+                ((replace(plan[0], oracle_b_selected=not plan[0].oracle_b_selected),) + plan[1:], workload)):
+            with self.subTest(plan_type=type(bad_plan), workload_type=type(bad_workload)), \
+                    patch.object(h, "_readback_v2_plan", side_effect=AssertionError("No invalid lower readback")) as lower, \
+                    self.assertRaises(ValueError):
+                h._readback_synthetic_v2("unused", bad_plan, bad_workload, self.targets, self.profile, self.envelope)
+            lower.assert_not_called()
+
+    def test_v2_constructor_specific_rejection_is_runtime_provenance_not_family_policy(self):
+        with self.published_four_work() as (root, _):
+            node = self.metadata_node(root)
+            fact = next(fact for fact in node["constructor_facts"]
+                        if fact["constructor_kind"] == "text" and len(fact["trials"]) > 1)
+            trial = next(trial for trial in fact["trials"] if trial["ordinal"] != fact["selected_trial_ordinal"])
+            # This valid closed runtime reason intentionally need not equal the
+            # family-only policy's reason. No rejected candidate is reconstructed.
+            trial.update(eligible=False, rejection_reason="SYNTHETIC_TEXT_WNEW_CAP")
+            self.write_metadata_node(root, node)
+            observed = self.readback_fixture(root)
+            self.assertTrue(observed.readback_complete and observed.constructor_rejections_are_runtime_provenance)
+        with self.published_four_work() as (root, _):
+            node = self.metadata_node(root)
+            fact = next(fact for fact in node["constructor_facts"] if len(fact["trials"]) > 1)
+            trial = next(trial for trial in fact["trials"] if trial["ordinal"] != fact["selected_trial_ordinal"])
+            trial.update(actual_physical_bytes=fact["physical_target"], actual_logical_bytes=fact["logical_target"],
+                physical_margin=0, logical_margin=0, eligible=False,
+                rejection_reason="SYNTHETIC_BOTH_MINIMA_SHORTFALL")
+            self.write_metadata_node(root, node)
+            with self.assertRaises(ValueError):
+                self.readback_fixture(root)
+
+    def test_v2_constructor_selection_log_and_durable_selected_margins_fail_closed(self):
+        cases = ("ordinal", "margin", "eligible_order", "too_many_trials")
+        for case in cases:
+            with self.subTest(case=case), self.published_four_work() as (root, _):
+                node = self.metadata_node(root)
+                fact = next(fact for fact in node["constructor_facts"]
+                            if fact["constructor_kind"] == "text" and fact["selected_knob"] > 0)
+                selected = next(trial for trial in fact["trials"]
+                                if trial["ordinal"] == fact["selected_trial_ordinal"])
+                if case == "ordinal":
+                    fact["selected_trial_ordinal"] = 9
+                elif case == "margin":
+                    fact["physical_margin"] += 1
+                elif case == "too_many_trials":
+                    fact["trials"] = [dict(selected, ordinal=ordinal) for ordinal in range(1, 10)]
+                else:
+                    trial = next(trial for trial in fact["trials"]
+                                 if trial["ordinal"] != fact["selected_trial_ordinal"])
+                    ordinal = trial["ordinal"]
+                    trial.update(selected)
+                    trial.update(ordinal=ordinal, knob=fact["selected_knob"] - 1)
+                self.write_metadata_node(root, node)
+                with self.assertRaises(ValueError):
+                    self.readback_fixture(root)
+
+    def test_v2_metadata_publication_is_exclusive_durable_and_not_family_credit(self):
+        original_open, original_fsync = Path.open, os.fsync
+        actions = []
+        class WriteProbe:
+            def __init__(self, stream):
+                self.stream = stream
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+            def write(self, data):
+                actions.append("write")
+                return self.stream.write(data)
+            def flush(self):
+                actions.append("flush")
+                return self.stream.flush()
+            def fileno(self):
+                return self.stream.fileno()
+        def opened(path, mode="r", *args, **kwargs):
+            stream = original_open(path, mode, *args, **kwargs)
+            if path.name == "materialization-v2.json" and mode == "xb":
+                actions.append("exclusive")
+                return WriteProbe(stream)
+            return stream
+        def fsync(descriptor):
+            actions.append("fsync")
+            return original_fsync(descriptor)
+        with self.sealed_four_work() as root:
+            pkf = {path.name: path.read_bytes() for path in root.iterdir()}
+            with patch.object(Path, "open", new=opened), patch.object(os, "fsync", side_effect=fsync):
+                metadata = h._publish_v2_materialization(root, self.result, self.targets, self.profile, self.envelope)
+            self.assertEqual(actions, ["exclusive", "write", "flush", "fsync"])
+            data = (root / "materialization-v2.json").read_bytes()
+            self.assertEqual(metadata.committed_procedural_excess, self.result.ledger.committed_excess)
+            self.assertEqual(metadata.attributable_experiment_bytes,
+                             sum(value.physical_bytes for value in self.result.family_totals))
+            self.assertEqual(sum(path.stat().st_size for path in root.iterdir()),
+                             metadata.current_sealed_pkf_bytes + len(data))
+            with self.assertRaises(FileExistsError):
+                h._publish_v2_materialization(root, self.result, self.targets, self.profile, self.envelope)
+            self.assertEqual(data, (root / "materialization-v2.json").read_bytes())
+            self.assertEqual(pkf, {path.name: path.read_bytes() for path in root.glob("*.pkf")})
+
+    def test_v2_publication_caps_fail_before_create_and_io_failure_preserves_sealed_prefix(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        with self.published_four_work() as (root, metadata):
+            metadata_size = len(evidence.encode_materialization_v2(metadata))
+        for case in ("metadata_cap", "archive_cap"):
+            archive_bound = self.result.coordinator.archive_bytes + metadata_size - 1
+            envelope = (replace(self.envelope, max_payload_bytes=metadata_size - 1) if case == "metadata_cap"
+                else replace(self.envelope, archive_cap_bytes=archive_bound,
+                             max_payload_bytes=min(self.envelope.max_payload_bytes, archive_bound)))
+            with self.subTest(case=case), self.sealed_four_work() as root, \
+                    patch.object(h, "_exclusive_bytes", side_effect=AssertionError("No pre-cap publication")) as write:
+                with self.assertRaises(ValueError):
+                    h._publish_v2_materialization(root, self.result, self.targets, self.profile, envelope)
+                write.assert_not_called()
+                self.assertFalse((root / "materialization-v2.json").exists())
+        original_open = Path.open
+        for case in ("write", "flush", "fsync"):
+            class FailingWrite:
+                def __init__(self, stream):
+                    self.stream = stream
+                def __enter__(self):
+                    self.stream.__enter__()
+                    return self
+                def __exit__(self, *args):
+                    return self.stream.__exit__(*args)
+                def write(self, data):
+                    if case == "write":
+                        self.stream.write(data[:17])
+                        raise OSError("SLICE1N_PUBLICATION_WRITE")
+                    return self.stream.write(data)
+                def flush(self):
+                    self.stream.flush()
+                    if case == "flush":
+                        raise OSError("SLICE1N_PUBLICATION_FLUSH")
+                def fileno(self):
+                    return self.stream.fileno()
+            def opened(path, mode="r", *args, **kwargs):
+                stream = original_open(path, mode, *args, **kwargs)
+                return FailingWrite(stream) if path.name == "materialization-v2.json" and mode == "xb" else stream
+            def fsync(_):
+                if case == "fsync":
+                    raise OSError("SLICE1N_PUBLICATION_FSYNC")
+            with self.subTest(case=case), self.sealed_four_work() as root:
+                before = {path.name: path.read_bytes() for path in root.iterdir()}
+                with patch.object(Path, "open", new=opened), patch.object(os, "fsync", side_effect=fsync), \
+                        self.assertRaises(OSError):
+                    h._publish_v2_materialization(root, self.result, self.targets, self.profile, self.envelope)
+                self.assertEqual(before, {path.name: path.read_bytes() for path in root.glob("*.pkf")})
+                self.assertFalse((root / "COMPLETE.json").exists())
+                preserved = (root / "materialization-v2.json").read_bytes()
+                with self.assertRaises(FileExistsError):
+                    h._publish_v2_materialization(root, self.result, self.targets, self.profile, self.envelope)
+                self.assertEqual((root / "materialization-v2.json").read_bytes(), preserved)
+
+    def test_v2_full_owner_publication_failure_cannot_return_lower_success(self):
+        plan, workload = self.full_metadata_fixture()
+        calls = []
+        def lower(*args, **kwargs):
+            calls.append("sealed_lower_return")
+            return self.result
+        def publish(*args):
+            calls.append("publication")
+            self.assertIs(args[1], self.result)
+            raise OSError("SLICE1N_PUBLICATION_FAILURE")
+        with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
+                patch.object(h, "_materialize_v2_plan", side_effect=lower), \
+                patch.object(h, "_publish_v2_materialization", side_effect=publish), \
+                self.assertRaisesRegex(OSError, "SLICE1N_PUBLICATION_FAILURE"):
+            h._materialize_synthetic_v2(plan, workload, self.targets, self.profile, self.envelope, directory)
+        self.assertEqual(calls, ["sealed_lower_return", "publication"])
+
 
 class V2FullMaterializerV1IsolationTests(unittest.TestCase):
     def test_historical_materializer_coordinator_and_r0_never_activate_full_v2_path(self):
         from tests.test_program_k_e2_operational import StreamingCoordinatorTests, R0ComponentTests, _plan
+        from experiments import program_k_e2_r0_evidence as evidence
         names = ("_materialize_synthetic_v2", "_materialize_v2_plan", "_construct_v2_materialization_work",
-                 "_build_primary_v2_baseline", "_materialize_v2_unit", "_capture_qualified_codec_profile")
+                 "_build_primary_v2_baseline", "_materialize_v2_unit", "_capture_qualified_codec_profile",
+                 "_publish_v2_materialization", "_readback_synthetic_v2", "_readback_v2_plan",
+                 "_v2_serialized_reservation", "_v2_materialization_evidence", "_v2_readback_constructor",
+                 "_v2_readback_prior", "_v2_readback_unit", "_v2_readback_support")
         with _EvidenceExitStack() as stack:
             for name in names:
                 stack.enter_context(patch.object(h, name, side_effect=AssertionError("No full V2 historical path")))
             stack.enter_context(patch.object(physical, "capture_qualified_profile",
                                              side_effect=AssertionError("No V1 profile capture")))
+            for owner, name in ((evidence, "encode_materialization_v2"),
+                    (evidence, "decode_materialization_v2"), (evidence, "plan_identity_v2"),
+                    (h.store, "FramedStreamPullReader")):
+                stack.enter_context(patch.object(owner, name,
+                    side_effect=AssertionError("No V2 evidence or PKF reader in V1")))
             stack.enter_context(patch.object(operational.harness, "_coordinator_private_bytes", return_value=100))
             fixture = SyntheticMaterializationTests()
             with tempfile.TemporaryDirectory() as directory:
@@ -5292,3 +5841,13 @@ class V2FullMaterializerV1IsolationTests(unittest.TestCase):
                 self.assertIs(result.units[0].status, records.AuditStatus.PASS)
                 self.assertTrue(list(Path(directory).rglob("*.jsonl")))
                 self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            postprocess = R0BPostprocessingTests()
+            with postprocess.fixture() as inputs, \
+                    patch.object(h.analysis, "_shared_bootstrap", side_effect=AssertionError("No real bootstrap")):
+                result = postprocess.execute(inputs)
+                self.assertTrue(result.qualification_complete and result.readback_complete)
+                self.assertFalse(list(inputs["root"].rglob("*.pkf")))
+            with ClosedExperimentArchiveAccountingTests().fixture() as (root, _, accounting):
+                self.assertTrue((root / "COMPLETE.json").exists())
+                self.assertGreater(accounting.archive_bytes, 0)
+                self.assertFalse(list(root.rglob("*.pkf")))
