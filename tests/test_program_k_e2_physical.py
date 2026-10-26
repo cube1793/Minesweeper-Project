@@ -1,4 +1,4 @@
-"""Slice 1A representation tests using bounded, supplied logical evidence only."""
+"""Bounded representation/profile tests, with no experiment or diagnostic runs."""
 
 from contextlib import ExitStack
 from dataclasses import FrozenInstanceError, replace
@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -576,10 +577,10 @@ class ImportPurityTests(unittest.TestCase):
         forbidden = AssertionError("Import-time I/O or workload is forbidden")
         with ExitStack() as stack:
             stack.enter_context(patch.dict(sys.modules, {probe.__name__: probe}))
-            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "read_text"),
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "read_text"), (Path, "resolve"),
                                 (Path, "write_bytes"), (Path, "write_text"), (subprocess, "Popen"),
                                 (subprocess, "run"), (benchmark_board, "generate_board"),
-                                (zlib, "compressobj")):
+                                (inspect, "getsource"), (zlib, "compressobj")):
                 stack.enter_context(patch.object(owner, name, side_effect=forbidden))
             stack.enter_context(patch("builtins.open", side_effect=forbidden))
             exec(code, probe.__dict__)
@@ -734,6 +735,358 @@ class ProfileTests(unittest.TestCase):
         with patch.object(Path, "open", side_effect=OSError("synthetic missing artifact")):
             with self.assertRaises(p.PhysicalError):
                 p.capture_profile()
+
+
+def _qualified_policies():
+    return ({"name": "program-k-r0b-reference-constructor/v1", "sha256": "c" * 64},
+            {"name": "program-k-r0b-text-constructor/v1", "sha256": "d" * 64})
+
+
+def _qualified_node(provider="builtin-python-runtime", platform="win32"):
+    """Pure structural reader fixture; it does not attest a real environment."""
+    writers, runtime = _profile_facts()
+    runtime.update(platform=platform, unresolved=[], zlib_provider_kind=provider,
+                   zlib_native_owner_role="python_dll" if provider == "builtin-python-runtime"
+                   else "zlib_extension")
+    roles = ["interpreter"]
+    if platform == "win32":
+        roles.append("python_dll")
+    if provider == "extension-file":
+        roles.append("zlib_extension")
+    runtime["artifacts"] = [dict(role=role, path=role, byte_length=1, sha256="b" * 64)
+                            for role in sorted(roles)]
+    node = json.loads(p.profile_from_facts(writer_sources=writers, runtime=runtime,
+                                         constructor_policies=_qualified_policies()).canonical_bytes)
+    node["status"] = "QUALIFIED"
+    return node
+
+
+class QualifiedProfileValidationTests(unittest.TestCase):
+    def test_provider_profiles_roundtrip_without_filesystem_io(self):
+        for provider, platform in (("builtin-python-runtime", "win32"),
+                                   ("extension-file", "win32"), ("extension-file", "linux")):
+            raw = _json_bytes(_qualified_node(provider, platform))
+            with self.subTest(provider=provider, platform=platform), \
+                    patch.object(Path, "open", side_effect=AssertionError("Decode is pure")), \
+                    patch.object(Path, "resolve", side_effect=AssertionError("Decode is pure")):
+                profile = p.decode_profile(raw)
+                self.assertIs(type(profile), p.CodecProfile)
+                self.assertTrue(profile.qualified)
+                self.assertIs(p.require_qualified_profile(profile), profile)
+                self.assertEqual(profile.canonical_bytes, raw)
+                self.assertEqual(profile.sha256, hashlib.sha256(raw).digest())
+                self.assertTrue(raw.isascii())
+
+    def test_unqualified_legacy_and_extended_facts_cannot_grant_qualification(self):
+        writers, runtime = _profile_facts()
+        legacy = p.profile_from_facts(writer_sources=writers, runtime=runtime)
+        self.assertEqual(p.decode_profile(legacy.canonical_bytes), legacy)
+        qualified_node = _qualified_node()
+        supplied = p.profile_from_facts(writer_sources=tuple(qualified_node["writer_sources"]),
+            runtime=qualified_node["runtime"], constructor_policies=_qualified_policies())
+        self.assertFalse(supplied.qualified)
+        self.assertEqual(json.loads(supplied.canonical_bytes)["status"], "UNQUALIFIED_SLICE_1A")
+        with self.assertRaises(p.PhysicalError):
+            p.require_qualified_profile(supplied)
+        for key in ("zlib_provider_kind", "zlib_native_owner_role"):
+            partial = json.loads(supplied.canonical_bytes)
+            del partial["runtime"][key]
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(partial))
+        for function in (p.profile_from_facts, p.capture_profile, p.capture_qualified_profile,
+                         p.require_qualified_profile):
+            self.assertNotIn("qualified", inspect.signature(function).parameters)
+
+    def test_closed_status_runtime_and_exact_empty_unresolved(self):
+        mutations = [lambda n, status=status: n.update(status=status)
+                     for status in (True, "qualified", "QUALIFIED_SLICE_1I", "", "PENDING")]
+        mutations += [lambda n: n.update(qualified=True),
+                      lambda n: n["runtime"].update(unresolved=["missing-native"]),
+                      lambda n: n["runtime"].update(unresolved=None),
+                      lambda n: n["runtime"].update(extra="unknown")]
+        mutations += [lambda n, key=key: n["runtime"].pop(key)
+                      for key in ("zlib_provider_kind", "zlib_native_owner_role")]
+        for mutate in mutations:
+            node = _qualified_node()
+            mutate(node)
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(node))
+
+    def test_policy_coverage_order_names_and_digests_are_exact(self):
+        mutations = (
+            lambda n: n.update(constructor_policies=[]),
+            lambda n: n["constructor_policies"].pop(),
+            lambda n: n["constructor_policies"].append({"name": "third", "sha256": "e" * 64}),
+            lambda n: n["constructor_policies"].reverse(),
+            lambda n: n["constructor_policies"].__setitem__(1, n["constructor_policies"][0]),
+            lambda n: n["constructor_policies"][0].update(name="alternate-reference"),
+            lambda n: n["constructor_policies"][0].update(name=True),
+            lambda n: n["constructor_policies"][0].update(sha256="C" * 64),
+            lambda n: n["constructor_policies"][0].update(sha256="c" * 63),
+            lambda n: n["constructor_policies"][0].update(sha256=True),
+        )
+        for mutate in mutations:
+            node = _qualified_node()
+            mutate(node)
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(node))
+
+    def test_provider_and_native_role_sets_cannot_be_cross_mixed(self):
+        for provider in ("builtin-python-runtime", "extension-file"):
+            node = _qualified_node(provider)
+            for role in tuple(item["role"] for item in node["runtime"]["artifacts"]):
+                missing = json.loads(_json_bytes(node))
+                missing["runtime"]["artifacts"] = [item for item in missing["runtime"]["artifacts"]
+                                                     if item["role"] != role]
+                with self.subTest(provider=provider, missing=role), self.assertRaises(p.PhysicalError):
+                    p.decode_profile(_json_bytes(missing))
+            for owner in ("python_dll", "zlib_extension", "other"):
+                if owner == node["runtime"]["zlib_native_owner_role"]:
+                    continue
+                mixed = json.loads(_json_bytes(node))
+                mixed["runtime"]["zlib_native_owner_role"] = owner
+                with self.assertRaises(p.PhysicalError):
+                    p.decode_profile(_json_bytes(mixed))
+        for mutate in (
+                lambda n: n["runtime"].update(platform="linux"),
+                lambda n: n["runtime"].update(zlib_provider_kind="unknown"),
+                lambda n: n["runtime"]["artifacts"].append(
+                    dict(role="zlib_extension", path="phantom", byte_length=1, sha256="a" * 64))):
+            node = _qualified_node()
+            mutate(node)
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(node))
+        node = _qualified_node()
+        node["runtime"]["artifacts"].insert(0,
+            dict(role="base_interpreter", path="base", byte_length=1, sha256="a" * 64))
+        self.assertTrue(p.decode_profile(_json_bytes(node)).qualified)
+
+    def test_every_bound_writer_runtime_policy_and_provider_identity_changes_digest(self):
+        original = _qualified_node("extension-file")
+        expected = p.decode_profile(_json_bytes(original)).sha256
+        for collection in ("writer_sources", "artifacts", "constructor_policies"):
+            values = original["runtime"][collection] if collection == "artifacts" else original[collection]
+            for index in range(len(values)):
+                for field, value in (("sha256", "e" * 64),) if collection == "constructor_policies" else (
+                        ("sha256", "e" * 64), ("path", "changed-path"), ("byte_length", 2)):
+                    node = json.loads(_json_bytes(original))
+                    items = node["runtime"][collection] if collection == "artifacts" else node[collection]
+                    items[index][field] = value
+                    with self.subTest(collection=collection, index=index, field=field):
+                        self.assertNotEqual(p.decode_profile(_json_bytes(node)).sha256, expected)
+        for key in ("python_implementation", "python_version", "python_abi",
+                    "zlib_build_version", "zlib_runtime_version"):
+            node = json.loads(_json_bytes(original))
+            node["runtime"][key] += "-changed"
+            self.assertNotEqual(p.decode_profile(_json_bytes(node)).sha256, expected)
+        self.assertNotEqual(p.decode_profile(_json_bytes(_qualified_node())).sha256, expected)
+        self.assertNotEqual(p.decode_profile(_json_bytes(_qualified_node("extension-file", "linux"))).sha256,
+                            expected)
+
+    def test_exact_types_and_mutated_or_impostor_profiles_are_rejected(self):
+        class ProfileSubclass(p.CodecProfile):
+            pass
+
+        raw = _json_bytes(_qualified_node())
+        for value in (None, raw, bytearray(raw), types.SimpleNamespace(canonical_bytes=raw, qualified=True),
+                      ProfileSubclass(raw)):
+            with self.assertRaises(p.PhysicalError):
+                p.require_qualified_profile(value)
+        for value in (bytearray(raw), memoryview(raw), "not bytes"):
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(value)
+        profile = p.decode_profile(raw)
+        object.__setattr__(profile, "canonical_bytes", b"{}")
+        with self.assertRaises(p.PhysicalError):
+            p.require_qualified_profile(profile)
+        with self.assertRaises(p.PhysicalError):
+            _ = profile.qualified
+        for value in (True, 1.0, 0, -1):
+            node = _qualified_node()
+            node["runtime"]["artifacts"][0]["byte_length"] = value
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(node))
+        for key in ("zlib_provider_kind", "zlib_native_owner_role"):
+            node = _qualified_node()
+            node["runtime"][key] = True
+            with self.assertRaises(p.PhysicalError):
+                p.decode_profile(_json_bytes(node))
+
+
+class QualifiedCaptureTests(unittest.TestCase):
+    def capture(self):
+        return p.capture_qualified_profile(constructor_policies=_qualified_policies())
+
+    def test_capture_is_read_only_and_self_check_is_exactly_bounded(self):
+        import benchmark_board
+        import socket
+        from experiments import program_k_e2_r0_harness as harness
+        from experiments import program_k_e2_store as store
+        opened = []
+        real_open = Path.open
+
+        def read_only(path, mode="r", *args, **kwargs):
+            self.assertEqual(mode, "rb")
+            opened.append(path)
+            return real_open(path, mode, *args, **kwargs)
+
+        forbidden = AssertionError("Profile capture may only hash artifacts and check the tiny codec")
+        with ExitStack() as stack:
+            for owner, name in ((subprocess, "Popen"), (subprocess, "run"), (socket, "socket"),
+                                (benchmark_board, "generate_board"), (store, "StreamWriter"),
+                                (store, "FramedStreamWriter"), (harness, "construct_reference_v2"),
+                                (harness, "construct_text_family_v2"), (harness, "_measure_r0a"),
+                                (Path, "write_bytes"), (Path, "write_text"), (Path, "glob"), (Path, "rglob")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            stack.enter_context(patch.object(Path, "open", autospec=True, side_effect=read_only))
+            encode = stack.enter_context(patch.object(p, "encode_payload", wraps=p.encode_payload))
+            decode = stack.enter_context(patch.object(p, "decode_payload", wraps=p.decode_payload))
+            profile = self.capture()
+        self.assertEqual([call.args for call in encode.call_args_list],
+                         [(b"x",), (b"x" * 4096,), (b"x" * 4096,)])
+        self.assertEqual(len(decode.call_args_list), 2)
+        self.assertEqual([call.args[2] for call in decode.call_args_list], [1, 4096])
+        self.assertEqual([call.args[0] for call in decode.call_args_list], [p.RAW, p.DEFLATE])
+        self.assertTrue(profile.qualified)
+        runtime = json.loads(profile.canonical_bytes)["runtime"]
+        self.assertEqual(runtime["zlib_build_version"], zlib.ZLIB_VERSION)
+        self.assertEqual(runtime["zlib_runtime_version"], zlib.ZLIB_RUNTIME_VERSION)
+        self.assertEqual(runtime["unresolved"], [])
+        self.assertGreaterEqual(len(opened), 5)
+
+    def test_extension_branch_hashes_exact_native_file_with_matching_origin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native = Path(directory) / "synthetic-zlib-native.bin"
+            native.write_bytes(b"controlled native provider fixture")
+            with patch.object(zlib, "__file__", str(native), create=True), \
+                    patch.object(zlib, "__spec__", types.SimpleNamespace(name="zlib", origin=str(native))):
+                profile = self.capture()
+            runtime = json.loads(profile.canonical_bytes)["runtime"]
+            self.assertEqual(runtime["zlib_provider_kind"], "extension-file")
+            self.assertEqual(runtime["zlib_native_owner_role"], "zlib_extension")
+            artifacts = {item["role"]: item for item in runtime["artifacts"]}
+            self.assertEqual(artifacts["zlib_extension"], dict(role="zlib_extension", path=str(native.resolve()),
+                byte_length=len(b"controlled native provider fixture"),
+                sha256=hashlib.sha256(b"controlled native provider fixture").hexdigest()))
+            self.assertIn("python_dll", artifacts)
+            self.assertIs(p.require_qualified_profile(profile), profile)
+
+    def test_extension_missing_unreadable_invalid_or_conflicting_facts_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native, other = Path(directory) / "native.bin", Path(directory) / "other.bin"
+            native.write_bytes(b"native")
+            other.write_bytes(b"other")
+            for fact, origin in ((str(native), str(other)), (str(native), "built-in"),
+                                 (str(native) + ".missing", str(native) + ".missing"),
+                                 ("", ""), (bytearray(b"native"), str(native)), (True, str(native))):
+                with self.subTest(fact=fact, origin=origin), \
+                        patch.object(zlib, "__file__", fact, create=True), \
+                        patch.object(zlib, "__spec__", types.SimpleNamespace(name="zlib", origin=origin)), \
+                        self.assertRaises(p.PhysicalError):
+                    self.capture()
+            real_open = Path.open
+
+            def deny_native(path, *args, **kwargs):
+                if path == native.resolve():
+                    raise OSError("unreadable native provider")
+                return real_open(path, *args, **kwargs)
+
+            with patch.object(zlib, "__file__", str(native), create=True), \
+                    patch.object(zlib, "__spec__", types.SimpleNamespace(name="zlib", origin=str(native))), \
+                    patch.object(Path, "open", autospec=True, side_effect=deny_native), \
+                    self.assertRaises(p.PhysicalError):
+                self.capture()
+
+    def test_builtin_ambiguous_origin_missing_spec_and_impostor_module_fail_closed(self):
+        for spec in (None, types.SimpleNamespace(name="zlib", origin=None),
+                     types.SimpleNamespace(name="zlib", origin="frozen"),
+                     types.SimpleNamespace(name="other", origin="built-in")):
+            with patch.object(zlib, "__file__", None, create=True), patch.object(zlib, "__spec__", spec), \
+                    self.assertRaises(p.PhysicalError):
+                self.capture()
+        with patch.object(p, "zlib", types.ModuleType("zlib")), self.assertRaises(p.PhysicalError):
+            self.capture()
+
+    def test_missing_or_invalid_loaded_dll_handle_fails_closed(self):
+        for handle in (None, True, False, 0, -1, 1.0, "1", 1 << 128):
+            with self.subTest(handle=handle), patch.object(sys, "dllhandle", handle), \
+                    self.assertRaises(p.PhysicalError):
+                self.capture()
+        with patch.object(sys, "dllhandle", None):
+            del sys.dllhandle
+            with self.assertRaises(p.PhysicalError):
+                self.capture()
+
+    def test_failed_empty_nonexistent_or_truncated_dll_lookup_fails_closed(self):
+        import ctypes
+
+        def nonexistent(handle, buffer, size):
+            buffer.value = str(Path(p.__file__).with_name("missing-slice-1i-runtime.dll"))
+            return len(buffer.value)
+
+        for effect in (lambda handle, buffer, size: 0, lambda handle, buffer, size: 1,
+                       lambda handle, buffer, size: size, nonexistent):
+            with patch.object(ctypes.windll.kernel32, "GetModuleFileNameW", side_effect=effect), \
+                    self.assertRaises(p.PhysicalError):
+                self.capture()
+
+    def test_unreadable_interpreter_loaded_dll_or_writer_fails_without_fallback(self):
+        real_artifact = p._profile_artifact
+        for denied in ("interpreter", "python_dll", "physical"):
+            def fail_artifact(role, path):
+                if role == denied:
+                    raise OSError("unreadable artifact")
+                return real_artifact(role, path)
+
+            with self.subTest(denied=denied), patch.object(p, "_profile_artifact", side_effect=fail_artifact), \
+                    self.assertRaises(p.PhysicalError):
+                self.capture()
+
+    def test_policy_inputs_are_exact_and_rejected_before_artifact_reads(self):
+        valid = _qualified_policies()
+        invalid = (None, [], list(valid), (), valid[:1], valid + valid[:1], tuple(reversed(valid)),
+                   (valid[0], valid[0]), (dict(valid[0], sha256=True), valid[1]),
+                   (dict(valid[0], name="alternate"), valid[1]),
+                   (types.MappingProxyType(valid[0]), valid[1]))
+        for policies in invalid:
+            with self.subTest(policies=policies), \
+                    patch.object(p, "_profile_artifact", side_effect=AssertionError("Validate policies first")), \
+                    self.assertRaises(p.PhysicalError):
+                p.capture_qualified_profile(constructor_policies=policies)
+        with self.assertRaises(TypeError):
+            p.capture_qualified_profile()
+        with self.assertRaises(TypeError):
+            p.capture_qualified_profile(constructor_policies=valid, qualified=True)
+
+    def test_accepted_policy_dicts_are_frozen_before_artifact_capture(self):
+        policies = _qualified_policies()
+        before = [dict(item) for item in policies]
+        real_artifact = p._profile_artifact
+
+        def mutate_input(role, path):
+            policies[0]["sha256"] = "e" * 64
+            return real_artifact(role, path)
+
+        with patch.object(p, "_profile_artifact", side_effect=mutate_input):
+            profile = p.capture_qualified_profile(constructor_policies=policies)
+        self.assertEqual(json.loads(profile.canonical_bytes)["constructor_policies"], before)
+
+    def test_failed_raw_deflate_determinism_decode_or_versions_cannot_qualify(self):
+        compressed = p.encode_payload(b"x" * 4096)
+        results = (
+            [(p.DEFLATE, b"bad"), compressed, compressed],
+            [(p.RAW, b"x"), (p.RAW, b"x" * 4096), (p.RAW, b"x" * 4096)],
+            [(p.RAW, b"x"), compressed, (p.DEFLATE, compressed[1] + b"different")],
+            [(True, b"x"), compressed, compressed],
+        )
+        for result in results:
+            with patch.object(p, "encode_payload", side_effect=result), self.assertRaises(p.PhysicalError):
+                self.capture()
+        with patch.object(p, "decode_payload", return_value=b"wrong"), self.assertRaises(p.PhysicalError):
+            self.capture()
+        for name in ("ZLIB_VERSION", "ZLIB_RUNTIME_VERSION"):
+            with patch.object(zlib, name, ""), self.assertRaises(p.PhysicalError):
+                self.capture()
 
 
 if __name__ == "__main__":

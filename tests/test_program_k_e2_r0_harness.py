@@ -3644,3 +3644,316 @@ class ReferenceConstructorTests(unittest.TestCase):
         self.assertTrue(all(not v.eligible for v in result.trials))
         self.assertTrue(all(v.actual_logical_bytes >= self.targets.logical.reference for v in result.trials))
         self.assertEqual((result.selected_bundles, result.selected_wires), ((), ()))
+
+
+# Slice 1I profile capture is read-only. It exercises no synthetic constructor.
+_POLICY_NAMES = ("program-k-r0b-reference-constructor/v1", "program-k-r0b-text-constructor/v1")
+_POLICY_REFERENCE_SOURCES = (
+    "reference_board_identity", "ReferencePrefix", "_reference_catalog", "_reference_observation",
+    "_reference_prefix", "_reference_constraints", "_reference_work", "_reference_projection",
+    "_reference_maintenance", "_reference_k_actual", "_reference_children", "_reference_bundles",
+    "_reference_candidate_bundles", "_reference_text_families", "_reference_size_bases",
+    "_reference_bases_fit", "_reference_expanded_fits", "_reference_q_bounds", "ReferenceUnitMetrics",
+    "ReferenceTrial", "ReferenceConstructionResult", "_next_reference_q", "_search_reference_trials",
+    "_reference_failure", "_reference_static_cause", "_reference_unit_metrics", "construct_reference_v2",
+)
+_POLICY_TEXT_SOURCES = (
+    "TextTrial", "TextConstructionResult", "_text_spec", "_text_check", "_text_entropy", "_text_filler",
+    "_text_lengths", "_next_text_h", "_search_text_trials", "_text_terminal_reason", "_mutate_text_bundle",
+    "_text_owned", "construct_text_family_v2",
+)
+
+
+@contextmanager
+def _profile_read_only():
+    """Permit source/native reads while rejecting filesystem write entry points."""
+    import builtins
+    import io
+    original_builtin, original_io, original_os = builtins.open, io.open, os.open
+    def opened(original, file, mode="r", *args, **kwargs):
+        if type(mode) is not str or any(flag in mode for flag in "wax+"):
+            raise AssertionError("Profile capture must not write files")
+        return original(file, mode, *args, **kwargs)
+    def os_open(path, flags, *args, **kwargs):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            raise AssertionError("Profile capture must not write files")
+        return original_os(path, flags, *args, **kwargs)
+    with patch.object(builtins, "open", side_effect=lambda *a, **k: opened(original_builtin, *a, **k)), \
+         patch.object(io, "open", side_effect=lambda *a, **k: opened(original_io, *a, **k)), \
+         patch.object(os, "open", side_effect=os_open), \
+         patch.object(Path, "write_bytes", side_effect=AssertionError("No profile artifact")), \
+         patch.object(Path, "write_text", side_effect=AssertionError("No profile artifact")), \
+         patch.object(Path, "mkdir", side_effect=AssertionError("No profile directory")):
+        yield
+
+
+class ConstructorPolicyIdentityTests(unittest.TestCase):
+    def test_exact_names_digests_repeat_capture_and_canonical_bundles(self):
+        identities = h._constructor_policy_identities()
+        self.assertIs(type(identities), tuple)
+        self.assertEqual(tuple(v["name"] for v in identities), _POLICY_NAMES)
+        self.assertEqual(identities, h._constructor_policy_identities())
+        bundles = h._constructor_policy_source_bundles()
+        self.assertEqual(len(bundles), 2)
+        for identity_fact, data in zip(identities, bundles):
+            self.assertEqual(set(identity_fact), {"name", "sha256"})
+            self.assertRegex(identity_fact["sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(identity_fact["sha256"], sha256(data).hexdigest())
+            self.assertTrue(data.isascii())
+            node = json.loads(data)
+            self.assertEqual(set(node), {"schema", "name", "constants", "sources"})
+            self.assertEqual(node["schema"], "program-k-r0b-constructor-policy-source/v1")
+            self.assertEqual(node["name"], identity_fact["name"])
+            self.assertEqual(data, json.dumps(node, sort_keys=True, separators=(",", ":"),
+                                             ensure_ascii=True, allow_nan=False).encode("ascii"))
+
+    def test_every_required_source_is_present_once_in_exact_order_and_preserved(self):
+        getsource = inspect.getsource
+        with patch.object(inspect, "getsource", wraps=getsource) as captured:
+            bundles = h._constructor_policy_source_bundles()
+        expected_names = _POLICY_REFERENCE_SOURCES + _POLICY_TEXT_SOURCES
+        self.assertEqual(tuple(call.args[0] for call in captured.call_args_list),
+                         tuple(getattr(h, name) for name in expected_names))
+        for data, names in zip(bundles, (_POLICY_REFERENCE_SOURCES, _POLICY_TEXT_SOURCES)):
+            sources = json.loads(data)["sources"]
+            self.assertEqual(tuple(v["name"] for v in sources), names)
+            self.assertEqual(len({v["name"] for v in sources}), len(names))
+            for item in sources:
+                self.assertEqual(set(item), {"name", "source"})
+                source = getsource(getattr(h, item["name"])).replace("\r\n", "\n").replace("\r", "\n")
+                self.assertEqual(item["source"], source)
+
+    def test_closed_reference_and_text_constants_match_accepted_policy(self):
+        reference, text = (json.loads(data)["constants"] for data in h._constructor_policy_source_bundles())
+        self.assertEqual(reference, {
+            "_REFERENCE_Q_MAX": 2581110, "_REFERENCE_TEXT": "SYNTHETIC_NON_EVIDENCE|L:|H:",
+            "board_dimensions": [30, 16], "mines": 0, "origin": [0, 0], "target": [1, 0],
+            "catalog_entries": 479, "redundancy_domain": "PROGRAM_K_R0B_REFERENCE_REDUNDANCY_V1\0",
+            "minimum_additional_entry_bound": 13, "packed_prefix_bytes": "6q+4", "candidate_limit": 8,
+            "selection_order": ["actual_physical_bytes", "actual_logical_bytes", "q"],
+            "physical_upper_window": None, "readiness_policy": "dual-independent-ceil-3-over-2/v1",
+        })
+        self.assertEqual(text, {
+            "_TEXT_FAMILIES": [
+                ["primary", "PRIMARY", "evaluators", 0, 1],
+                ["k_control", "K_CONTROL", "kcontrol_maintenance", -1, 1],
+                ["oracle_primary", "PRIMARY", "oracle_b_audits", None, 4],
+                ["oracle_repeat", "DETERMINISM", "repeat_oracle_b_audits", None, 4],
+                ["determinism", "DETERMINISM", "repeat_evaluators", 0, 1],
+            ],
+            "text_format": '"SYNTHETIC_NON_EVIDENCE|L:" + "x"*ell + "|H:" + Base64(B(h))',
+            "entropy_domain": "PROGRAM_K_R0B_TEXT_FILL_V1\0", "entropy_raw_block_bytes": 49152,
+            "base64_full_block_chars": 65536, "candidate_limit": 8, "physical_window": 4096,
+            "secant_target": "T_P", "selection_order": ["actual_physical_bytes", "actual_logical_bytes", "h"],
+            "readiness_policy": "dual-independent-ceil-3-over-2/v1",
+        })
+        self.assertEqual(reference["_REFERENCE_Q_MAX"], h._REFERENCE_Q_MAX)
+        self.assertEqual(reference["_REFERENCE_TEXT"], h._REFERENCE_TEXT)
+        self.assertEqual(text["_TEXT_FAMILIES"],
+                         [[name, kind.value, stream, index, copies] for name, kind, stream, index, copies
+                          in h._TEXT_FAMILIES])
+
+    def test_lf_crlf_and_cr_sources_have_identical_identity(self):
+        expected = h._constructor_policy_identities()
+        getsource = inspect.getsource
+        for ending in ("\n", "\r\n", "\r"):
+            def source(value):
+                return getsource(value).replace("\r\n", "\n").replace("\r", "\n").replace("\n", ending)
+            with self.subTest(ending=repr(ending)), patch.object(inspect, "getsource", side_effect=source):
+                self.assertEqual(h._constructor_policy_identities(), expected)
+
+    def test_constant_floats_nan_boolean_and_numeric_impostors_fail_closed(self):
+        class IntImpostor(int):
+            pass
+        for value in (1.5, float("nan"), float("inf"), True, IntImpostor(2581110), object()):
+            with self.subTest(value=type(value)), patch.object(h, "_REFERENCE_Q_MAX", value), \
+                 self.assertRaisesRegex(h.HarnessError, "SOURCE_VALUE"):
+                h._constructor_policy_identities()
+        families = list(h._TEXT_FAMILIES)
+        families[0] = families[0][:-1] + (1.5,)
+        with patch.object(h, "_TEXT_FAMILIES", tuple(families)), \
+             self.assertRaisesRegex(h.HarnessError, "SOURCE_VALUE"):
+            h._constructor_policy_identities()
+
+    def test_each_bound_source_change_affects_only_its_own_policy(self):
+        before = h._constructor_policy_identities()
+        sources = {name: inspect.getsource(getattr(h, name))
+                   for name in _POLICY_REFERENCE_SOURCES + _POLICY_TEXT_SOURCES}
+        for index, names in enumerate((_POLICY_REFERENCE_SOURCES, _POLICY_TEXT_SOURCES)):
+            for changed_name in names:
+                def source(value):
+                    # Retaining this whitespace demonstrates that only newlines normalize.
+                    return sources[value.__name__] + (" " if value.__name__ == changed_name else "")
+                with self.subTest(source=changed_name), patch.object(inspect, "getsource", side_effect=source):
+                    after = h._constructor_policy_identities()
+                self.assertNotEqual(after[index]["sha256"], before[index]["sha256"])
+                self.assertEqual(after[1 - index], before[1 - index])
+
+    def test_orchestration_and_complete_harness_file_are_outside_policy_identity(self):
+        expected = h._constructor_policy_identities()
+        hashed = []
+        def digest(data):
+            hashed.append(data)
+            return sha256(data)
+        with patch.object(h, "_measure_r0a", new=lambda *a, **k: "changed orchestration"), \
+             patch.object(h, "materialize_synthetic", new=lambda *a, **k: "changed persistence"), \
+             patch.object(h, "launch_r0b", new=lambda *a, **k: "changed launcher"), \
+             patch.object(h, "sha256", side_effect=digest):
+            self.assertEqual(h._constructor_policy_identities(), expected)
+        self.assertEqual(tuple(hashed), h._constructor_policy_source_bundles())
+        self.assertEqual(len(hashed), 2)
+
+    def test_path_mtime_line_number_and_object_identity_do_not_enter_digest(self):
+        from types import FunctionType
+        expected = h._constructor_policy_identities()
+        sources = {name: inspect.getsource(getattr(h, name))
+                   for name in _POLICY_REFERENCE_SOURCES + _POLICY_TEXT_SOURCES}
+        original = h._text_entropy
+        copied = FunctionType(original.__code__.replace(co_filename="different-source-path.py",
+            co_firstlineno=original.__code__.co_firstlineno + 17), original.__globals__, original.__name__,
+            original.__defaults__, original.__closure__)
+        self.assertIsNot(copied, original)
+        with patch.object(h, "_text_entropy", new=copied), \
+             patch.object(h, "__file__", "different-harness-path.py"), \
+             patch.object(h, "_HARNESS_PATH", "different-harness-path.py"), \
+             patch.object(inspect, "getsource", side_effect=lambda value: sources[value.__name__]), \
+             patch.object(Path, "stat", side_effect=AssertionError("No identity mtime")), \
+             patch.object(Path, "read_bytes", side_effect=AssertionError("No whole-file identity")), \
+             patch.object(Path, "open", side_effect=AssertionError("No whole-file identity")):
+            self.assertEqual(h._constructor_policy_identities(), expected)
+
+    def test_missing_impostor_and_unavailable_source_fail_closed(self):
+        for name in _POLICY_REFERENCE_SOURCES + _POLICY_TEXT_SOURCES:
+            with self.subTest(name=name), patch.object(h, name, None), \
+                 self.assertRaisesRegex(h.HarnessError, "SOURCE_OBJECT_REQUIRED"):
+                h._constructor_policy_identities()
+        for value in (object(), h._text_filler, lambda: None):
+            with self.subTest(value=type(value)), patch.object(h, "_text_entropy", value), \
+                 self.assertRaisesRegex(h.HarnessError, "SOURCE_OBJECT_REQUIRED"):
+                h._constructor_policy_identities()
+        for unavailable in (OSError("missing source"), TypeError("built-in object")):
+            with patch.object(inspect, "getsource", side_effect=unavailable), \
+                 self.assertRaisesRegex(h.HarnessError, "SOURCE_UNAVAILABLE"):
+                h._constructor_policy_identities()
+        for unavailable in ("", " \n", None, b"source"):
+            with patch.object(inspect, "getsource", return_value=unavailable), \
+                 self.assertRaisesRegex(h.HarnessError, "SOURCE_UNAVAILABLE"):
+                h._constructor_policy_identities()
+
+    def test_import_performs_no_policy_capture_qualification_or_writes(self):
+        import importlib.util
+        import sys
+        name = "experiments._slice1i_harness_import_fixture"
+        spec = importlib.util.spec_from_file_location(name, h.__file__)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {name: module}), _profile_read_only(), \
+             patch.object(inspect, "getsource", side_effect=AssertionError("No import source capture")), \
+             patch.object(physical, "capture_profile", side_effect=AssertionError("No import profile")), \
+             patch.object(physical, "capture_qualified_profile", side_effect=AssertionError("No import qualification")), \
+             patch.object(physical, "encode_payload", side_effect=AssertionError("No import self-check")):
+            spec.loader.exec_module(module)
+
+
+class QualifiedHarnessProfileTests(unittest.TestCase):
+    def test_harness_owner_propagates_capture_errors_and_rejects_unqualified_result(self):
+        from tests.test_program_k_e2_physical import _profile_facts
+        writers, runtime = _profile_facts()
+        unqualified = physical.profile_from_facts(writer_sources=writers, runtime=runtime)
+        policies = h._constructor_policy_identities()
+        with patch.object(physical, "capture_qualified_profile", return_value=unqualified) as captured, \
+             self.assertRaises(physical.PhysicalError):
+            h._capture_qualified_codec_profile()
+        captured.assert_called_once_with(constructor_policies=policies)
+        with patch.object(physical, "capture_qualified_profile",
+                          side_effect=physical.PhysicalError("PROFILE_CAPTURE_INCOMPLETE")), \
+             self.assertRaisesRegex(physical.PhysicalError, "PROFILE_CAPTURE_INCOMPLETE"):
+            h._capture_qualified_codec_profile()
+        with patch.object(h, "_text_entropy", None), \
+             patch.object(physical, "capture_qualified_profile", side_effect=AssertionError("No incomplete policy")), \
+             self.assertRaisesRegex(h.HarnessError, "SOURCE_OBJECT_REQUIRED"):
+            h._capture_qualified_codec_profile()
+
+    def test_current_approved_windows_profile_is_exact_deterministic_and_read_only(self):
+        import ctypes
+        import subprocess
+        import sys
+        import sysconfig
+        import zlib
+        self.assertEqual(os.name, "nt")
+        self.assertIsNone(getattr(zlib, "__file__", None))
+        self.assertEqual(zlib.__spec__.origin, "built-in")
+        self.assertIs(type(sys.dllhandle), int)
+        buffer = ctypes.create_unicode_buffer(32768)
+        get_name = ctypes.windll.kernel32.GetModuleFileNameW
+        get_name.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32)
+        get_name.restype = ctypes.c_uint32
+        count = get_name(ctypes.c_void_p(sys.dllhandle), buffer, len(buffer))
+        self.assertGreater(count, 0)
+        self.assertLess(count, len(buffer))
+        loaded_dll = Path(buffer.value).resolve(strict=True)
+        blocked_codes = {getattr(h, name).__code__ for name in
+            ("construct_text_family_v2", "construct_reference_v2", "_reference_prefix",
+             "_reference_bundles", "reference_board_identity")}
+        previous_profiler = sys.getprofile()
+        def forbid_workload(frame, event, arg):
+            if event == "call" and frame.f_code in blocked_codes:
+                raise AssertionError("Profile capture may not construct a workload")
+        with _profile_read_only(), \
+             patch.object(subprocess, "Popen", side_effect=AssertionError("No process spawn")), \
+             patch.object(h.qualification, "_git", side_effect=AssertionError("No Git capture")), \
+             patch("benchmark_board.generate_board", side_effect=AssertionError("No board generation")), \
+             patch.object(execution.runner, "run_k_p0", side_effect=AssertionError("No solver")), \
+             patch.object(execution.runner, "run_k_control", side_effect=AssertionError("No solver")), \
+             patch.object(h.store, "StreamWriter", side_effect=AssertionError("No store writer")), \
+             patch.object(physical, "require_qualified_profile", wraps=physical.require_qualified_profile) as required:
+            try:
+                sys.setprofile(forbid_workload)
+                first = h._capture_qualified_codec_profile()
+                second = h._capture_qualified_codec_profile()
+            finally:
+                sys.setprofile(previous_profiler)
+            self.assertEqual(required.call_count, 2)
+            self.assertIs(required.call_args_list[0].args[0], first)
+            self.assertIs(required.call_args_list[1].args[0], second)
+        self.assertIs(type(first), physical.CodecProfile)
+        self.assertTrue(first.qualified)
+        self.assertIs(physical.require_qualified_profile(first), first)
+        self.assertEqual(first.canonical_bytes, second.canonical_bytes)
+        self.assertEqual(first.sha256, second.sha256)
+        node = json.loads(first.canonical_bytes)
+        self.assertEqual(node["status"], "QUALIFIED")
+        self.assertTrue(first.canonical_bytes.isascii())
+        self.assertEqual(first.canonical_bytes, json.dumps(node, sort_keys=True, separators=(",", ":"),
+                                                         ensure_ascii=True, allow_nan=False).encode("ascii"))
+        self.assertEqual(node["constructor_policies"], list(h._constructor_policy_identities()))
+        writers = node["writer_sources"]
+        self.assertEqual(tuple(v["role"] for v in writers), ("logical_records", "physical", "worker_bundle"))
+        directory = Path(physical.__file__).resolve(strict=True).parent
+        for fact, filename in zip(writers,
+                ("program_k_e2_records.py", "program_k_e2_physical.py", "program_k_e2_execution.py")):
+            path = directory / filename
+            data = path.read_bytes()
+            self.assertEqual(fact, dict(role=fact["role"], path=str(path.resolve(strict=True)),
+                                       byte_length=len(data), sha256=sha256(data).hexdigest()))
+        runtime = node["runtime"]
+        self.assertEqual(runtime["unresolved"], [])
+        self.assertEqual(runtime["python_implementation"], platform.python_implementation())
+        self.assertEqual(runtime["python_version"], platform.python_version())
+        self.assertEqual(runtime["python_abi"], sysconfig.get_config_var("SOABI") or sys.implementation.cache_tag)
+        self.assertEqual(runtime["platform"], sys.platform)
+        self.assertEqual(runtime["zlib_build_version"], zlib.ZLIB_VERSION)
+        self.assertEqual(runtime["zlib_runtime_version"], zlib.ZLIB_RUNTIME_VERSION)
+        self.assertEqual((runtime["zlib_build_version"], runtime["zlib_runtime_version"]), ("1.3.1", "1.3.1"))
+        self.assertEqual(runtime["zlib_provider_kind"], "builtin-python-runtime")
+        self.assertEqual(runtime["zlib_native_owner_role"], "python_dll")
+        artifacts = {v["role"]: v for v in runtime["artifacts"]}
+        expected_paths = {"interpreter": Path(sys.executable).resolve(strict=True), "python_dll": loaded_dll}
+        base = Path(sys._base_executable).resolve(strict=True)
+        if base != expected_paths["interpreter"]:
+            expected_paths["base_interpreter"] = base
+        self.assertEqual(set(artifacts), set(expected_paths))
+        self.assertNotIn("zlib_extension", artifacts)
+        for role, path in expected_paths.items():
+            data = path.read_bytes()
+            self.assertEqual(artifacts[role], dict(role=role, path=str(path), byte_length=len(data),
+                                                 sha256=sha256(data).hexdigest()))

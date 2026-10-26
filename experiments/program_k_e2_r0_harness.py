@@ -1681,6 +1681,98 @@ def construct_reference_v2(work, targets, codec_profile_sha256, *, max_payload_b
     return ReferenceConstructionResult(q_lo, q_hi, trials, trial, bundles, wires, None, None)
 
 
+def _constructor_policy_source_bundles():
+    """Capture only the two closed constructor policies, without orchestration."""
+    import inspect
+    from types import FunctionType
+
+    def exact_source_value(value):
+        if value is None or type(value) in (str, int):
+            return
+        if type(value) is list:
+            for item in value:
+                exact_source_value(item)
+        elif type(value) is dict and all(type(key) is str for key in value):
+            for item in value.values():
+                exact_source_value(item)
+        else:
+            raise HarnessError("CONSTRUCTOR_POLICY_SOURCE_VALUE")
+
+    policies = (
+        ("program-k-r0b-reference-constructor/v1", {
+            "_REFERENCE_Q_MAX": _REFERENCE_Q_MAX,
+            "_REFERENCE_TEXT": _REFERENCE_TEXT,
+            "board_dimensions": [30, 16], "mines": 0,
+            "origin": [0, 0], "target": [1, 0], "catalog_entries": 479,
+            "redundancy_domain": "PROGRAM_K_R0B_REFERENCE_REDUNDANCY_V1\0",
+            "minimum_additional_entry_bound": 13, "packed_prefix_bytes": "6q+4",
+            "candidate_limit": 8,
+            "selection_order": ["actual_physical_bytes", "actual_logical_bytes", "q"],
+            "physical_upper_window": None,
+            "readiness_policy": "dual-independent-ceil-3-over-2/v1",
+        }, (
+            "reference_board_identity", "ReferencePrefix", "_reference_catalog",
+            "_reference_observation", "_reference_prefix", "_reference_constraints",
+            "_reference_work", "_reference_projection", "_reference_maintenance",
+            "_reference_k_actual", "_reference_children", "_reference_bundles",
+            "_reference_candidate_bundles", "_reference_text_families", "_reference_size_bases",
+            "_reference_bases_fit", "_reference_expanded_fits", "_reference_q_bounds",
+            "ReferenceUnitMetrics", "ReferenceTrial", "ReferenceConstructionResult",
+            "_next_reference_q", "_search_reference_trials", "_reference_failure",
+            "_reference_static_cause", "_reference_unit_metrics", "construct_reference_v2",
+        )),
+        ("program-k-r0b-text-constructor/v1", {
+            "_TEXT_FAMILIES": [[family, kind.value, stream, index, multiplicity]
+                               for family, kind, stream, index, multiplicity in _TEXT_FAMILIES],
+            "text_format": '"SYNTHETIC_NON_EVIDENCE|L:" + "x"*ell + "|H:" + Base64(B(h))',
+            "entropy_domain": "PROGRAM_K_R0B_TEXT_FILL_V1\0",
+            "entropy_raw_block_bytes": 49152, "base64_full_block_chars": 65536,
+            "candidate_limit": 8, "physical_window": 4096, "secant_target": "T_P",
+            "selection_order": ["actual_physical_bytes", "actual_logical_bytes", "h"],
+            "readiness_policy": "dual-independent-ceil-3-over-2/v1",
+        }, (
+            "TextTrial", "TextConstructionResult", "_text_spec", "_text_check",
+            "_text_entropy", "_text_filler", "_text_lengths", "_next_text_h",
+            "_search_text_trials", "_text_terminal_reason", "_mutate_text_bundle",
+            "_text_owned", "construct_text_family_v2",
+        )),
+    )
+    result = []
+    for policy_name, constants, names in policies:
+        sources = []
+        for name in names:
+            value = globals().get(name)
+            expected_type = type if name[0].isupper() else FunctionType
+            _need(type(value) is expected_type and value.__name__ == name
+                  and value.__qualname__ == name and value.__module__ == __name__,
+                  "CONSTRUCTOR_POLICY_SOURCE_OBJECT_REQUIRED")
+            try:
+                source = inspect.getsource(value)
+            except (OSError, TypeError):
+                raise HarnessError("CONSTRUCTOR_POLICY_SOURCE_UNAVAILABLE") from None
+            _need(type(source) is str and bool(source.strip()), "CONSTRUCTOR_POLICY_SOURCE_UNAVAILABLE")
+            sources.append({"name": name, "source": source.replace("\r\n", "\n").replace("\r", "\n")})
+        node = {"schema": "program-k-r0b-constructor-policy-source/v1", "name": policy_name,
+                "constants": constants, "sources": sources}
+        exact_source_value(node)
+        result.append(json.dumps(node, sort_keys=True, separators=(",", ":"),
+                                 ensure_ascii=True, allow_nan=False).encode("ascii"))
+    return tuple(result)
+
+
+def _constructor_policy_identities():
+    """Bind exact normalized constructor sources; no file metadata enters identity."""
+    return tuple({"name": json.loads(data)["name"], "sha256": sha256(data).hexdigest()}
+                 for data in _constructor_policy_source_bundles())
+
+
+def _capture_qualified_codec_profile():
+    """Read-only in-memory profile owner for a later separately authorized run."""
+    profile = physical.capture_qualified_profile(constructor_policies=_constructor_policy_identities())
+    physical.require_qualified_profile(profile)
+    return profile
+
+
 @dataclass(frozen=True, slots=True)
 class SyntheticMaterialization:
     coordinator: operational.CoordinatorResult

@@ -2,7 +2,7 @@
 
 Contexts must come from an authenticated outer boundary. CRC32 detects corruption;
 it does not replace that boundary's SHA-256 or semantic validation. Profile capture
-is explicit read-only I/O, and every profile in this slice remains unqualified.
+is explicit read-only I/O. Codec qualification does not activate operational paths.
 """
 
 from dataclasses import dataclass
@@ -23,6 +23,10 @@ CHUNK_BYTES = 65_536
 RAW = 0
 DEFLATE = 1
 _CRC_DOMAIN = b"PKE2RF02-CHECK\0"
+_CONSTRUCTOR_POLICY_NAMES = (
+    "program-k-r0b-reference-constructor/v1",
+    "program-k-r0b-text-constructor/v1",
+)
 
 
 class PhysicalError(ValueError):
@@ -372,7 +376,8 @@ def _artifact(node):
 def _profile_node(node):
     _keys(node, ("schema_version", "status", "contract", "writer_sources", "runtime", "constructor_policies"))
     _need(type(node["schema_version"]) is int and node["schema_version"] == 1, "PROFILE_SCHEMA_VERSION")
-    _need(node["status"] == "UNQUALIFIED_SLICE_1A", "OPERATIONAL_QUALIFICATION_UNAVAILABLE")
+    _need(type(node["status"]) is str and node["status"] in ("UNQUALIFIED_SLICE_1A", "QUALIFIED"),
+          "PROFILE_STATUS")
     # Canonical bytes comparison distinguishes e.g. true from 1 in nested facts.
     _need(_json(node["contract"]) == _json(_profile_contract()), "PROFILE_CONTRACT_MISMATCH")
     sources = node["writer_sources"]
@@ -384,6 +389,13 @@ def _profile_node(node):
     runtime = node["runtime"]
     text_keys = ("python_implementation", "python_version", "python_abi", "platform",
                  "zlib_build_version", "zlib_runtime_version")
+    provider_keys = ("zlib_provider_kind", "zlib_native_owner_role")
+    # Historical unqualified canonical bytes remain decodable. New captures and
+    # all qualified profiles use the complete extended runtime shape.
+    legacy_runtime = (node["status"] == "UNQUALIFIED_SLICE_1A" and type(runtime) is dict
+                      and set(runtime) == set(text_keys + ("artifacts", "unresolved")))
+    if not legacy_runtime:
+        text_keys += provider_keys
     _keys(runtime, text_keys + ("artifacts", "unresolved"))
     for key in text_keys:
         _text(runtime[key])
@@ -406,6 +418,19 @@ def _profile_node(node):
         _digest(item["sha256"])
     names = [item["name"] for item in policies]
     _need(names == sorted(set(names)), "PROFILE_POLICY_ORDER")
+    if node["status"] == "QUALIFIED":
+        _need(runtime["unresolved"] == [], "PROFILE_QUALIFIED_UNRESOLVED")
+        _need(tuple(names) == _CONSTRUCTOR_POLICY_NAMES, "PROFILE_QUALIFIED_POLICY_COVERAGE")
+        provider = (runtime["zlib_provider_kind"], runtime["zlib_native_owner_role"])
+        windows = runtime["platform"] == "win32"
+        if provider == ("extension-file", "zlib_extension"):
+            required = {"interpreter", "zlib_extension"} | ({"python_dll"} if windows else set())
+        else:
+            _need(provider == ("builtin-python-runtime", "python_dll") and windows,
+                  "PROFILE_ZLIB_PROVIDER")
+            required = {"interpreter", "python_dll"}
+        _need(set(roles) in (required, required | {"base_interpreter"}),
+              "PROFILE_QUALIFIED_RUNTIME_COVERAGE")
 
 
 def _unique(pairs):
@@ -441,7 +466,8 @@ class CodecProfile:
 
     @property
     def qualified(self):
-        return False
+        CodecProfile.__post_init__(self)
+        return json.loads(self.canonical_bytes)["status"] == "QUALIFIED"
 
 
 def profile_from_facts(*, writer_sources, runtime, constructor_policies=()):
@@ -464,7 +490,8 @@ def decode_profile(data):
 def require_qualified_profile(profile):
     _need(type(profile) is CodecProfile, "EXACT_CODEC_PROFILE_REQUIRED")
     CodecProfile.__post_init__(profile)
-    raise PhysicalError("OPERATIONAL_QUALIFICATION_UNAVAILABLE_IN_SLICE_1A")
+    _need(profile.qualified, "OPERATIONAL_QUALIFICATION_UNAVAILABLE_IN_SLICE_1A")
+    return profile
 
 
 def capture_profile(*, constructor_policies=()):
@@ -527,6 +554,12 @@ def capture_profile(*, constructor_policies=()):
             "platform": sys.platform,
             "zlib_build_version": zlib.ZLIB_VERSION,
             "zlib_runtime_version": zlib.ZLIB_RUNTIME_VERSION,
+            "zlib_provider_kind": ("extension-file" if native else "builtin-python-runtime"
+                if os.name == "nt" and getattr(getattr(zlib, "__spec__", None), "origin", None) == "built-in"
+                else "unresolved"),
+            "zlib_native_owner_role": ("zlib_extension" if native else "python_dll"
+                if os.name == "nt" and getattr(getattr(zlib, "__spec__", None), "origin", None) == "built-in"
+                else "unresolved"),
             "artifacts": sorted(artifacts, key=lambda item: item["role"]),
             "unresolved": sorted(unresolved),
         }
@@ -535,4 +568,129 @@ def capture_profile(*, constructor_policies=()):
     except PhysicalError:
         raise
     except (OSError, ValueError, TypeError, AttributeError):
+        raise PhysicalError("PROFILE_CAPTURE_INCOMPLETE") from None
+
+
+def _qualified_policy_facts(policies):
+    _need(type(policies) is tuple and len(policies) == 2, "PROFILE_QUALIFIED_POLICY_COVERAGE")
+    frozen = []
+    for item, expected in zip(policies, _CONSTRUCTOR_POLICY_NAMES):
+        _keys(item, ("name", "sha256"))
+        _need(type(item["name"]) is str and item["name"] == expected, "PROFILE_QUALIFIED_POLICY_COVERAGE")
+        _digest(item["sha256"])
+        frozen.append(dict(item))
+    return tuple(frozen)
+
+
+def _profile_artifact(role, path):
+    from pathlib import Path
+
+    path = Path(path).resolve(strict=True)
+    digest, size = sha256(), 0
+    with path.open("rb") as source:
+        while chunk := source.read(CHUNK_BYTES):
+            digest.update(chunk)
+            size += len(chunk)
+    result = {"role": role, "path": str(path), "byte_length": size, "sha256": digest.hexdigest()}
+    _artifact(result)
+    return result
+
+
+def _loaded_python_dll_path():
+    """Resolve the actual loaded runtime handle; never guess or search for a DLL."""
+    import ctypes
+    import sys
+    from pathlib import Path
+
+    handle = getattr(sys, "dllhandle", None)
+    _need(type(handle) is int and 0 < handle < 1 << (8 * ctypes.sizeof(ctypes.c_void_p)),
+          "PROFILE_PYTHON_DLL_HANDLE")
+    buffer = ctypes.create_unicode_buffer(32768)
+    get_name = ctypes.windll.kernel32.GetModuleFileNameW
+    get_name.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32)
+    get_name.restype = ctypes.c_uint32
+    count = get_name(ctypes.c_void_p(handle), buffer, len(buffer))
+    _need(type(count) is int and 0 < count < len(buffer) and bool(buffer.value), "PROFILE_PYTHON_DLL_PATH")
+    return Path(buffer.value).resolve(strict=True)
+
+
+def _codec_self_check(build_version, runtime_version):
+    _text(build_version)
+    _text(runtime_version)
+    _need((build_version, runtime_version) == (zlib.ZLIB_VERSION, zlib.ZLIB_RUNTIME_VERSION),
+          "PROFILE_ZLIB_VERSION_BINDING")
+    raw = encode_payload(b"x")
+    logical = b"x" * 4096
+    first, second = encode_payload(logical), encode_payload(logical)
+    for result in (raw, first, second):
+        _need(type(result) is tuple and len(result) == 2 and type(result[0]) is int
+              and type(result[1]) is bytes, "PROFILE_CODEC_SELF_CHECK_FAILED")
+    _need(raw == (RAW, b"x") and decode_payload(*raw, 1) == b"x",
+          "PROFILE_CODEC_SELF_CHECK_FAILED")
+    _need(first == second and first[0] == DEFLATE and len(first[1]) < len(logical)
+          and decode_payload(*first, len(logical)) == logical, "PROFILE_CODEC_SELF_CHECK_FAILED")
+
+
+def capture_qualified_profile(*, constructor_policies):
+    """Read exact writer/native identities and check the tiny codec in process.
+
+    This qualifies only the representation identity. It writes no artifact and
+    does not authorize persistence, a performance diagnostic, R0 or Actual E2.
+    """
+    import os
+    from pathlib import Path
+    import platform
+    import sys
+    import sysconfig
+    import types
+    import zlib as imported_zlib
+
+    policies = _qualified_policy_facts(constructor_policies)
+    try:
+        _need(type(zlib) is types.ModuleType and zlib is imported_zlib
+              and zlib is sys.modules.get("zlib") and zlib.__name__ == "zlib", "PROFILE_ZLIB_MODULE")
+        spec = getattr(zlib, "__spec__", None)
+        _need(spec is not None and getattr(spec, "name", None) == "zlib", "PROFILE_ZLIB_SPEC")
+        native, origin = getattr(zlib, "__file__", None), getattr(spec, "origin", None)
+        if native is None:
+            _need(os.name == "nt" and type(origin) is str and origin == "built-in", "PROFILE_ZLIB_PROVIDER")
+            provider, owner = "builtin-python-runtime", "python_dll"
+        else:
+            _need(type(native) is str and bool(native) and type(origin) is str and bool(origin),
+                  "PROFILE_ZLIB_PROVIDER")
+            native = Path(native).resolve(strict=True)
+            _need(native == Path(origin).resolve(strict=True), "PROFILE_ZLIB_ORIGIN_BINDING")
+            provider, owner = "extension-file", "zlib_extension"
+        directory = Path(__file__).resolve(strict=True).parent
+        writers = tuple(_profile_artifact(role, directory / filename) for role, filename in (
+            ("logical_records", "program_k_e2_records.py"), ("physical", "program_k_e2_physical.py"),
+            ("worker_bundle", "program_k_e2_execution.py")))
+        artifacts = [_profile_artifact("interpreter", sys.executable)]
+        base = getattr(sys, "_base_executable", None)
+        if base is not None:
+            _need(type(base) is str and bool(base), "PROFILE_BASE_INTERPRETER")
+            if Path(base).resolve(strict=True) != Path(sys.executable).resolve(strict=True):
+                artifacts.append(_profile_artifact("base_interpreter", base))
+        if os.name == "nt":
+            artifacts.append(_profile_artifact("python_dll", _loaded_python_dll_path()))
+        if provider == "extension-file":
+            artifacts.append(_profile_artifact("zlib_extension", native))
+        runtime = {
+            "python_implementation": platform.python_implementation(),
+            "python_version": platform.python_version(),
+            "python_abi": sysconfig.get_config_var("SOABI") or sys.implementation.cache_tag,
+            "platform": sys.platform,
+            "zlib_build_version": zlib.ZLIB_VERSION,
+            "zlib_runtime_version": zlib.ZLIB_RUNTIME_VERSION,
+            "zlib_provider_kind": provider,
+            "zlib_native_owner_role": owner,
+            "artifacts": sorted(artifacts, key=lambda item: item["role"]),
+            "unresolved": [],
+        }
+        _codec_self_check(runtime["zlib_build_version"], runtime["zlib_runtime_version"])
+        return CodecProfile(_json({"schema_version": 1, "status": "QUALIFIED", "contract": _profile_contract(),
+            "writer_sources": list(writers), "runtime": runtime, "constructor_policies": list(policies)}))
+    except PhysicalError:
+        raise
+    except (OSError, ValueError, TypeError, AttributeError, ImportError, zlib.error):
         raise PhysicalError("PROFILE_CAPTURE_INCOMPLETE") from None
