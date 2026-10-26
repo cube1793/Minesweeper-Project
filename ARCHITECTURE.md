@@ -364,6 +364,54 @@ was added.** Its partial modeled refresh leaves public observation/answer mask/
 route at the committed prefix. Reference truth never enters planner/admissibility
 or executed choice. The neutral helper creates no feature-to-feature UI dependency.
 
+
+### Stage-3 Extended: Program K / E2 remediation boundary — ACTIVE
+
+Milestone 10 **Program K: Logical Known-Mine Capability + Selective Physical
+Materialization** is the active Stage-3 Extended research milestone. Gate-R E0/E1
+qualification and Actual E1 are CLOSED / ACCEPTED, and E2 implementation slices
+I1–I8 plus the amended R0 harness are accepted historical/current implementation
+lineage. Program K effectiveness is still **NOT ESTABLISHED**.
+
+The accepted historical Real R0-A is operational non-effectiveness evidence for
+its original source/representation. Its integrity/work are CLOSED. The follow-on
+static review proved two blocks for that historical implementation: the frozen
+execution-admission projection exceeds the 12 h ceiling, and the old whole-archive
+representation exceeds the 16 GiB R0-B ceiling. These findings remain valid
+historical evidence; they are not an executed R0-B failure and are not
+retrospectively erased by a newer design.
+
+Remediation engineering investigation is **CLOSED / ACCEPTED**. The exact
+[remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
+and its [acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
+are frozen at documentation commit `83c9f0c` with **FINAL DESIGN ACCEPTED —
+BLOCKER 0 / REQUIRED 0; design phase CLOSED**. The design is an accepted future
+implementation contract, not a statement that current production source already
+implements the remediation.
+
+Accepted V1.3.1 design boundaries:
+
+| Boundary | Accepted responsibility |
+| --- | --- |
+| Logical evidence | Existing canonical `records.encode()` bytes, semantic digests and required evidence content remain unchanged |
+| Physical representation | Planned `PKE2RF02` record frames and `PKE2WB02` worker bundle; raw DEFLATE profile is qualified explicitly rather than changing logical schemas |
+| Size calibration | Physical and logical maxima produce independent 3/2 floors; the logical floor qualifies workload only and never grants archive credit |
+| P/K/D/O sizing | Two-component constructor separates repetitive logical volume from deterministic entropy used to control physical size; positive physical floors retain the inclusive `T_P .. T_P+4096` procedural window |
+| Reference sizing | Truthful 30×16 zero-mine scaffold with the complete 479-entry constraint catalog; artificial `Z` is forbidden; reference has no +4096 window and uses the bounded minimum eligible candidate |
+| Procedural archive guard | Global `B_proc` reserves fixed allowance and limits realized attributable excess before the first durable write of a complete unit; final fixed/archive caps remain independent checks |
+| Validation/store | Worker, parent, coordinator and independent readback keep separate validation responsibility; immutable keys, durability-before-progress and poison/abort on partial failure remain |
+| Compatibility | Historical V1 evidence/decoding stays unchanged; V1/V2/profile/basis mixing must fail closed |
+| Qualification gate | Before large qualification, the exact large truthful reference must run the bounded encode/decode/validation/K-D-binding wall and peak-RSS diagnostic |
+
+`RF02`, `WB02`, the two-component constructors and `B_proc` are therefore
+**accepted planned architecture**, not yet live runtime architecture. Current
+source facts continue to come from committed code/tests. The immediate next work
+unit is separately authorized **Remediation Slice 1A — RF02 / WB02 / codec /
+qualified-profile primitives**. A later accepted implementation and qualification
+must be committed before a separately authorized fresh R0-A can recalibrate the
+new source/profile. Real R0-B and Actual E2 remain separately gated after that.
+No design acceptance auto-chains execution.
+
 ### Replay
 
 | 모듈 | 책임 |
@@ -772,7 +820,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Foundation, Identity Separation, Modeled-Time Playback / Synthetic Smooth Cursor Presentation, Human Mouse Trace / Path Visualization과 Same-board Comparison은 CLOSED다. Stage-3 Extended는 ACTIVE이며 Timeline Analytics, Selected Exemplar Viewer (`ff6358a`), Visualization Usability Polish (`31630dd`)도 CLOSED다. 다음은 새 work unit의 고정 exemplar human/domain 해석이며 이후 별도 algorithm-research 방향/specification 결정이 필요하다. 이 closeout은 해석/연구를 시작하지 않는다. Stage-3 Visualizer의 incremental forward는 구현되었고 arbitrary seek는 index 0 재구성을 유지한다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐다. Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. E2 I1–I8와 기존 R0 harness는 accepted implementation lineage이며 historical Real R0-A는 accepted/closed다. Old source/representation의 execution-wall 및 R0-B archive static blocks는 historical evidence로 보존한다. Remediation investigation은 CLOSED / ACCEPTED, V1.3.1 design은 FINAL DESIGN ACCEPTED / exact-byte frozen이나 remediation implementation은 아직 NOT STARTED다. 현재 next는 별도 승인되는 Slice 1A(RF02/WB02/codec/profile primitives)이며 fresh R0-A, R0-B, Actual E2는 미승인이다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -782,16 +830,24 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 
 현재 기능에 포함되지 않은 개선 후보다.
 
-Same-board Comparison과 **Representative-board Demonstrations / Timeline Analytics**는
-**FINAL ACCEPTANCE PASS / CLOSED**다. Stage-3 Extended 자체는 **ACTIVE**다.
-Selected Exemplar Viewer도 [FINAL ACCEPTANCE PASS / CLOSED](docs/stage3-extended/STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md)다.
-[Visualization Usability Polish](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)도
-FINAL ACCEPTANCE PASS / CLOSED다. 다음은 새 ChatGPT/Codex work unit의 고정 exemplar
-human/domain 해석, 그 후 별도 algorithm-research 방향/specification 결정이다.
-Nearest exact-minimum-risk guessing using movement cost는 backlog 후보일 뿐 채택된
-정책이 아니다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제 samples로
-유지하고 synthetic route/cursor나 공통 clock과 합치지 않는다. Model C refit,
-새 solver 정책 또는 provenance schema 확장은 승인되지 않았다.
+Same-board Comparison, **Representative-board Demonstrations / Timeline Analytics**,
+Selected Exemplar Viewer, Visualization Usability Polish와 Fixed-Exemplar Human /
+Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extended 자체는
+**ACTIVE**이고 현재 milestone 10은 Program K다.
+
+Program K의 remediation engineering investigation과 V1.3.1 설계는 각각
+CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED 상태지만 실제 remediation source는 아직
+구현되지 않았다. 따라서 현재 확장 방향의 첫 항목은 accepted design을 작은 work
+unit으로 구현·검증하는 것이며, 즉시 다음은 별도 승인되는 Slice 1A
+(RF02 / WB02 / codec / qualified-profile primitives)다. 이후에도 bounded large-reference
+performance diagnostic, qualification, committed source, fresh R0-A와 재판정이 선행되어야
+Real R0-B나 Actual E2를 고려할 수 있다. Historical static blocks는 그때까지 old
+source/representation의 accepted evidence로 남는다.
+
+Nearest exact-minimum-risk guessing using movement cost는 별도 backlog 후보일 뿐 Program K
+정책에 포함되지 않는다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제
+samples로 유지하고 synthetic route/cursor나 공통 clock과 합치지 않는다. Model C refit,
+임의 cap 완화, 새 solver 정책 또는 provenance schema 확장은 별도 승인 없이 허용되지 않는다.
 
 - Live 파생 통계 계산기와 Replay controller의 추가 분리를 검토한다. ZiNi process/job owner 추출은 Viewer 공유 seam으로 완료됐다.
 - UI 표시 formatter와 계산 모델의 경계를 정리하고, exact analysis의 비동기 실행·취소 방식을 검토한다.

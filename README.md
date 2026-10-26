@@ -161,33 +161,29 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
    playback/synthetic cursor 및 두 UI의 hidden-answer/completed-route 참조.
    Qualified `31630dd6ffa2301c41534fca3b003838d865f313`.
    [Closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
-9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation.
+9. **CLOSED** — Fixed-Exemplar Human / Domain Interpretation.
    [Closeout](docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
-10. **Program K selected / research specification FROZEN / ACCEPTED** —
-    Algorithm-research direction/specification decision.
-    [Program K research specification](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md)와
-    [Gate-R E0/E1 research protocol — FROZEN / ACCEPTED](docs/stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md).
+10. **ACTIVE** — Program K: Logical Known-Mine Capability + Selective Physical Materialization.
 
-Milestones **1–9는 CLOSED 유지**, Stage-3 Extended 전체는 **ACTIVE**입니다.
-Program K — Logical Known-Mine Capability + Selective Physical Materialization의
-연구 명세와 Gate-R E0/E1 연구 protocol은 모두 **FROZEN / ACCEPTED**이며 두 문서가
-현재 Program-K documentary authorities입니다. 독립 protocol audit/re-audit 최종 결과는
-**BLOCKER 0 / REQUIRED 0 / CONTENT FREEZE PASS**입니다. **K는 UNIMPLEMENTED**이며
-**Gate R은 NOT GRANTED**입니다. **P-1..P-8은 필수**, **O-4/O-7은 protocol-required**,
-**O-5는 OPTIONAL / DEFER**입니다. A-E1..A-E4는 향후 실행 전제이며 A-E5는 조건부입니다.
-K 자체가 frozen contract 아래에서 실패하면 **Program L**(기존 V1-admissible certainty
-대안 내 local completion / target ordering)이 fallback이며 L 구현 승인도 아닙니다.
-**NEXT: bounded experimental implementation scope에 대한 명시적 Gate R authorization 결정.**
-제안된 production modifications는 **NONE**이며 구현과 E0/E1 실행은 승인되지 않았습니다.
-E2/E3도 승인되지 않았고 production integration은 이후 별도 Gate P 범위입니다.
-공식 100k 재실행은 없고 ZiNi final holdout은 미개봉/제외 상태입니다.
-Frozen Stage-3 V1은 historical authority로 유지합니다. 추가 fixed-exemplar gameplay 검토는
-필요하지 않습니다. Nearest Minimum-Risk Guess는 별도 후보이며 기존 해석은 이를
-평가하거나 지지·반박하는 구별 증거를 제공하지 않았습니다.
+현재 Program K는 **PRE-ACTUAL-E2**입니다. E2 구현 I1–I8은 8/8 COMPLETE / ACCEPTED이고,
+accepted Real R0-A는 원래 source/representation에 대해 COMPLETE / INTEGRITY PASS /
+EVIDENCE ACCEPTED / CLOSED입니다. 그 R0-A에서 도출된 execution-wall admission과
+R0-B minimum whole-archive의 두 static block은 **역사적 old-source/old-representation
+증거로 그대로 보존**되며, 아직 operationally resolved로 재해석하지 않습니다.
 
-현재 작업 복구는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md) →
-[Stage-3 Extended README](docs/stage3-extended/README.md) → 위 frozen K 명세와
-frozen Gate-R protocol 순서이며 구현 사실이 다투어지면 현재 source/tests를 확인합니다.
+후속 remediation engineering investigation은 CLOSED / ACCEPTED입니다.
+[Program K remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)은
+**FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**이고,
+[acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)는
+**BLOCKER 0 / REQUIRED 0; design phase CLOSED**를 기록합니다. Authority-freeze commit은
+`83c9f0c` (`docs: freeze accepted Program K remediation design`)입니다.
+
+Remediation implementation은 아직 **NOT STARTED**입니다. 현재 다음 work unit은 별도
+명시적 승인이 필요한 **Remediation Slice 1A — RF02 / WB02 / codec / qualified-profile
+primitives**입니다. Fresh R0-A, Real R0-B, Actual E2는 모두 **NOT AUTHORIZED / NOT RUN**이며
+Program K effectiveness는 **NOT ESTABLISHED**입니다. 자세한 현재 상태와 recovery order는
+[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Stage-3 Extended index](docs/stage3-extended/README.md)를
+우선합니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
