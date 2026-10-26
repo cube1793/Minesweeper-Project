@@ -27,6 +27,7 @@ from experiments import program_k_e2_execution as execution
 from experiments import program_k_e2_operational as operational
 from experiments import program_k_e2_qualification as qualification
 from experiments import program_k_e2_readiness as readiness
+from experiments import program_k_e2_r0_evidence as evidence
 from experiments import program_k_e2_analysis as analysis
 from experiments import program_k_e2_report as report
 from experiments import program_k_e2_game as game
@@ -1353,78 +1354,23 @@ class _FinalizationObserver:
             now - self.started, max(self.max_gap, now - self.last), self.events, True)
 
 
-# Closed metadata vocabulary for the requested R0 manifest. I2 records always
-# use their existing codec. No arbitrary imports or generic dataclass discovery.
-_FACT_TYPES = {cls.__name__: cls for cls in (
-    RunProvenance, FileFact, ArchiveAccounting, FinalizationFact, operational.OperatingEnvelope,
-    operational.R0Work, operational.R0UnitMeasurement, operational.R0ComponentMeasurement,
-    operational.R0SetupMeasurement, operational._R0Observation, operational.UnitReceipt, operational.CoordinatorResult,
-    readiness.AmendmentProvenance, readiness.SubsetCounts, readiness.SyntheticCorpusSelection,
-    readiness.SyntheticWorkload, readiness.R0APlan, readiness.ComponentMeasurement,
-    readiness.OracleMeasurement, readiness.WallRouteMeasurement, readiness.ReferenceMeasurement,
-    readiness.RouteContainment, readiness.R0AConcurrencyMeasurement, readiness.ComponentSizes,
-    readiness.SupportingStreams, readiness.PhaseMeasurement, readiness.R0BMeasurement,
-)}
-_FACT_ENUMS = {cls.__name__: cls for cls in (operational.R0Component, execution.WorkerKind,
-    records.AuditStatus, records.Phase, readiness.WallAccounting, readiness.ByteAccounting)}
-_FACT_RECORDS = (records.BoardIdentity, records.RuntimeIdentity, records.SourceBlobIdentity,
-                 records.StreamDigest)
+# Constructor/error ownership remains here. The pure codec accepts exactly these
+# four local types through a closed compatibility parameter, without importing us.
+_LOCAL_FACT_TYPES = (RunProvenance, FileFact, ArchiveAccounting, FinalizationFact)
 
 
 def _fact_node(value):
-    if value is None or type(value) in (str, int, bool):
-        return value
-    if type(value) is bytes:
-        return {"bytes": value.hex()}
-    if type(value) is Fraction:
-        return {"fraction": [value.numerator, value.denominator]}
-    if type(value) is tuple:
-        return [_fact_node(v) for v in value]
-    if type(value) is records.StreamDigest:
-        records.StreamDigest.__post_init__(value)
-        return {"stream": [value.name, value.sha256, value.byte_length, value.record_count]}
-    if type(value) in _FACT_RECORDS:
-        return {"record": records.encode(value).decode("ascii")}
-    if type(value) in _FACT_ENUMS.values():
-        return {"enum": type(value).__name__, "value": value.value}
-    _need(type(value) in _FACT_TYPES.values(), "UNSUPPORTED_R0_METADATA")
-    if hasattr(type(value), "__post_init__"):
-        type(value).__post_init__(value)
-    return {"fact": type(value).__name__, "fields":
-            {field.name: _fact_node(getattr(value, field.name)) for field in fields(value)}}
+    try:
+        return evidence.fact_node_v1(value, local_fact_types=_LOCAL_FACT_TYPES)
+    except evidence.EvidenceError as error:
+        raise HarnessError(str(error)) from None
 
 
 def _fact_read(node):
-    if node is None or type(node) in (str, int, bool):
-        return node
-    if type(node) is list:
-        return tuple(_fact_read(v) for v in node)
-    _need(type(node) is dict, "INVALID_R0_METADATA")
-    if set(node) == {"bytes"}:
-        _need(type(node["bytes"]) is str, "INVALID_R0_BYTES")
-        value = bytes.fromhex(node["bytes"])
-        _need(value.hex() == node["bytes"], "NONCANONICAL_R0_BYTES")
-        return value
-    if set(node) == {"fraction"}:
-        a, b = node["fraction"]
-        _need(type(a) is int and type(b) is int and b > 0, "INVALID_R0_FRACTION")
-        value = Fraction(a, b)
-        _need((value.numerator, value.denominator) == (a, b), "NONCANONICAL_R0_FRACTION")
-        return value
-    if set(node) == {"stream"}:
-        return records.StreamDigest(*node["stream"])
-    if set(node) == {"record"}:
-        value = records.decode(node["record"].encode("ascii"))
-        _need(type(value) in _FACT_RECORDS, "UNSUPPORTED_METADATA_RECORD")
-        return value
-    if set(node) == {"enum", "value"}:
-        _need(node["enum"] in _FACT_ENUMS, "UNSUPPORTED_METADATA_ENUM")
-        return _FACT_ENUMS[node["enum"]](node["value"])
-    _need(set(node) == {"fact", "fields"} and node["fact"] in _FACT_TYPES, "UNSUPPORTED_METADATA_FACT")
-    cls = _FACT_TYPES[node["fact"]]
-    _need(type(node["fields"]) is dict and set(node["fields"]) == {f.name for f in fields(cls)},
-          "METADATA_FIELDS_MISMATCH")
-    return cls(**{name: _fact_read(value) for name, value in node["fields"].items()})
+    try:
+        return evidence.fact_read_v1(node, local_fact_types=_LOCAL_FACT_TYPES)
+    except evidence.EvidenceError as error:
+        raise HarnessError(str(error)) from None
 
 
 def _inventory(root, *, exclude=(), check=lambda: None, progress=None):

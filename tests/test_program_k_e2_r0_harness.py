@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError, fields, replace
 from fractions import Fraction
+import inspect
 import json
 import os
 from pathlib import Path
@@ -2014,3 +2015,117 @@ class OperatorEvidenceTests(unittest.TestCase):
             with self.subTest(node=node), self.assertRaises(h.HarnessError):
                 h._fact_read(node)
 # EVIDENCE_TESTS_END
+
+
+class V1MetadataSeamCompatibilityTests(unittest.TestCase):
+    """Pre-Slice-1B wire nodes from the committed codec; no live run or I/O."""
+
+    @staticmethod
+    def _local_golden_facts():
+        file = h.FileFact("fixture.bin", 7, "a" * 64)
+        file_node = {"fact": "FileFact", "fields": {
+            "path": "fixture.bin", "byte_length": 7, "sha256": "a" * 64}}
+        accounting = h.ArchiveAccounting((file,), 3, 4, 7)
+        accounting_node = {"fact": "ArchiveAccounting", "fields": {
+            "files": [file_node], "attributable_bytes": 3,
+            "fixed_allowance_bytes": 4, "archive_bytes": 7}}
+        stages = (("writes", 1, 4), ("manifest_inventory", 0, 1),
+                  ("accounting_inventory", 0, 1), ("source_recheck", 0, 1), ("cleanup", 0, 1))
+        finalization = h.FinalizationFact(stages, 13, 5, 2, False)
+        finalization_node = {"fact": "FinalizationFact", "fields": {
+            "stages": [["writes", 1, 4], ["manifest_inventory", 0, 1],
+                       ["accounting_inventory", 0, 1], ["source_recheck", 0, 1], ["cleanup", 0, 1]],
+            "wall_ns": 13, "max_progress_gap_ns": 5, "progress_events": 2, "complete": False}}
+        path = "experiments/program_k_e2_r0_harness.py"
+        source = records.SourceBlobIdentity(path, "b" * 40, "c" * 64, 17)
+        runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os", "fixture-platform",
+                                          "fixture-arch", None)
+        provenance = h.RunProvenance("cdba3513c23df77ba44449af1e551889a6954768", "e" * 40,
+            (source,), ((path, "d" * 64, 19, True),), runtime, "synthetic-python", True)
+        # Literal canonical embedded-record strings pin their historical wrapping
+        # independently of either the harness wrapper or the new evidence codec.
+        source_wire = ('{"fields":{"blob_id":"' + "b" * 40 + '","byte_length":17,"path":"'
+                       + path + '","sha256":"' + "c" * 64
+                       + '"},"kind":"source_blob_identity","version":1}')
+        runtime_wire = ('{"fields":{"architecture":"fixture-arch","host":null,"os":"fixture-os",'
+                        '"platform":"fixture-platform","python_implementation":"FixturePython",'
+                        '"python_version":"0"},"kind":"runtime_identity","version":1}')
+        provenance_node = {"fact": "RunProvenance", "fields": {
+            "selection_source_head": "cdba3513c23df77ba44449af1e551889a6954768",
+            "r0_harness_source_head": "e" * 40, "sources": [{"record": source_wire}],
+            "working_files": [[path, "d" * 64, 19, True]], "runtime": {"record": runtime_wire},
+            "executable": "synthetic-python", "dont_write_bytecode": True}}
+        return ((file, file_node), (accounting, accounting_node),
+                (finalization, finalization_node), (provenance, provenance_node))
+
+    def test_four_harness_public_fact_names_keep_literal_v1_nodes_and_exact_types(self):
+        pairs = self._local_golden_facts()
+        self.assertEqual({type(value) for value, _ in pairs},
+                         {h.RunProvenance, h.FileFact, h.ArchiveAccounting, h.FinalizationFact})
+        for value, expected in pairs:
+            with self.subTest(fact=type(value).__name__):
+                self.assertEqual(h._fact_node(value), expected)
+                rebuilt = h._fact_read(expected)
+                self.assertIs(type(rebuilt), type(value))
+                self.assertEqual(rebuilt, value)
+                self.assertEqual(h._fact_node(rebuilt), expected)
+                self.assertEqual(h._canonical(h._fact_node(value)),
+                    json.dumps(expected, sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=True, allow_nan=False).encode("ascii") + b"\n")
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(rebuilt, fields(rebuilt)[0].name, None)
+        accounting = h._fact_read(pairs[1][1])
+        self.assertIs(type(accounting.files), tuple)
+        self.assertIs(type(accounting.files[0]), h.FileFact)
+        provenance = h._fact_read(pairs[3][1])
+        self.assertIs(type(provenance.sources[0]), records.SourceBlobIdentity)
+        self.assertIs(type(provenance.runtime), records.RuntimeIdentity)
+
+    def test_wrapper_call_shapes_and_representative_scalar_wire_remain_exact(self):
+        self.assertEqual(tuple(inspect.signature(h._fact_node).parameters), ("value",))
+        self.assertEqual(tuple(inspect.signature(h._fact_read).parameters), ("node",))
+        value = (None, "literal", 7, True, False, b"\x00\xff", Fraction(-7, 3),
+                 records.AuditStatus.INCOMPLETE)
+        node = [None, "literal", 7, True, False, {"bytes": "00ff"},
+                {"fraction": [-7, 3]}, {"enum": "AuditStatus", "value": "INCOMPLETE"}]
+        self.assertEqual(h._fact_node(value), node)
+        restored = h._fact_read(node)
+        self.assertEqual(restored, value)
+        self.assertEqual(tuple(type(item) for item in restored), tuple(type(item) for item in value))
+
+    def test_wrapper_preserves_harness_error_diagnoses_and_closed_vocabulary(self):
+        with self.assertRaisesRegex(h.HarnessError, "UNSUPPORTED_R0_METADATA"):
+            h._fact_node(object())
+        cases = (({"fact": "Unregistered", "fields": {}}, "UNSUPPORTED_METADATA_FACT"),
+                 ({"enum": "Unregistered", "value": "PASS"}, "UNSUPPORTED_METADATA_ENUM"),
+                 ({"fact": "FileFact", "fields": {"path": "fixture.bin"}}, "METADATA_FIELDS_MISMATCH"),
+                 ({"fraction": [2, 4]}, "NONCANONICAL_R0_FRACTION"),
+                 ({"bytes": "FF"}, "NONCANONICAL_R0_BYTES"))
+        for node, diagnosis in cases:
+            with self.subTest(diagnosis=diagnosis), self.assertRaisesRegex(h.HarnessError, diagnosis):
+                h._fact_read(node)
+
+    def test_harness_local_constructor_validation_is_unchanged(self):
+        file, accounting, finalization, provenance = (value for value, _ in self._local_golden_facts())
+        cases = ((file, {"byte_length": True}), (file, {"path": "../escape"}),
+                 (accounting, {"archive_bytes": 8}), (accounting, {"files": [file]}),
+                 (finalization, {"complete": True}), (finalization, {"wall_ns": 0}),
+                 (provenance, {"dont_write_bytecode": False}),
+                 (provenance, {"selection_source_head": "f" * 40}))
+        for value, changes in cases:
+            with self.subTest(fact=type(value).__name__, changes=changes), self.assertRaises(h.HarnessError):
+                replace(value, **changes)
+
+    def test_existing_v1_schema_owners_retain_exact_identifiers(self):
+        # These owners intentionally remain V1. Inspecting code constants avoids
+        # invoking I/O/orchestration merely to exercise their unchanged literals.
+        owners = ((h._r0a_evidence_node, "program-k-e2-r0a-observations/v1"),
+                  (h.read_r0a_evidence, "program-k-e2-r0a-observations/v1"),
+                  (h._finish_run, "program-k-e2-r0-run/v1"),
+                  (h._validate_run_manifest, "program-k-e2-r0-run/v1"),
+                  (h._close_experiment_archive, "program-k-e2-r0b-experiment/v1"),
+                  (h.account_experiment_archive, "program-k-e2-r0b-experiment/v1"))
+        for function, expected in owners:
+            with self.subTest(owner=function.__name__):
+                self.assertIn(expected, function.__code__.co_consts)
+                self.assertNotIn(expected[:-1] + "2", function.__code__.co_consts)
