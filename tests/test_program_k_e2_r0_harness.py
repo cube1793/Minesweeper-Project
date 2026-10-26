@@ -3957,3 +3957,545 @@ class QualifiedHarnessProfileTests(unittest.TestCase):
             data = path.read_bytes()
             self.assertEqual(artifacts[role], dict(role=role, path=str(path), byte_length=len(data),
                                                  sha256=sha256(data).hexdigest()))
+
+
+class V2MaterializationTransactionTests(unittest.TestCase):
+    """Bounded constructor-to-RF02 transactions, never a full R0 materializer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = h._capture_qualified_codec_profile()
+        cls.work, baseline = _reference_fixture()
+        cap = max(len(execution.encode_bundle(value)) for value in baseline.values()) + 1024
+        cls.envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=cap)
+        logical = _text_logical_bytes(baseline[execution.WorkerKind.PRIMARY], "reference")
+        targets = _reference_targets(cls.work,
+            logical_reference=logical + h._reference_prefix(7).added_length(7))
+        with patch.object(execution, "_materialize_board", side_effect=AssertionError("No board generation")), \
+                patch.object(execution.runner, "run_k_p0", side_effect=AssertionError("No solver")), \
+                patch.object(execution.runner, "run_k_control", side_effect=AssertionError("No solver")):
+            cls.constructed = h.construct_reference_v2(cls.work, targets, cls.profile.sha256,
+                max_payload_bytes=cap, envelope=cls.envelope)
+        if cls.constructed.rejection_reason is not None:
+            raise AssertionError(cls.constructed.rejection_reason)
+        cls.wires = cls.constructed.selected_wires
+        cls.views = tuple(execution.decode_bundle_view_v2(wire, cls.profile.sha256,
+            max_payload_bytes=cap) for wire in cls.wires)
+        cls.results = tuple(h._synthetic_v2_operation_result(cls.work, kind, wire,
+            cls.profile, cls.envelope, prior_primary_wire=None if index == 0 else cls.wires[0])
+            for index, (kind, wire) in enumerate(zip(operational._kinds(cls.work), cls.wires)))
+        # Independent existing fixture partition: only PRIMARY.control_maintenance
+        # owns Reference; copied K/D premises remain in their respective families.
+        cls.actual = {family: tuple(sum(_text_family_metrics(view, family)[axis]
+            for view in cls.views) for axis in (0, 1)) for family in readiness.V2_FAMILIES}
+        cls.targets = readiness.DualComponentSizes(*(readiness.ComponentSizes(
+            *(cls.actual[family][axis] for family in readiness.V2_FAMILIES)) for axis in (0, 1)))
+        cls.owned = readiness.V2_FAMILIES
+
+    @contextmanager
+    def sink(self, envelope=None):
+        with tempfile.TemporaryDirectory() as directory:
+            sink = operational._V2EvidenceSink(directory, self.envelope if envelope is None else envelope,
+                                                self.profile)
+            try:
+                yield Path(directory), sink
+            finally:
+                sink.close()
+
+    def prepare(self, **changes):
+        arguments = dict(work=self.work, results=self.results, targets=self.targets,
+                         profile=self.profile, envelope=self.envelope, owned_families=self.owned)
+        arguments.update(changes)
+        return h._prepare_v2_materialization_unit(**arguments)
+
+    def transact(self, sink, ledger=None, **changes):
+        arguments = dict(work=self.work, results=self.results, targets=self.targets,
+            profile=self.profile, envelope=sink.envelope, owned_families=self.owned,
+            ledger=readiness.ProceduralLedger(0) if ledger is None else ledger, sink=sink)
+        arguments.update(changes)
+        return h._materialize_v2_unit(**arguments)
+
+    @staticmethod
+    def snapshot(sink):
+        return (sink.byte_length, sink.durable_units, sink.durable_primary_boards,
+            sink.event_ordinal, sink.resource_ordinal, tuple((name, writer.path.read_bytes(),
+                writer.byte_length, writer.record_count, writer.last_key, writer.dirty)
+                for name, writer in sink.writers.items()))
+
+    def excess_targets(self, **excesses):
+        return replace(self.targets, physical=replace(self.targets.physical,
+            **{family: self.actual[family][0] - amount for family, amount in excesses.items()}))
+
+    def test_actual_q7_constructor_adapter_prepare_exact_persistence_and_rf02_scan(self):
+        self.assertEqual(self.constructed.q_lo, 7)
+        self.assertLessEqual(len(self.constructed.trials), 8)
+        self.assertLess(self.constructed.q_hi, 1000)
+        self.assertEqual(len(self.results), 3)
+        expected = {name: b"" for name in execution.STREAM_NAMES}
+        for result, view in zip(self.results, self.views):
+            self.assertEqual(result.receipt.reason, "SYNTHETIC_MATERIALIZATION")
+            self.assertEqual((result.receipt.elapsed_ns, result.receipt.exit_code), (0, None))
+            self.assertEqual((result.samples, result.observation), ((), None))
+            self.assertEqual((result.logical_bytes, result.physical_frame_bytes,
+                result.legacy_bundle_bytes, result.wb02_wire_bytes),
+                (view.logical_bytes, view.frame_bytes, view.legacy_bytes, view.wire_bytes))
+            for row in view.rows:
+                expected[row.stream_name] += row.frame_bytes
+        before = readiness.ProceduralLedger(0)
+        with self.sink() as (root, sink), \
+                patch.object(h.store.FramedStreamWriter, "append", side_effect=AssertionError("No re-encoding")):
+            result = self.transact(sink, before)
+            self.assertIsNot(result.ledger, before)
+            self.assertEqual(result.ledger, before)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (3, 1))
+            self.assertEqual(result.receipts, tuple(value.receipt for value in self.results))
+            self.assertFalse(result.ledger.reservation_pending)
+            self.assertEqual(result.ledger.reserved_excess, 0)
+            for name, raw in expected.items():
+                self.assertEqual((root / (name + ".pkf")).read_bytes(), raw, name)
+            scanned = {}
+            for digest in sink.seal():
+                rows = []
+                self.assertEqual(h.store.scan_framed_stream(root, digest.name,
+                    physical.context_for(digest.name, self.profile.sha256),
+                    visit=lambda key, value, logical, length: rows.append((key, logical, length))), digest)
+                scanned[digest.name] = rows
+            for family in self.owned:
+                physical_total = logical_total = 0
+                for view in self.views:
+                    for row in view.rows:
+                        if _text_owned(row.stream_name, view.bundle.kind, family):
+                            durable = next(value for value in scanned[row.stream_name] if value[0] == row.key)
+                            logical_total += len(durable[1])
+                            physical_total += durable[2]
+                total = next(value for value in result.family_totals if value.family == family)
+                self.assertEqual((total.physical_bytes, total.logical_bytes, total.physical_excess),
+                                 (physical_total, logical_total, 0))
+            self.assertFalse(list(root.glob("*.jsonl")))
+            self.assertFalse((root / "COMPLETE.json").exists())
+        self.assertEqual(before, readiness.ProceduralLedger(0))
+
+    def test_preparation_revalidates_all_wires_primary_binding_and_exact_policy_calls(self):
+        with patch.object(operational, "_fresh_wb02_context", wraps=operational._fresh_wb02_context) as fresh, \
+                patch.object(readiness, "evaluate_family_size", wraps=readiness.evaluate_family_size) as evaluate, \
+                patch.object(readiness, "unit_physical_excess", wraps=readiness.unit_physical_excess) as excess:
+            prepared = self.prepare()
+        top = [call for call in fresh.call_args_list if "prior_primary_wire" in call.kwargs]
+        self.assertEqual(len(top), 3)
+        for index, call in enumerate(top):
+            self.assertIs(call.args[0], self.wires[index])
+            self.assertIs(call.kwargs["prior_primary_wire"], None if index == 0 else self.wires[0])
+        self.assertEqual([call.args for call in evaluate.call_args_list], [
+            (family, *self.actual[family], *self.actual[family]) for family in self.owned])
+        excess.assert_called_once_with(prepared.family_evaluations)
+        self.assertEqual(prepared.physical_family_bytes,
+                         tuple((family, self.actual[family][0]) for family in self.owned))
+        self.assertEqual(prepared.logical_family_bytes,
+                         tuple((family, self.actual[family][1]) for family in self.owned))
+        self.assertEqual(prepared.physical_excess, 0)
+        self.assertFalse(hasattr(prepared, "__dict__"))
+        self.assertTrue({"context", "validated", "token", "path", "trusted"}.isdisjoint(
+            field.name for field in fields(prepared)))
+        with self.assertRaises(FrozenInstanceError):
+            prepared.physical_excess = 1
+        import pickle
+        with self.assertRaises((TypeError, ValueError)):
+            pickle.dumps(prepared)
+
+    def test_copied_reference_is_owned_once_and_exact_kd_frames_remain_charged(self):
+        targets = self.excess_targets(reference=3, k_control=2, determinism=1)
+        with self.sink() as (_, sink), \
+                patch.object(readiness, "unit_physical_excess", wraps=readiness.unit_physical_excess) as excess:
+            result = self.transact(sink, readiness.ProceduralLedger(6), targets=targets)
+        self.assertEqual(result.ledger.committed_excess, 6)
+        for call in excess.call_args_list:
+            self.assertEqual([value.family for value in call.args[0]].count("reference"), 1)
+        reference = next(value for value in result.family_totals if value.family == "reference")
+        primary_rows = tuple(row for row in self.views[0].rows if row.stream_name == "control_maintenance")
+        self.assertEqual(reference.physical_bytes, sum(row.frame_length for row in primary_rows))
+        copied = [row for view in self.views[1:] for row in view.rows if row.stream_name == "control_maintenance"]
+        self.assertTrue(copied)
+        self.assertEqual({row.logical_bytes for row in copied}, {row.logical_bytes for row in primary_rows})
+        for family, view in (("determinism", self.views[1]), ("k_control", self.views[2])):
+            value = next(value for value in result.family_totals if value.family == family)
+            self.assertEqual(value.physical_bytes, _text_family_metrics(view, family)[0])
+
+    def test_unknown_duplicate_missing_and_unscheduled_ownership_rejects(self):
+        cases = ((), list(self.owned), self.owned + ("unknown",), self.owned + ("reference",),
+                 self.owned[:-1], self.owned[::-1])
+        with patch.object(readiness, "reserve_procedural_unit", side_effect=AssertionError("No reservation")) as reserve:
+            for owned in cases:
+                with self.subTest(owned=owned), self.assertRaises(ValueError):
+                    self.prepare(owned_families=owned)
+            with self.assertRaises(ValueError):
+                self.prepare(work=replace(self.work, k_control_selected=False))
+        reserve.assert_not_called()
+
+    def test_zero_oracle_cannot_be_claimed_from_coverage_without_audit_bytes(self):
+        work, bundles = _text_fixture(oracle=0)
+        wires = tuple(execution.encode_bundle_v2(bundles[kind], self.profile.sha256,
+            max_payload_bytes=self.envelope.max_payload_bytes) for kind in operational._kinds(work))
+        results = tuple(h._synthetic_v2_operation_result(work, kind, wire, self.profile, self.envelope,
+            prior_primary_wire=None if index == 0 else wires[0])
+            for index, (kind, wire) in enumerate(zip(operational._kinds(work), wires)))
+        targets = replace(self.targets,
+            physical=replace(self.targets.physical, oracle_primary=0, oracle_repeat=0),
+            logical=replace(self.targets.logical, oracle_primary=0, oracle_repeat=0))
+        with self.assertRaises(ValueError):
+            self.prepare(work=work, results=results, targets=targets)
+
+    def test_result_shapes_status_scalars_profile_and_work_cannot_supply_authority(self):
+        missing = replace(self.results[0], receipt=replace(self.results[0].receipt,
+            status=records.AuditStatus.INCOMPLETE, reason="CASE_TIMEOUT"), wire=None,
+            logical_bytes=0, physical_frame_bytes=0, legacy_bundle_bytes=0, wb02_wire_bytes=0)
+        cases = [list(self.results), self.results[::-1], self.results[:-1],
+                 (missing,) + self.results[1:],
+                 (replace(self.results[0], codec_profile_sha256=b"x" * 32),) + self.results[1:]]
+        for name in ("logical_bytes", "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"):
+            bad = replace(self.results[0])
+            object.__setattr__(bad, name, getattr(bad, name) + 1)
+            cases.append((bad,) + self.results[1:])
+        for results in cases:
+            with self.subTest(results_type=type(results)), self.assertRaises(ValueError):
+                self.prepare(results=results)
+        for changes in ({"profile": self.profile.sha256}, {"work": replace(self.work, position=8)}):
+            with self.assertRaises(ValueError):
+                self.prepare(**changes)
+
+    def test_wrong_copied_primary_premise_is_rejected_by_fresh_validation(self):
+        other = h._reference_bundles(self.work, h._reference_prefix(0), 0)[0]
+        wire = execution.encode_bundle_v2(other, self.profile.sha256,
+                                           max_payload_bytes=self.envelope.max_payload_bytes)
+        result = h._synthetic_v2_operation_result(self.work, execution.WorkerKind.PRIMARY,
+                                                  wire, self.profile, self.envelope)
+        with self.assertRaises(ValueError):
+            self.prepare(results=(result,) + self.results[1:])
+
+    def test_synthetic_adapter_requires_explicit_samples_and_fresh_scalar_observations(self):
+        sample = records.ResourceSampleRecord(operational._unit_id(self.work.position,
+            execution.WorkerKind.PRIMARY), records.ProcessRole.COMBINED, 0, 5, 5,
+            "synthetic:fixture", 0, records.MemoryMethod.PRIVATE_BYTES)
+        with patch.object(operational, "_fresh_wb02_context", wraps=operational._fresh_wb02_context) as fresh:
+            result = h._synthetic_v2_operation_result(self.work, execution.WorkerKind.PRIMARY,
+                self.wires[0], self.profile, self.envelope, samples=(sample,))
+        fresh.assert_called_once()
+        self.assertEqual(result.samples, (sample,))
+        self.assertIs(result.wire, self.wires[0])
+        for wire in (bytearray(self.wires[0]), self.wires[0][:-1]):
+            with self.assertRaises(ValueError):
+                h._synthetic_v2_operation_result(self.work, execution.WorkerKind.PRIMARY,
+                                                  wire, self.profile, self.envelope)
+
+    def test_reserve_precedes_all_admission_and_final_checkpoint_precedes_commit(self):
+        events = []
+        reserve, commit = readiness.reserve_procedural_unit, readiness.commit_procedural_unit
+        checkpoint = h.store.FramedStreamWriter.checkpoint
+        original = readiness.ProceduralLedger(3)
+        with self.sink() as (_, sink):
+            admit = sink.admit
+            def reserved(ledger, evaluations):
+                events.append("reserve")
+                return reserve(ledger, evaluations)
+            def admitted(*args, **kwargs):
+                events.append("admit")
+                return admit(*args, **kwargs)
+            def durable(writer):
+                value = checkpoint(writer)
+                events.append("durable")
+                return value
+            def committed(ledger):
+                events.append("commit")
+                self.assertEqual((sink.durable_units, sink.durable_primary_boards), (3, 1))
+                self.assertTrue(all(not writer.dirty for writer in sink.writers.values()))
+                return commit(ledger)
+            with patch.object(readiness, "reserve_procedural_unit", side_effect=reserved), \
+                    patch.object(sink, "admit", side_effect=admitted), \
+                    patch.object(h.store.FramedStreamWriter, "checkpoint", new=durable), \
+                    patch.object(readiness, "commit_procedural_unit", side_effect=committed):
+                result = self.transact(sink, original, targets=self.excess_targets(reference=3))
+        self.assertEqual((events[0], events[-1]), ("reserve", "commit"))
+        self.assertEqual(events.count("admit"), 3)
+        self.assertEqual(events[-2], "durable")
+        self.assertEqual(result.ledger, readiness.ProceduralLedger(3, 3))
+        self.assertEqual(original, readiness.ProceduralLedger(3))
+
+    def test_zero_and_remaining_budget_edges_are_prewrite_and_immutable(self):
+        cases = ((0, 0, 0, True), (0, 0, 1, False), (10, 7, 3, True), (10, 7, 4, False))
+        for capacity, used, excess, succeeds in cases:
+            ledger = readiness.ProceduralLedger(capacity, used)
+            with self.subTest(capacity=capacity, used=used, excess=excess), self.sink() as (_, sink), \
+                    patch.object(sink, "admit", wraps=sink.admit) as admit, \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                before = self.snapshot(sink)
+                if succeeds:
+                    result = self.transact(sink, ledger, targets=self.excess_targets(reference=excess))
+                    self.assertEqual(result.ledger.committed_excess, used + excess)
+                    self.assertIsNot(result.ledger, ledger)
+                    self.assertEqual(commit.call_count, 1)
+                else:
+                    with self.assertRaisesRegex(readiness.ReadinessError, "^SYNTHETIC_PROCEDURAL_EXCESS_BUDGET$"):
+                        self.transact(sink, ledger, targets=self.excess_targets(reference=excess))
+                    admit.assert_not_called()
+                    commit.assert_not_called()
+                    self.assertEqual(self.snapshot(sink), before)
+                self.assertEqual(ledger, readiness.ProceduralLedger(capacity, used))
+
+    def test_ineligible_family_shortfalls_never_reserve_or_cross_credit(self):
+        base = self.excess_targets(reference=3)
+        cases = ((replace(base, physical=replace(base.physical, primary=self.actual["primary"][0] + 1)),
+                  "SYNTHETIC_PHYSICAL_MINIMUM_SHORTFALL"),
+                 (replace(base, logical=replace(base.logical, reference=self.actual["reference"][1] + 1)),
+                  "SYNTHETIC_LOGICAL_MINIMUM_SHORTFALL"))
+        for targets, reason in cases:
+            ledger = readiness.ProceduralLedger(10)
+            with self.subTest(reason=reason), self.sink() as (_, sink), \
+                    patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve, \
+                    patch.object(sink, "admit", wraps=sink.admit) as admit, \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                before = self.snapshot(sink)
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.transact(sink, ledger, targets=targets)
+                reserve.assert_not_called()
+                admit.assert_not_called()
+                commit.assert_not_called()
+                self.assertEqual(self.snapshot(sink), before)
+                self.assertEqual(ledger, readiness.ProceduralLedger(10))
+
+    def test_text_window_reference_exception_and_unused_window_have_no_budget_credit(self):
+        accepted = readiness.evaluate_family_size("primary", 10, 10, 4106, 10)
+        rejected = readiness.evaluate_family_size("primary", 10, 10, 4107, 10)
+        reference = readiness.evaluate_family_size("reference", 10, 10, 5010, 10)
+        self.assertTrue(accepted.eligible and reference.eligible)
+        self.assertEqual(rejected.rejection_reason, "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT")
+        self.assertEqual(readiness.unit_physical_excess((accepted, reference)), 9096)
+        ledger = readiness.ProceduralLedger(9096)
+        with self.assertRaisesRegex(readiness.ReadinessError, "SYNTHETIC_TEXT_PHYSICAL_OVERSHOOT"):
+            readiness.reserve_procedural_unit(ledger, (rejected, reference))
+        self.assertEqual(ledger, readiness.ProceduralLedger(9096))
+        spare_window = readiness.evaluate_family_size("primary", 10, 10, 10, 10**9)
+        one = readiness.evaluate_family_size("reference", 10, 10, 11, 10)
+        with self.assertRaisesRegex(readiness.ReadinessError, "SYNTHETIC_PROCEDURAL_EXCESS_BUDGET"):
+            readiness.reserve_procedural_unit(readiness.ProceduralLedger(0), (spare_window, one))
+
+    def test_ledger_initializer_binds_existing_capacity_and_negative_budget_fails_before_sink(self):
+        counts = (10000, 256, 128, 1, 256, 256)  # Supplied scalar policy fixture, no workload loop.
+        available = identity.MAX_ARCHIVE_BYTES - identity.FIXED_REPORT_RECEIPT_ALLOWANCE
+        physical_targets = readiness.ComponentSizes(1, 1, 1, available - 10896, 1, 1)
+        targets = readiness.DualComponentSizes(physical_targets, physical_targets)
+        with patch.object(readiness, "procedural_excess_capacity", wraps=readiness.procedural_excess_capacity) as capacity:
+            ledger = h._new_v2_materialization_ledger(targets, counts)
+        capacity.assert_called_once_with(targets.physical, counts)
+        self.assertEqual(ledger, readiness.ProceduralLedger(0))
+        changed_logical = replace(targets, logical=replace(targets.logical, primary=10**9))
+        self.assertEqual(h._new_v2_materialization_ledger(changed_logical, counts), ledger)
+        negative = replace(targets, physical=replace(physical_targets,
+                                                     oracle_repeat=physical_targets.oracle_repeat + 1))
+        with patch.object(operational._V2EvidenceSink, "admit", side_effect=AssertionError("No persistence")) as admit, \
+                self.assertRaisesRegex(readiness.ReadinessError, "SYNTHETIC_PROCEDURAL_FIXED_RESERVATION_INFEASIBLE"):
+            h._new_v2_materialization_ledger(negative, counts)
+        admit.assert_not_called()
+
+    def test_append_fsync_and_primary_progress_failures_abort_without_commit_or_totals(self):
+        original_append = h.store.FramedStreamWriter.append_frame
+        original_checkpoint = h.store.FramedStreamWriter.checkpoint
+        for case in ("append", "checkpoint", "progress"):
+            ledger = readiness.ProceduralLedger(3)
+            initial = tuple(h._V2FamilyTotal(name, 0, 0, 0) for name in self.owned)
+            state = dict(fired=False)
+            def append(writer, key, logical, frame):
+                value = original_append(writer, key, logical, frame)
+                progress = (writer.stream_name == "operations"
+                    and records.decode(logical).event_kind is records.EventKind.PROGRESS)
+                if not state["fired"] and ((case == "append" and writer.stream_name in execution.STREAM_NAMES)
+                                           or (case == "progress" and progress)):
+                    state["fired"] = True
+                    raise h.store.StoreError("SLICE1L_EXACT_APPEND_FAILURE")
+                return value
+            def checkpoint(writer):
+                if case == "checkpoint" and not state["fired"]:
+                    state["fired"] = True
+                    raise h.store.StoreError("SLICE1L_CHECKPOINT_FAILURE")
+                return original_checkpoint(writer)
+            with self.subTest(case=case), self.sink() as (root, sink), \
+                    patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve, \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                with patch.object(h.store.FramedStreamWriter, "append_frame", new=append), \
+                        patch.object(h.store.FramedStreamWriter, "checkpoint", new=checkpoint), \
+                        self.assertRaisesRegex(h.store.StoreError, "SLICE1L_"):
+                    self.transact(sink, ledger, targets=self.excess_targets(reference=3), family_totals=initial)
+                self.assertEqual(reserve.call_count, 1)
+                commit.assert_not_called()
+                self.assertTrue(state["fired"] and sink.poisoned)
+                self.assertEqual((sink.durable_units, sink.durable_primary_boards), (0, 0))
+                self.assertEqual(ledger, readiness.ProceduralLedger(3))
+                self.assertTrue(all(value.physical_bytes == value.logical_bytes == value.physical_excess == 0
+                                    for value in initial))
+                sink.close()
+                retained = {path.name: path.read_bytes() for path in root.glob("*.pkf")}
+                self.assertGreater(sum(map(len, retained.values())), 0)
+                with self.assertRaises(ValueError):
+                    sink.seal()
+                sink.close()
+                self.assertEqual({path.name: path.read_bytes() for path in root.glob("*.pkf")}, retained)
+
+    def test_archive_cap_refusal_after_reserve_is_distinct_unpoisoned_and_stops_workflow(self):
+        # A bounded existing support prefix makes the archive cap independently
+        # reachable while preserving the accepted archive >= payload relation.
+        text = "".join(sha256(str(index).encode("ascii")).hexdigest() for index in range(256))
+        with self.sink() as (_, sink):
+            while sink.byte_length < self.envelope.max_payload_bytes:
+                ordinal = sink.event_ordinal
+                sink.writers["operations"].append((ordinal,), records.OperationEventRecord(
+                    records.Phase.EXECUTION, "slice1l-prefix:" + text, records.EventKind.START,
+                    0, ordinal, records.OperationStatus.RUNNING))
+                sink.event_ordinal += 1
+            sink.checkpoint()
+            sink.envelope = replace(self.envelope, archive_cap_bytes=sink.byte_length)
+            before = self.snapshot(sink)
+            ledger = readiness.ProceduralLedger(0)
+            with patch.object(readiness, "reserve_procedural_unit", wraps=readiness.reserve_procedural_unit) as reserve, \
+                    patch.object(sink, "admit", wraps=sink.admit) as admit, \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit, \
+                    self.assertRaisesRegex(ValueError, "ARCHIVE_CAP"):
+                self.transact(sink, ledger)
+            self.assertEqual(reserve.call_count, 1)
+            self.assertEqual(admit.call_count, 1)
+            commit.assert_not_called()
+            self.assertEqual(self.snapshot(sink), before)
+            self.assertFalse(sink.poisoned)
+            self.assertEqual(ledger, readiness.ProceduralLedger(0))
+
+    def test_later_unit_failure_retains_durable_primary_prefix_without_ledger_update(self):
+        original_append = h.store.FramedStreamWriter.append_frame
+        first_downstream = self.views[1].rows[0]
+        prefix = {}
+        ledger = readiness.ProceduralLedger(3)
+        with self.sink() as (root, sink):
+            original_admit = sink.admit
+            def admit(work, result, *, prior_primary_wire=None):
+                receipt = original_admit(work, result, prior_primary_wire=prior_primary_wire)
+                if result.receipt.kind is execution.WorkerKind.PRIMARY:
+                    prefix.update({name: writer.path.read_bytes() for name, writer in sink.writers.items()})
+                return receipt
+            def append(writer, key, logical, frame):
+                value = original_append(writer, key, logical, frame)
+                if writer.stream_name == first_downstream.stream_name and key == first_downstream.key:
+                    raise h.store.StoreError("SLICE1L_LATER_UNIT_FAILURE")
+                return value
+            with patch.object(sink, "admit", side_effect=admit), \
+                    patch.object(h.store.FramedStreamWriter, "append_frame", new=append), \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit, \
+                    self.assertRaisesRegex(h.store.StoreError, "SLICE1L_LATER_UNIT_FAILURE"):
+                self.transact(sink, ledger, targets=self.excess_targets(reference=3))
+            commit.assert_not_called()
+            self.assertTrue(prefix and sink.poisoned)
+            self.assertEqual((sink.durable_units, sink.durable_primary_boards), (1, 1))
+            self.assertEqual(ledger, readiness.ProceduralLedger(3))
+            sink.close()
+            retained = {path.stem: path.read_bytes() for path in root.glob("*.pkf")}
+            self.assertTrue(all(retained[name].startswith(raw) for name, raw in prefix.items()))
+            self.assertGreater(sum(map(len, retained.values())), sum(map(len, prefix.values())))
+
+    def test_nonpass_replaced_receipts_and_forged_durability_never_commit(self):
+        for case in ("fail", "incomplete", "receipt_copy", "no_durability"):
+            with self.subTest(case=case), self.sink() as (_, sink), \
+                    patch.object(readiness, "commit_procedural_unit", wraps=readiness.commit_procedural_unit) as commit:
+                def admit(work, result, *, prior_primary_wire=None):
+                    if case in ("fail", "incomplete"):
+                        return replace(result.receipt, status=records.AuditStatus.FAIL if case == "fail"
+                                       else records.AuditStatus.INCOMPLETE, reason="SLICE1L_REFUSAL")
+                    if case == "receipt_copy":
+                        return replace(result.receipt)
+                    return result.receipt
+                with patch.object(sink, "admit", side_effect=admit), self.assertRaises(ValueError):
+                    self.transact(sink)
+                commit.assert_not_called()
+                self.assertEqual(sink.byte_length, 0)
+
+    def test_totals_accumulate_immutably_only_after_durable_success(self):
+        initial = tuple(h._V2FamilyTotal(name, 100, 200, 0) for name in self.owned)
+        with self.sink() as (_, sink):
+            result = self.transact(sink, readiness.ProceduralLedger(2),
+                                   targets=self.excess_targets(reference=2), family_totals=initial)
+        self.assertEqual(result.family_totals, tuple(h._V2FamilyTotal(name,
+            100 + self.actual[name][0], 200 + self.actual[name][1], 2 if name == "reference" else 0)
+            for name in self.owned))
+        self.assertTrue(all((value.physical_bytes, value.logical_bytes, value.physical_excess) == (100, 200, 0)
+                            for value in initial))
+        for value in (result, *result.family_totals):
+            self.assertFalse(hasattr(value, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+
+    def test_complete_scalar_totals_reconcile_actual_transaction_excess_and_reject_tampering(self):
+        counts = (10000, 256, 128, 1, 256, 256)  # Aggregate inputs only; no 10000-unit construction.
+        targets = self.excess_targets(reference=3)
+        ledger = h._new_v2_materialization_ledger(targets, counts)
+        with self.sink() as (_, sink):
+            transaction = self.transact(sink, ledger, targets=targets)
+        # Complete pure aggregate fixture: remaining units contribute their exact
+        # supplied minima; one actual durable unit contributes observed RF02 sizes.
+        totals = tuple(h._V2FamilyTotal(value.family,
+            value.physical_bytes + (count - 1) * getattr(targets.physical, value.family),
+            value.logical_bytes + (count - 1) * getattr(targets.logical, value.family), value.physical_excess)
+            for value, count in zip(transaction.family_totals, counts))
+        with patch.object(readiness, "reconcile_procedural_excess", wraps=readiness.reconcile_procedural_excess) as reconcile:
+            self.assertEqual(h._reconcile_v2_materialization_totals(targets, counts, totals, transaction.ledger), 3)
+        reconcile.assert_called_once_with(targets.physical, counts,
+            readiness.ComponentSizes(*(value.physical_bytes for value in totals)), transaction.ledger)
+        cases = (totals[:-1], (replace(totals[0], physical_bytes=totals[0].physical_bytes + 1),) + totals[1:],
+                 (replace(totals[0], physical_bytes=counts[0] * targets.physical.primary - 1),) + totals[1:])
+        for bad in cases:
+            with self.subTest(size=len(bad)), self.assertRaises(ValueError):
+                h._reconcile_v2_materialization_totals(targets, counts, bad, transaction.ledger)
+        logical_changed = tuple(replace(value, logical_bytes=value.logical_bytes + 10**9) for value in totals)
+        self.assertEqual(h._reconcile_v2_materialization_totals(targets, counts, logical_changed, transaction.ledger), 3)
+        with self.assertRaisesRegex(ValueError, "PROCEDURAL_CAPACITY_BINDING"):
+            h._reconcile_v2_materialization_totals(targets, counts, totals,
+                replace(transaction.ledger, capacity=transaction.ledger.capacity + 1))
+
+    def test_zero_family_nonzero_totals_fail_accepted_reconciliation(self):
+        counts = (10000, 256, 128, 0, 256, 256)
+        basis = readiness.ComponentSizes(1, 1, 0, 0, 1, 1)
+        targets = readiness.DualComponentSizes(basis, basis)
+        ledger = h._new_v2_materialization_ledger(targets, counts)
+        totals = tuple(h._V2FamilyTotal(name, count * getattr(basis, name),
+            count * getattr(basis, name), 0) for name, count in zip(self.owned, counts))
+        self.assertEqual(h._reconcile_v2_materialization_totals(targets, counts, totals, ledger), 0)
+        bad = tuple(replace(value, physical_bytes=1) if value.family == "oracle_primary" else value for value in totals)
+        with self.assertRaisesRegex(ValueError, "ZERO_FAMILY_REQUIRES_EXACT_TOTAL_ZERO"):
+            h._reconcile_v2_materialization_totals(targets, counts, bad, ledger)
+
+
+class V2TransactionV1IsolationTests(unittest.TestCase):
+    def test_private_transaction_facts_are_not_historical_serialization_authority(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        for cls in (h._V2PreparedUnit, h._V2FamilyTotal, h._V2MaterializedUnit):
+            self.assertNotIn(cls, evidence._FACT_TYPES.values())
+            self.assertNotIn(cls.__name__, evidence._FACT_TYPES)
+            with self.assertRaisesRegex(h.HarnessError, "UNSUPPORTED_METADATA_FACT"):
+                h._fact_read({"fact": cls.__name__, "fields": {}})
+
+    def test_historical_bundle_sizing_materialization_and_public_sources_stay_v1(self):
+        names = ("_prepare_v2_materialization_unit", "_synthetic_v2_operation_result",
+                 "_new_v2_materialization_ledger", "_materialize_v2_unit", "_reconcile_v2_materialization_totals")
+        fixture = SyntheticMaterializationTests()
+        plan = fixture.plan()
+        with tempfile.TemporaryDirectory() as directory:
+            seal = fixture._identity(directory, plan)
+            with _EvidenceExitStack() as stack:
+                for name in names:
+                    stack.enter_context(patch.object(h, name, side_effect=AssertionError("No V2 historical caller")))
+                stack.enter_context(patch.object(operational.harness, "_coordinator_private_bytes", return_value=100))
+                bundle = h.build_synthetic_bundle(plan[0], execution.WorkerKind.PRIMARY,
+                    readiness.ComponentSizes(1, 1, 1, 1, 1, 1), max_payload_bytes=67108864)
+                self.assertTrue(h.synthetic_bundle_family_bytes(bundle))
+                result = h.materialize_synthetic(plan, readiness.ComponentSizes(1, 1, 1, 1, 1, 1),
+                    fixture.envelope(), directory, seal)
+            self.assertTrue(result.readback_complete and result.cleanup_complete)
+            self.assertTrue(list(Path(directory).glob("*.jsonl")))
+            self.assertFalse(list(Path(directory).glob("*.pkf")))
+        for function in (operational.coordinate, h.materialize_synthetic, h.build_synthetic_bundle,
+                         h.synthetic_bundle_family_bytes):
+            source = inspect.getsource(function)
+            self.assertFalse(any(name in source for name in names))

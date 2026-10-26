@@ -1774,6 +1774,219 @@ def _capture_qualified_codec_profile():
 
 
 @dataclass(frozen=True, slots=True)
+class _V2PreparedUnit:
+    """Local sizing facts, never a validation token accepted by persistence."""
+
+    work: execution.BoardWork
+    results: tuple
+    family_evaluations: tuple
+    physical_family_bytes: tuple
+    logical_family_bytes: tuple
+    physical_excess: int
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("V2 materialization facts are invocation-local, not serializable.")
+
+
+@dataclass(frozen=True, slots=True)
+class _V2FamilyTotal:
+    family: str
+    physical_bytes: int
+    logical_bytes: int
+    physical_excess: int
+
+    def __post_init__(self):
+        _need(type(self.family) is str and self.family in readiness.V2_FAMILIES,
+              "EXACT_V2_FAMILY_REQUIRED")
+        for value in (self.physical_bytes, self.logical_bytes, self.physical_excess):
+            _integer(value)
+
+
+@dataclass(frozen=True, slots=True)
+class _V2MaterializedUnit:
+    prepared: _V2PreparedUnit
+    ledger: readiness.ProceduralLedger
+    receipts: tuple
+    family_totals: tuple
+
+
+def _v2_materialization_boundary(work, profile, envelope):
+    _need(type(work) is execution.BoardWork, "V2_EXACT_BOARD_WORK_REQUIRED")
+    execution.BoardWork.__post_init__(work)
+    _need(_known_synthetic_board(work.board), "SYNTHETIC_NON_BOARD_IDENTITY_REQUIRED")
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    return profile.sha256
+
+
+def _synthetic_v2_operation_result(work, kind, wire, profile, envelope, *,
+                                   prior_primary_wire=None, samples=()):
+    """Observe constructor bytes; this is not a worker execution receipt.
+
+    Resources are optional explicit synthetic observations. No execution or
+    resource sampling is inferred, and no fresh context escapes this call.
+    """
+    profile_sha256 = _v2_materialization_boundary(work, profile, envelope)
+    _need(type(kind) is execution.WorkerKind and kind in operational._kinds(work),
+          "SYNTHETIC_KIND_NOT_SCHEDULED")
+    _need(type(samples) is tuple and len(samples) <= 3, "V2_SYNTHETIC_RESOURCE_SAMPLES")
+    context = operational._fresh_wb02_context(wire, work, kind, profile_sha256, envelope,
+                                             prior_primary_wire=prior_primary_wire)
+    _need(type(context) is operational._WB02Context and context.work == work
+          and context.kind is kind and context.codec_profile_sha256 == profile_sha256
+          and context.wire is wire and context.envelope is envelope,
+          "V2_MATERIALIZATION_CONTEXT_BINDING")
+    _need(context.bundle.status is records.AuditStatus.PASS, "V2_MATERIALIZATION_PASS_REQUIRED")
+    receipt = operational.UnitReceipt(work.position, kind, records.AuditStatus.PASS,
+                                      "SYNTHETIC_MATERIALIZATION", 0, None)
+    return operational._V2OperationResult(receipt, wire, profile_sha256, samples, None,
+        context.logical_bytes, context.physical_frame_bytes, context.legacy_bundle_bytes,
+        context.wb02_wire_bytes)
+
+
+def _prepare_v2_materialization_unit(work, results, targets, profile, envelope, owned_families):
+    """Derive the complete owned partition afresh from exact WB02/RF02 bytes."""
+    profile_sha256 = _v2_materialization_boundary(work, profile, envelope)
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    _need(type(results) is tuple, "V2_WORKFLOW_ADMISSION_TYPES")
+    for result in results:
+        _need(type(result) is operational._V2OperationResult, "V2_EXACT_OPERATION_RESULT_REQUIRED")
+        operational._V2OperationResult.__post_init__(result)
+        _need(result.receipt.position == work.position, "V2_RESULT_WORK_BINDING")
+        _need(result.codec_profile_sha256 == profile_sha256, "V2_RESULT_PROFILE_BINDING")
+        _need(result.receipt.status is records.AuditStatus.PASS and result.wire is not None,
+              "V2_MATERIALIZATION_PASS_REQUIRED")
+    _need(tuple(result.receipt.kind for result in results) == operational._kinds(work),
+          "V2_WORKFLOW_RESULT_ORDER")
+    _need(type(owned_families) is tuple and bool(owned_families)
+          and all(type(family) is str and family in readiness.V2_FAMILIES for family in owned_families),
+          "V2_FAMILY_OWNERSHIP_REQUIRED")
+    _need(len(set(owned_families)) == len(owned_families), "DUPLICATE_UNIT_FAMILY")
+
+    physical_bytes, logical_bytes = {}, {}
+    complete_physical = complete_logical = 0
+    for result in results:
+        kind = result.receipt.kind
+        context = operational._fresh_wb02_context(result.wire, work, kind, profile_sha256, envelope,
+            prior_primary_wire=None if kind is execution.WorkerKind.PRIMARY else results[0].wire)
+        _need(type(context) is operational._WB02Context and context.work == work
+              and context.kind is kind and context.codec_profile_sha256 == profile_sha256
+              and context.wire is result.wire and context.envelope is envelope,
+              "V2_MATERIALIZATION_CONTEXT_BINDING")
+        _need(context.bundle.status is records.AuditStatus.PASS
+              and context.bundle.work_position == result.receipt.position and context.bundle.kind is kind,
+              "V2_MATERIALIZATION_RECEIPT_BINDING")
+        _need((result.logical_bytes, result.physical_frame_bytes, result.legacy_bundle_bytes,
+               result.wb02_wire_bytes) == (context.logical_bytes, context.physical_frame_bytes,
+               context.legacy_bundle_bytes, context.wb02_wire_bytes), "V2_MATERIALIZATION_SIZE_BINDING")
+        for family in _reference_text_families(context.bundle):
+            rows = tuple(row for row in context.rows if _text_owned(family, row.stream_name))
+            _need(bool(rows) and family not in physical_bytes, "V2_FAMILY_OWNERSHIP_BINDING")
+            physical_bytes[family] = sum(row.frame_length for row in rows)
+            logical_bytes[family] = sum(len(row.logical_bytes) for row in rows)
+        if kind is execution.WorkerKind.PRIMARY:
+            # The PRIMARY control_maintenance representation is the sole
+            # Reference owner. Copied premises in D/K remain in those text
+            # families' accepted _text_owned partition, never another Reference.
+            reference_rows = tuple(row for row in context.rows if row.stream_name == "control_maintenance")
+            if reference_rows:
+                physical_bytes["reference"] = sum(row.frame_length for row in reference_rows)
+                logical_bytes["reference"] = sum(len(row.logical_bytes) for row in reference_rows)
+        complete_physical += context.physical_frame_bytes
+        complete_logical += context.logical_bytes
+    present = tuple(family for family in readiness.V2_FAMILIES if family in physical_bytes)
+    _need(owned_families == present, "V2_FAMILY_OWNERSHIP_BINDING")
+    _need(sum(physical_bytes.values()) == complete_physical
+          and sum(logical_bytes.values()) == complete_logical, "V2_FAMILY_BYTE_PARTITION")
+    evaluations = tuple(readiness.evaluate_family_size(family,
+        getattr(targets.physical, family), getattr(targets.logical, family),
+        physical_bytes[family], logical_bytes[family]) for family in present)
+    for evaluation in evaluations:
+        _need(evaluation.eligible, evaluation.rejection_reason)
+    excess = readiness.unit_physical_excess(evaluations)
+    return _V2PreparedUnit(work, results, evaluations,
+        tuple((family, physical_bytes[family]) for family in present),
+        tuple((family, logical_bytes[family]) for family in present), excess)
+
+
+def _new_v2_materialization_ledger(targets, unit_counts):
+    """Bind a future full owner's ledger to the accepted physical capacity."""
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    return readiness.ProceduralLedger(readiness.procedural_excess_capacity(targets.physical, unit_counts))
+
+
+def _v2_family_totals(values):
+    _need(type(values) is tuple, "V2_FAMILY_TOTALS_REQUIRED")
+    for value in values:
+        _need(type(value) is _V2FamilyTotal, "V2_FAMILY_TOTAL_REQUIRED")
+        _V2FamilyTotal.__post_init__(value)
+    names = tuple(value.family for value in values)
+    _need(len(set(names)) == len(names)
+          and names == tuple(family for family in readiness.V2_FAMILIES if family in names),
+          "V2_FAMILY_TOTALS_COVERAGE")
+    return values
+
+
+def _materialize_v2_unit(work, results, targets, profile, envelope, owned_families,
+                         ledger, sink, *, family_totals=()):
+    """One serial unit: fresh facts, reserve, exact durable admission, commit.
+
+    Failed invocations return neither reserved state nor updated totals. Partial
+    bytes belong to the aborted outer run; there is no refund or retry path.
+    """
+    prepared = _prepare_v2_materialization_unit(work, results, targets, profile, envelope, owned_families)
+    _need(type(ledger) is readiness.ProceduralLedger, "EXACT_PROCEDURALLEDGER_REQUIRED")
+    readiness.ProceduralLedger.__post_init__(ledger)
+    previous_totals = {value.family: value for value in _v2_family_totals(family_totals)}
+    for evaluation in prepared.family_evaluations:
+        old = previous_totals.get(evaluation.family, _V2FamilyTotal(evaluation.family, 0, 0, 0))
+        previous_totals[evaluation.family] = _V2FamilyTotal(evaluation.family,
+            old.physical_bytes + evaluation.actual_physical_bytes,
+            old.logical_bytes + evaluation.actual_logical_bytes,
+            old.physical_excess + evaluation.physical_excess)
+    updated_totals = tuple(previous_totals[family] for family in readiness.V2_FAMILIES
+                           if family in previous_totals)
+    _need(type(sink) is operational._V2EvidenceSink, "V2_WORKFLOW_ADMISSION_TYPES")
+    _need(sink.profile_sha256 == profile.sha256 and sink.envelope == envelope,
+          "V2_MATERIALIZATION_SINK_BINDING")
+    reserved = readiness.reserve_procedural_unit(ledger, prepared.family_evaluations)
+    sink._writable()
+    for result in results:
+        sink._result(work, result)
+    before_units, before_primary = sink.durable_units, sink.durable_primary_boards
+    receipts = []
+    # Equivalent accepted 1K admission, with abort on the first refused unit.
+    # In particular an ARCHIVE_CAP receipt must not permit downstream writes.
+    for result in results:
+        receipt = sink.admit(work, result, prior_primary_wire=(None
+            if result.receipt.kind is execution.WorkerKind.PRIMARY else results[0].wire))
+        _need(type(receipt) is operational.UnitReceipt, "V2_MATERIALIZATION_RECEIPT_BINDING")
+        operational.UnitReceipt.__post_init__(receipt)
+        _need(receipt.position == result.receipt.position and receipt.kind is result.receipt.kind,
+              "V2_MATERIALIZATION_RECEIPT_BINDING")
+        _need(receipt.status is records.AuditStatus.PASS, receipt.reason)
+        _need(receipt is result.receipt, "V2_MATERIALIZATION_RECEIPT_BINDING")
+        receipts.append(receipt)
+    sink._writable()
+    _need(sink.durable_units == before_units + len(results)
+          and sink.durable_primary_boards == before_primary + 1, "V2_MATERIALIZATION_DURABILITY_BINDING")
+    committed = readiness.commit_procedural_unit(reserved)
+    return _V2MaterializedUnit(prepared, committed, tuple(receipts), updated_totals)
+
+
+def _reconcile_v2_materialization_totals(targets, unit_counts, family_totals, ledger):
+    """Pure physical reconciliation only; this is not final archive readback."""
+    _need(type(targets) is readiness.DualComponentSizes, "V2_DUAL_TARGETS_REQUIRED")
+    readiness.DualComponentSizes.__post_init__(targets)
+    totals = _v2_family_totals(family_totals)
+    _need(tuple(value.family for value in totals) == readiness.V2_FAMILIES, "V2_FAMILY_TOTALS_COVERAGE")
+    physical_totals = readiness.ComponentSizes(*(value.physical_bytes for value in totals))
+    return readiness.reconcile_procedural_excess(targets.physical, unit_counts, physical_totals, ledger)
+
+
+@dataclass(frozen=True, slots=True)
 class SyntheticMaterialization:
     coordinator: operational.CoordinatorResult
     identity_seal: records.StreamDigest
