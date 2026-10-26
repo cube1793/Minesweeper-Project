@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import FrozenInstanceError, fields, is_dataclass, replace
 from enum import Enum
+from hashlib import sha256
 import inspect
 import json
 import os
@@ -1068,6 +1069,260 @@ class PersistencePremiseTests(unittest.TestCase):
                 self.assertFalse(any(path.name.startswith("complete") for path in Path(directory).iterdir()))
             finally:
                 sink.close()
+
+
+class WB02PrimitiveTests(unittest.TestCase):
+    """Bounded canonical transport fixtures; no runner or board generation."""
+
+    profile = b"\xa3" * 32
+
+    @staticmethod
+    def _bundle(text='literal "quote" \\ path', *, position=128, kind=execution.WorkerKind.PRIMARY):
+        board = records.encode(records.BoardIdentity(42_424_242, "fixture", 4, 1, 1,
+                                                     (0, 0), text, "WB02-test"))
+        runtime = records.encode(records.RuntimeIdentity(text, "test", "test", "test", "test", None))
+        header = execution.ProjectionHeader("control", "WIN", 7, None, True, False, True,
+                                            ('diagnostic "x" \\ y',))
+        return execution.WorkerBundle(position, kind, board, identity.ArmOrder.CONTROL_THEN_KP0,
+            (("boards", (board,)), ("runtime", (runtime,)), ("oracle_b_audits", ()),
+             ("oracle_b_coverage", ())), (header,), records.AuditStatus.PASS, ())
+
+    @staticmethod
+    def _parts(data):
+        length = int.from_bytes(data[8:16], "big")
+        return json.loads(data[16:16 + length]), data[16 + length:-32]
+
+    def _rewrite(self, data, change):
+        node, frames = self._parts(data)
+        change(node)
+        for _ in range(10):
+            encoded = json.dumps(node, sort_keys=True, separators=(",", ":"),
+                                 ensure_ascii=True).encode("ascii")
+            total = 48 + len(encoded) + len(frames)
+            if node["wire_bytes"] == total:
+                break
+            node["wire_bytes"] = total
+        body = b"PKE2WB02" + len(encoded).to_bytes(8, "big") + encoded + frames
+        return body + sha256(body).digest()
+
+    def test_exact_magic_layout_arithmetic_sha_and_determinism(self):
+        bundle = self._bundle()
+        encoded = execution.encode_bundle_v2(bundle, self.profile)
+        node, frames = self._parts(encoded)
+        metadata_size = int.from_bytes(encoded[8:16], "big")
+        self.assertEqual(encoded[:8], b"PKE2WB02")
+        self.assertEqual(len(encoded), 48 + metadata_size + len(frames))
+        self.assertEqual(len(encoded), node["wire_bytes"])
+        self.assertEqual(node["frame_bytes"], len(frames))
+        self.assertEqual(node["logical_bytes"], sum(len(v) for _, values in bundle.streams for v in values))
+        self.assertEqual(node["legacy_bytes"], len(execution.encode_bundle(bundle)))
+        self.assertEqual(encoded[-32:], sha256(encoded[:-32]).digest())
+        self.assertEqual(encoded, execution.encode_bundle_v2(bundle, self.profile))
+        self.assertEqual(encoded[16:16 + metadata_size],
+                         json.dumps(node, sort_keys=True, separators=(",", ":")).encode("ascii"))
+
+    def test_ordered_groups_keys_and_zero_row_oracle_have_no_filler(self):
+        from experiments import program_k_e2_physical as physical
+        for kind, rank in ((execution.WorkerKind.PRIMARY, 0), (execution.WorkerKind.DETERMINISM, 1),
+                           (execution.WorkerKind.K_CONTROL, 2)):
+            bundle = self._bundle(position=identity.UINT64_MAX, kind=kind)
+            data = execution.encode_bundle_v2(bundle, self.profile)
+            node, frames = self._parts(data)
+            self.assertEqual(tuple(g[0] for g in node["streams"]), tuple(n for n, _ in bundle.streams))
+            self.assertEqual(node["streams"][-2:], [["oracle_b_audits", 0, 0, 0],
+                                                    ["oracle_b_coverage", 0, 0, 0]])
+            offset = 0
+            for name, values in bundle.streams:
+                for index, logical in enumerate(values):
+                    decoded, offset = physical.decode_frame_from(frames, offset,
+                        physical.context_for(name, self.profile),
+                        expected_key=(identity.UINT64_MAX, rank, index))
+                    self.assertEqual(decoded.logical_bytes, logical)
+            self.assertEqual(offset, len(frames))
+            self.assertEqual(execution.decode_bundle_v2(data, self.profile), bundle)
+
+    def test_no_logical_json_string_reembedding_and_immutable_result(self):
+        bundle = self._bundle()
+        data = execution.encode_bundle_v2(bundle, self.profile)
+        node, _ = self._parts(data)
+        self.assertNotIn("board", node)
+        metadata = data[16:16 + int.from_bytes(data[8:16], "big")]
+        for _, values in bundle.streams:
+            for value in values:
+                self.assertNotIn(json.dumps(value.decode("ascii")).encode("ascii"), metadata)
+        decoded = execution.decode_bundle_v2(data, self.profile)
+        self.assertIs(type(decoded), execution.WorkerBundle)
+        self.assertIs(type(decoded.streams), tuple)
+        self.assertTrue(all(type(value) is bytes for _, values in decoded.streams for value in values))
+        with self.assertRaises(FrozenInstanceError):
+            decoded.work_position = 3
+        for function in (execution.encode_bundle_v2, execution.decode_bundle_v2):
+            self.assertFalse(any("validat" in name for name in inspect.signature(function).parameters))
+        with self.assertRaises(TypeError):
+            execution.decode_bundle_v2(data, self.profile, validated=True)
+
+    def test_corrupted_metadata_group_or_digest_rejected(self):
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        metadata_size = int.from_bytes(data[8:16], "big")
+        for offset in (16, 16 + metadata_size + 10, len(data) - 1):
+            bad = bytearray(data)
+            bad[offset] ^= 1
+            with self.subTest(offset=offset), self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(bytes(bad), self.profile)
+        # A correct outer digest must not conceal a corrupt RF02 group.
+        bad = bytearray(data[:-32])
+        bad[16 + metadata_size + 10] ^= 1
+        with self.assertRaises(execution.E2ExecutionError):
+            execution.decode_bundle_v2(bytes(bad) + sha256(bad).digest(), self.profile)
+
+    def test_all_message_truncations_and_trailing_garbage_rejected(self):
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        for length in range(len(data)):
+            with self.subTest(length=length), self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(data[:length], self.profile)
+        for bad in (data + b"x", data[:-32] + b"x" + sha256(data[:-32] + b"x").digest()):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(bad, self.profile)
+
+    def test_closed_metadata_rejects_unknown_missing_float_and_noncanonical(self):
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        changes = (lambda n: n.update(extra=0), lambda n: n.pop("legacy_bytes"),
+                   lambda n: n.update(position=1.0), lambda n: n.update(position=True),
+                   lambda n: n.update(position=float("nan")))
+        for change in changes:
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(self._rewrite(data, change), self.profile)
+        node, frames = self._parts(data)
+        for metadata in (json.dumps(node, sort_keys=True).encode("ascii"),
+                         b'{"position":128,' + data[17:16 + int.from_bytes(data[8:16], "big")]):
+            body = b"PKE2WB02" + len(metadata).to_bytes(8, "big") + metadata + frames
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(body + sha256(body).digest(), self.profile)
+
+    def test_profile_size_basis_container_identity_mixing_rejected(self):
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        for key, value in (("container", "PKE2WB01"), ("size_basis", "legacy"),
+                           ("codec_profile_sha256", "00" * 32)):
+            with self.subTest(key=key), self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(self._rewrite(data, lambda n: n.update({key: value})), self.profile)
+        with self.assertRaises(execution.E2ExecutionError):
+            execution.decode_bundle_v2(data, b"\x00" * 32)
+        with self.assertRaises(execution.E2ExecutionError):
+            execution.decode_bundle_v2(execution.encode_bundle(self._bundle()), self.profile)
+        with self.assertRaises(execution.E2ExecutionError):
+            execution.decode_bundle(data)
+
+    def test_declared_counts_order_sizes_and_frame_keys_rejected(self):
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        changes = (lambda n: n["streams"][0].__setitem__(1, 2),
+                   lambda n: n["streams"][0].__setitem__(1, True),
+                   lambda n: n["streams"].reverse(),
+                   lambda n: n["streams"].append(n["streams"][-1][:]),
+                   lambda n: n["streams"][0].__setitem__(0, "unknown"),
+                   lambda n: n.update(logical_bytes=n["logical_bytes"] + 1),
+                   lambda n: n.update(legacy_bytes=n["legacy_bytes"] + 1),
+                   lambda n: n.update(frame_bytes=n["frame_bytes"] + 1),
+                   lambda n: n.update(position=n["position"] + 1),
+                   lambda n: n.update(kind="K_CONTROL"))
+        for change in changes:
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(self._rewrite(data, change), self.profile)
+
+    def test_bounds_precede_metadata_parse_and_frame_decode(self):
+        from experiments import program_k_e2_physical as physical
+        data = execution.encode_bundle_v2(self._bundle(), self.profile)
+        huge = b"PKE2WB02" + identity.UINT64_MAX.to_bytes(8, "big") + bytes(32)
+        with patch.object(json, "loads", side_effect=AssertionError("Must bound before parse")), \
+                patch.object(physical, "decode_frame_from", side_effect=AssertionError("Must bound before inflate")):
+            for candidate, kwargs in ((huge, {}), (data, {"max_payload_bytes": len(data) - 1}),
+                                      (data, {"max_metadata_bytes": 1})):
+                with self.assertRaises(execution.E2ExecutionError):
+                    execution.decode_bundle_v2(candidate, self.profile, **kwargs)
+        with patch.object(execution, "_json", side_effect=AssertionError("Must bound before allocation")):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.encode_bundle_v2(self._bundle(), self.profile, max_metadata_bytes=1)
+
+    def test_invalid_limits_mutable_inputs_and_false_authority_rejected(self):
+        bundle = self._bundle()
+        data = execution.encode_bundle_v2(bundle, self.profile)
+        for limit in (True, 0, -1, 67_108_865):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(data, self.profile, max_payload_bytes=limit)
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.encode_bundle_v2(bundle, self.profile, max_payload_bytes=limit)
+        for bad in (bytearray(data), memoryview(data)):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.decode_bundle_v2(bad, self.profile)
+        for digest in ("00" * 32, bytes(31), bytearray(32), True):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.encode_bundle_v2(bundle, digest)
+
+    def test_logical_legacy_and_wire_caps_are_independent(self):
+        bundle = self._bundle("repeat" * 1024)
+        logical_size = sum(len(v) for _, values in bundle.streams for v in values)
+        legacy_size = execution.legacy_bundle_size(bundle)
+        data = execution.encode_bundle_v2(bundle, self.profile)
+        self.assertLess(len(data), logical_size)
+        self.assertLess(logical_size, legacy_size)
+        with self.assertRaisesRegex(execution.E2ExecutionError, "PAYLOAD_CAP"):
+            execution.encode_bundle_v2(bundle, self.profile, max_payload_bytes=logical_size - 1)
+        with self.assertRaisesRegex(execution.E2ExecutionError, "LEGACY_CAP"):
+            execution.encode_bundle_v2(bundle, self.profile, max_payload_bytes=logical_size)
+        with self.assertRaisesRegex(execution.E2ExecutionError, "DECLARED_SIZE_CAP"):
+            execution.decode_bundle_v2(data, self.profile, max_payload_bytes=logical_size)
+        sparse = self._bundle("x")
+        sparse = replace(sparse, projection_headers=(), streams=tuple(
+            (name, (sparse.board,) if name == "boards" else ()) for name in execution.STREAM_NAMES))
+        wire = execution.encode_bundle_v2(sparse, self.profile)
+        self.assertLess(execution.legacy_bundle_size(sparse), len(wire) - 1)
+        with self.assertRaisesRegex(execution.E2ExecutionError, "WIRE_CAP"):
+            execution.encode_bundle_v2(sparse, self.profile, max_payload_bytes=len(wire) - 1)
+
+    def test_writer_rejects_mismatched_board_and_noncanonical_or_wrong_family(self):
+        bundle = self._bundle()
+        other = self._bundle("other")
+        for candidate in (replace(bundle, board=other.board),
+                          replace(bundle, streams=(("boards", (bundle.board + b" ",)),)),
+                          replace(bundle, streams=(("boards", (bundle.board,)), ("runtime", (bundle.board,))))):
+            with self.assertRaises(ValueError):
+                execution.encode_bundle_v2(candidate, self.profile)
+
+    def test_legacy_counter_exact_for_adversarial_valid_records_and_duplication(self):
+        for text in ('x', '"' * 63, "\\" * 64, 'quote"slash\\' * 31,
+                     "Korean-한글-emoji-😀", "a" * 4096):
+            for kind in execution.WorkerKind:
+                bundle = self._bundle(text, position=identity.UINT64_MAX, kind=kind)
+                self.assertEqual(execution.legacy_bundle_size(bundle), len(execution.encode_bundle(bundle)))
+                without_board_stream = replace(bundle, streams=bundle.streams[1:])
+                self.assertEqual(execution.legacy_bundle_size(without_board_stream),
+                                 len(execution.encode_bundle(without_board_stream)))
+                multiple = replace(bundle, streams=tuple(
+                    (name, values * 3 if name == "runtime" else values) for name, values in bundle.streams))
+                self.assertEqual(execution.legacy_bundle_size(multiple), len(execution.encode_bundle(multiple)))
+                self.assertEqual(execution.decode_bundle_v2(
+                    execution.encode_bundle_v2(multiple, self.profile), self.profile), multiple)
+                decoded = execution.decode_bundle_v2(execution.encode_bundle_v2(bundle, self.profile), self.profile)
+                self.assertEqual(execution.encode_bundle(decoded), execution.encode_bundle(bundle))
+
+    def test_legacy_string_domain_and_exact_quote_backslash_count(self):
+        for data in (b"x", b'"', b"\\", bytes(range(32, 127)), b'"\\' * 128):
+            self.assertEqual(execution.legacy_json_string_size(data),
+                             len(json.dumps(data.decode("ascii"), ensure_ascii=True).encode("ascii")))
+        for bad in (b"", b"\x1f", b"\x7f", b"\xff", b"line\n", bytearray(b"x"), "x"):
+            with self.assertRaises(execution.E2ExecutionError):
+                execution.legacy_json_string_size(bad)
+        bundle = self._bundle()
+        with self.assertRaises(ValueError):
+            execution.legacy_bundle_size(replace(bundle, board=b'{"not":"a record"}'))
+
+    def test_v1_default_encoder_path_remains_explicit_and_unchanged(self):
+        bundle = self._bundle()
+        with patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("V2 invoked")), \
+                patch.object(execution, "decode_bundle_v2", side_effect=AssertionError("V2 invoked")):
+            data = execution.encode_bundle(bundle)
+            self.assertEqual(execution.decode_bundle(data), bundle)
+            self.assertTrue(data.startswith(b"{"))
+            self.assertEqual(json.loads(data)["version"], 1)
 
 
 if __name__ == "__main__":

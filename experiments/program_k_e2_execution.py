@@ -21,6 +21,7 @@ import stage3_planner
 from stage3_physical import action_cost, load_timing_table, validate_timing_table
 from experiments import program_k_e2_identity as identity
 from experiments import program_k_e2_records as records
+from experiments import program_k_e2_physical as physical
 from experiments import program_k_e2_game as game
 from experiments import program_k_e2_audit as audit
 from experiments import program_k_e2_evaluator as evaluator
@@ -307,6 +308,232 @@ def decode_bundle(data):
         raise
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError):
         raise E2ExecutionError("MALFORMED_IPC") from None
+
+
+WB02_MAGIC = b"PKE2WB02"
+WB02_SIZE_BASIS = "PKE2WB02-LSUM-LLEGACY-WIRE-V1"
+_WB02_KEYS = frozenset(("container", "codec_profile_sha256", "size_basis", "position", "kind",
+    "arm_order", "headers", "status", "reasons", "streams", "logical_bytes", "legacy_bytes",
+    "frame_bytes", "wire_bytes"))
+
+
+def legacy_json_string_size(data):
+    """Exact V1 JSON-string size for nonempty printable canonical ASCII bytes.
+
+    This arithmetic is not a canonical-record or semantic validation result.
+    """
+    _need(type(data) is bytes and bool(data) and all(32 <= b <= 126 for b in data),
+          "LEGACY_COUNTER_ASCII_DOMAIN")
+    return 2 + len(data) + data.count(b'"') + data.count(b"\\")
+
+
+def _wire_json_size(node):
+    """Count the closed transport metadata without allocating its JSON bytes."""
+    if type(node) is str:
+        _need(all(32 <= ord(c) <= 126 for c in node), "IPC_METADATA_ASCII_REQUIRED")
+        return 2 + len(node) + node.count('"') + node.count("\\")
+    if node is None:
+        return 4
+    if type(node) is bool:
+        return 4 if node else 5
+    if type(node) is int:
+        _uint(node)
+        return len(str(node))
+    if type(node) in (tuple, list):
+        return 2 + max(0, len(node) - 1) + sum(_wire_json_size(v) for v in node)
+    _need(type(node) is dict and all(type(k) is str for k in node), "IPC_METADATA_SHAPE")
+    return 2 + max(0, len(node) - 1) + sum(
+        _wire_json_size(k) + 1 + _wire_json_size(v) for k, v in node.items())
+
+
+def _transport_headers(bundle):
+    return tuple({name: getattr(header, name) for name in _HEADER_FIELDS}
+                 for header in bundle.projection_headers)
+
+
+def _canonical_transport_record(data, cls):
+    _need(type(data) is bytes and 0 < len(data) <= physical.MAX_PAYLOAD_BYTES,
+          "WORKER_PAYLOAD_CAP")
+    value = records.decode(data)
+    _need(type(value) is cls and records.encode(value) == data,
+          "NONCANONICAL_OR_WRONG_RECORD_FAMILY")
+
+
+def legacy_bundle_size(bundle):
+    """Count the unchanged V1 encoding, including its top-level board copy.
+
+    Record bodies never become outer JSON strings here. Canonical records and
+    their closed stream families are still independently checked.
+    """
+    _record(bundle, WorkerBundle)
+    board_size = legacy_json_string_size(bundle.board)
+    _canonical_transport_record(bundle.board, records.BoardIdentity)
+    node = {"version": 1, "position": bundle.work_position, "kind": bundle.kind.value,
+            "board": "", "arm_order": bundle.arm_order.value,
+            "streams": tuple((name, ()) for name, _ in bundle.streams),
+            "headers": _transport_headers(bundle), "status": bundle.status.value,
+            "reasons": bundle.reason_codes}
+    total = _wire_json_size(node) + board_size - 2
+    for name, values in bundle.streams:
+        total += max(0, len(values) - 1)
+        for data in values:
+            total += legacy_json_string_size(data)
+            _canonical_transport_record(data, _family(name))
+    return total
+
+
+def _wb02_limits(codec_profile_sha256, max_payload_bytes, max_metadata_bytes):
+    _need(type(codec_profile_sha256) is bytes and len(codec_profile_sha256) == 32,
+          "WB02_PROFILE_IDENTITY_REQUIRED")
+    for value in (max_payload_bytes, max_metadata_bytes):
+        _need(type(value) is int and 0 < value <= physical.MAX_PAYLOAD_BYTES,
+              "WB02_EXACT_BOUNDED_LIMIT_REQUIRED")
+    _need(max_metadata_bytes <= max_payload_bytes, "WB02_METADATA_CAP_ORDER")
+
+
+def _wb02_rank(kind):
+    # Same durable rank order as operational._kind_rank; no operational import.
+    return (WorkerKind.PRIMARY, WorkerKind.DETERMINISM, WorkerKind.K_CONTROL).index(kind)
+
+
+def encode_bundle_v2(bundle, codec_profile_sha256, *,
+                     max_payload_bytes=physical.MAX_PAYLOAD_BYTES,
+                     max_metadata_bytes=None):
+    """Compose one immutable WB02 message; the live worker path remains V1.
+
+    This primitive checks representation, types and containment. Work-specific
+    semantic admission still belongs to each independently validating boundary.
+    A supplied profile digest binds context; it makes no qualification claim.
+    """
+    if max_metadata_bytes is None:
+        max_metadata_bytes = max_payload_bytes
+    _wb02_limits(codec_profile_sha256, max_payload_bytes, max_metadata_bytes)
+    _record(bundle, WorkerBundle)
+    logical_size = sum(len(data) for _, values in bundle.streams for data in values)
+    _need(logical_size <= max_payload_bytes and len(bundle.board) <= max_payload_bytes,
+          "WORKER_PAYLOAD_CAP")
+    _need(dict(bundle.streams).get("boards") == (bundle.board,), "BOARD_IDENTITY_STREAM_REQUIRED")
+    legacy_size = legacy_bundle_size(bundle)
+    _need(legacy_size <= max_payload_bytes, "WORKER_LEGACY_CAP")
+    frames, groups, frame_size = [], [], 0
+    rank = _wb02_rank(bundle.kind)
+    for name, values in bundle.streams:
+        context = physical.context_for(name, codec_profile_sha256)
+        group_size = 0
+        for index, data in enumerate(values):
+            frame = physical.encode_frame(data, (bundle.work_position, rank, index), context,
+                                          max_payload_bytes=max_payload_bytes)
+            group_size += len(frame)
+            frame_size += len(frame)
+            _need(48 + frame_size <= max_payload_bytes, "WORKER_WIRE_CAP")
+            frames.append(frame)
+        groups.append((name, len(values), sum(map(len, values)), group_size))
+    node = {"container": WB02_MAGIC.decode("ascii"), "codec_profile_sha256": codec_profile_sha256.hex(),
+            "size_basis": WB02_SIZE_BASIS, "position": bundle.work_position, "kind": bundle.kind.value,
+            "arm_order": bundle.arm_order.value, "headers": _transport_headers(bundle),
+            "status": bundle.status.value, "reasons": bundle.reason_codes, "streams": groups,
+            "logical_bytes": logical_size, "legacy_bytes": legacy_size,
+            "frame_bytes": frame_size, "wire_bytes": 0}
+    # At most eight decimal digits occur under the fixed payload cap. Counting
+    # reaches a fixed point without allocating a prospective oversized message.
+    for _ in range(10):
+        metadata_size = _wire_json_size(node)
+        wire_size = 48 + metadata_size + frame_size
+        if node["wire_bytes"] == wire_size:
+            break
+        node["wire_bytes"] = wire_size
+    else:
+        raise E2ExecutionError("WB02_SIZE_FIXED_POINT")
+    _need(metadata_size <= max_metadata_bytes, "WB02_METADATA_CAP")
+    _need(wire_size <= max_payload_bytes, "WORKER_WIRE_CAP")
+    metadata = _json(node)
+    _need(len(metadata) == metadata_size, "WB02_METADATA_SIZE_MISMATCH")
+    body = b"".join((WB02_MAGIC, metadata_size.to_bytes(8, "big"), metadata, *frames))
+    return body + sha256(body).digest()
+
+
+def decode_bundle_v2(data, codec_profile_sha256, *,
+                     max_payload_bytes=physical.MAX_PAYLOAD_BYTES,
+                     max_metadata_bytes=None):
+    """Decode explicit WB02 bytes, with no V1 guessing or validation bypass.
+
+    The returned frozen WorkerBundle contains exact immutable logical bytes;
+    callers must independently perform their own work/semantic validation.
+    """
+    if max_metadata_bytes is None:
+        max_metadata_bytes = max_payload_bytes
+    _wb02_limits(codec_profile_sha256, max_payload_bytes, max_metadata_bytes)
+    _need(type(data) is bytes and 48 <= len(data) <= max_payload_bytes, "WB02_MESSAGE_CAP_OR_TRUNCATION")
+    _need(data[:8] == WB02_MAGIC, "WB02_CONTAINER_IDENTITY")
+    metadata_size = int.from_bytes(data[8:16], "big")
+    _need(0 < metadata_size <= max_metadata_bytes and metadata_size <= len(data) - 48,
+          "WB02_METADATA_CAP_OR_TRUNCATION")
+    _need(sha256(memoryview(data)[:-32]).digest() == data[-32:], "WB02_SHA256_MISMATCH")
+    metadata = data[16:16 + metadata_size]
+    try:
+        node = json.loads(metadata.decode("ascii"), object_pairs_hook=_unique_object,
+            parse_float=lambda _: (_ for _ in ()).throw(E2ExecutionError("IPC_FLOAT_FORBIDDEN")),
+            parse_constant=lambda _: (_ for _ in ()).throw(E2ExecutionError("IPC_NONFINITE_FORBIDDEN")))
+        _need(type(node) is dict and set(node) == _WB02_KEYS, "WB02_METADATA_SCHEMA")
+        _need(node["container"] == WB02_MAGIC.decode("ascii"), "WB02_CONTAINER_IDENTITY")
+        _need(node["codec_profile_sha256"] == codec_profile_sha256.hex(), "WB02_PROFILE_IDENTITY")
+        _need(node["size_basis"] == WB02_SIZE_BASIS, "WB02_SIZE_BASIS_IDENTITY")
+        _uint(node["position"])
+        kind, arm_order = WorkerKind(node["kind"]), identity.ArmOrder(node["arm_order"])
+        status = records.AuditStatus(node["status"])
+        _need(type(node["headers"]) is list and type(node["reasons"]) is list
+              and type(node["streams"]) is list, "WB02_METADATA_COLLECTIONS")
+        for key in ("logical_bytes", "legacy_bytes", "frame_bytes", "wire_bytes"):
+            _need(type(node[key]) is int and 0 <= node[key] <= max_payload_bytes,
+                  "WB02_DECLARED_SIZE_CAP")
+        _need(node["wire_bytes"] == len(data) and
+              node["frame_bytes"] == len(data) - 48 - metadata_size, "WB02_DECLARED_WIRE_SIZE")
+        groups = node["streams"]
+        names = []
+        for group in groups:
+            _need(type(group) is list and len(group) == 4 and type(group[0]) is str
+                  and group[0] in STREAM_NAMES, "WB02_STREAM_SCHEMA")
+            names.append(group[0])
+            for value in group[1:]:
+                _need(type(value) is int and 0 <= value <= max_payload_bytes,
+                      "WB02_STREAM_SIZE_CAP")
+            _need(group[1] <= group[3] // 16 and (group[1] != 0 or group[2:] == [0, 0]),
+                  "WB02_STREAM_COUNT_SIZE")
+        _need(names == sorted(set(names), key=STREAM_NAMES.index), "STREAM_ORDER_OR_DUPLICATE")
+        _need(sum(g[2] for g in groups) == node["logical_bytes"] and
+              sum(g[3] for g in groups) == node["frame_bytes"], "WB02_GROUP_TOTALS")
+        _need(_json(node) == metadata, "NONCANONICAL_WB02_METADATA")
+        headers = []
+        for header in node["headers"]:
+            _need(type(header) is dict and set(header) == set(_HEADER_FIELDS)
+                  and type(header["diagnostics"]) is list, "IPC_PROJECTION_HEADER_SHAPE")
+            headers.append(ProjectionHeader(**dict(header, diagnostics=tuple(header["diagnostics"]))))
+        offset, streams = 16 + metadata_size, []
+        rank = _wb02_rank(kind)
+        for name, count, logical_size, group_size in groups:
+            group_end, consumed, values = offset + group_size, 0, []
+            context = physical.context_for(name, codec_profile_sha256)
+            for index in range(count):
+                _need(consumed < logical_size, "WB02_LOGICAL_SIZE_MISMATCH")
+                frame, offset = physical.decode_frame_from(data, offset, context,
+                    expected_key=(node["position"], rank, index),
+                    max_payload_bytes=logical_size - consumed)
+                _need(offset <= group_end, "WB02_GROUP_BOUNDARY")
+                consumed += len(frame.logical_bytes)
+                values.append(frame.logical_bytes)
+            _need(offset == group_end and consumed == logical_size, "WB02_GROUP_SIZE_MISMATCH")
+            streams.append((name, tuple(values)))
+        _need(offset == len(data) - 32, "WB02_TRAILING_BYTES")
+        boards = dict(streams).get("boards", ())
+        _need(len(boards) == 1, "BOARD_IDENTITY_STREAM_REQUIRED")
+        bundle = WorkerBundle(node["position"], kind, boards[0], arm_order, tuple(streams),
+                              tuple(headers), status, tuple(node["reasons"]))
+        _need(legacy_bundle_size(bundle) == node["legacy_bytes"], "WB02_LEGACY_SIZE_MISMATCH")
+        return bundle
+    except E2ExecutionError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
+        raise E2ExecutionError("MALFORMED_WB02") from None
 
 
 def _projection_streams(projection, role):
