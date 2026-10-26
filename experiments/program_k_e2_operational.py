@@ -230,6 +230,23 @@ class _Channel:
 
 def _worker_main(work, kind, first_bytes, envelope, connection, barrier, r0_observe=False):
     """Spawn target; barrier precedes generation/source checks/private answers."""
+    return _worker_core(work, kind, first_bytes, envelope, connection, barrier, r0_observe=r0_observe)
+
+
+def _worker_main_v2(work, kind, first_bytes, envelope, connection, barrier, codec_profile_sha256):
+    """Explicit WB02 transport target; the supplied profile is not qualification."""
+    return _worker_core(work, kind, first_bytes, envelope, connection, barrier,
+                        v2=True, codec_profile_sha256=codec_profile_sha256)
+
+
+def _transport_profile(value):
+    _need(type(value) is bytes and len(value) == 32, "WB02_PROFILE_IDENTITY_REQUIRED")
+    return value
+
+
+def _worker_core(work, kind, first_bytes, envelope, connection, barrier, *, r0_observe=False,
+                 v2=False, codec_profile_sha256=None):
+    """Both transports own the same barrier, watchdog, events and private errors."""
     barrier.wait()
     channel = _Channel(connection, envelope)
     watchdog = None
@@ -292,6 +309,8 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier, r0_obse
 
     try:
         channel.send(b"S")
+        if v2:
+            _transport_profile(codec_profile_sha256)
         codes, regions = execution.decision_watchdog_targets()
         watchdog = DecisionWatchdog(threading.get_ident(), codes, regions, envelope, abort)
         watchdog.start()
@@ -308,7 +327,12 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier, r0_obse
             _need(first_bytes is None, "PRIMARY_HAS_PRIOR")
             bundle = execution.execute_primary(work, **kwargs)
         else:
-            first = execution.decode_bundle(first_bytes)
+            if v2:
+                _need(type(first_bytes) is bytes, "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+                first = execution.decode_bundle_v2(first_bytes, codec_profile_sha256,
+                                                    max_payload_bytes=envelope.max_payload_bytes)
+            else:
+                first = execution.decode_bundle(first_bytes)
             if kind is execution.WorkerKind.DETERMINISM:
                 bundle = execution.execute_repeat(work, first, **kwargs)
             else:
@@ -327,7 +351,9 @@ def _worker_main(work, kind, first_bytes, envelope, connection, barrier, r0_obse
                 fact.applicability_checks, fact.actual_checks, fact.wall_ns, fact.intervals)
             channel.result(json.dumps(telemetry + (r0_max_arm,), separators=(",", ":")).encode("ascii"),
                            tags=(b"T", b"U", b"V"))
-        channel.result(execution.encode_bundle(bundle))
+        payload = (execution.encode_bundle_v2(bundle, codec_profile_sha256,
+                    max_payload_bytes=envelope.max_payload_bytes) if v2 else execution.encode_bundle(bundle))
+        channel.result(payload)
     except BaseException as error:
         # No exception repr/traceback crosses the answer-owning worker boundary.
         reason = abort_reason or ("REQUIRED_EVIDENCE_INCOMPLETE" if isinstance(error, execution.E2EvidenceIncomplete)
@@ -408,6 +434,48 @@ class _OperationResult:
     bundle: object
     samples: tuple
     observation: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class _V2OperationResult:
+    """Immutable transport and diagnostics, never validation authority."""
+
+    receipt: UnitReceipt
+    wire: bytes | None
+    codec_profile_sha256: bytes
+    samples: tuple
+    observation: object
+    logical_bytes: int
+    physical_frame_bytes: int
+    legacy_bundle_bytes: int
+    wb02_wire_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.receipt) is UnitReceipt, "V2_RECEIPT_TYPE")
+        UnitReceipt.__post_init__(self.receipt)
+        _transport_profile(self.codec_profile_sha256)
+        _need(type(self.samples) is tuple and self.observation is None, "V2_OBSERVATION_TYPE")
+        for sample in self.samples:
+            _need(type(sample) is records.ResourceSampleRecord, "INVALID_MEMORY_SAMPLE")
+            records.ResourceSampleRecord.__post_init__(sample)
+        sizes = (self.logical_bytes, self.physical_frame_bytes, self.legacy_bundle_bytes, self.wb02_wire_bytes)
+        for size in sizes:
+            _integer(size)
+        if self.wire is None:
+            _need(sizes == (0, 0, 0, 0) and self.receipt.status is not records.AuditStatus.PASS,
+                  "V2_MISSING_WIRE_FACTS")
+        else:
+            _need(type(self.wire) is bytes and bool(self.wire)
+                  and self.receipt.status is records.AuditStatus.PASS, "V2_IMMUTABLE_WIRE_REQUIRED")
+            _need(self.wb02_wire_bytes == len(self.wire), "WB02_WIRE_SIZE_BINDING")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("V2 transport results are local observations, not serializable trust objects.")
+
+
+def _missing_v2(work, kind, reason, codec_profile_sha256):
+    return _V2OperationResult(UnitReceipt(work.position, kind, records.AuditStatus.INCOMPLETE,
+        reason, 0, None), None, codec_profile_sha256, (), None, 0, 0, 0, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -628,6 +696,29 @@ def _bind_prior_bundle(candidate, first_bytes, work, kind, envelope):
 def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                          job_started_ns, launcher_started_ns, *, worker_target=None, r0_observe=False):
     """One disposable process. The private test target never changes the public plan."""
+    return _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
+        job_started_ns, launcher_started_ns, worker_target=worker_target, r0_observe=r0_observe)
+
+
+def _supervise_operation_v2(work, kind, first_bytes, envelope, ledger, cancel,
+                            job_started_ns, launcher_started_ns, codec_profile_sha256, *, worker_target=None):
+    """Separate WB02 boundary; profile identity alone conveys no qualification."""
+    _transport_profile(codec_profile_sha256)
+    _envelope(envelope)
+    _need(type(work) is execution.BoardWork and type(kind) is execution.WorkerKind,
+          "WB02_WORK_KIND_BINDING")
+    execution.BoardWork.__post_init__(work)
+    _need(first_bytes is None if kind is execution.WorkerKind.PRIMARY else type(first_bytes) is bytes,
+          "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+    return _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
+        job_started_ns, launcher_started_ns, worker_target=worker_target,
+        v2=True, codec_profile_sha256=codec_profile_sha256)
+
+
+def _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
+                              job_started_ns, launcher_started_ns, *, worker_target=None, r0_observe=False,
+                              v2=False, codec_profile_sha256=None):
+    """Shared spawn/Job/barrier/IPC/monitor/reap owner for both transports."""
     started = time.monotonic_ns()
     counter_started = time.perf_counter_ns() if r0_observe else None
     context = multiprocessing.get_context("spawn")
@@ -635,14 +726,17 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
     barrier = context.Event()
     _need(type(r0_observe) is bool and (not r0_observe or worker_target is None), "R0_PRODUCTION_WORKER_REQUIRED")
     args = (work, kind, first_bytes, envelope, child, barrier)
-    process = context.Process(target=_worker_main if worker_target is None else worker_target,
-                              args=args + (True,) if r0_observe else args)
+    target = (_worker_main_v2 if v2 else _worker_main) if worker_target is None else worker_target
+    process = context.Process(target=target, args=args + (codec_profile_sha256,) if v2 else
+                              args + (True,) if r0_observe else args)
     inbox, reader_stop = Queue(maxsize=2), threading.Event()
     reader = api = job = peak_memory = None
     token = object()
     first_sample = peak_sample = last_sample = None
     reason, diagnosed_fail = None, False
     bundle = None
+    immutable_wire = None
+    size_facts = (0, 0, 0, 0)
     wire = bytearray()
     expected_size = None
     started_frame = finished = False
@@ -824,9 +918,19 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
                 _need(not data and expected_size is not None and len(wire) == expected_size, "MALFORMED_IPC")
                 validation_started = time.monotonic_ns()
                 binding_started = time.perf_counter_ns() if r0_observe and first_bytes is not None else None
-                candidate = execution.decode_bundle(bytes(wire))
-                execution.revalidate_bundle(candidate, work, kind, max_payload_bytes=envelope.max_payload_bytes)
-                _bind_prior_bundle(candidate, first_bytes, work, kind, envelope)
+                immutable_wire = bytes(wire)
+                if v2:
+                    boundary = _fresh_wb02_context(immutable_wire, work, kind, codec_profile_sha256,
+                                                   envelope, prior_primary_wire=first_bytes)
+                    candidate = boundary.bundle
+                    size_facts = (boundary.logical_bytes, boundary.physical_frame_bytes,
+                                  boundary.legacy_bundle_bytes, boundary.wb02_wire_bytes)
+                    del boundary
+                else:
+                    candidate = execution.decode_bundle(immutable_wire)
+                    execution.revalidate_bundle(candidate, work, kind, max_payload_bytes=envelope.max_payload_bytes)
+                    _bind_prior_bundle(candidate, first_bytes, work, kind, envelope)
+                    immutable_wire = None
                 if binding_started is not None:
                     prior_binding_intervals.append((binding_started, time.perf_counter_ns()))
                 streams = dict(candidate.streams)
@@ -949,8 +1053,14 @@ def _supervise_operation(work, kind, first_bytes, envelope, ledger, cancel,
         finished and telemetry is not None and reason not in ("DECISION_TIMEOUT", "ARM_TIMEOUT", "CASE_TIMEOUT",
             "JOB_TIMEOUT", "LAUNCHER_TIMEOUT", "SHADOW_TIMEOUT", "WATCHDOG_INCOMPLETE"),
         tuple(prior_binding_intervals))
-    return _OperationResult(UnitReceipt(work.position, kind, status, summary_reason, elapsed,
-                                       exit_code), bundle, samples, observation)
+    receipt = UnitReceipt(work.position, kind, status, summary_reason, elapsed, exit_code)
+    if v2:
+        # Failed or incomplete transport is never a downstream premise. Retain
+        # the diagnosed receipt (including FAIL precedence), not partial bytes.
+        if reason is not None or status is not records.AuditStatus.PASS:
+            immutable_wire, size_facts = None, (0, 0, 0, 0)
+        return _V2OperationResult(receipt, immutable_wire, codec_profile_sha256, samples, None, *size_facts)
+    return _OperationResult(receipt, bundle, samples, observation)
 
 
 def _workflow(work, envelope, ledger, cancel, job_started, launcher_started):
@@ -967,6 +1077,27 @@ def _workflow(work, envelope, ledger, cancel, job_started, launcher_started):
         outcomes.append(result)
         if kind is execution.WorkerKind.PRIMARY and result.bundle is not None:
             first = execution.encode_bundle(result.bundle)
+    return tuple(outcomes)
+
+
+def _workflow_v2(work, envelope, ledger, cancel, job_started, launcher_started, codec_profile_sha256):
+    """Pass the exact PRIMARY wire to D/K; no conversion or persistence."""
+    _transport_profile(codec_profile_sha256)
+    outcomes = []
+    first = None
+    for kind in _kinds(work):
+        if kind is not execution.WorkerKind.PRIMARY and first is None:
+            result = _missing_v2(work, kind, "PRIMARY_PREMISES_MISSING", codec_profile_sha256)
+        elif cancel.is_set():
+            result = _missing_v2(work, kind, "CANCELLED", codec_profile_sha256)
+        else:
+            result = _supervise_operation_v2(work, kind, first, envelope, ledger, cancel,
+                                             job_started, launcher_started, codec_profile_sha256)
+        _need(type(result) is _V2OperationResult and result.codec_profile_sha256 == codec_profile_sha256,
+              "V2_RESULT_PROFILE_BINDING")
+        outcomes.append(result)
+        if kind is execution.WorkerKind.PRIMARY:
+            first = result.wire
     return tuple(outcomes)
 
 
