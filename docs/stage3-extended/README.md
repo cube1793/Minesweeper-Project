@@ -6,9 +6,10 @@ Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen bas
 ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
 **Stage-3 Extended는 ACTIVE**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
 
-Current state: **2026-10-26 (Asia/Seoul), PRE-ACTUAL-E2 — TWO STATIC FOLLOW-ON BLOCKS**.
-Accepted `main` / `origin/main` at refresh entry:
-`c0bc270bce1996797f9ecec80e79ea8998d3205d`.
+Current state: **2026-10-26 (Asia/Seoul), PRE-ACTUAL-E2 — REMEDIATION DESIGN V1.3.1 ACCEPTED**.
+Verified `main` / local `origin/main` at authority-freeze entry:
+`be1fa9d74d3fb6c4efba91df02741cb98699551f`; ahead/behind **0/0**, clean index/worktree.
+Historical R0-A run/review source remains `c0bc270bce1996797f9ecec80e79ea8998d3205d`.
 Accepted technical harness ancestor:
 `7e7f847816fedb77cef67b576eab665afabfbfbf`
 — `feat: add Program K E2 R0 harness`; its direct parent is
@@ -62,8 +63,19 @@ Its post-run integrity review and static follow-on review are complete. The
 accepted observations establish two independent static blocks: the frozen
 execution-admission projection exceeds 12 hours at every candidate N/concurrency,
 and the required synthetic R0-B family minima exceed the 16 GiB archive ceiling.
-**NEXT: source-only / read-only engineering investigation and remediation proposal
-for both blocks, followed by explicit adjudication.** Real R0-B is
+Remediation engineering investigation: **CLOSED / ACCEPTED**. The
+[exact remediation design V1.3.1](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) is
+**FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**; the
+[live acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
+records **BLOCKER 0 / REQUIRED 0 at the design boundary; design phase CLOSED**.
+Remediation implementation: **NOT STARTED**.
+**NEXT: separately authorized Remediation Slice 1A — RF02 / WB02 / codec /
+qualified-profile primitives.** Separate explicit implementation authorization is
+required. Fresh R0-A: **NOT AUTHORIZED / NOT RUN**. The design provides a credible
+remediation path only; fresh committed implementation and fresh R0 evidence are
+still required. Historical R0-A evidence and both static blocks remain unchanged
+for the old source/representation; design acceptance does not resolve them operationally.
+Real R0-B is
 **NOT RUN / NOT AUTHORIZED**; this is not a failed R0-B run. Complete R0
 adjudication is **NOT DONE**. Final N/concurrency are **NOT SELECTED**, and the
 final E2 Operating Envelope is **NOT SELECTED / NOT FROZEN**.
@@ -219,9 +231,11 @@ results retain their original identity and meaning.
     **I1–I8 = 8/8 COMPLETE / ACCEPTED.** Amendment conformance, target
     counts/synthetic selection, setup repair and R0 harness are accepted.
     **Real R0-A is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun.**
-    **NEXT: source-only / read-only engineering investigation and remediation
-    proposal for the execution-admission and synthetic-archive blocks.** Real
-    R0-B and Actual E2 are **NOT RUN / NOT AUTHORIZED**. Later readiness,
+    Remediation investigation is **CLOSED / ACCEPTED**; V1.3.1 is **FINAL DESIGN
+    ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Remediation implementation is **NOT STARTED**.
+    **NEXT: separately authorized Remediation Slice 1A — RF02 / WB02 / codec /
+    qualified-profile primitives.** Fresh R0-A, R0-B and Actual E2 are
+    **NOT RUN / NOT AUTHORIZED**. Later readiness,
     Operating Envelope and execution steps remain conditional on resolution and
     explicit adjudication. No milestone 11+ is frozen.
 
@@ -489,29 +503,48 @@ minimum-total-archive preflight there; cumulative persistence/final accounting
 still fail closed. These facts were established by source-only/read-only static
 inspection and arithmetic, without materialization or a launcher invocation.
 
-#### Current execution boundary / engineering investigation
+#### Current execution boundary / accepted remediation design
 
-**Immediate NEXT: source-only / read-only engineering investigation and remediation
-proposal for both static blocks, then explicit ChatGPT/user adjudication.**
-Candidate investigation areas are K/D setup/reference preparation, encoding/IPC,
+The [exact V1.3.1 design](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) is **FINAL DESIGN
+ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Its
+[acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) is the
+live authority for the subsequent closure re-audit PASS and ChatGPT/user final
+acceptance: **BLOCKER 0 / REQUIRED 0; design phase CLOSED**. The design's historical
+pre-re-audit wording remains unchanged. Remediation implementation is **NOT STARTED**.
+
+**Immediate NEXT: PROGRAM K REMEDIATION SLICE 1A — RF02 / WB02 / codec /
+qualified-profile primitives, only after separate explicit implementation authorization.**
+Return to ChatGPT for authority-freeze adjudication before commit; do not start
+Slice 1A yet. No operational workload is authorized by this receipt.
+
+Historical scope of the now **CLOSED / ACCEPTED** engineering investigation:
+candidate investigation areas are K/D setup/reference preparation, encoding/IPC,
 worker/coordinator validation, persistence/readback/cleanup and the observed weak
 or negative O_K_BIND scaling. For bytes, examine the approximately 3.745 MB primary
 maximum unit, required semantic content versus incidental representation, a compact
 semantically equivalent representation, and an early minimum-total-archive check.
-These are investigation targets, not established causes or approved implementations.
+These were investigation targets, not established causes or approved implementations.
 
 Do not begin by loosening caps, safety factors, subsets, the candidate-N ladder,
 attribution, policy or thresholds. Any contract change requires separate explicit
-adjudication. This documentation refresh implements no remedy. **No R0-B
-authorization until both blocks are resolved and adjudicated.**
+adjudication. The accepted R0-A evidence and both static blocks above remain
+historical evidence for the old source/representation. The design provides a
+credible remediation path only; fresh committed implementation and fresh R0 evidence
+are still required to establish operational resolution. This freeze implements no remedy.
 
 | Boundary | Current status |
 | --- | --- |
 | Real R0-A execution / integrity / evidence | **COMPLETE / PASS / ACCEPTED; work CLOSED, no rerun** |
 | R0-A post-run integrity review | **COMPLETE** |
 | R0 follow-on static feasibility review | **COMPLETE** |
-| Execution-wall admission | **STATICALLY BLOCKED** |
-| R0-B minimum whole-archive feasibility | **STATICALLY BLOCKED** |
+| Historical execution-wall admission / old source | **STATICALLY BLOCKED; proof preserved** |
+| Historical R0-B minimum archive / old representation | **STATICALLY BLOCKED; proof preserved** |
+| Remediation engineering investigation | **CLOSED / ACCEPTED** |
+| Remediation design V1.3.1 | **FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES** |
+| Design boundary | **BLOCKER 0 / REQUIRED 0; design phase CLOSED** |
+| Remediation implementation | **NOT STARTED** |
+| Next implementation work unit | **Remediation Slice 1A; separate explicit authorization required** |
+| Fresh R0-A | **NOT AUTHORIZED / NOT RUN** |
 | Real R0-B | **NOT RUN / NOT AUTHORIZED; no R0-B failure claimed** |
 | Complete R0 adjudication | **NOT DONE** |
 | Final N / final concurrency | **NOT SELECTED** |
@@ -524,9 +557,12 @@ authorization until both blocks are resolved and adjudicated.**
 | Program K final closeout | **NOT DONE** |
 | Stage-3 Extended / milestone 10 | **ACTIVE; milestones 1–9 remain CLOSED** |
 
-Only after separately accepted resolution may future authorization consider
-Real R0-B, complete R0 readiness adjudication, final Operating Envelope selection/
-freeze and separately authorized Actual E2. Any E3 required by the frozen trigger,
+Separately authorized implementation/qualification must include the mandatory
+bounded large-reference performance diagnostic before large qualification, followed
+by committed qualified source and separately authorized fresh R0-A. Only after
+fresh admission/constructibility review may future authorization consider real
+R0-B, complete R0 adjudication, final N/concurrency/envelope selection and separately
+authorized Actual E2. Any E3 required by the frozen trigger,
 Gate P, production integration, K trace/native-user acceptance, Program K closeout
 and eventual Extended closeout remain conditional later work. This is not an
 automatic execution chain, a PASS result, or a new frozen milestone.
@@ -549,6 +585,8 @@ Recovery order:
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this roadmap →
 [frozen E2 protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
 [frozen R0 Attribution Amendment](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) →
+[exact V1.3.1 design](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) /
+[live acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) →
 current source/tests for disputed implementation facts.
 Do not repeat E2-D0, protocol/amendment audits, Gate-R/E0/E1 execution or closed
 evidence merely for recovery.
@@ -680,9 +718,10 @@ E2 implementation is now **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
 [R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
 is **CONTENT-FROZEN / ACCEPTED**. Conformance, selection, setup repair and the
 R0 harness at `7e7f847` are accepted. Real R0-A is now COMPLETE / INTEGRITY PASS /
-EVIDENCE ACCEPTED / CLOSED. Current NEXT is source-only / read-only engineering
-investigation and a remediation proposal for the two static follow-on blocks
-recorded above. R0-B and Actual E2 remain NOT RUN / NOT AUTHORIZED; effectiveness
+EVIDENCE ACCEPTED / CLOSED. Remediation investigation/design are CLOSED / ACCEPTED;
+V1.3.1 is frozen by exact tracked bytes, and remediation implementation is NOT STARTED.
+Current NEXT is separately authorized Remediation Slice 1A. Fresh R0-A, R0-B and
+Actual E2 remain NOT RUN / NOT AUTHORIZED; effectiveness
 is NOT ESTABLISHED. The historical polish acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
@@ -1027,10 +1066,11 @@ qualification are accepted/closed. The E2 Effectiveness Protocol is FROZEN /
 ACCEPTED, E2 implementation is **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
 R0 Attribution Amendment v1 is **CONTENT-FROZEN / ACCEPTED**. Conformance,
 selection, setup repair and R0 harness `7e7f847` are accepted. Real R0-A is COMPLETE /
-INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun. Current next work is
-source-only / read-only engineering investigation and a remediation proposal for
-the execution-admission and synthetic-archive blocks above. R0-B and Actual E2 are
-NOT RUN / NOT AUTHORIZED; complete R0 adjudication is NOT DONE and the final
+INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun. Remediation investigation/design
+are CLOSED / ACCEPTED; V1.3.1 is frozen by exact tracked bytes, and remediation
+implementation is NOT STARTED. Current next work is separately authorized
+Remediation Slice 1A. Fresh R0-A, R0-B and Actual E2 are NOT RUN / NOT AUTHORIZED;
+complete R0 adjudication is NOT DONE and the final
 Operating Envelope is NOT FROZEN. Effectiveness is NOT ESTABLISHED.
 Milestone 10 remains ACTIVE.
 The historical Same-board closeout
