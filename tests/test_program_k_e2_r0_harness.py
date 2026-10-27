@@ -8060,3 +8060,839 @@ class R0ACaseReadbackV2Tests(unittest.TestCase):
         with patch.object(h, "_readback_r0a_case_v2", side_effect=AssertionError("Implicit readback")), \
                 _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
             self.assertIs(type(fixture["claim"]), operational._R0V2SealedCase)
+
+
+class _Slice1UClock:
+    """Deliberately disjoint clocks: evidence timestamps cannot be deadlines."""
+
+    def __init__(self):
+        self.value = 10_000_000
+        self.monotonic_value = 100
+        self.lock = threading.Lock()
+
+    def perf_counter_ns(self):
+        with self.lock:
+            self.value += 10
+            return self.value
+
+    def monotonic_ns(self):
+        return self.monotonic_value
+
+
+class _Slice1UCarrier:
+    """Test-only readback seam; public evidence is real, private life is tracked."""
+
+    def __init__(self, evidence, work, component, phase, profile):
+        self.evidence, self.work, self.component, self.phase = evidence, work, component, phase
+        self.codec_profile_sha256 = profile.sha256
+
+
+class _Slice1UFuture:
+    def __init__(self, pool, function, arguments):
+        self.pool, self.function, self.arguments = pool, function, arguments
+        self.value = self.error = None
+        self.completed = self.cancelled = False
+
+    def execute(self):
+        if not self.cancelled:
+            try:
+                self.value = self.function(*self.arguments)
+            except BaseException as error:
+                self.error = error
+        self.function = self.arguments = None
+        self.completed = True
+
+    def result(self):
+        if not self.completed:
+            self.pool.drain()
+        if self.cancelled:
+            from concurrent.futures import CancelledError
+            raise CancelledError()
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+    def cancel(self):
+        self.pool.world.events.append(("future_cancel", self.pool.world.cancel.is_set()))
+        if not self.completed:
+            self.cancelled = True
+            self.function = self.arguments = None
+            self.completed = True
+            return True
+        return False
+
+
+class _Slice1UPool:
+    """One deterministic reversed-completion wave, with no retained history."""
+
+    def __init__(self, world, max_workers, **kwargs):
+        import weakref
+        self.world, self.limit = world, max_workers
+        self.pending, self.closed = [], False
+        self.futures = weakref.WeakSet()
+        self.maximum_pending = 0
+        world.pools.append(self)
+        world.events.append(("pool_enter", max_workers))
+
+    def submit(self, function, *arguments):
+        assert not self.closed
+        assert len(self.pending) < self.limit, "Unbounded future queue"
+        work, kind, prior = arguments[:3]
+        phase = "setup" if kind is execution.WorkerKind.PRIMARY and (
+            work.determinism_selected or work.k_control_selected) else "target"
+        if not self.pending:
+            assert not tuple(self.futures), "Previous phase futures retained"
+        if phase == "target" and prior is not None:
+            offset = work.position // self.limit * self.limit
+            assert all((self.world.component_for(work), "setup", p) in self.world.readbacks
+                       for p in range(offset, min(offset + self.limit, 64))), "Target before setup authentication"
+        if work.position % self.limit == 0 and phase != "target":
+            assert not tuple(self.world.carriers), "Previous wave private carriers retained"
+        self.world.events.append(("submit", phase, work.position))
+        future = _Slice1UFuture(self, function, arguments)
+        self.pending.append(future)
+        self.futures.add(future)
+        self.maximum_pending = max(self.maximum_pending, len(self.pending))
+        return future
+
+    def drain(self):
+        pending, self.pending = self.pending, []
+        self.world.binding_base = self.world.clock.perf_counter_ns()
+        for future in reversed(pending):
+            future.execute()
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        self.world.events.append(("pool_shutdown", self.world.cancel.is_set(), wait, cancel_futures))
+        if cancel_futures:
+            for future in self.pending:
+                future.cancel()
+        self.pending.clear()
+        self.closed = True
+        if self.world.failure == "pool_close":
+            raise RuntimeError("injected pool close failure")
+
+
+class _Slice1UIdleThread:
+    """Disable background scheduling while using the real monitor's checkpoints."""
+
+    def __init__(self, world):
+        self.world, self.ident, self.closed = world, None, False
+
+    def start(self):
+        self.ident = 1
+
+    def join(self, timeout=None):
+        self.closed = True
+        self.world.events.append(("monitor_join", self.world.cancel.is_set()))
+        if self.world.failure == "final_deadline":
+            self.world.clock.monotonic_value += self.world.envelope.max_job_wall_ms * 1_000_000
+
+    def is_alive(self):
+        return self.world.failure == "monitor_close"
+
+
+class _Slice1UFixture:
+    """Mocked execution/disk claims for 64-unit collector orchestration only.
+
+    The real monitor, archive budget and 1R constructors are exercised. This
+    fixture does not claim its synthetic readback seam authenticates disk.
+    Selected separate tests below use genuine 1S and 1T instead.
+    """
+
+    def __init__(self, concurrency=2, *, failure=None, zero_oracle=False):
+        import weakref
+        from tests.test_program_k_e2_operational import _envelope, _r0_v2_supplied_profile
+        self.profile = _r0_v2_supplied_profile()
+        self.envelope = _envelope(concurrency=concurrency, archive_cap_bytes=10_000_000)
+        runtime = records.RuntimeIdentity("Slice1UFixture", "0", "fixture-os", "fixture-platform", "fixture-arch", None)
+        self.work = tuple(operational.R0Work(position,
+            records.BoardIdentity(70_000_000 + position, "slice1u-literal-" + str(position),
+                1, 1, 0, (0, 0), "supplied-fixture", "supplied-fixture"),
+            b"u" * 32, "R0-1U-LITERAL", runtime) for position in range(64))
+        self.clock, self.cancel = _Slice1UClock(), threading.Event()
+        self.failure, self.zero_oracle = failure, zero_oracle
+        self.events, self.budgets, self.ledgers, self.monitors, self.pools = [], [], [], [], []
+        self.readbacks, self.authenticated = set(), {}
+        self.carriers = weakref.WeakSet()
+        self.wires, self.prior_identities = {}, []
+        self.seals, self.progress_facts, self.setup_counts = [], [], []
+        self.max_carriers, self.max_setup_carriers, self.max_target_carriers, self.binding_base = 0, 0, 0, 0
+        self.expected_monitor_counts = []
+        self.original_budget = operational._R0V2ComponentArchiveBudget
+        self.original_ledger = operational._MemoryLedger
+        self.original_monitor = operational._R0MemoryMonitor
+
+    @staticmethod
+    def component_for(work):
+        return next(component for component in operational.R0Component
+                    if operational._r0_work(work, component) == work)
+
+    def budget(self, component, envelope):
+        value = self.original_budget(component, envelope)
+        self.budgets.append(value)
+        self.events.append(("budget", component.value))
+        return value
+
+    def ledger(self, envelope):
+        value = self.original_ledger(envelope)
+        self.ledgers.append(value)
+        return value
+
+    def monitor(self, ledger, cancel, envelope):
+        value = self.original_monitor(ledger, cancel, envelope)
+        value.thread = _Slice1UIdleThread(self)
+        self.monitors.append(value)
+        return value
+
+    def memory(self):
+        if self.failure == "memory" and self.seals:
+            return self.envelope.coordinator_memory_cap_bytes + 1
+        return 500 if self.monitors and self.monitors[-1].setup is not None else 900
+
+    def supervise(self, work, kind, prior, envelope, ledger, cancel, job_start, launcher_start, digest):
+        assert job_start == launcher_start == 100, "Evidence clock used as deadline clock"
+        assert digest == self.profile.sha256 and ledger is self.ledgers[-1]
+        component = self.component_for(work)
+        phase = "setup" if kind is execution.WorkerKind.PRIMARY and component in operational._R0_SETUP_ROUTES else "target"
+        if prior is not None:
+            assert prior is self.wires[(component, "setup", work.position)]
+            self.prior_identities.append((phase, work.position, id(prior)))
+        self.events.append(("worker", phase, work.position, self.clock.perf_counter_ns()))
+        if self.failure == "worker_exception" and work.position == 0:
+            raise RuntimeError("injected worker exception")
+        status = (records.AuditStatus.FAIL if self.failure == "worker_fail" else records.AuditStatus.INCOMPLETE)
+        if self.failure in ("worker_fail", "worker_incomplete") and work.position == 0:
+            return operational._R0V2OperationResult(operational.UnitReceipt(work.position, kind,
+                status, "SYNTHETIC_FAILURE", 50, 0), None, digest, (), None, 0, 0, 0, 0)
+        wire = (b"WB02" + bytes((work.position, operational._kind_rank(kind))) + b"supplied").ljust(2000, b"x")
+        self.wires[(component, phase, work.position)] = wire
+        binding = ((self.binding_base, self.binding_base + 5), (self.binding_base + 5, self.binding_base + 8)) \
+            if component is operational.R0Component.ORACLE_K_BIND and phase == "target" else ()
+        observation = operational._R0Observation(10, 20, 30, 1, 2, 0, 1,
+            (0, 0, 0, ()), True, True, True, binding)
+        sample = records.ResourceSampleRecord(operational._unit_id(work.position, kind), records.ProcessRole.COMBINED,
+            10, 20, 30, "slice1u:literal", 50, records.MemoryMethod.PRIVATE_BYTES)
+        value = operational._R0V2OperationResult(operational.UnitReceipt(work.position, kind,
+            records.AuditStatus.PASS, "ADMITTED", 50, 0), wire, digest, (sample,), observation,
+            1000, 1500, 1200, len(wire))
+        if self.failure == "missing_wire" and work.position == 0:
+            object.__setattr__(value, "wire", None)
+        return value
+
+    def seal(self, anchor, work, result, envelope, profile, budget, *, phase, prior_primary_wire=None):
+        component = budget.component
+        assert profile is self.profile and budget is self.budgets[-1]
+        if prior_primary_wire is not None:
+            assert prior_primary_wire is self.wires[(component, "setup", work.position)]
+        started, finished = self.clock.perf_counter_ns(), self.clock.perf_counter_ns()
+        relative = operational._r0_case_path_v2(envelope.concurrency, component, work.position, phase)
+        directory = Path(anchor) / relative
+        directory.mkdir(parents=True)
+        streams = tuple(records.StreamDigest(name, "a" * 64, 500, 1)
+                        for name in execution.STREAM_NAMES + ("operations", "resources"))
+        byte_length = sum(s.byte_length for s in streams)
+        reservation = budget.reserve((work.position, phase), byte_length)
+        if self.failure == "seal" and work.position == 0:
+            (directory / "operations.pkf").write_bytes(b"partial")
+            raise OSError("injected partial sealing failure")
+        claim = operational._R0V2SealedCase(work, component, phase, relative, result.receipt, streams,
+            profile.sha256, result.samples, result.observation, result.logical_bytes, result.physical_frame_bytes,
+            result.legacy_bundle_bytes, result.wb02_wire_bytes, (started, finished), byte_length)
+        budget.commit(reservation, byte_length)
+        self.seals.append((component, phase, work.position, claim.parent_admission_interval))
+        self.events.append(("seal", phase, work.position, finished))
+        return claim
+
+    def readback(self, anchor, claim, work, component, phase, profile, envelope, *, prior_primary=None, cancel=None):
+        import weakref
+        assert profile is self.profile and claim.work == work and claim.component is component and claim.phase == phase
+        if self.failure == "readback" and work.position == 0:
+            raise ValueError("injected independent readback failure")
+        if prior_primary is not None:
+            assert prior_primary is self.authenticated[(component, "setup", work.position)]()
+            assert prior_primary.work == work and prior_primary.codec_profile_sha256 == profile.sha256
+            if self.failure == "prior":
+                raise ValueError("injected authenticated prior mismatch")
+        families = dict(P="primary", K="k_control", O="oracle_primary", D="determinism",
+                        O_K_BIND=None, O_D_REPEAT="oracle_repeat")
+        family = "reference" if phase == "setup" else families[component.value]
+        owned = h.evidence.R0AByteCountV2(0, 0, 0) if family is None or (
+            self.zero_oracle and family in ("oracle_primary", "oracle_repeat")) else h.evidence.R0AByteCountV2(
+                300 if work.position == 0 else 200, 400 if work.position == 1 else 300, 1)
+        observed = claim.observation
+        telemetry = h.evidence.R0ATelemetryV2(observed.worker_memory, observed.coordinator_memory,
+            observed.combined_memory, observed.decision_wall, observed.arm_wall, observed.shadow_wall,
+            observed.physical_inputs, h.evidence.R0AOracleTelemetryV2(0, 0, 0, ()), True, True, True,
+            tuple(h.evidence.R0AIntervalV2(*interval) for interval in observed.prior_binding_intervals))
+        case = h.evidence.R0ACaseEvidenceV2(claim.receipt, telemetry,
+            h.evidence.R0APayloadAxesV2(claim.logical_bytes, claim.legacy_bundle_bytes,
+                claim.wb02_wire_bytes, claim.physical_frame_bytes),
+            h.evidence.R0AArchiveEvidenceV2(claim.relative_directory, claim.streams), family, owned, True)
+        carrier = _Slice1UCarrier(case, work, component, phase, profile)
+        self.carriers.add(carrier)
+        self.max_carriers = max(self.max_carriers, len(self.carriers))
+        self.max_setup_carriers = max(self.max_setup_carriers, sum(c.phase == "setup" for c in self.carriers))
+        self.max_target_carriers = max(self.max_target_carriers, sum(c.phase == "target" for c in self.carriers))
+        self.authenticated[(component, phase, work.position)] = weakref.ref(carrier)
+        self.readbacks.add((component, phase, work.position))
+        self.events.append(("readback", phase, work.position, self.clock.perf_counter_ns()))
+        if self.failure == "cancel" and work.position == 0:
+            cancel.set()
+        if self.failure == "deadline" and work.position == 0:
+            self.clock.monotonic_value += envelope.max_job_wall_ms * 1_000_000
+        if self.failure == "budget" and work.position == 63:
+            self.budgets[-1]._committed_bytes += 1
+        return carrier
+
+    def progress(self, component, fact):
+        import sys
+        assert type(fact) is h.evidence.R0AProgressV2
+        assert not tuple(self.carriers), "Private carrier escaped wave into progress"
+        assert not tuple(self.pools[-1].futures), "Completed Future retained operation result"
+        # Only the test's dictionary, loop value and getrefcount temporary remain.
+        assert all(sys.getrefcount(value) == 3 for value in self.wires.values()), "Live wire escaped wave"
+        self.wires.clear()
+        assert (component, "target", fact.position) in self.readbacks
+        self.events.append(("progress", fact.position, self.clock.perf_counter_ns()))
+        self.progress_facts.append((component, fact))
+        if self.failure == "callback":
+            raise RuntimeError("injected callback failure")
+
+    @_evidence_contextmanager
+    def patches(self):
+        with _EvidenceExitStack() as stack:
+            for owner, name, replacement in (
+                (h.time, "perf_counter_ns", self.clock.perf_counter_ns),
+                (h.time, "monotonic_ns", self.clock.monotonic_ns),
+                (operational, "_R0V2ComponentArchiveBudget", self.budget),
+                (operational, "_MemoryLedger", self.ledger),
+                (operational, "_R0MemoryMonitor", self.monitor),
+                (operational.harness, "_coordinator_private_bytes", self.memory),
+                (h, "ThreadPoolExecutor", lambda **kwargs: _Slice1UPool(self, **kwargs)),
+                (operational, "_supervise_r0_operation_v2", self.supervise),
+                (operational, "_seal_r0_case_v2", self.seal),
+                (h, "_readback_r0a_case_v2", self.readback)):
+                stack.enter_context(patch.object(owner, name, new=replacement))
+            for owner, names in (
+                (execution, ("encode_bundle_v2", "make_work_plan", "revalidate_work_plan", "_materialize_board")),
+                (physical, ("capture_profile", "capture_qualified_profile")),
+                (h, ("_materialize_r0a_work", "capture_run_provenance", "capture_run_provenance_v2",
+                     "launch_r0a", "launch_r0b", "_materialize_synthetic_v2")),
+                (h.evidence, ("R0AObservationsV2",)),
+                (identity, ("select_indices", "select_subset_positions")),
+                (h.analysis, ("analyze_effectiveness",))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name,
+                        side_effect=AssertionError("Slice 1U collector activated forbidden " + name)))
+            yield self
+
+    def collect(self, anchor, component=operational.R0Component.PRIMARY):
+        return h._collect_r0a_component_v2(self.work, component, anchor, self.envelope, self.profile,
+                                          cancel=self.cancel, progress=self.progress)
+
+
+class R0ACollectorInputV2Tests(unittest.TestCase):
+    def test_all_identity_defects_reject_before_mutation_or_worker(self):
+        fixture = _Slice1UFixture()
+        def changed(index, **changes):
+            values = list(fixture.work)
+            value = replace(values[index])
+            for name, item in changes.items():
+                object.__setattr__(value, name, item)
+            values[index] = value
+            return tuple(values)
+        mutations = (list(fixture.work), fixture.work[:-1], fixture.work + fixture.work[:1],
+            changed(0, position=True), changed(1, position=0), changed(1, board=fixture.work[0].board),
+            changed(1, protocol_seed=b"z" * 32), changed(1, run_id="R0-OTHER"), changed(0, run_id="OTHER"),
+            changed(0, runtime=None), changed(0, runtime=object()),
+            changed(1, runtime=replace(fixture.work[0].runtime, python_version="different")),
+            tuple(replace(value, run_id="R0-") for value in fixture.work),
+            (object(),) + fixture.work[1:])
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), \
+                patch.object(Path, "mkdir", side_effect=AssertionError("Invalid input mutated filesystem")):
+            for work in mutations:
+                with self.subTest(work=type(work), first=work[0] if work else None), self.assertRaises(ValueError):
+                    h._collect_r0a_component_v2(work, operational.R0Component.PRIMARY, directory,
+                                               fixture.envelope, fixture.profile)
+            self.assertFalse(fixture.events)
+            self.assertEqual(tuple(Path(directory).iterdir()), ())
+
+    def test_envelope_profile_callback_cancel_and_component_domains(self):
+        fixture = _Slice1UFixture()
+        invalid_envelope = replace(fixture.envelope)
+        object.__setattr__(invalid_envelope, "concurrency", True)
+        invalid_three = replace(fixture.envelope)
+        object.__setattr__(invalid_three, "concurrency", 3)
+        node = json.loads(fixture.profile.canonical_bytes)
+        node["status"] = "UNQUALIFIED_SLICE_1A"
+        from tests.test_program_k_e2_physical import _json_bytes
+        unqualified = physical.CodecProfile(_json_bytes(node))
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            for changes in ({"envelope": invalid_envelope}, {"envelope": invalid_three}, {"envelope": object()}, {"profile": object()},
+                            {"profile": unqualified}, {"progress": 1}, {"cancel": object()}, {"component": "P"}):
+                args = dict(work=fixture.work, component=operational.R0Component.PRIMARY, anchor=directory,
+                            envelope=fixture.envelope, profile=fixture.profile)
+                args.update(changes)
+                with self.subTest(changes=tuple(changes)), self.assertRaises(ValueError):
+                    h._collect_r0a_component_v2(**args)
+            self.assertFalse(fixture.events)
+
+    def test_precancelled_input_has_no_workers_markers_or_budget(self):
+        fixture = _Slice1UFixture()
+        fixture.cancel.set()
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), self.assertRaises(ValueError):
+            fixture.collect(directory)
+        self.assertFalse(fixture.events)
+
+    def test_all_six_roots_are_preflighted_before_first_component(self):
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory:
+            conflict = Path(directory) / "calibration/c2/O_D_REPEAT"
+            conflict.mkdir(parents=True)
+            with fixture.patches(), self.assertRaisesRegex(ValueError, "ALREADY_EXISTS"):
+                h._collect_r0a_concurrency_v2(fixture.work, directory, fixture.envelope, fixture.profile)
+            self.assertFalse(fixture.events)
+            self.assertEqual(tuple(conflict.iterdir()), ())
+
+    def test_existing_empty_component_and_non_directory_parent_reject(self):
+        for shape in ("empty_component", "parent_file"):
+            fixture = _Slice1UFixture()
+            with self.subTest(shape=shape), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "calibration"
+                if shape == "empty_component":
+                    (path / "c2/P").mkdir(parents=True)
+                else:
+                    path.write_bytes(b"not a directory")
+                with fixture.patches(), self.assertRaises((ValueError, OSError)):
+                    fixture.collect(directory)
+                self.assertFalse(fixture.events)
+
+    def test_detectable_reparse_and_junction_ancestors_reject(self):
+        from types import SimpleNamespace
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).absolute()
+            original = Path.lstat
+            def reparse(path, *args, **kwargs):
+                info = original(path, *args, **kwargs)
+                return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400) if path == root else info
+            with fixture.patches(), patch.object(Path, "lstat", new=reparse), self.assertRaises(ValueError):
+                fixture.collect(directory)
+            if hasattr(Path, "is_junction"):
+                with fixture.patches(), patch.object(Path, "is_junction", return_value=True), self.assertRaises(ValueError):
+                    fixture.collect(directory)
+            self.assertFalse(fixture.events)
+
+
+class R0ACollectorComponentV2Tests(unittest.TestCase):
+    def test_real_executor_bounds_active_fake_workers_for_all_concurrencies(self):
+        from concurrent.futures import ThreadPoolExecutor
+        for concurrency in (1, 2, 4):
+            fixture = _Slice1UFixture(concurrency)
+            barrier, lock = threading.Barrier(concurrency), threading.Lock()
+            active, peak, pools = [0], [0], []
+            original = fixture.supervise
+            def supervise(*args):
+                work = args[0]
+                if work.position >= concurrency:
+                    previous = work.position // concurrency * concurrency - concurrency
+                    assert all((operational.R0Component.PRIMARY, "target", p) in fixture.readbacks
+                               for p in range(previous, previous + concurrency))
+                with lock:
+                    active[0] += 1
+                    peak[0] = max(peak[0], active[0])
+                try:
+                    barrier.wait(timeout=5)
+                    return original(*args)
+                finally:
+                    with lock:
+                        active[0] -= 1
+            class Pool(ThreadPoolExecutor):
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs)
+                    pools.append(self)
+            fixture.supervise = supervise
+            with self.subTest(c=concurrency), tempfile.TemporaryDirectory() as directory, fixture.patches(), \
+                    patch.object(h, "ThreadPoolExecutor", new=Pool):
+                value = h._collect_r0a_component_v2(fixture.work, operational.R0Component.PRIMARY,
+                    directory, fixture.envelope, fixture.profile, cancel=fixture.cancel)
+            self.assertEqual(peak[0], concurrency)
+            self.assertEqual(active[0], 0)
+            self.assertEqual(len(value.units), 64)
+            self.assertEqual(len(pools), 1)
+            self.assertTrue(all(not thread.is_alive() for thread in pools[0]._threads))
+
+    def test_bounded_reverse_completion_preserves_admission_progress_and_release_for_each_c(self):
+        for concurrency in (1, 2, 4):
+            fixture = _Slice1UFixture(concurrency)
+            with self.subTest(c=concurrency), tempfile.TemporaryDirectory() as directory, fixture.patches():
+                value = fixture.collect(directory, operational.R0Component.K_CONTROL)
+            self.assertEqual(len(fixture.budgets), 1)
+            self.assertEqual(len(fixture.ledgers), 1)
+            self.assertEqual(len(fixture.monitors), 1)
+            self.assertEqual(len(fixture.pools), 1)
+            self.assertEqual(fixture.pools[0].maximum_pending, concurrency)
+            self.assertEqual(tuple(v.position for v in value.units), tuple(range(64)))
+            self.assertEqual(tuple(f.position for _, f in fixture.progress_facts), tuple(range(64)))
+            self.assertEqual(tuple(w.positions for w in value.setup_waves),
+                tuple(tuple(range(i, i + concurrency)) for i in range(0, 64, concurrency)))
+            workers = [event[2] for event in fixture.events if event[:2] == ("worker", "setup")]
+            self.assertEqual(workers[:concurrency], list(reversed(range(concurrency))))
+            for phase in ("setup", "target"):
+                self.assertEqual([v[2] for v in fixture.seals if v[1] == phase], list(range(64)))
+            self.assertLessEqual(fixture.max_carriers, 2 * concurrency)
+            self.assertLessEqual(fixture.max_setup_carriers, concurrency)
+            self.assertLessEqual(fixture.max_target_carriers, concurrency)
+            self.assertFalse(tuple(fixture.carriers))
+            self.assertFalse(fixture.wires)
+
+    def test_all_six_flags_owned_families_and_standalone_complete_walls(self):
+        flags = ((False, False, False), (False, False, True), (True, False, False),
+                 (False, True, False), (True, False, True), (True, True, False))
+        families = ("primary", "k_control", "oracle_primary", "determinism", None, "oracle_repeat")
+        for component, expected_flags, family in zip(operational.R0Component, flags, families):
+            fixture = _Slice1UFixture(4, zero_oracle=True)
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory, fixture.patches():
+                value = fixture.collect(directory, component)
+            derived = operational._r0_work(fixture.work[0], component)
+            self.assertEqual((derived.oracle_b_selected, derived.determinism_selected, derived.k_control_selected), expected_flags)
+            self.assertIs(derived.runtime, fixture.work[0].runtime)
+            self.assertTrue(all(u.target.family == family for u in value.units))
+            if component in operational._R0_SETUP_ROUTES:
+                self.assertTrue(all(u.setup.family == "reference" for u in value.units))
+                self.assertEqual(len(fixture.seals), 128)
+            else:
+                self.assertTrue(all(u.setup is None for u in value.units))
+                self.assertEqual(len(fixture.seals), 64)
+            if component.value in ("P", "K", "O", "D"):
+                self.assertEqual(value.wall_intervals, (h.evidence.R0AWallIntervalV2(
+                    "COMPLETE_ROUTE", tuple(range(64)), value.complete_interval),))
+                self.assertEqual(value.wall_ns, value.complete_interval.duration_ns)
+            self.assertTrue(all(type(u.target) is h.evidence.R0ACaseEvidenceV2 for u in value.units))
+            self.assertNotIn("wire", {field.name for field in fields(value.units[0].target)})
+
+    def test_setup_authentication_precedes_every_target_submission_and_progress(self):
+        fixture = _Slice1UFixture(4)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = fixture.collect(directory, operational.R0Component.DETERMINISM)
+        events = fixture.events
+        for wave in value.setup_waves:
+            setup_reads = [i for i, event in enumerate(events) if event[0:2] == ("readback", "setup") and event[2] in wave.positions]
+            target_submits = [i for i, event in enumerate(events) if event[0:2] == ("submit", "target") and event[2] in wave.positions]
+            target_reads = [i for i, event in enumerate(events) if event[0:2] == ("readback", "target") and event[2] in wave.positions]
+            progress = [i for i, event in enumerate(events) if event[0] == "progress" and event[1] in wave.positions]
+            self.assertLess(max(setup_reads), min(target_submits))
+            self.assertLess(max(target_reads), min(progress))
+            self.assertLessEqual(wave.setup_interval.finished_ns, wave.target_interval.started_ns)
+        self.assertEqual(len(fixture.prior_identities), 64)
+
+    def test_budget_reconciles_all_55_streams_and_exact_cap(self):
+        fixture = _Slice1UFixture()
+        fixture.envelope = replace(fixture.envelope, archive_cap_bytes=64 * 55 * 500)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = fixture.collect(directory)
+        budget = fixture.budgets[0]
+        self.assertIsNone(budget.pending)
+        self.assertFalse(budget.aborted)
+        self.assertEqual(budget.committed_bytes, budget.cap_bytes)
+        self.assertEqual(budget.committed_bytes,
+            sum(s.byte_length for unit in value.units for s in unit.target.archive.streams))
+        self.assertGreater(budget.committed_bytes, sum(unit.target.owned_bytes.physical_bytes for unit in value.units))
+        self.assertTrue(all(len(unit.target.archive.streams) == 55 for unit in value.units))
+
+    def test_case_exceeding_remaining_cap_by_one_aborts_without_refund(self):
+        fixture = _Slice1UFixture()
+        fixture.envelope = replace(fixture.envelope, archive_cap_bytes=64 * 55 * 500 - 1)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), self.assertRaisesRegex(ValueError, "ARCHIVE_CAP"):
+            fixture.collect(directory)
+        self.assertEqual(len(fixture.budgets), 1)
+        self.assertTrue(fixture.budgets[0].aborted)
+        self.assertEqual(fixture.budgets[0].committed_bytes, 63 * 55 * 500)
+
+    def test_real_monitor_setup_and_global_facts_are_not_durable_samples(self):
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = fixture.collect(directory, operational.R0Component.K_CONTROL)
+        monitor = fixture.monitors[0]
+        self.assertEqual(value.monitor, h.evidence.R0AMonitorEvidenceV2(
+            monitor.coordinator, monitor.combined, monitor.memory_sample_count))
+        self.assertEqual((value.monitor.coordinator_private_peak_bytes, value.monitor.combined_peak_bytes), (900, 900))
+        self.assertTrue(all((w.monitor.coordinator_private_peak_bytes, w.monitor.combined_peak_bytes) == (500, 500)
+                            and w.monitor.memory_sample_count > 0 for w in value.setup_waves))
+        self.assertGreater(value.monitor.memory_sample_count, sum(w.monitor.memory_sample_count for w in value.setup_waves))
+        self.assertTrue(monitor.thread.closed)
+        self.assertEqual(fixture.ledgers[0].values, {})
+        self.assertGreater(value.monitor.coordinator_private_peak_bytes, value.units[0].target.observation.coordinator_memory)
+        shutdown = next(i for i, event in enumerate(fixture.events) if event[0] == "pool_shutdown")
+        joined = next(i for i, event in enumerate(fixture.events) if event[0] == "monitor_join")
+        self.assertLess(shutdown, joined)
+
+    def test_oracle_k_exact_live_phases_union_and_position_order(self):
+        fixture = _Slice1UFixture(4)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = fixture.collect(directory, operational.R0Component.ORACLE_K_BIND)
+        rows = value.wall_intervals
+        self.assertEqual({r.phase for r in rows}, {"ORCHESTRATION", "PRIOR_ENCODE", "PRIOR_BIND", "PARENT_ADMISSION", "CLEANUP"})
+        self.assertEqual(sum(r.phase == "ORCHESTRATION" for r in rows), 1)
+        self.assertEqual(sum(r.phase == "CLEANUP" for r in rows), 1)
+        self.assertEqual(tuple(r.positions for r in rows if r.phase == "PRIOR_ENCODE"), tuple(w.positions for w in value.setup_waves))
+        expected_bindings = tuple(sorted((h.evidence.R0AWallIntervalV2("PRIOR_BIND", (u.position,), i)
+            for u in value.units for i in u.target.observation.prior_binding_intervals), key=h.evidence._r0a_wall_key))
+        self.assertEqual(tuple(r for r in rows if r.phase == "PRIOR_BIND"), expected_bindings)
+        admissions = tuple(r for r in rows if r.phase == "PARENT_ADMISSION")
+        self.assertEqual(tuple(r.positions for r in admissions), tuple((p,) for p in range(64)))
+        claims = tuple(v[3] for v in fixture.seals if v[1] == "target")
+        self.assertEqual(tuple((r.interval.started_ns, r.interval.finished_ns) for r in admissions), claims)
+        endpoints = sorted({x for r in rows for x in (r.interval.started_ns, r.interval.finished_ns)})
+        independent_union = sum(b - a for a, b in zip(endpoints, endpoints[1:])
+            if any(r.interval.started_ns <= a < b <= r.interval.finished_ns for r in rows))
+        self.assertEqual(value.wall_ns, independent_union)
+        self.assertLess(value.wall_ns, sum(r.interval.duration_ns for r in rows))
+        self.assertLess(value.wall_ns, value.complete_wall_ns)
+
+    def test_oracle_repeat_target_intervals_cover_readback_and_exclude_setup(self):
+        fixture = _Slice1UFixture(2)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = fixture.collect(directory, operational.R0Component.ORACLE_D_REPEAT)
+        rows = value.wall_intervals
+        self.assertEqual({r.phase for r in rows}, {"ORCHESTRATION", "TARGET_PHASE", "CLEANUP"})
+        self.assertEqual(tuple((r.positions, r.interval) for r in rows if r.phase == "TARGET_PHASE"),
+                         tuple((w.positions, w.target_interval) for w in value.setup_waves))
+        self.assertTrue(all(a.interval.finished_ns <= b.interval.started_ns for a, b in zip(rows, rows[1:])))
+        self.assertEqual(value.wall_ns, sum(r.interval.duration_ns for r in rows))
+        for wave in value.setup_waves:
+            for event in fixture.events:
+                if event[0] in ("seal", "readback") and event[1] == "target" and event[2] in wave.positions:
+                    self.assertLessEqual(wave.target_interval.started_ns, event[3])
+                    self.assertLessEqual(event[3], wave.target_interval.finished_ns)
+        self.assertEqual(rows[-1].phase, "CLEANUP")
+        self.assertEqual(rows[-1].interval.started_ns, value.setup_waves[-1].target_interval.finished_ns)
+        self.assertEqual(rows[-1].interval.finished_ns, value.complete_interval.finished_ns)
+
+    def test_component_can_never_be_resumed_even_with_empty_existing_root(self):
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            fixture.collect(directory)
+            before = len(fixture.events)
+            with self.assertRaisesRegex(ValueError, "ALREADY_EXISTS"):
+                fixture.collect(directory)
+            self.assertEqual(len(fixture.events), before)
+
+
+class R0ACollectorFailureV2Tests(unittest.TestCase):
+    def test_monitor_entry_failure_preserves_original_even_if_its_cleanup_fails(self):
+        fixture = _Slice1UFixture()
+        monitors = []
+        original_error = RuntimeError("original monitor entry failure")
+        class Monitor:
+            def __init__(self, ledger, cancel, envelope):
+                self.stop = threading.Event()
+                self.thread = _Slice1UIdleThread(fixture)
+                self.thread.ident = 1
+                self.closed = False
+                monitors.append(self)
+            def __enter__(self):
+                raise original_error
+            def __exit__(self, *args):
+                self.closed = True
+                raise RuntimeError("secondary cleanup failure")
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), \
+                patch.object(operational, "_R0MemoryMonitor", new=Monitor):
+            with self.assertRaises(RuntimeError) as caught:
+                fixture.collect(directory)
+        self.assertIs(caught.exception, original_error)
+        self.assertTrue(monitors[0].stop.is_set())
+        self.assertTrue(monitors[0].closed)
+        self.assertTrue(fixture.cancel.is_set())
+        self.assertTrue(fixture.budgets[0].aborted)
+        self.assertFalse(fixture.pools)
+
+    def test_executor_creation_failure_reaps_the_already_started_monitor(self):
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), patch.object(h,
+                "ThreadPoolExecutor", side_effect=RuntimeError("executor construction")):
+            with self.assertRaisesRegex(RuntimeError, "executor construction"):
+                fixture.collect(directory)
+        self.assertTrue(fixture.cancel.is_set())
+        self.assertTrue(fixture.budgets[0].aborted)
+        self.assertTrue(fixture.monitors[0].thread.closed)
+
+    def test_every_failure_reaps_and_terminally_aborts_without_retry(self):
+        failures = ("worker_exception", "worker_fail", "worker_incomplete", "missing_wire", "seal", "readback",
+                    "prior", "memory", "deadline", "cancel", "callback", "budget", "pool_close", "monitor_close", "final_deadline")
+        for failure in failures:
+            fixture = _Slice1UFixture(failure=failure)
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory, fixture.patches():
+                with self.assertRaises((ValueError, RuntimeError, OSError)):
+                    fixture.collect(directory, operational.R0Component.K_CONTROL)
+                self.assertTrue(fixture.cancel.is_set())
+                self.assertEqual(len(fixture.budgets), 1)
+                self.assertTrue(fixture.budgets[0].aborted)
+                self.assertTrue(fixture.pools[0].closed)
+                self.assertTrue(fixture.monitors[0].thread.closed)
+                if failure == "seal":
+                    path = Path(directory) / "calibration/c2/K/00/setup/operations.pkf"
+                    self.assertEqual(path.read_bytes(), b"partial")
+                    self.assertIsNotNone(fixture.budgets[0].pending)
+                if failure == "readback":
+                    self.assertEqual(fixture.budgets[0].committed_bytes, 2 * 55 * 500)
+                    self.assertFalse(any(event[:2] == ("submit", "target") for event in fixture.events))
+                if failure in ("callback", "readback", "seal", "prior", "worker_exception", "worker_fail", "worker_incomplete", "missing_wire", "memory", "deadline", "cancel"):
+                    shutdown = next(event for event in fixture.events if event[0] == "pool_shutdown")
+                    self.assertTrue(shutdown[1], "Cancellation must precede executor wait")
+                self.assertLessEqual(len(fixture.progress_facts), 64)
+
+    def test_public_constructor_failure_does_not_turn_cleanup_into_success(self):
+        fixture = _Slice1UFixture()
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), patch.object(
+                h.evidence, "R0AComponentEvidenceV2", side_effect=ValueError("injected constructor failure")):
+            with self.assertRaisesRegex(ValueError, "constructor"):
+                fixture.collect(directory)
+        self.assertTrue(fixture.cancel.is_set())
+        self.assertTrue(fixture.budgets[0].aborted)
+        self.assertEqual(fixture.budgets[0].committed_bytes, 64 * 55 * 500)
+        self.assertTrue(fixture.monitors[0].thread.closed)
+        self.assertTrue(fixture.pools[0].closed)
+
+
+class R0ACollectorConcurrencyV2Tests(unittest.TestCase):
+    def test_exact_six_components_distinct_owners_and_pure_assembly(self):
+        fixture = _Slice1UFixture(4, zero_oracle=True)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches():
+            value = h._collect_r0a_concurrency_v2(fixture.work, directory, fixture.envelope, fixture.profile,
+                                                 cancel=fixture.cancel, progress=fixture.progress)
+        self.assertEqual(tuple(v.component for v in value.components), h.evidence.R0A_COMPONENTS_V2)
+        self.assertEqual(value.run_id, fixture.work[0].run_id)
+        self.assertEqual(value.envelope, fixture.envelope)
+        self.assertEqual(value.concurrency, 4)
+        self.assertEqual(value.family_summaries, h.evidence.summarize_r0a_components_v2(value.components))
+        self.assertEqual(value.containment, h.evidence.derive_r0a_containment_v2(value.components))
+        self.assertEqual(tuple(c.route for c in value.containment), readiness.CALIBRATION_ROUTES)
+        for owners in (fixture.budgets, fixture.ledgers, fixture.monitors, fixture.pools):
+            self.assertEqual(len(owners), 6)
+            self.assertEqual(len({id(owner) for owner in owners}), 6)
+        for budget, component in zip(fixture.budgets, value.components):
+            exact = sum(seal.byte_length for unit in component.units
+                for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target)) for seal in case.archive.streams)
+            self.assertEqual(budget.committed_bytes, exact)
+            self.assertIsNone(budget.pending)
+            self.assertFalse(budget.aborted)
+        self.assertEqual(len(value.family_summaries), 9)
+        self.assertTrue(all(s.record_count == 0 for s in value.family_summaries if s.family.startswith("oracle")))
+        for changed in (value.components[::-1], value.components[:-1]):
+            with self.assertRaises(ValueError):
+                replace(value, components=changed)
+        with self.assertRaises(ValueError):
+            replace(value, family_summaries=value.family_summaries[::-1])
+
+    def test_first_failed_component_stops_concurrency_and_sets_cancel(self):
+        fixture = _Slice1UFixture()
+        calls = []
+        def failed(*args, **kwargs):
+            calls.append(args[1])
+            raise RuntimeError("component failed")
+        with tempfile.TemporaryDirectory() as directory, patch.object(h, "_collect_r0a_component_v2", new=failed), \
+                self.assertRaisesRegex(RuntimeError, "component failed"):
+            h._collect_r0a_concurrency_v2(fixture.work, directory, fixture.envelope, fixture.profile, cancel=fixture.cancel)
+        self.assertEqual(calls, [operational.R0Component.PRIMARY])
+        self.assertTrue(fixture.cancel.is_set())
+
+    def test_late_component_failure_preserves_earlier_archives_and_never_starts_later_routes(self):
+        fixture = _Slice1UFixture(4)
+        original = h._collect_r0a_component_v2
+        calls = []
+        def collect(*args, **kwargs):
+            component = args[1]
+            calls.append(component.value)
+            if component is operational.R0Component.DETERMINISM:
+                raise RuntimeError("late D failure")
+            return original(*args, **kwargs)
+        with tempfile.TemporaryDirectory() as directory, fixture.patches(), \
+                patch.object(h, "_collect_r0a_component_v2", new=collect):
+            with self.assertRaisesRegex(RuntimeError, "late D failure"):
+                h._collect_r0a_concurrency_v2(fixture.work, directory, fixture.envelope, fixture.profile,
+                                             cancel=fixture.cancel, progress=fixture.progress)
+            self.assertEqual({p.name for p in (Path(directory) / "calibration/c4").iterdir()}, {"P", "K", "O"})
+        self.assertEqual(calls, ["P", "K", "O", "D"])
+        self.assertTrue(fixture.cancel.is_set())
+        self.assertEqual(len(fixture.budgets), 3)
+        self.assertTrue(all(not budget.aborted and budget.committed_bytes > 0 for budget in fixture.budgets))
+
+    def test_existing_owners_never_activate_collectors(self):
+        owners = (h.launch_r0a, h.launch_r0b, h._measure_r0a, h.adapt_r0a_concurrency,
+            h._materialize_v2_plan, h._readback_v2_plan, h._readback_r0a_case_v2,
+            operational._seal_r0_case_v2, operational.measure_r0_component,
+            operational._workflow_v2, operational._supervise_operation_v2)
+        for owner in owners:
+            with self.subTest(owner=owner.__name__):
+                source = inspect.getsource(owner)
+                self.assertNotIn("_collect_r0a_component_v2", source)
+                self.assertNotIn("_collect_r0a_concurrency_v2", source)
+
+
+class R0ACollectorIntegrationV2Tests(unittest.TestCase):
+    def test_small_literal_waves_use_real_1s_seal_and_1t_readback(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from tests.test_program_k_e2_operational import _r0_v2_result
+        for component in (operational.R0Component.PRIMARY, operational.R0Component.K_CONTROL):
+            with self.subTest(component=component), _slice1t_sealed_fixture(component, rich=True) as fixture:
+                work = fixture["work"]
+                supplied = operational.R0Work(work.position, work.board, work.protocol_seed, work.run_id, work.runtime)
+                profile, envelope = fixture["profile"], fixture["envelope"]
+                primary = None
+                if fixture["setup"] is not None:
+                    with patch.object(operational.harness, "_coordinator_private_bytes", return_value=100):
+                        primary = h._readback_r0a_case_v2(fixture["anchor"], fixture["setup"], work, component,
+                            "setup", profile, envelope)
+                bundles = {fixture["bundle"].kind: (fixture["bundle"], fixture["claim"])}
+                if primary is not None:
+                    bundles[execution.WorkerKind.PRIMARY] = (primary.bundle, fixture["setup"])
+                results = {}
+                for kind, (bundle, claim) in bundles.items():
+                    result = _r0_v2_result(work, bundle, profile)
+                    results[kind] = replace(result, receipt=claim.receipt, samples=claim.samples,
+                                            observation=claim.observation)
+                seen, returned = [], []
+                def supervise(expected_work, kind, prior, *args):
+                    self.assertEqual(expected_work, work)
+                    if kind is not execution.WorkerKind.PRIMARY:
+                        self.assertTrue(any(phase == "setup" for phase, _ in returned))
+                        self.assertIs(prior, results[execution.WorkerKind.PRIMARY].wire)
+                    seen.append(kind)
+                    return results[kind]
+                readback = h._readback_r0a_case_v2
+                def authenticate(*args, **kwargs):
+                    carrier = readback(*args, **kwargs)
+                    returned.append((args[4], carrier.evidence))
+                    return carrier
+                cancel = threading.Event()
+                ledger = operational._MemoryLedger(envelope)
+                budget = operational._R0V2ComponentArchiveBudget(component, envelope)
+                with tempfile.TemporaryDirectory(prefix="slice1u-real-chain-") as directory, \
+                        patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                        patch.object(operational, "_supervise_r0_operation_v2", new=supervise), \
+                        patch.object(h, "_readback_r0a_case_v2", new=authenticate), \
+                        patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("Collector regenerated prior")), \
+                        operational._R0MemoryMonitor(ledger, cancel, envelope) as monitor, \
+                        ThreadPoolExecutor(max_workers=envelope.concurrency) as pool:
+                    units, setup_wave, rows, finished = h._collect_r0a_wave_v2((supplied,), component, directory,
+                        envelope, profile, budget, ledger, monitor, pool, cancel, h.time.monotonic_ns())
+                    self.assertEqual(len(units), 1)
+                    self.assertIs(type(units[0]), h.evidence.R0AUnitEvidenceV2)
+                    self.assertEqual(units[0].target, returned[-1][1])
+                    expected_cases = 1 if primary is None else 2
+                    self.assertEqual(len(tuple(Path(directory).rglob("*.pkf"))), expected_cases * 55)
+                    self.assertFalse(tuple(Path(directory).rglob("*.jsonl")))
+                    self.assertIsNone(budget.pending)
+                    self.assertFalse(budget.aborted)
+                    self.assertEqual(budget.committed_bytes, sum(seal.byte_length for _, case in returned for seal in case.archive.streams))
+                    self.assertGreater(finished, 0)
+                    if primary is not None:
+                        self.assertEqual(units[0].setup, returned[0][1])
+                        self.assertEqual(setup_wave.positions, (0,))
+                        self.assertGreater(setup_wave.monitor.memory_sample_count, 0)
+                    else:
+                        self.assertIsNone(setup_wave)
+                    self.assertEqual(rows, ())
+                self.assertEqual(seen, [execution.WorkerKind.PRIMARY] if primary is None else
+                    [execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL])

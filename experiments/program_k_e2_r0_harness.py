@@ -7,6 +7,7 @@ bootstrap semantics. R0 operator evidence describes a closed synthetic experimen
 archive; every archive-local supporting file counts toward its fixed allowance.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from enum import Enum
 from fractions import Fraction
@@ -3216,6 +3217,313 @@ def _readback_r0a_case_v2(anchor, sealed_case, expected_work, expected_component
                 reader.invalidate()
             except BaseException:
                 pass
+        raise
+
+
+def _r0a_collector_inputs_v2(work, envelope, profile, cancel, progress):
+    """Validate supplied calibration identities, without selecting or capturing."""
+    _need(type(work) is tuple and len(work) == 64, "R0A_COLLECTOR_64_WORK_REQUIRED")
+    for item in work:
+        _need(type(item) is operational.R0Work, "R0A_COLLECTOR_WORK_TYPE")
+        operational.R0Work.__post_init__(item)
+        _need(type(item.runtime) is records.RuntimeIdentity, "R0A_COLLECTOR_RUNTIME_REQUIRED")
+        records.RuntimeIdentity.__post_init__(item.runtime)
+    first = work[0]
+    _need(tuple(item.position for item in work) == tuple(range(64))
+          and len({item.board.game_index for item in work}) == 64
+          and all((item.protocol_seed, item.run_id, item.runtime) ==
+                  (first.protocol_seed, first.run_id, first.runtime) for item in work),
+          "R0A_COLLECTOR_WORK_IDENTITY")
+    _need(first.run_id.startswith("R0-") and len(first.run_id) > 3
+          and all(32 <= ord(char) < 127 for char in first.run_id), "R0A_COLLECTOR_RUN_ID")
+    operational._envelope(envelope)
+    _need(type(envelope.concurrency) is int and envelope.concurrency in (1, 2, 4),
+          "R0A_COLLECTOR_CONCURRENCY")
+    physical.require_qualified_profile(profile)
+    _need(cancel is None or (callable(getattr(cancel, "is_set", None))
+                            and callable(getattr(cancel, "set", None))), "CANCELLATION_TOKEN")
+    _need(progress is None or callable(progress), "R0A_COLLECTOR_PROGRESS_CALLBACK")
+    return threading.Event() if cancel is None else cancel
+
+
+def _r0a_collector_paths_v2(anchor, envelope, components):
+    """Read-only fresh-subtree checks under the accepted normal-filesystem model."""
+    def normal(path):
+        info = path.lstat()
+        _need(stat.S_ISDIR(info.st_mode)
+              and not (getattr(info, "st_file_attributes", 0)
+                       & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)), "R0A_COLLECTOR_PATH_SHAPE")
+        junction = getattr(path, "is_junction", None)
+        _need(junction is None or not junction(), "R0A_COLLECTOR_JUNCTION")
+
+    root = Path(anchor).absolute()
+    for path in reversed((root,) + tuple(root.parents)):
+        normal(path)
+    parent = root
+    for name in ("calibration", "c" + str(envelope.concurrency)):
+        parent = parent / name
+        try:
+            normal(parent)
+        except FileNotFoundError:
+            break
+    for component in components:
+        relative = operational._r0_case_path_v2(envelope.concurrency, component, 0, "target")
+        directory = root.joinpath(*relative.split("/")[:3])
+        try:
+            directory.lstat()
+        except FileNotFoundError:
+            continue
+        raise HarnessError("R0A_COLLECTOR_COMPONENT_ALREADY_EXISTS")
+    return root
+
+
+def _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor=None):
+    """Operational deadlines have their own clock, never an evidence endpoint."""
+    _need(not cancel.is_set(), "CANCELLED")
+    if monitor is not None:
+        monitor.check()
+    now = time.monotonic_ns()
+    limit = min(envelope.max_job_wall_ms, envelope.max_launcher_wall_ms) * 1_000_000
+    if now - started >= limit:
+        cancel.set()
+        raise operational.OperationalAbort("JOB_TIMEOUT" if envelope.max_job_wall_ms <=
+            envelope.max_launcher_wall_ms else "LAUNCHER_TIMEOUT")
+    _need(not cancel.is_set(), "CANCELLED")
+
+
+def _collect_r0a_phase_v2(works, kind, phase, prior_wires, prior_cases, anchor, envelope,
+                         profile, budget, ledger, monitor, pool, cancel, started):
+    """One bounded wave phase; only 1T may authenticate its sealed cases."""
+    futures, results, claims, carriers = [], [], [], []
+    future = result = claim = carrier = None
+    try:
+        for index, item in enumerate(works):
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            futures.append(pool.submit(operational._supervise_r0_operation_v2,
+                item, kind, prior_wires[index], envelope, ledger, cancel, started, started, profile.sha256))
+        for future in futures:
+            result = future.result()
+            _need(type(result) is operational._R0V2OperationResult, "R0A_COLLECTOR_OPERATION_TYPE")
+            operational._R0V2OperationResult.__post_init__(result)
+            _need(result.receipt.status is records.AuditStatus.PASS and result.wire is not None,
+                  "R0A_COLLECTOR_SUCCESSFUL_OPERATION_REQUIRED")
+            results.append(result)
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        # The coordinator's admission order is a contract, not completion order.
+        for index, result in enumerate(results):
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            claims.append(operational._seal_r0_case_v2(anchor, works[index], result, envelope,
+                profile, budget, phase=phase, prior_primary_wire=prior_wires[index]))
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        for index, claim in enumerate(claims):
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            carrier = _readback_r0a_case_v2(anchor, claim, works[index], budget.component, phase,
+                profile, envelope, prior_primary=prior_cases[index], cancel=cancel)
+            carriers.append(carrier)
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        # These transport objects remain private and are bounded to this wave.
+        return (tuple(result.wire for result in results), tuple(carriers),
+                tuple(claim.parent_admission_interval for claim in claims))
+    except BaseException:
+        cancel.set()
+        budget.abort()
+        for future in futures:
+            future.cancel()
+        # Reap every already-submitted supervisor before releasing its arguments.
+        for future in futures:
+            try:
+                future.result()
+            except BaseException:
+                pass
+        raise
+    finally:
+        futures.clear()
+        results.clear()
+        claims.clear()
+        carriers.clear()
+        future = result = claim = carrier = None
+        prior_wires = prior_cases = ()
+
+
+def _collect_r0a_wave_v2(work, component, anchor, envelope, profile, budget, ledger,
+                        monitor, pool, cancel, started):
+    """Release every private premise before returning public wave evidence."""
+    _need(type(work) is tuple and 0 < len(work) <= envelope.concurrency, "R0A_COLLECTOR_BOUNDED_WAVE")
+    works = tuple(operational._r0_work(item, component) for item in work)
+    positions = tuple(item.position for item in works)
+    target_kind = {operational.R0Component.PRIMARY: execution.WorkerKind.PRIMARY,
+        operational.R0Component.ORACLE_B: execution.WorkerKind.PRIMARY,
+        operational.R0Component.K_CONTROL: execution.WorkerKind.K_CONTROL,
+        operational.R0Component.DETERMINISM: execution.WorkerKind.DETERMINISM,
+        operational.R0Component.ORACLE_K_BIND: execution.WorkerKind.K_CONTROL,
+        operational.R0Component.ORACLE_D_REPEAT: execution.WorkerKind.DETERMINISM}[component]
+    has_setup = target_kind is not execution.WorkerKind.PRIMARY
+    setup_wires = setup_cases = target_wires = target_cases = arguments = ()
+    admissions = ()
+    setup_facts = None
+    walls, units = [], []
+    try:
+        if has_setup:
+            monitor.begin_setup()
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            setup_wires, setup_cases, _ = _collect_r0a_phase_v2(works, execution.WorkerKind.PRIMARY,
+                "setup", (None,) * len(works), (None,) * len(works), anchor, envelope, profile,
+                budget, ledger, monitor, pool, cancel, started)
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            setup_facts = monitor.end_setup()
+        target_started = time.perf_counter_ns()
+        preparation_started = time.perf_counter_ns() if component is operational.R0Component.ORACLE_K_BIND else None
+        # Select existing immutable wires only after every setup passed readback.
+        arguments = tuple((item, setup_wires[index] if has_setup else None,
+                           setup_cases[index] if has_setup else None) for index, item in enumerate(works))
+        prior_wires = tuple(value[1] for value in arguments)
+        prior_cases = tuple(value[2] for value in arguments)
+        if preparation_started is not None:
+            walls.append(evidence.R0AWallIntervalV2("PRIOR_ENCODE", positions,
+                evidence.R0AIntervalV2(preparation_started, time.perf_counter_ns())))
+        target_wires, target_cases, admissions = _collect_r0a_phase_v2(works, target_kind, "target",
+            prior_wires, prior_cases, anchor, envelope, profile, budget, ledger, monitor, pool, cancel, started)
+        for index, item in enumerate(works):
+            unit = evidence.R0AUnitEvidenceV2(item.position, target_cases[index].evidence,
+                setup_cases[index].evidence if has_setup else None)
+            units.append(unit)
+            if component is operational.R0Component.ORACLE_K_BIND:
+                walls.extend(evidence.R0AWallIntervalV2("PRIOR_BIND", (item.position,), interval)
+                             for interval in unit.target.observation.prior_binding_intervals)
+                walls.append(evidence.R0AWallIntervalV2("PARENT_ADMISSION", (item.position,),
+                    evidence.R0AIntervalV2(*admissions[index])))
+        _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        target_finished = time.perf_counter_ns()
+        target_interval = evidence.R0AIntervalV2(target_started, target_finished)
+        if component is operational.R0Component.ORACLE_D_REPEAT:
+            walls.append(evidence.R0AWallIntervalV2("TARGET_PHASE", positions, target_interval))
+        setup_wave = None
+        if setup_facts is not None:
+            setup_start, setup_end, coordinator, combined, count = setup_facts
+            setup_wave = evidence.R0ASetupWaveV2(operational._R0_SETUP_ROUTES[component], positions,
+                evidence.R0AIntervalV2(setup_start, setup_end), target_interval,
+                evidence.R0AMonitorEvidenceV2(coordinator, combined, count), True)
+        return tuple(units), setup_wave, tuple(walls), target_finished
+    finally:
+        # Completed Futures, transport arguments and carriers must not retain a
+        # previous wave. Public unit evidence contains neither wire nor bundle.
+        setup_wires = setup_cases = target_wires = target_cases = arguments = ()
+        prior_wires = prior_cases = admissions = ()
+
+
+def _collect_r0a_component_v2(work, component, anchor, envelope, profile, *, cancel=None, progress=None):
+    """Collect one supplied 64-unit component; never authorize a live R0 run."""
+    cancel = _r0a_collector_inputs_v2(work, envelope, profile, cancel, progress)
+    _need(type(component) is operational.R0Component, "R0A_COLLECTOR_COMPONENT")
+    _need(not cancel.is_set(), "CANCELLED")
+    anchor = _r0a_collector_paths_v2(anchor, envelope, (component,))
+    complete_started = time.perf_counter_ns()
+    started = time.monotonic_ns()
+    budget = operational._R0V2ComponentArchiveBudget(component, envelope)
+    ledger = monitor = pool = None
+    monitor_active = False
+    units, waves, walls, progress_facts = [], [], [], []
+    try:
+        ledger = operational._MemoryLedger(envelope)
+        monitor = operational._R0MemoryMonitor(ledger, cancel, envelope)
+        try:
+            monitor.__enter__()
+            monitor_active = True
+        except BaseException:
+            try:
+                monitor.stop.set()
+                if monitor.thread.ident is not None:
+                    monitor.__exit__(*sys.exc_info())
+                else:
+                    ledger.remove("r0-coordinator")
+            except BaseException:
+                pass  # Preserve the failed entry, including a sampling failure.
+            raise
+        pool = ThreadPoolExecutor(max_workers=envelope.concurrency, thread_name_prefix="program-k-r0-v2")
+        downstream = component in (operational.R0Component.ORACLE_K_BIND, operational.R0Component.ORACLE_D_REPEAT)
+        if downstream:
+            walls.append(evidence.R0AWallIntervalV2("ORCHESTRATION", (),
+                evidence.R0AIntervalV2(complete_started, time.perf_counter_ns())))
+        cleanup_started = None
+        for offset in range(0, 64, envelope.concurrency):
+            _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+            wave_units, wave, wave_walls, target_finished = _collect_r0a_wave_v2(
+                work[offset:offset + envelope.concurrency], component, anchor, envelope, profile,
+                budget, ledger, monitor, pool, cancel, started)
+            # The wave helper has released all live/private premises before this
+            # point. The last endpoint also starts the actual final cleanup.
+            cleanup_started = target_finished
+            units.extend(wave_units)
+            if wave is not None:
+                waves.append(wave)
+            walls.extend(wave_walls)
+            for unit in wave_units:
+                _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+                fact = evidence.R0AProgressV2(unit.position, unit.position + 1, 64)
+                if progress is not None:
+                    progress(component, fact)
+                progress_facts.append(fact)
+                _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        pool.shutdown(wait=True, cancel_futures=True)
+        pool = None
+        _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        exact_bytes = sum(seal.byte_length for unit in units
+            for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target))
+            for seal in case.archive.streams)
+        _need(budget.pending is None and not budget.aborted and budget.committed_bytes == exact_bytes,
+              "R0A_COLLECTOR_ARCHIVE_RECONCILIATION")
+        _need(tuple(unit.position for unit in units) == tuple(range(64))
+              and tuple(fact.position for fact in progress_facts) == tuple(range(64)),
+              "R0A_COLLECTOR_COMPLETE_COVERAGE")
+        _r0a_collector_checkpoint_v2(cancel, envelope, started, monitor)
+        monitor_active = False
+        monitor.__exit__(None, None, None)
+        _r0a_collector_checkpoint_v2(cancel, envelope, started)
+        complete_finished = time.perf_counter_ns()
+        complete_interval = evidence.R0AIntervalV2(complete_started, complete_finished)
+        if downstream:
+            walls.append(evidence.R0AWallIntervalV2("CLEANUP", (),
+                evidence.R0AIntervalV2(cleanup_started, complete_finished)))
+            wall_intervals = tuple(sorted(walls, key=evidence._r0a_wall_key))
+        else:
+            wall_intervals = (evidence.R0AWallIntervalV2("COMPLETE_ROUTE", tuple(range(64)), complete_interval),)
+        value = evidence.R0AComponentEvidenceV2(component.value, complete_interval, wall_intervals,
+            evidence.R0AMonitorEvidenceV2(monitor.coordinator, monitor.combined, monitor.memory_sample_count),
+            tuple(units), tuple(waves), tuple(progress_facts))
+        evidence.r0a_component_wall_v2(value)
+        return value
+    except BaseException:
+        cancel.set()
+        budget.abort()
+        if pool is not None:
+            try:
+                pool.shutdown(wait=True, cancel_futures=True)
+            except BaseException:
+                pass  # Preserve the first failure; never turn cleanup into success.
+        if monitor_active:
+            try:
+                monitor.__exit__(*sys.exc_info())
+            except BaseException:
+                pass
+        raise
+
+
+def _collect_r0a_concurrency_v2(work, anchor, envelope, profile, *, cancel=None, progress=None):
+    """Six standalone components for one supplied concurrency, without outer evidence."""
+    cancel = _r0a_collector_inputs_v2(work, envelope, profile, cancel, progress)
+    _need(not cancel.is_set(), "CANCELLED")
+    order = tuple(operational.R0Component(name) for name in evidence.R0A_COMPONENTS_V2)
+    anchor = _r0a_collector_paths_v2(anchor, envelope, order)
+    try:
+        components = tuple(_collect_r0a_component_v2(work, component, anchor, envelope, profile,
+            cancel=cancel, progress=progress) for component in order)
+        _need(not cancel.is_set(), "CANCELLED")
+        summaries = evidence.summarize_r0a_components_v2(components)
+        containment = evidence.derive_r0a_containment_v2(components)
+        return evidence.R0AConcurrencyEvidenceV2(envelope.concurrency, work[0].run_id, envelope,
+                                                components, summaries, containment)
+    except BaseException:
+        cancel.set()
         raise
 
 
