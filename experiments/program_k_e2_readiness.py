@@ -647,6 +647,93 @@ def derive_dual_targets(maxima):
                                 for basis in (maxima.physical, maxima.logical)))
 
 
+R0A_FAMILY_ROUTES_V2 = (
+    ("primary", "P"),
+    ("k_control", "K"),
+    ("oracle_primary", "O"),
+    ("oracle_repeat", "O_D_REPEAT"),
+    ("determinism", "D"),
+    ("reference", "K"),
+    ("reference", "D"),
+    ("reference", "O_K_SETUP"),
+    ("reference", "O_D_SETUP"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class R0AFamilySummaryV2:
+    """Complete supplied 64-unit claims, never durable authentication.
+
+    The observation owner reconciles these values against supplied unit facts.
+    Physical and logical maxima may have different unit witnesses; neither
+    maximum is inferred from its total or from the other basis.
+    """
+
+    family: str
+    route: str
+    completed_units: int
+    record_count: int
+    physical_total_bytes: int
+    logical_total_bytes: int
+    physical_max_unit_bytes: int
+    logical_max_unit_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.family) is str and type(self.route) is str
+              and (self.family, self.route) in R0A_FAMILY_ROUTES_V2,
+              "R0A_V2_FAMILY_ROUTE_REQUIRED")
+        _integer(self.completed_units)
+        _need(self.completed_units == 64, "R0A_V2_COMPLETE_64_UNITS_REQUIRED")
+        for value in (self.record_count, self.physical_total_bytes, self.logical_total_bytes,
+                      self.physical_max_unit_bytes, self.logical_max_unit_bytes):
+            _integer(value)
+        sizes = (self.physical_total_bytes, self.logical_total_bytes,
+                 self.physical_max_unit_bytes, self.logical_max_unit_bytes)
+        if self.record_count == 0:
+            _need(self.family in ("oracle_primary", "oracle_repeat") and sizes == (0, 0, 0, 0),
+                  "R0A_V2_ZERO_ORACLE_REQUIRED")
+        else:
+            _need(all(value > 0 for value in sizes), "R0A_V2_NONZERO_RECORD_SIZES_REQUIRED")
+            for total, maximum in ((self.physical_total_bytes, self.physical_max_unit_bytes),
+                                   (self.logical_total_bytes, self.logical_max_unit_bytes)):
+                _need(maximum <= total <= self.completed_units * maximum,
+                      "R0A_V2_TOTAL_MAXIMUM_RECONCILIATION")
+
+
+def derive_r0a_dual_maxima_v2(concurrency_summaries):
+    """Normalize supplied calibration maxima without capture, I/O or admission.
+
+    The caller owns authentication and raw-unit reconciliation. Shared Oracle
+    sizing covers both observed Oracle routes; reference sizing covers each of
+    the four setup routes. Each basis selects its own maxima independently.
+    """
+    _need(type(concurrency_summaries) is tuple and len(concurrency_summaries) == 3,
+          "R0A_V2_CONCURRENCY_SUMMARIES_REQUIRED")
+    summaries = []
+    for value, expected in zip(concurrency_summaries, (1, 2, 4)):
+        _need(type(value) is tuple and len(value) == 2, "R0A_V2_CONCURRENCY_PAIR_REQUIRED")
+        concurrency, supplied = value
+        _need(type(concurrency) is int and concurrency == expected, "R0A_V2_CONCURRENCY_ORDER")
+        _need(type(supplied) is tuple and len(supplied) == len(R0A_FAMILY_ROUTES_V2),
+              "R0A_V2_NINE_FAMILY_SUMMARIES_REQUIRED")
+        for summary, pair in zip(supplied, R0A_FAMILY_ROUTES_V2):
+            _record(summary, R0AFamilySummaryV2)
+            _need((summary.family, summary.route) == pair, "R0A_V2_FAMILY_SUMMARY_ORDER")
+        summaries.append(supplied)
+    axes = []
+    for physical in (True, False):
+        observed = tuple(tuple(summary.physical_max_unit_bytes if physical
+                               else summary.logical_max_unit_bytes for summary in group)
+                         for group in summaries)
+        primary = max(group[0] for group in observed)
+        k_control = max(group[1] for group in observed)
+        oracle = max(group[index] for group in observed for index in (2, 3))
+        determinism = max(group[4] for group in observed)
+        reference = max(group[index] for group in observed for index in (5, 6, 7, 8))
+        axes.append(ComponentSizes(primary, k_control, oracle, oracle, determinism, reference))
+    return DualComponentSizes(*axes)
+
+
 @dataclass(frozen=True, slots=True)
 class FamilySizeEvaluation:
     """Exact size-policy facts; eligibility is not run admission or evidence."""

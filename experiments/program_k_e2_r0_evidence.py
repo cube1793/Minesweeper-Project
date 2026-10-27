@@ -888,3 +888,898 @@ def decode_archive_manifest_v2(data, *, expected_profile_sha256=None):
         raise
     except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
         raise EvidenceError("V2_MALFORMED_ARCHIVE_METADATA") from None
+
+
+# Slice 1R: supplied calibration claims only. No archive access or live capture.
+R0A_COMPONENTS_V2 = ("P", "K", "O", "D", "O_K_BIND", "O_D_REPEAT")
+R0A_WALL_PHASES_V2 = ("COMPLETE_ROUTE", "ORCHESTRATION", "PRIOR_ENCODE", "PRIOR_BIND",
+                      "PARENT_ADMISSION", "TARGET_PHASE", "CLEANUP")
+_R0A_SETUP_ROUTES_V2 = {"K": "K", "D": "D", "O_K_BIND": "O_K_SETUP", "O_D_REPEAT": "O_D_SETUP"}
+_R0A_TARGET_FAMILIES_V2 = {"P": "primary", "K": "k_control", "O": "oracle_primary",
+                          "D": "determinism", "O_K_BIND": None, "O_D_REPEAT": "oracle_repeat"}
+_R0A_TARGET_KINDS_V2 = {"P": execution.WorkerKind.PRIMARY, "O": execution.WorkerKind.PRIMARY,
+    "K": execution.WorkerKind.K_CONTROL, "O_K_BIND": execution.WorkerKind.K_CONTROL,
+    "D": execution.WorkerKind.DETERMINISM, "O_D_REPEAT": execution.WorkerKind.DETERMINISM}
+_R0A_POSITIONS_V2 = tuple(range(64))
+_R0A_STREAMS_V2 = execution.STREAM_NAMES + ("operations", "resources")
+
+
+def _r0a_uint(value, minimum=0):
+    _v2_integer(value, minimum, identity.UINT64_MAX)
+
+
+def _r0a_true(value):
+    _v2_boolean(value)
+    _need(value, "R0A_V2_COMPLETE_CLAIM_REQUIRED")
+
+
+def _r0a_tuple(value):
+    _need(type(value) is tuple, "R0A_V2_EXACT_TUPLE_REQUIRED")
+
+
+def _r0a_positions(value, *, empty=False):
+    _r0a_tuple(value)
+    _need(empty or bool(value), "R0A_V2_POSITIONS_REQUIRED")
+    for position in value:
+        _v2_integer(position, 0, 63)
+    _need(value == tuple(sorted(set(value))), "R0A_V2_POSITION_ORDER")
+
+
+def _r0a_path(value):
+    # Lexical claims only: deliberately no Path, resolve, stat or file access.
+    _need(type(value) is str and bool(value)
+          and all(ord(c) >= 32 and not 0xD800 <= ord(c) <= 0xDFFF for c in value)
+          and "\\" not in value and ":" not in value
+          and all(part not in ("", ".", "..") for part in value.split("/")),
+          "R0A_V2_CANONICAL_RELATIVE_PATH")
+
+
+def _r0a_head(value):
+    _need(type(value) is str and len(value) == 40
+          and all(c in "0123456789abcdef" for c in value), "R0A_V2_HEAD_IDENTITY")
+
+
+def provenance_digest_v2(selection_source_head, r0_harness_source_head, sources, working_files,
+                         runtime, executable, dont_write_bytecode):
+    """Bind seven supplied fields, without importing their harness-owned carrier.
+
+    The separator ends in LF; the canonical node and complete preimage do not.
+    This digest proves neither live source identity nor CRLF normalization.
+    """
+    _r0a_head(selection_source_head)
+    _r0a_head(r0_harness_source_head)
+    _r0a_tuple(sources)
+    _need(bool(sources), "R0A_V2_SOURCES_REQUIRED")
+    for source in sources:
+        _v2_exact(source, records.SourceBlobIdentity)
+    paths = tuple(source.path for source in sources)
+    _need(paths == tuple(sorted(set(paths))), "R0A_V2_SOURCE_ORDER")
+    _r0a_tuple(working_files)
+    _need(len(working_files) == len(sources), "R0A_V2_WORKING_COVERAGE")
+    for item, path in zip(working_files, paths):
+        _need(type(item) is tuple and len(item) == 4, "R0A_V2_WORKING_SHAPE")
+        _need(type(item[0]) is str and item[0] == path, "R0A_V2_WORKING_PATH")
+        _profile_identity(item[1])
+        _r0a_uint(item[2])
+        _v2_boolean(item[3])
+    _v2_exact(runtime, records.RuntimeIdentity)
+    _need(type(executable) is str and bool(executable), "R0A_V2_EXECUTABLE")
+    _r0a_true(dont_write_bytecode)
+    node = {"dont_write_bytecode": dont_write_bytecode, "executable": executable,
+        "r0_harness_source_head": r0_harness_source_head,
+        "runtime": records.encode(runtime).decode("ascii"), "selection_source_head": selection_source_head,
+        "sources": [records.encode(source).decode("ascii") for source in sources],
+        "working_files": [[path, digest, length, normalized] for path, digest, length, normalized in working_files]}
+    return sha256(b"program-k-e2-r0-provenance/v2\n" + _v2_json(node)).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class R0AIntervalV2:
+    started_ns: int
+    finished_ns: int
+
+    def __post_init__(self):
+        _r0a_uint(self.started_ns)
+        _r0a_uint(self.finished_ns)
+        _need(self.started_ns <= self.finished_ns, "R0A_V2_INTERVAL_ORDER")
+
+    @property
+    def duration_ns(self):
+        return self.finished_ns - self.started_ns
+
+
+@dataclass(frozen=True, slots=True)
+class R0AWallIntervalV2:
+    phase: str
+    positions: tuple
+    interval: R0AIntervalV2
+
+    def __post_init__(self):
+        _need(type(self.phase) is str and self.phase in R0A_WALL_PHASES_V2, "R0A_V2_WALL_PHASE")
+        _r0a_positions(self.positions, empty=True)
+        _v2_exact(self.interval, R0AIntervalV2)
+
+
+@dataclass(frozen=True, slots=True)
+class R0AMonitorEvidenceV2:
+    coordinator_private_peak_bytes: int
+    combined_peak_bytes: int
+    memory_sample_count: int
+
+    def __post_init__(self):
+        for value in (self.coordinator_private_peak_bytes, self.combined_peak_bytes, self.memory_sample_count):
+            _r0a_uint(value, 1)
+        _need(self.combined_peak_bytes >= self.coordinator_private_peak_bytes, "R0A_V2_MONITOR_MEMORY")
+
+
+def _r0a_intervals(value):
+    _r0a_tuple(value)
+    previous = 0
+    for interval in value:
+        _v2_exact(interval, R0AIntervalV2)
+        _need(previous <= interval.started_ns, "R0A_V2_TELEMETRY_INTERVAL_ORDER")
+        previous = interval.finished_ns
+
+
+@dataclass(frozen=True, slots=True)
+class R0AOracleTelemetryV2:
+    probes: int
+    calls: int
+    wall_ns: int
+    intervals: tuple
+
+    def __post_init__(self):
+        for value in (self.probes, self.calls, self.wall_ns):
+            _r0a_uint(value)
+        _r0a_intervals(self.intervals)
+        _need(self.calls <= self.probes == len(self.intervals)
+              and self.wall_ns == sum(i.duration_ns for i in self.intervals), "R0A_V2_ORACLE_TELEMETRY")
+
+
+@dataclass(frozen=True, slots=True)
+class R0ATelemetryV2:
+    worker_memory: int
+    coordinator_memory: int
+    combined_memory: int
+    decision_wall: int
+    arm_wall: int
+    shadow_wall: int
+    physical_inputs: int
+    oracle: R0AOracleTelemetryV2
+    resources_complete: bool
+    cleanup_complete: bool
+    watchdogs_complete: bool
+    prior_binding_intervals: tuple
+
+    def __post_init__(self):
+        for value in (self.worker_memory, self.coordinator_memory, self.combined_memory,
+                      self.decision_wall, self.arm_wall, self.shadow_wall, self.physical_inputs):
+            _r0a_uint(value)
+        _need(self.combined_memory >= max(self.worker_memory, self.coordinator_memory)
+              and self.decision_wall <= self.arm_wall, "R0A_V2_TELEMETRY_MAXIMA")
+        _v2_exact(self.oracle, R0AOracleTelemetryV2)
+        for flag in (self.resources_complete, self.cleanup_complete, self.watchdogs_complete):
+            _r0a_true(flag)
+        _r0a_intervals(self.prior_binding_intervals)
+
+
+@dataclass(frozen=True, slots=True)
+class R0APayloadAxesV2:
+    logical_sum_bytes: int
+    legacy_bundle_bytes: int
+    wb02_wire_bytes: int
+    physical_frame_bytes: int
+
+    def __post_init__(self):
+        for value in (self.logical_sum_bytes, self.legacy_bundle_bytes, self.wb02_wire_bytes,
+                      self.physical_frame_bytes):
+            _v2_integer(value, 1, physical.MAX_PAYLOAD_BYTES)
+        _need(self.wb02_wire_bytes > 48 + self.physical_frame_bytes, "R0A_V2_WB02_SIZE_CLAIM")
+
+
+@dataclass(frozen=True, slots=True)
+class R0AArchiveEvidenceV2:
+    relative_directory: str
+    streams: tuple
+
+    def __post_init__(self):
+        _r0a_path(self.relative_directory)
+        _r0a_tuple(self.streams)
+        for stream in self.streams:
+            _v2_exact(stream, records.StreamDigest)
+        _need(tuple(stream.name for stream in self.streams) == _R0A_STREAMS_V2, "R0A_V2_STREAM_ORDER")
+        _r0a_uint(sum(stream.byte_length for stream in self.streams))
+        _r0a_uint(sum(stream.record_count for stream in self.streams))
+
+
+@dataclass(frozen=True, slots=True)
+class R0AByteCountV2:
+    physical_bytes: int
+    logical_bytes: int
+    record_count: int
+
+    def __post_init__(self):
+        for value in (self.physical_bytes, self.logical_bytes, self.record_count):
+            _r0a_uint(value)
+        _need((self.physical_bytes == 0) == (self.logical_bytes == 0) == (self.record_count == 0),
+              "R0A_V2_ZERO_RECORD_PARITY")
+
+
+@dataclass(frozen=True, slots=True)
+class R0ACaseEvidenceV2:
+    receipt: operational.UnitReceipt
+    observation: R0ATelemetryV2
+    payload: R0APayloadAxesV2
+    archive: R0AArchiveEvidenceV2
+    family: str | None
+    owned_bytes: R0AByteCountV2
+    readback_complete: bool
+
+    def __post_init__(self):
+        _v2_exact(self.receipt, operational.UnitReceipt)
+        _need(self.receipt.status is records.AuditStatus.PASS and self.receipt.reason == "ADMITTED"
+              and type(self.receipt.exit_code) is int and self.receipt.exit_code == 0,
+              "R0A_V2_ADMITTED_RECEIPT_REQUIRED")
+        _v2_integer(self.receipt.position, 0, 63)
+        _r0a_uint(self.receipt.elapsed_ns, 1)
+        _v2_exact(self.observation, R0ATelemetryV2)
+        _need(self.observation.arm_wall <= self.receipt.elapsed_ns, "R0A_V2_CASE_WALL_ORDER")
+        _v2_exact(self.payload, R0APayloadAxesV2)
+        _v2_exact(self.archive, R0AArchiveEvidenceV2)
+        _v2_exact(self.owned_bytes, R0AByteCountV2)
+        if self.family is None:
+            _need(self.owned_bytes == R0AByteCountV2(0, 0, 0), "R0A_V2_NO_FAMILY_BYTES")
+        else:
+            _v2_family(self.family)
+            _need(self.family in ("oracle_primary", "oracle_repeat") or self.owned_bytes.record_count > 0,
+                  "R0A_V2_NONORACLE_BYTES_REQUIRED")
+        _need(self.owned_bytes.physical_bytes <= self.payload.physical_frame_bytes
+              and self.owned_bytes.logical_bytes <= self.payload.logical_sum_bytes
+              and self.owned_bytes.physical_bytes <= sum(s.byte_length for s in self.archive.streams)
+              and self.owned_bytes.record_count <= sum(s.record_count for s in self.archive.streams),
+              "R0A_V2_OWNED_SUBSET_CLAIM")
+        _r0a_true(self.readback_complete)
+
+
+@dataclass(frozen=True, slots=True)
+class R0AUnitEvidenceV2:
+    position: int
+    target: R0ACaseEvidenceV2
+    setup: R0ACaseEvidenceV2 | None
+
+    def __post_init__(self):
+        _v2_integer(self.position, 0, 63)
+        _v2_exact(self.target, R0ACaseEvidenceV2)
+        _need(self.target.receipt.position == self.position, "R0A_V2_TARGET_POSITION")
+        if self.setup is not None:
+            _v2_exact(self.setup, R0ACaseEvidenceV2)
+            _need(self.setup.receipt.position == self.position
+                  and self.setup.receipt.kind is execution.WorkerKind.PRIMARY
+                  and self.setup.family == "reference", "R0A_V2_SETUP_IDENTITY")
+
+
+@dataclass(frozen=True, slots=True)
+class R0ASetupWaveV2:
+    route: str
+    positions: tuple
+    setup_interval: R0AIntervalV2
+    target_interval: R0AIntervalV2
+    monitor: R0AMonitorEvidenceV2
+    readback_complete: bool
+
+    def __post_init__(self):
+        _need(type(self.route) is str and self.route in _R0A_SETUP_ROUTES_V2.values(), "R0A_V2_SETUP_ROUTE")
+        _r0a_positions(self.positions)
+        _v2_exact(self.setup_interval, R0AIntervalV2)
+        _v2_exact(self.target_interval, R0AIntervalV2)
+        _need(self.setup_interval.finished_ns <= self.target_interval.started_ns, "R0A_V2_SETUP_BEFORE_TARGET")
+        _v2_exact(self.monitor, R0AMonitorEvidenceV2)
+        _r0a_true(self.readback_complete)
+
+
+@dataclass(frozen=True, slots=True)
+class R0AProgressV2:
+    position: int
+    done: int
+    total: int
+
+    def __post_init__(self):
+        _v2_integer(self.position, 0, 63)
+        _r0a_uint(self.done, 1)
+        _r0a_uint(self.total, 1)
+        _need((self.done, self.total) == (self.position + 1, 64), "R0A_V2_PROGRESS_CLAIM")
+
+
+def _r0a_inside(inner, outer):
+    _need(outer.started_ns <= inner.started_ns <= inner.finished_ns <= outer.finished_ns,
+          "R0A_V2_INTERVAL_CONTAINMENT")
+
+
+def _r0a_wall_key(value):
+    return (value.interval.started_ns, value.interval.finished_ns, value.phase, value.positions)
+
+
+def _r0a_union(intervals):
+    total, end = 0, 0
+    for interval in sorted(intervals, key=lambda i: (i.started_ns, i.finished_ns)):
+        total += max(0, interval.finished_ns - max(end, interval.started_ns))
+        end = max(end, interval.finished_ns)
+    _r0a_uint(total)
+    return total
+
+
+def _r0a_wall(component):
+    rows = component.wall_intervals
+    if component.component in ("P", "K", "O", "D"):
+        _need(len(rows) == 1 and rows[0].phase == "COMPLETE_ROUTE"
+              and rows[0].positions == _R0A_POSITIONS_V2
+              and rows[0].interval == component.complete_interval, "R0A_V2_COMPLETE_WALL")
+        return component.complete_interval.duration_ns
+    phases = {name: tuple(row for row in rows if row.phase == name) for name in R0A_WALL_PHASES_V2}
+    orchestration, cleanup = phases["ORCHESTRATION"], phases["CLEANUP"]
+    _need(len(orchestration) == len(cleanup) == 1
+          and orchestration[0].positions == cleanup[0].positions == (), "R0A_V2_ROUTE_OVERHEAD_REQUIRED")
+    waves = component.setup_waves
+    _need(orchestration[0].interval.finished_ns <= waves[0].setup_interval.started_ns
+          and waves[-1].target_interval.finished_ns <= cleanup[0].interval.started_ns,
+          "R0A_V2_OVERHEAD_CHRONOLOGY")
+    if component.component == "O_D_REPEAT":
+        _need(all(not phases[name] for name in ("COMPLETE_ROUTE", "PRIOR_ENCODE", "PRIOR_BIND", "PARENT_ADMISSION")),
+              "R0A_V2_REPEAT_PHASE_SET")
+        expected = tuple((wave.positions, wave.target_interval) for wave in waves)
+        _need(tuple((row.positions, row.interval) for row in phases["TARGET_PHASE"]) == expected,
+              "R0A_V2_TARGET_WAVE_COVERAGE")
+        intervals = tuple(row.interval for row in rows)
+        _need(all(a.finished_ns <= b.started_ns for a, b in zip(intervals, intervals[1:])),
+              "R0A_V2_REPEAT_PHASE_OVERLAP")
+        wall = sum(i.duration_ns for i in intervals)
+    else:
+        _need(not phases["COMPLETE_ROUTE"] and not phases["TARGET_PHASE"], "R0A_V2_BIND_PHASE_SET")
+        encodes = phases["PRIOR_ENCODE"]
+        _need(tuple(row.positions for row in encodes) == tuple(w.positions for w in waves),
+              "R0A_V2_ENCODING_WAVE_COVERAGE")
+        for row, wave in zip(encodes, waves):
+            _r0a_inside(row.interval, wave.target_interval)
+        admissions = phases["PARENT_ADMISSION"]
+        _need(tuple(row.positions for row in admissions) == tuple((p,) for p in _R0A_POSITIONS_V2),
+              "R0A_V2_ADMISSION_COVERAGE")
+        expected = []
+        for unit in component.units:
+            bindings = unit.target.observation.prior_binding_intervals
+            _need(bool(bindings), "R0A_V2_BINDING_OBSERVATION_REQUIRED")
+            expected.extend(R0AWallIntervalV2("PRIOR_BIND", (unit.position,), i) for i in bindings)
+        _need(phases["PRIOR_BIND"] == tuple(sorted(expected, key=_r0a_wall_key)), "R0A_V2_BINDING_MULTISET")
+        for wave in waves:
+            for row in phases["PRIOR_BIND"] + admissions:
+                if row.positions[0] in wave.positions:
+                    _r0a_inside(row.interval, wave.target_interval)
+        wall = _r0a_union(tuple(row.interval for row in rows))
+    _r0a_uint(wall, 1)
+    return wall
+
+
+@dataclass(frozen=True, slots=True)
+class R0AComponentEvidenceV2:
+    component: str
+    complete_interval: R0AIntervalV2
+    wall_intervals: tuple
+    monitor: R0AMonitorEvidenceV2
+    units: tuple
+    setup_waves: tuple
+    progress: tuple
+
+    def __post_init__(self):
+        _need(type(self.component) is str and self.component in R0A_COMPONENTS_V2, "R0A_V2_COMPONENT")
+        _v2_exact(self.complete_interval, R0AIntervalV2)
+        _r0a_uint(self.complete_interval.duration_ns, 1)
+        _v2_exact(self.monitor, R0AMonitorEvidenceV2)
+        for values in (self.wall_intervals, self.units, self.setup_waves, self.progress):
+            _r0a_tuple(values)
+        for row in self.wall_intervals:
+            _v2_exact(row, R0AWallIntervalV2)
+            _r0a_inside(row.interval, self.complete_interval)
+        _need(tuple(map(_r0a_wall_key, self.wall_intervals)) == tuple(sorted(map(_r0a_wall_key, self.wall_intervals))),
+              "R0A_V2_WALL_ORDER")
+        has_setup = self.component in _R0A_SETUP_ROUTES_V2
+        for unit in self.units:
+            _v2_exact(unit, R0AUnitEvidenceV2)
+            _need((unit.setup is not None) == has_setup
+                  and unit.target.family == _R0A_TARGET_FAMILIES_V2[self.component]
+                  and unit.target.receipt.kind is _R0A_TARGET_KINDS_V2[self.component], "R0A_V2_CASE_OWNERSHIP")
+            for case in (unit.target,) if unit.setup is None else (unit.setup, unit.target):
+                for interval in case.observation.oracle.intervals + case.observation.prior_binding_intervals:
+                    _r0a_inside(interval, self.complete_interval)
+        _need(tuple(unit.position for unit in self.units) == _R0A_POSITIONS_V2, "R0A_V2_UNIT_COVERAGE")
+        for item in self.progress:
+            _v2_exact(item, R0AProgressV2)
+        _need(tuple(item.position for item in self.progress) == _R0A_POSITIONS_V2, "R0A_V2_PROGRESS_COVERAGE")
+        previous = self.complete_interval.started_ns
+        for wave in self.setup_waves:
+            _v2_exact(wave, R0ASetupWaveV2)
+            _need(has_setup and wave.route == _R0A_SETUP_ROUTES_V2[self.component]
+                  and previous <= wave.setup_interval.started_ns, "R0A_V2_WAVE_ORDER")
+            _r0a_inside(wave.setup_interval, self.complete_interval)
+            _r0a_inside(wave.target_interval, self.complete_interval)
+            previous = wave.target_interval.finished_ns
+        _need(tuple(p for wave in self.setup_waves for p in wave.positions)
+              == (_R0A_POSITIONS_V2 if has_setup else ()), "R0A_V2_SETUP_COVERAGE")
+        _r0a_wall(self)
+
+    @property
+    def wall_ns(self):
+        return r0a_component_wall_v2(self)
+
+    @property
+    def complete_wall_ns(self):
+        return self.complete_interval.duration_ns
+
+
+def r0a_component_wall_v2(component):
+    """Reconstruct only supplied intervals, never actual clock observations."""
+    _v2_exact(component, R0AComponentEvidenceV2)
+    return _r0a_wall(component)
+
+
+@dataclass(frozen=True, slots=True)
+class R0ARouteContainmentV2:
+    route: str
+    max_worker_memory_bytes: int
+    max_coordinator_memory_bytes: int
+    max_combined_memory_bytes: int
+    max_decision_wall_ns: int
+    max_arm_wall_ns: int
+    max_case_wall_ns: int
+    max_shadow_wall_ns: int
+    max_physical_inputs: int
+    max_logical_sum_bytes: int
+    max_legacy_bundle_bytes: int
+    max_wb02_wire_bytes: int
+    max_physical_frame_bytes: int
+    launcher_wall_ns: int
+    watchdogs_complete: bool
+    resources_complete: bool
+    cleanup_complete: bool
+    progress_complete: bool
+    readback_complete: bool
+    watchdog_breaches: int
+    resource_breaches: int
+
+    def __post_init__(self):
+        _need(type(self.route) is str and self.route in readiness.CALIBRATION_ROUTES, "R0A_V2_CONTAINMENT_ROUTE")
+        for value in (self.max_worker_memory_bytes, self.max_coordinator_memory_bytes, self.max_combined_memory_bytes,
+                      self.max_arm_wall_ns, self.max_case_wall_ns, self.max_physical_inputs, self.max_logical_sum_bytes,
+                      self.max_legacy_bundle_bytes, self.max_wb02_wire_bytes, self.max_physical_frame_bytes,
+                      self.launcher_wall_ns):
+            _r0a_uint(value, 1)
+        for value in (self.max_decision_wall_ns, self.max_shadow_wall_ns, self.watchdog_breaches, self.resource_breaches):
+            _r0a_uint(value)
+        _need(self.max_combined_memory_bytes >= max(self.max_worker_memory_bytes, self.max_coordinator_memory_bytes)
+              and self.max_decision_wall_ns <= self.max_arm_wall_ns <= self.max_case_wall_ns,
+              "R0A_V2_CONTAINMENT_MAXIMA")
+        for flag in (self.watchdogs_complete, self.resources_complete, self.cleanup_complete,
+                     self.progress_complete, self.readback_complete):
+            _r0a_true(flag)
+        _need(self.watchdog_breaches == self.resource_breaches == 0, "R0A_V2_BREACH_CLAIM")
+
+
+def _r0a_components(components):
+    _r0a_tuple(components)
+    for component in components:
+        _v2_exact(component, R0AComponentEvidenceV2)
+    _need(tuple(c.component for c in components) == R0A_COMPONENTS_V2, "R0A_V2_COMPONENT_ORDER")
+
+
+def summarize_r0a_components_v2(components):
+    """Reconcile supplied unit claims, not persisted RF02 records."""
+    _r0a_components(components)
+    return _summarize_r0a_components_v2(components)
+
+
+def _summarize_r0a_components_v2(components):
+    # Only callers that have just revalidated the complete components use this.
+    by_name = {component.component: component for component in components}
+    result = []
+    setup_components = {route: name for name, route in _R0A_SETUP_ROUTES_V2.items()}
+    for family, route in readiness.R0A_FAMILY_ROUTES_V2:
+        component = by_name[setup_components[route] if family == "reference" else route]
+        values = tuple((unit.setup if family == "reference" else unit.target).owned_bytes for unit in component.units)
+        result.append(readiness.R0AFamilySummaryV2(family, route, 64, sum(v.record_count for v in values),
+            sum(v.physical_bytes for v in values), sum(v.logical_bytes for v in values),
+            max(v.physical_bytes for v in values), max(v.logical_bytes for v in values)))
+    return tuple(result)
+
+
+def _r0a_containment(component, *, setup_only=False):
+    cases = tuple(unit.setup for unit in component.units) if setup_only else tuple(
+        case for unit in component.units for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target)))
+    observations = tuple(case.observation for case in cases)
+    monitors = tuple(w.monitor for w in component.setup_waves)
+    if not setup_only:
+        monitors += (component.monitor,)
+    wall = sum(w.setup_interval.duration_ns for w in component.setup_waves) if setup_only else component.complete_wall_ns
+    return R0ARouteContainmentV2(_R0A_SETUP_ROUTES_V2[component.component] if setup_only else component.component,
+        max(v.worker_memory for v in observations),
+        max(tuple(v.coordinator_memory for v in observations) + tuple(m.coordinator_private_peak_bytes for m in monitors)),
+        max(tuple(v.combined_memory for v in observations) + tuple(m.combined_peak_bytes for m in monitors)),
+        max(v.decision_wall for v in observations), max(v.arm_wall for v in observations),
+        max(case.receipt.elapsed_ns for case in cases), max(v.shadow_wall for v in observations),
+        max(v.physical_inputs for v in observations), max(case.payload.logical_sum_bytes for case in cases),
+        max(case.payload.legacy_bundle_bytes for case in cases), max(case.payload.wb02_wire_bytes for case in cases),
+        max(case.payload.physical_frame_bytes for case in cases), wall, True, True, True, True, True, 0, 0)
+
+
+def derive_r0a_containment_v2(components):
+    """Pure maxima of supplied observations; monitor peaks need not equal durable samples."""
+    _r0a_components(components)
+    return _derive_r0a_containment_v2(components)
+
+
+def _derive_r0a_containment_v2(components):
+    values = {c.component: _r0a_containment(c) for c in components}
+    for component in components:
+        if component.component in ("O_K_BIND", "O_D_REPEAT"):
+            item = _r0a_containment(component, setup_only=True)
+            values[item.route] = item
+    return tuple(values[route] for route in readiness.CALIBRATION_ROUTES)
+
+
+@dataclass(frozen=True, slots=True)
+class R0AConcurrencyEvidenceV2:
+    concurrency: int
+    run_id: str
+    envelope: operational.OperatingEnvelope
+    components: tuple
+    family_summaries: tuple
+    containment: tuple
+
+    def __post_init__(self):
+        _need(type(self.concurrency) is int and self.concurrency in (1, 2, 4), "R0A_V2_CONCURRENCY")
+        _need(type(self.run_id) is str and self.run_id.startswith("R0-") and len(self.run_id) > 3
+              and all(32 <= ord(c) < 127 for c in self.run_id), "R0A_V2_RUN_ID")
+        _v2_exact(self.envelope, operational.OperatingEnvelope)
+        _need(self.envelope.concurrency == self.concurrency, "R0A_V2_ENVELOPE_CONCURRENCY")
+        _r0a_components(self.components)
+        for component in self.components:
+            if component.setup_waves:
+                _need(tuple(w.positions for w in component.setup_waves) == tuple(
+                    _R0A_POSITIONS_V2[start:start + self.concurrency] for start in range(0, 64, self.concurrency)),
+                    "R0A_V2_CONCURRENCY_WAVES")
+        _r0a_tuple(self.family_summaries)
+        for summary in self.family_summaries:
+            _v2_exact(summary, readiness.R0AFamilySummaryV2)
+        _need(self.family_summaries == _summarize_r0a_components_v2(self.components), "R0A_V2_SIZE_RECONCILIATION")
+        _r0a_tuple(self.containment)
+        for item in self.containment:
+            _v2_exact(item, R0ARouteContainmentV2)
+            _need(max(item.max_logical_sum_bytes, item.max_legacy_bundle_bytes,
+                      item.max_wb02_wire_bytes, item.max_physical_frame_bytes) <= self.envelope.max_payload_bytes,
+                  "R0A_V2_PAYLOAD_CAP_CLAIM")
+        _need(self.containment == _derive_r0a_containment_v2(self.components), "R0A_V2_CONTAINMENT_RECONCILIATION")
+
+
+@dataclass(frozen=True, slots=True)
+class R0APlanEvidenceV2:
+    protocol_seed: bytes
+    boards: tuple
+
+    def __post_init__(self):
+        _need(type(self.protocol_seed) is bytes and self.protocol_seed == bytes.fromhex(identity.PROTOCOL_SHA256),
+              "R0A_V2_PROTOCOL_SEED")
+        _r0a_tuple(self.boards)
+        for board in self.boards:
+            _v2_exact(board, records.BoardIdentity)
+        # Frozen bounded index selection only, never board generation or target recount.
+        readiness.R0APlan(self.protocol_seed, tuple(board.game_index for board in self.boards))
+
+
+@dataclass(frozen=True, slots=True)
+class R0AObservationsV2:
+    """Complete supplied calibration claims, not live or durable authentication."""
+    schema: str
+    selection_receipt_sha256: str
+    source_head: str
+    provenance_sha256: str
+    protocol: records.ProtocolIdentity
+    amendment: readiness.AmendmentProvenance
+    runtime: records.RuntimeIdentity
+    plan: R0APlanEvidenceV2
+    codec_profile_bytes: bytes
+    codec_profile_sha256: str
+    size_basis: SizeBasisV2
+    concurrencies: tuple
+
+    def __post_init__(self):
+        _need(type(self.schema) is str and self.schema == R0A_OBSERVATIONS_V2, "R0A_V2_SCHEMA")
+        for value in (self.selection_receipt_sha256, self.provenance_sha256, self.codec_profile_sha256):
+            _profile_identity(value)
+        _r0a_head(self.source_head)
+        _v2_exact(self.protocol, records.ProtocolIdentity)
+        _need(self.protocol == records.ProtocolIdentity(identity.PROTOCOL_PATH, identity.PROTOCOL_SHA256,
+            identity.PROTOCOL_BLOB_ID, identity.FREEZE_COMMIT), "R0A_V2_FROZEN_PROTOCOL")
+        _v2_exact(self.amendment, readiness.AmendmentProvenance)
+        _v2_exact(self.runtime, records.RuntimeIdentity)
+        _v2_exact(self.plan, R0APlanEvidenceV2)
+        _basis(self.size_basis)
+        _need(type(self.codec_profile_bytes) is bytes, "R0A_V2_PROFILE_BYTES")
+        profile = physical.decode_profile(self.codec_profile_bytes)
+        physical.require_qualified_profile(profile)
+        _need(profile.sha256.hex() == self.codec_profile_sha256 == self.size_basis.codec_profile_sha256,
+              "R0A_V2_PROFILE_BINDING")
+        _r0a_tuple(self.concurrencies)
+        for value in self.concurrencies:
+            _v2_exact(value, R0AConcurrencyEvidenceV2)
+        _need(tuple(value.concurrency for value in self.concurrencies) == (1, 2, 4)
+              and len({value.run_id for value in self.concurrencies}) == 3, "R0A_V2_CONCURRENCY_ORDER")
+        paths = tuple(case.archive.relative_directory for value in self.concurrencies for component in value.components
+                      for unit in component.units for case in
+                      ((unit.target,) if unit.setup is None else (unit.setup, unit.target)))
+        _need(len(paths) == len(set(paths)), "R0A_V2_ARCHIVE_PATH_UNIQUENESS")
+
+
+# Explicit V2 writers/readers. No dataclass discovery or V1 fact dispatch.
+def _r0a_interval_node(v):
+    return {"started_ns": v.started_ns, "finished_ns": v.finished_ns}
+
+
+def _r0a_monitor_node(v):
+    return {"coordinator_private_peak_bytes": v.coordinator_private_peak_bytes,
+            "combined_peak_bytes": v.combined_peak_bytes, "memory_sample_count": v.memory_sample_count}
+
+
+def _r0a_stream_node(v):
+    return {"name": v.name, "sha256": v.sha256, "byte_length": v.byte_length, "record_count": v.record_count}
+
+
+def _r0a_payload_node(v):
+    return {"logical_sum_bytes": v.logical_sum_bytes, "legacy_bundle_bytes": v.legacy_bundle_bytes,
+            "wb02_wire_bytes": v.wb02_wire_bytes, "physical_frame_bytes": v.physical_frame_bytes}
+
+
+def _r0a_receipt_node(v):
+    return {"position": v.position, "kind": v.kind.value, "status": v.status.value,
+            "reason": v.reason, "elapsed_ns": v.elapsed_ns, "exit_code": v.exit_code}
+
+
+def _r0a_telemetry_node(v):
+    return {"worker_memory": v.worker_memory, "coordinator_memory": v.coordinator_memory,
+        "combined_memory": v.combined_memory, "decision_wall": v.decision_wall,
+        "arm_wall": v.arm_wall, "shadow_wall": v.shadow_wall, "physical_inputs": v.physical_inputs,
+        "oracle": {"probes": v.oracle.probes, "calls": v.oracle.calls, "wall_ns": v.oracle.wall_ns,
+                   "intervals": [_r0a_interval_node(i) for i in v.oracle.intervals]},
+        "resources_complete": v.resources_complete, "cleanup_complete": v.cleanup_complete,
+        "watchdogs_complete": v.watchdogs_complete,
+        "prior_binding_intervals": [_r0a_interval_node(i) for i in v.prior_binding_intervals]}
+
+
+def _r0a_case_node(v):
+    return {"receipt": _r0a_receipt_node(v.receipt), "observation": _r0a_telemetry_node(v.observation),
+        "payload": _r0a_payload_node(v.payload), "archive": {"relative_directory": v.archive.relative_directory,
+        "streams": [_r0a_stream_node(s) for s in v.archive.streams]}, "family": v.family,
+        "owned_bytes": {"physical_bytes": v.owned_bytes.physical_bytes, "logical_bytes": v.owned_bytes.logical_bytes,
+                        "record_count": v.owned_bytes.record_count}, "readback_complete": v.readback_complete}
+
+
+def _r0a_wave_node(v):
+    return {"route": v.route, "positions": list(v.positions), "setup_interval": _r0a_interval_node(v.setup_interval),
+        "target_interval": _r0a_interval_node(v.target_interval), "monitor": _r0a_monitor_node(v.monitor),
+        "readback_complete": v.readback_complete}
+
+
+def _r0a_component_node(v):
+    return {"component": v.component, "complete_interval": _r0a_interval_node(v.complete_interval),
+        "wall_intervals": [{"phase": row.phase, "positions": list(row.positions),
+                            "interval": _r0a_interval_node(row.interval)} for row in v.wall_intervals],
+        "monitor": _r0a_monitor_node(v.monitor),
+        "units": [{"position": unit.position, "target": _r0a_case_node(unit.target),
+                   "setup": None if unit.setup is None else _r0a_case_node(unit.setup)} for unit in v.units],
+        "setup_waves": [_r0a_wave_node(wave) for wave in v.setup_waves],
+        "progress": [{"position": item.position, "done": item.done, "total": item.total} for item in v.progress]}
+
+
+def _r0a_summary_node(v):
+    return {"family": v.family, "route": v.route, "completed_units": v.completed_units,
+        "record_count": v.record_count, "physical_total_bytes": v.physical_total_bytes,
+        "logical_total_bytes": v.logical_total_bytes, "physical_max_unit_bytes": v.physical_max_unit_bytes,
+        "logical_max_unit_bytes": v.logical_max_unit_bytes}
+
+
+def _r0a_containment_node(v):
+    return {"route": v.route, "max_worker_memory_bytes": v.max_worker_memory_bytes,
+        "max_coordinator_memory_bytes": v.max_coordinator_memory_bytes, "max_combined_memory_bytes": v.max_combined_memory_bytes,
+        "max_decision_wall_ns": v.max_decision_wall_ns, "max_arm_wall_ns": v.max_arm_wall_ns,
+        "max_case_wall_ns": v.max_case_wall_ns, "max_shadow_wall_ns": v.max_shadow_wall_ns,
+        "max_physical_inputs": v.max_physical_inputs, "max_logical_sum_bytes": v.max_logical_sum_bytes,
+        "max_legacy_bundle_bytes": v.max_legacy_bundle_bytes, "max_wb02_wire_bytes": v.max_wb02_wire_bytes,
+        "max_physical_frame_bytes": v.max_physical_frame_bytes, "launcher_wall_ns": v.launcher_wall_ns,
+        "watchdogs_complete": v.watchdogs_complete, "resources_complete": v.resources_complete,
+        "cleanup_complete": v.cleanup_complete, "progress_complete": v.progress_complete,
+        "readback_complete": v.readback_complete, "watchdog_breaches": v.watchdog_breaches,
+        "resource_breaches": v.resource_breaches}
+
+
+def _r0a_envelope_node(v):
+    return {"concurrency": v.concurrency, "max_decision_wall_ms": v.max_decision_wall_ms,
+        "max_arm_wall_ms": v.max_arm_wall_ms, "max_case_wall_ms": v.max_case_wall_ms,
+        "max_job_wall_ms": v.max_job_wall_ms, "max_launcher_wall_ms": v.max_launcher_wall_ms,
+        "shadow_timeout_ms": v.shadow_timeout_ms, "max_physical_inputs": v.max_physical_inputs,
+        "worker_memory_cap_bytes": v.worker_memory_cap_bytes, "coordinator_memory_cap_bytes": v.coordinator_memory_cap_bytes,
+        "memory_cap_bytes": v.memory_cap_bytes, "archive_cap_bytes": v.archive_cap_bytes,
+        "monitor_interval_ms": v.monitor_interval_ms, "max_payload_bytes": v.max_payload_bytes,
+        "max_ipc_frame_bytes": v.max_ipc_frame_bytes, "aggregation_wall_ms": v.aggregation_wall_ms,
+        "validation_wall_ms": v.validation_wall_ms, "publication_wall_ms": v.publication_wall_ms,
+        "readback_wall_ms": v.readback_wall_ms, "report_wall_ms": v.report_wall_ms,
+        "fixed_report_receipt_allowance": v.fixed_report_receipt_allowance}
+
+
+def _r0a_concurrency_node(v):
+    return {"concurrency": v.concurrency, "run_id": v.run_id, "envelope": _r0a_envelope_node(v.envelope),
+        "components": [_r0a_component_node(c) for c in v.components],
+        "family_summaries": [_r0a_summary_node(s) for s in v.family_summaries],
+        "containment": [_r0a_containment_node(c) for c in v.containment]}
+
+
+def encode_r0a_observations_v2(value):
+    """Encode bounded, complete supplied claims. Never publish or authenticate files."""
+    _v2_exact(value, R0AObservationsV2)
+    a = value.amendment
+    node = {"schema": value.schema, "selection_receipt_sha256": value.selection_receipt_sha256,
+        "source_head": value.source_head, "provenance_sha256": value.provenance_sha256,
+        "protocol": records.encode(value.protocol).decode("ascii"),
+        "amendment": {"sha256": a.sha256, "byte_length": a.byte_length, "external_receipt": a.external_receipt,
+            "protocol_sha256": a.protocol_sha256, "protocol_blob": a.protocol_blob, "protocol_commit": a.protocol_commit},
+        "runtime": records.encode(value.runtime).decode("ascii"),
+        "plan": {"protocol_seed": value.plan.protocol_seed.hex(),
+                 "boards": [records.encode(board).decode("ascii") for board in value.plan.boards]},
+        "codec_profile_bytes": value.codec_profile_bytes.hex(), "codec_profile_sha256": value.codec_profile_sha256,
+        "size_basis": json.loads(encode_size_basis(value.size_basis)),
+        "concurrencies": [_r0a_concurrency_node(c) for c in value.concurrencies]}
+    data = _v2_json(node) + b"\n"
+    _need(0 < len(data) <= physical.MAX_PAYLOAD_BYTES, "R0A_V2_METADATA_BOUND")
+    return data
+
+
+def _r0a_fields(node, names):
+    _v2_fields(node, names.split())
+    return node
+
+
+def _r0a_list(value, maximum):
+    _need(type(value) is list and len(value) <= maximum, "R0A_V2_BOUNDED_ARRAY")
+    return value
+
+
+def _r0a_read_interval(node):
+    return R0AIntervalV2(**_r0a_fields(node, "started_ns finished_ns"))
+
+
+def _r0a_read_monitor(node):
+    return R0AMonitorEvidenceV2(**_r0a_fields(node, "coordinator_private_peak_bytes combined_peak_bytes memory_sample_count"))
+
+
+def _r0a_read_telemetry(node):
+    _r0a_fields(node, "worker_memory coordinator_memory combined_memory decision_wall arm_wall shadow_wall physical_inputs "
+               "oracle resources_complete cleanup_complete watchdogs_complete prior_binding_intervals")
+    oracle = _r0a_fields(node["oracle"], "probes calls wall_ns intervals")
+    return R0ATelemetryV2(node["worker_memory"], node["coordinator_memory"], node["combined_memory"],
+        node["decision_wall"], node["arm_wall"], node["shadow_wall"], node["physical_inputs"],
+        R0AOracleTelemetryV2(oracle["probes"], oracle["calls"], oracle["wall_ns"],
+            tuple(_r0a_read_interval(i) for i in _r0a_list(oracle["intervals"], physical.MAX_PAYLOAD_BYTES))),
+        node["resources_complete"], node["cleanup_complete"], node["watchdogs_complete"],
+        tuple(_r0a_read_interval(i) for i in _r0a_list(node["prior_binding_intervals"], physical.MAX_PAYLOAD_BYTES)))
+
+
+def _r0a_read_case(node):
+    _r0a_fields(node, "receipt observation payload archive family owned_bytes readback_complete")
+    receipt = _r0a_fields(node["receipt"], "position kind status reason elapsed_ns exit_code")
+    _need(type(receipt["kind"]) is str and type(receipt["status"]) is str, "R0A_V2_RECEIPT_ENUM")
+    archive = _r0a_fields(node["archive"], "relative_directory streams")
+    return R0ACaseEvidenceV2(operational.UnitReceipt(receipt["position"], execution.WorkerKind(receipt["kind"]),
+        records.AuditStatus(receipt["status"]), receipt["reason"], receipt["elapsed_ns"], receipt["exit_code"]),
+        _r0a_read_telemetry(node["observation"]), R0APayloadAxesV2(**_r0a_fields(node["payload"],
+            "logical_sum_bytes legacy_bundle_bytes wb02_wire_bytes physical_frame_bytes")),
+        R0AArchiveEvidenceV2(archive["relative_directory"], tuple(records.StreamDigest(**_r0a_fields(s,
+            "name sha256 byte_length record_count")) for s in _r0a_list(archive["streams"], len(_R0A_STREAMS_V2)))),
+        node["family"], R0AByteCountV2(**_r0a_fields(node["owned_bytes"], "physical_bytes logical_bytes record_count")),
+        node["readback_complete"])
+
+
+def _r0a_read_wave(node):
+    _r0a_fields(node, "route positions setup_interval target_interval monitor readback_complete")
+    return R0ASetupWaveV2(node["route"], tuple(_r0a_list(node["positions"], 64)),
+        _r0a_read_interval(node["setup_interval"]), _r0a_read_interval(node["target_interval"]),
+        _r0a_read_monitor(node["monitor"]), node["readback_complete"])
+
+
+def _r0a_read_component(node):
+    _r0a_fields(node, "component complete_interval wall_intervals monitor units setup_waves progress")
+    rows = []
+    for row in _r0a_list(node["wall_intervals"], physical.MAX_PAYLOAD_BYTES):
+        _r0a_fields(row, "phase positions interval")
+        rows.append(R0AWallIntervalV2(row["phase"], tuple(_r0a_list(row["positions"], 64)), _r0a_read_interval(row["interval"])))
+    units = []
+    for unit in _r0a_list(node["units"], 64):
+        _r0a_fields(unit, "position target setup")
+        units.append(R0AUnitEvidenceV2(unit["position"], _r0a_read_case(unit["target"]),
+                                     None if unit["setup"] is None else _r0a_read_case(unit["setup"])))
+    return R0AComponentEvidenceV2(node["component"], _r0a_read_interval(node["complete_interval"]), tuple(rows),
+        _r0a_read_monitor(node["monitor"]), tuple(units),
+        tuple(_r0a_read_wave(w) for w in _r0a_list(node["setup_waves"], 64)),
+        tuple(R0AProgressV2(**_r0a_fields(p, "position done total")) for p in _r0a_list(node["progress"], 64)))
+
+
+def _r0a_read_concurrency(node):
+    _r0a_fields(node, "concurrency run_id envelope components family_summaries containment")
+    envelope = operational.OperatingEnvelope(**_r0a_fields(node["envelope"],
+        "concurrency max_decision_wall_ms max_arm_wall_ms max_case_wall_ms max_job_wall_ms max_launcher_wall_ms "
+        "shadow_timeout_ms max_physical_inputs worker_memory_cap_bytes coordinator_memory_cap_bytes memory_cap_bytes "
+        "archive_cap_bytes monitor_interval_ms max_payload_bytes max_ipc_frame_bytes aggregation_wall_ms validation_wall_ms "
+        "publication_wall_ms readback_wall_ms report_wall_ms fixed_report_receipt_allowance"))
+    summaries = tuple(readiness.R0AFamilySummaryV2(**_r0a_fields(s,
+        "family route completed_units record_count physical_total_bytes logical_total_bytes physical_max_unit_bytes logical_max_unit_bytes"))
+        for s in _r0a_list(node["family_summaries"], 9))
+    containment = tuple(R0ARouteContainmentV2(**_r0a_fields(c,
+        "route max_worker_memory_bytes max_coordinator_memory_bytes max_combined_memory_bytes max_decision_wall_ns "
+        "max_arm_wall_ns max_case_wall_ns max_shadow_wall_ns max_physical_inputs max_logical_sum_bytes max_legacy_bundle_bytes "
+        "max_wb02_wire_bytes max_physical_frame_bytes launcher_wall_ns watchdogs_complete resources_complete cleanup_complete "
+        "progress_complete readback_complete watchdog_breaches resource_breaches")) for c in _r0a_list(node["containment"], 8))
+    return R0AConcurrencyEvidenceV2(node["concurrency"], node["run_id"], envelope,
+        tuple(_r0a_read_component(c) for c in _r0a_list(node["components"], 6)), summaries, containment)
+
+
+def _r0a_read_rec(value, cls):
+    _need(type(value) is str and value.isascii(), "R0A_V2_EXACT_REC_STRING")
+    data = value.encode("ascii")
+    result = records.decode(data)
+    _v2_exact(result, cls)
+    _need(records.encode(result) == data, "R0A_V2_CANONICAL_REC_STRING")
+    return result
+
+
+def decode_r0a_observations_v2(data, *, expected_profile_sha256=None, expected_provenance_sha256=None,
+                              expected_source_head=None, expected_selection_receipt_sha256=None,
+                              expected_plan=None, expected_runtime=None):
+    """Decode/reconcile supplied claims. Expected values are also supplied, never captured."""
+    _need(type(data) is bytes and 0 < len(data) <= physical.MAX_PAYLOAD_BYTES, "R0A_V2_METADATA_BOUND")
+    for digest in (expected_profile_sha256, expected_provenance_sha256, expected_selection_receipt_sha256):
+        if digest is not None:
+            _profile_identity(digest)
+    if expected_source_head is not None:
+        _r0a_head(expected_source_head)
+    if expected_plan is not None:
+        _v2_exact(expected_plan, R0APlanEvidenceV2)
+    if expected_runtime is not None:
+        _v2_exact(expected_runtime, records.RuntimeIdentity)
+    try:
+        node = json.loads(data.decode("ascii"), object_pairs_hook=_v2_unique,
+                          parse_float=_no_float, parse_constant=_no_float)
+        _r0a_fields(node, "schema selection_receipt_sha256 source_head provenance_sha256 protocol amendment runtime plan "
+                    "codec_profile_bytes codec_profile_sha256 size_basis concurrencies")
+        # Reject lexical drift before constructing the large supplied claim tree.
+        # The final record-aware encode equality remains authoritative as well.
+        _need(_v2_json(node) + b"\n" == data, "R0A_V2_NONCANONICAL_DOCUMENT")
+        for observed, expected in ((node["codec_profile_sha256"], expected_profile_sha256),
+                (node["provenance_sha256"], expected_provenance_sha256), (node["source_head"], expected_source_head),
+                (node["selection_receipt_sha256"], expected_selection_receipt_sha256)):
+            _need(expected is None or observed == expected, "R0A_V2_EXPECTED_BINDING_MISMATCH")
+        plan = _r0a_fields(node["plan"], "protocol_seed boards")
+        value = R0AObservationsV2(node["schema"], node["selection_receipt_sha256"], node["source_head"],
+            node["provenance_sha256"], _r0a_read_rec(node["protocol"], records.ProtocolIdentity),
+            readiness.AmendmentProvenance(**_r0a_fields(node["amendment"],
+                "sha256 byte_length external_receipt protocol_sha256 protocol_blob protocol_commit")),
+            _r0a_read_rec(node["runtime"], records.RuntimeIdentity),
+            R0APlanEvidenceV2(_v2_hex(plan["protocol_seed"]),
+                tuple(_r0a_read_rec(b, records.BoardIdentity) for b in _r0a_list(plan["boards"], 64))),
+            _v2_hex(node["codec_profile_bytes"]), node["codec_profile_sha256"],
+            decode_size_basis(_v2_json(node["size_basis"])),
+            tuple(_r0a_read_concurrency(c) for c in _r0a_list(node["concurrencies"], 3)))
+        for observed, expected in ((value.codec_profile_sha256, expected_profile_sha256),
+                (value.provenance_sha256, expected_provenance_sha256), (value.source_head, expected_source_head),
+                (value.selection_receipt_sha256, expected_selection_receipt_sha256),
+                (value.plan, expected_plan), (value.runtime, expected_runtime)):
+            _need(expected is None or observed == expected, "R0A_V2_EXPECTED_BINDING_MISMATCH")
+        _need(encode_r0a_observations_v2(value) == data, "R0A_V2_NONCANONICAL_DOCUMENT")
+        return value
+    except EvidenceError:
+        raise
+    except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
+        raise EvidenceError("R0A_V2_MALFORMED_OBSERVATIONS") from None

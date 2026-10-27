@@ -1353,5 +1353,210 @@ class V2PolicyIsolationTests(unittest.TestCase):
         self.assertEqual(imports, {'dataclasses', 'enum', 'fractions', 'hashlib', 'experiments'})
 
 
+class R0ACalibrationSizingV2Tests(unittest.TestCase):
+    """Supplied scalar calibration claims only; no collection or authentication."""
+
+    PAIRS = (('primary', 'P'), ('k_control', 'K'), ('oracle_primary', 'O'),
+             ('oracle_repeat', 'O_D_REPEAT'), ('determinism', 'D'),
+             ('reference', 'K'), ('reference', 'D'),
+             ('reference', 'O_K_SETUP'), ('reference', 'O_D_SETUP'))
+
+    def summary(self, index=0, physical=11, logical=101):
+        family, route = self.PAIRS[index]
+        return r.R0AFamilySummaryV2(family, route, 64, 64, physical * 64, logical * 64,
+                                    physical, logical)
+
+    def claims(self):
+        return tuple((c, tuple(self.summary(index, 10 + index + c, 100 + index + c)
+                               for index in range(9))) for c in (1, 2, 4))
+
+    def changed(self, claims, concurrency_index, summary_index, **changes):
+        output = list(claims)
+        c, summaries = output[concurrency_index]
+        changed = list(summaries)
+        changed[summary_index] = replace(changed[summary_index], **changes)
+        output[concurrency_index] = (c, tuple(changed))
+        return tuple(output)
+
+    def test_exact_fields_pairs_and_immutable_summary(self):
+        self.assertEqual(r.R0A_FAMILY_ROUTES_V2, self.PAIRS)
+        self.assertEqual(tuple(field.name for field in fields(r.R0AFamilySummaryV2)), (
+            'family', 'route', 'completed_units', 'record_count', 'physical_total_bytes',
+            'logical_total_bytes', 'physical_max_unit_bytes', 'logical_max_unit_bytes'))
+        summary = self.summary()
+        self.assertFalse(hasattr(summary, '__dict__'))
+        with self.assertRaises(FrozenInstanceError):
+            summary.route = 'K'
+
+    def test_exact_maxima_use_unit_maxima_not_totals_and_do_not_apply_floors(self):
+        observed = r.derive_r0a_dual_maxima_v2(self.claims())
+        self.assertEqual(observed.physical, r.ComponentSizes(14, 15, 17, 17, 18, 22))
+        self.assertEqual(observed.logical, r.ComponentSizes(104, 105, 107, 107, 108, 112))
+
+    def test_physical_and_logical_witnesses_may_be_different_concurrencies(self):
+        claims = self.changed(self.claims(), 0, 0,
+            physical_total_bytes=1001 * 64, physical_max_unit_bytes=1001)
+        claims = self.changed(claims, 1, 0,
+            logical_total_bytes=2003 * 64, logical_max_unit_bytes=2003)
+        observed = r.derive_r0a_dual_maxima_v2(claims)
+        self.assertEqual(observed.physical.primary, 1001)
+        self.assertEqual(observed.logical.primary, 2003)
+        self.assertEqual(observed.physical.reference, 22)
+        self.assertEqual(observed.logical.reference, 112)
+
+    def test_physical_only_and_logical_only_mutations_have_no_cross_credit(self):
+        claims = self.claims()
+        before = r.derive_r0a_dual_maxima_v2(claims)
+        physical = r.derive_r0a_dual_maxima_v2(self.changed(claims, 0, 1,
+            physical_total_bytes=1009 * 64, physical_max_unit_bytes=1009))
+        logical = r.derive_r0a_dual_maxima_v2(self.changed(claims, 1, 4,
+            logical_total_bytes=2011 * 64, logical_max_unit_bytes=2011))
+        self.assertEqual(physical.logical, before.logical)
+        self.assertEqual(physical.physical.k_control, 1009)
+        self.assertEqual(logical.physical, before.physical)
+        self.assertEqual(logical.logical.determinism, 2011)
+
+    def test_both_oracle_routes_participate_with_independent_axis_witnesses(self):
+        claims = self.changed(self.claims(), 0, 2,
+            physical_total_bytes=1103 * 64, physical_max_unit_bytes=1103)
+        claims = self.changed(claims, 1, 3,
+            logical_total_bytes=2203 * 64, logical_max_unit_bytes=2203)
+        observed = r.derive_r0a_dual_maxima_v2(claims)
+        self.assertEqual((observed.physical.oracle_primary, observed.physical.oracle_repeat), (1103, 1103))
+        self.assertEqual((observed.logical.oracle_primary, observed.logical.oracle_repeat), (2203, 2203))
+
+    def test_each_reference_route_and_concurrency_can_supply_the_maximum(self):
+        for c_index in range(3):
+            for index in range(5, 9):
+                with self.subTest(concurrency=c_index, route=self.PAIRS[index][1]):
+                    claims = self.changed(self.claims(), c_index, index,
+                        physical_total_bytes=1201 * 64, physical_max_unit_bytes=1201,
+                        logical_total_bytes=2309 * 64, logical_max_unit_bytes=2309)
+                    observed = r.derive_r0a_dual_maxima_v2(claims)
+                    self.assertEqual(observed.physical.reference, 1201)
+                    self.assertEqual(observed.logical.reference, 2309)
+
+    def test_k_and_d_target_copies_do_not_supply_reference_maximum(self):
+        claims = self.changed(self.claims(), 0, 1,
+            physical_total_bytes=4001 * 64, physical_max_unit_bytes=4001)
+        claims = self.changed(claims, 1, 4,
+            logical_total_bytes=5003 * 64, logical_max_unit_bytes=5003)
+        observed = r.derive_r0a_dual_maxima_v2(claims)
+        self.assertEqual(observed.physical.reference, 22)
+        self.assertEqual(observed.logical.reference, 112)
+
+    def test_zero_oracle_is_complete_and_distinct_from_missing_summary(self):
+        claims = self.claims()
+        for c_index in range(3):
+            for index in (2, 3):
+                claims = self.changed(claims, c_index, index, record_count=0,
+                    physical_total_bytes=0, logical_total_bytes=0,
+                    physical_max_unit_bytes=0, logical_max_unit_bytes=0)
+        observed = r.derive_r0a_dual_maxima_v2(claims)
+        self.assertEqual(observed.physical.oracle_primary, 0)
+        self.assertEqual(observed.logical.oracle_repeat, 0)
+        self.assertEqual(claims[0][1][2].completed_units, 64)
+        missing = ((1, claims[0][1][:2] + claims[0][1][3:]),) + claims[1:]
+        with self.assertRaises(r.ReadinessError):
+            r.derive_r0a_dual_maxima_v2(missing)
+
+    def test_summary_rejects_wrong_pairs_partial_counts_and_inconsistent_zero(self):
+        invalid = ({'family': 'reference', 'route': 'O'}, {'route': 'O_K_BIND'},
+                   {'family': 'PRIMARY'}, {'completed_units': 63}, {'completed_units': 65},
+                   {'record_count': 0}, {'physical_total_bytes': 0},
+                   {'logical_max_unit_bytes': 0}, {'physical_max_unit_bytes': 1000},
+                   {'physical_total_bytes': 11 * 64 + 1})
+        for changes in invalid:
+            with self.subTest(changes=changes), self.assertRaises(r.ReadinessError):
+                replace(self.summary(), **changes)
+        for index in (2, 3):
+            with self.assertRaises(r.ReadinessError):
+                replace(self.summary(index), record_count=0, physical_total_bytes=0,
+                        physical_max_unit_bytes=0)
+            with self.assertRaises(r.ReadinessError):
+                replace(self.summary(index), physical_total_bytes=0, logical_total_bytes=0,
+                        physical_max_unit_bytes=0, logical_max_unit_bytes=0)
+
+    def test_summary_rejects_inexact_numeric_and_vocabulary_types(self):
+        class IntegerSubclass(int):
+            pass
+        class StringSubclass(str):
+            pass
+        for name in ('completed_units', 'record_count', 'physical_total_bytes', 'logical_total_bytes',
+                     'physical_max_unit_bytes', 'logical_max_unit_bytes'):
+            for value in (True, -1, 1.0, IntegerSubclass(64), identity.UINT64_MAX + 1):
+                with self.subTest(field=name, value=value), self.assertRaises(r.ReadinessError):
+                    replace(self.summary(), **{name: value})
+        for changes in ({'family': StringSubclass('primary')}, {'route': StringSubclass('P')},
+                        {'family': 1}, {'route': None}):
+            with self.subTest(changes=changes), self.assertRaises(r.ReadinessError):
+                replace(self.summary(), **changes)
+
+    def test_concurrency_shape_and_order_are_rejected_without_normalization(self):
+        claims = self.claims()
+        invalid = (list(claims), claims[::-1], claims[:2], claims + claims[:1],
+                   ([1, claims[0][1]],) + claims[1:],
+                   ((True, claims[0][1]),) + claims[1:],
+                   ((1.0, claims[0][1]),) + claims[1:],
+                   ((1, list(claims[0][1])),) + claims[1:],
+                   ((1, claims[0][1][::-1]),) + claims[1:],
+                   ((1, (claims[0][1][0],) * 9),) + claims[1:])
+        for value in invalid:
+            with self.subTest(input=value), self.assertRaises(r.ReadinessError):
+                r.derive_r0a_dual_maxima_v2(value)
+
+    def test_helper_revalidates_exact_summary_type_and_forged_fields(self):
+        class SummarySubclass(r.R0AFamilySummaryV2):
+            pass
+        original = self.summary()
+        subclass = SummarySubclass(original.family, original.route, original.completed_units,
+            original.record_count, original.physical_total_bytes, original.logical_total_bytes,
+            original.physical_max_unit_bytes, original.logical_max_unit_bytes)
+        corrupt = replace(original)
+        object.__setattr__(corrupt, 'physical_max_unit_bytes', True)
+        for wrong in (subclass, corrupt, SimpleNamespace(family='primary', route='P'), original.__class__):
+            claims = self.claims()
+            claims = ((1, (wrong,) + claims[0][1][1:]),) + claims[1:]
+            with self.subTest(value=wrong), self.assertRaises(r.ReadinessError):
+                r.derive_r0a_dual_maxima_v2(claims)
+
+    def test_exact_ceil_targets_remain_owned_by_unchanged_dual_derivation(self):
+        maxima = r.derive_r0a_dual_maxima_v2(self.claims())
+        targets = r.derive_dual_targets(maxima)
+        self.assertEqual(targets.physical, r.ComponentSizes(21, 23, 26, 26, 27, 33))
+        self.assertEqual(targets.logical, r.ComponentSizes(156, 158, 161, 161, 162, 168))
+
+    def test_large_integer_maximum_stays_exact_and_target_overflow_fails_closed(self):
+        huge = identity.UINT64_MAX
+        claims = self.changed(self.claims(), 0, 0,
+            physical_total_bytes=huge, physical_max_unit_bytes=huge)
+        maxima = r.derive_r0a_dual_maxima_v2(claims)
+        self.assertEqual(maxima.physical.primary, huge)
+        with self.assertRaises(r.ReadinessError):
+            r.derive_dual_targets(maxima)
+
+    def test_v1_sizing_does_not_activate_new_vocabulary_or_derivation(self):
+        historical = _measurements()
+        expected = r.derive_r0b_sizing_plan(historical)
+        with patch.object(r, 'derive_r0a_dual_maxima_v2', side_effect=AssertionError('V2 activated')), \
+             patch.object(r, 'R0AFamilySummaryV2', side_effect=AssertionError('V2 activated')):
+            self.assertEqual(r.derive_r0b_sizing_plan(historical), expected)
+            self.assertEqual(r.validate_r0a_measurements(historical), historical)
+
+    def test_derivation_has_no_capture_filesystem_measurement_or_persistence(self):
+        claims = self.claims()
+        expected = r.derive_r0a_dual_maxima_v2(claims)
+        blocked = ((builtins, 'open'), (io, 'open'), (os, 'open'), (os, 'stat'), (os, 'lstat'),
+                   (Path, 'open'), (Path, 'resolve'), (Path, 'read_bytes'), (Path, 'write_bytes'),
+                   (Path, 'mkdir'), (subprocess, 'run'), (subprocess, 'Popen'),
+                   (q, 'capture_sources'), (q, 'capture_sources_v2'), (r, 'capture_review_sources'),
+                   (op, 'coordinate'), (op, 'measure_r0_component'))
+        with ExitStack() as stack:
+            for owner, attribute in blocked:
+                stack.enter_context(patch.object(owner, attribute, side_effect=AssertionError('impure call')))
+            self.assertEqual(r.derive_r0a_dual_maxima_v2(claims), expected)
+            r.derive_dual_targets(expected)
+
+
 if __name__ == '__main__':
     unittest.main()

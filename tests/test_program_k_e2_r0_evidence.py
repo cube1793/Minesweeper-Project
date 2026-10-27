@@ -1086,5 +1086,713 @@ class ImportPurityTests(unittest.TestCase):
         self.assertEqual(probe.schema_version(V2_SCHEMAS[0]), 2)
 
 
+def _r0a_supplied_fixture_v2():
+    """Complete supplied claims only: no board generation, wire, disk or capture."""
+    from experiments import program_k_e2_identity as identity
+    from tests.test_program_k_e2_physical import _qualified_node
+    profile = physical.decode_profile(_json(_qualified_node()))
+    runtime = records.RuntimeIdentity("FixturePython", "0", "fixture-os", "fixture-platform",
+                                      "fixture-arch", None)
+    seed = bytes.fromhex(identity.PROTOCOL_SHA256)
+    indices = readiness.build_r0a_plan(seed).ordered_indices
+    boards = tuple(records.BoardIdentity(index, "supplied-fingerprint-" + str(position), 30, 16, 99,
+        (0, 0), "supplied-generator", "supplied-spec") for position, index in enumerate(indices))
+    names = execution.STREAM_NAMES + ("operations", "resources")
+    seals = tuple(records.StreamDigest(name, "a" * 64, 500, 1) for name in names)
+    interval = e.R0AIntervalV2
+    components = ("P", "K", "O", "D", "O_K_BIND", "O_D_REPEAT")
+    families = dict(P="primary", K="k_control", O="oracle_primary", D="determinism",
+                    O_K_BIND=None, O_D_REPEAT="oracle_repeat")
+    kinds = dict(P=execution.WorkerKind.PRIMARY, K=execution.WorkerKind.K_CONTROL,
+                 O=execution.WorkerKind.PRIMARY, D=execution.WorkerKind.DETERMINISM,
+                 O_K_BIND=execution.WorkerKind.K_CONTROL,
+                 O_D_REPEAT=execution.WorkerKind.DETERMINISM)
+    setup_routes = dict(K="K", D="D", O_K_BIND="O_K_SETUP", O_D_REPEAT="O_D_SETUP")
+    monitor = e.R0AMonitorEvidenceV2(25, 40, 3)
+    payload = e.R0APayloadAxesV2(1000, 1200, 2000, 1500)
+    concurrencies = []
+    for concurrency in (1, 2, 4):
+        measured = []
+        for component_index, component in enumerate(components):
+            units, waves, wall_intervals = [], [], []
+            end = 100 + (64 // concurrency) * 100
+            complete = interval(0, end + 30)
+            for offset in range(0, 64, concurrency):
+                positions = tuple(range(offset, offset + concurrency))
+                base = 100 + (offset // concurrency) * 100
+                setup_interval, target_interval = interval(base, base + 10), interval(base + 20, base + 80)
+                if component in setup_routes:
+                    waves.append(e.R0ASetupWaveV2(setup_routes[component], positions, setup_interval,
+                                                target_interval, monitor, True))
+                if component == "O_K_BIND":
+                    wall_intervals.append(e.R0AWallIntervalV2("PRIOR_ENCODE", positions,
+                                                              interval(base + 20, base + 25)))
+                if component == "O_D_REPEAT":
+                    wall_intervals.append(e.R0AWallIntervalV2("TARGET_PHASE", positions, target_interval))
+                for position in positions:
+                    binding = (interval(base + 30, base + 40),) if component == "O_K_BIND" else ()
+                    observation = e.R0ATelemetryV2(10, 20, 30, 1, 2, 0, 1,
+                        e.R0AOracleTelemetryV2(0, 0, 0, ()), True, True, True, binding)
+                    family = families[component]
+                    owned = e.R0AByteCountV2(0, 0, 0) if family is None else e.R0AByteCountV2(
+                        200 + concurrency if position == 0 else 100 + concurrency,
+                        220 + concurrency if position == 1 else 120 + concurrency, 1)
+                    target = e.R0ACaseEvidenceV2(operational.UnitReceipt(position, kinds[component],
+                        records.AuditStatus.PASS, "ADMITTED", 50, 0), observation, payload,
+                        e.R0AArchiveEvidenceV2("c%d/%s/%d/target" % (concurrency, component, position), seals),
+                        family, owned, True)
+                    setup = None
+                    if component in setup_routes:
+                        setup_observation = replace(observation, prior_binding_intervals=())
+                        setup_owned = e.R0AByteCountV2(300 + component_index * 10 + concurrency,
+                                                      400 - component_index * 10 + concurrency, 1)
+                        setup = e.R0ACaseEvidenceV2(operational.UnitReceipt(position,
+                            execution.WorkerKind.PRIMARY, records.AuditStatus.PASS, "ADMITTED", 5, 0),
+                            setup_observation, payload,
+                            e.R0AArchiveEvidenceV2("c%d/%s/%d/setup" % (concurrency, component, position), seals),
+                            "reference", setup_owned, True)
+                    units.append(e.R0AUnitEvidenceV2(position, target, setup))
+                    if component == "O_K_BIND":
+                        wall_intervals.extend((e.R0AWallIntervalV2("PRIOR_BIND", (position,), binding[0]),
+                            e.R0AWallIntervalV2("PARENT_ADMISSION", (position,),
+                                interval(base + 50 + position - offset, base + 51 + position - offset))))
+            if component in ("P", "K", "O", "D"):
+                wall_intervals = [e.R0AWallIntervalV2("COMPLETE_ROUTE", tuple(range(64)), complete)]
+            else:
+                wall_intervals.extend((e.R0AWallIntervalV2("ORCHESTRATION", (), interval(10, 20)),
+                    e.R0AWallIntervalV2("CLEANUP", (), interval(end + 10, end + 20))))
+            wall_intervals.sort(key=lambda item: (item.interval.started_ns, item.interval.finished_ns,
+                                                  item.phase, item.positions))
+            measured.append(e.R0AComponentEvidenceV2(component, complete, tuple(wall_intervals), monitor,
+                tuple(units), tuple(waves), tuple(e.R0AProgressV2(p, p + 1, 64) for p in range(64))))
+        measured = tuple(measured)
+        envelope = operational.OperatingEnvelope(concurrency, 100, 200, 300, 400, 500, 100,
+            1000, 100000, 100000, 200000, 100000000, 1, 1000000, 65536, 100, 100, 100, 100, 100)
+        concurrencies.append(e.R0AConcurrencyEvidenceV2(concurrency, "R0-SUPPLIED-C%d" % concurrency,
+            envelope, measured, e.summarize_r0a_components_v2(measured), e.derive_r0a_containment_v2(measured)))
+    return e.R0AObservationsV2(e.R0A_OBSERVATIONS_V2, h.SELECTION_RECEIPT_SHA256, "b" * 40,
+        "c" * 64, records.ProtocolIdentity(identity.PROTOCOL_PATH, identity.PROTOCOL_SHA256,
+            identity.PROTOCOL_BLOB_ID, identity.FREEZE_COMMIT), readiness.AmendmentProvenance(), runtime,
+        e.R0APlanEvidenceV2(seed, boards), profile.canonical_bytes, profile.sha256.hex(),
+        e.SizeBasisV2(profile.sha256.hex()), tuple(concurrencies))
+
+
+def _r0a_change_component_v2(value, concurrency_index, component_index, component):
+    concurrency = value.concurrencies[concurrency_index]
+    components = list(concurrency.components)
+    components[component_index] = component
+    components = tuple(components)
+    changed = replace(concurrency, components=components,
+        family_summaries=e.summarize_r0a_components_v2(components),
+        containment=e.derive_r0a_containment_v2(components))
+    values = list(value.concurrencies)
+    values[concurrency_index] = changed
+    return replace(value, concurrencies=tuple(values))
+
+
+class R0AProvenanceDigestV2Tests(unittest.TestCase):
+    def setUp(self):
+        self.sources = (records.SourceBlobIdentity("experiments/a.py", "a" * 40, "b" * 64, 10),
+                        records.SourceBlobIdentity("experiments/z.py", "c" * 40, "d" * 64, 20))
+        self.runtime = records.RuntimeIdentity("SuppliedPython", "1", "fixture", "fixture", "fixture", None)
+        self.args = ("1" * 40, "2" * 40, self.sources,
+            ((self.sources[0].path, "3" * 64, 12, True),
+             (self.sources[1].path, "4" * 64, 20, False)), self.runtime, "C:\\supplied\\python.exe", True)
+
+    def expected_node(self):
+        a = self.args
+        return dict(selection_source_head=a[0], r0_harness_source_head=a[1],
+            sources=[records.encode(s).decode("ascii") for s in a[2]],
+            working_files=[list(v) for v in a[3]], runtime=records.encode(a[4]).decode("ascii"),
+            executable=a[5], dont_write_bytecode=a[6])
+
+    def test_exact_seven_field_preimage_with_domain_lf_and_no_final_lf(self):
+        from hashlib import sha256
+        raw = b"program-k-e2-r0-provenance/v2\n" + _json(self.expected_node())
+        actual = e.provenance_digest_v2(*self.args)
+        self.assertFalse(raw.endswith(b"\n"))
+        self.assertEqual(actual, sha256(raw).hexdigest())
+        self.assertNotEqual(actual, sha256(raw + b"\n").hexdigest())
+        self.assertEqual(actual, e.provenance_digest_v2(*self.args))
+        self.assertEqual(set(self.expected_node()), {"selection_source_head", "r0_harness_source_head",
+            "sources", "working_files", "runtime", "executable", "dont_write_bytecode"})
+        self.assertIsInstance(self.expected_node()["runtime"], str)
+        self.assertTrue(all(isinstance(v, str) for v in self.expected_node()["sources"]))
+
+    def test_each_mutable_field_changes_binding_and_unsupported_bool_is_rejected(self):
+        original = e.provenance_digest_v2(*self.args)
+        changes = {0: "5" * 40, 1: "6" * 40,
+            2: (replace(self.sources[0], blob_id="7" * 40), self.sources[1]),
+            3: ((self.sources[0].path, "8" * 64, 12, True), self.args[3][1]),
+            4: replace(self.runtime, python_version="2"), 5: "C:\\SUPPLIED\\python.exe"}
+        for index, value in changes.items():
+            args = list(self.args)
+            args[index] = value
+            with self.subTest(index=index):
+                self.assertNotEqual(e.provenance_digest_v2(*args), original)
+        for value in (False, 0, 1, "true", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                e.provenance_digest_v2(*self.args[:-1], value)
+
+    def test_sources_are_exact_sorted_unique_and_working_files_exactly_correspond(self):
+        mutations = ((2, self.sources[::-1]), (2, self.sources + self.sources[:1]),
+            (2, list(self.sources)), (2, ()), (3, self.args[3][::-1]), (3, self.args[3][:-1]),
+            (3, list(self.args[3])), (3, (list(self.args[3][0]), self.args[3][1])))
+        for index, value in mutations:
+            args = list(self.args)
+            args[index] = value
+            with self.subTest(index=index, value=value), self.assertRaises(ValueError):
+                e.provenance_digest_v2(*args)
+        for index, bad in ((0, "wrong/path"), (1, "A" * 64), (1, "g" * 64),
+                           (2, True), (2, -1), (2, 1 << 64), (3, 1), (3, "false")):
+            first = list(self.args[3][0])
+            first[index] = bad
+            args = list(self.args)
+            args[3] = (tuple(first), self.args[3][1])
+            with self.subTest(index=index, bad=bad), self.assertRaises(ValueError):
+                e.provenance_digest_v2(*args)
+
+    def test_head_runtime_executable_and_record_types_are_not_coerced(self):
+        for index, bad in ((0, "A" * 40), (0, "a" * 39), (1, True), (4, records.encode(self.runtime)),
+                           (5, ""), (5, Path("python.exe")), (5, True)):
+            args = list(self.args)
+            args[index] = bad
+            with self.subTest(index=index, bad=bad), self.assertRaises(ValueError):
+                e.provenance_digest_v2(*args)
+        class Source(records.SourceBlobIdentity):
+            pass
+        with self.assertRaises(ValueError):
+            e.provenance_digest_v2(self.args[0], self.args[1],
+                (Source("experiments/a.py", "a" * 40, "b" * 64, 10),),
+                (self.args[3][0],), *self.args[4:])
+
+    def test_digest_is_supplied_only_with_capture_and_file_access_poisoned(self):
+        from experiments import program_k_e2_qualification as qualification
+        forbidden = AssertionError("Pure digest must not authenticate or touch files")
+        with ExitStack() as stack:
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "resolve"),
+                (Path, "exists"), (subprocess, "run"), (qualification, "capture_sources_v2"),
+                (h, "capture_run_provenance_v2"), (e, "fact_node_v1"), (e, "fact_read_v1")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            stack.enter_context(patch("builtins.open", side_effect=forbidden))
+            self.assertEqual(len(e.provenance_digest_v2(*self.args)), 64)
+
+
+class R0AObservationsV2Tests(unittest.TestCase):
+    """Supplied metadata acceptance is deliberately not durable authentication."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.value = _r0a_supplied_fixture_v2()
+        cls.raw = e.encode_r0a_observations_v2(cls.value)
+
+    def test_canonical_complete_shape_exact_roundtrip_and_supplied_expected_bindings(self):
+        node = json.loads(self.raw)
+        self.assertEqual(self.raw, _json(node) + b"\n")
+        self.assertTrue(self.raw.isascii())
+        self.assertEqual(tuple(f.name for f in fields(self.value)), (
+            "schema", "selection_receipt_sha256", "source_head", "provenance_sha256", "protocol",
+            "amendment", "runtime", "plan", "codec_profile_bytes", "codec_profile_sha256", "size_basis",
+            "concurrencies"))
+        decoded = e.decode_r0a_observations_v2(self.raw,
+            expected_profile_sha256=self.value.codec_profile_sha256,
+            expected_provenance_sha256=self.value.provenance_sha256,
+            expected_source_head=self.value.source_head)
+        self.assertEqual(decoded, self.value)
+        self.assertEqual(e.encode_r0a_observations_v2(decoded), self.raw)
+        self.assertEqual(node["schema"], "program-k-e2-r0a-observations/v2")
+        self.assertEqual(node["runtime"], records.encode(self.value.runtime).decode("ascii"))
+        self.assertEqual(len(node["plan"]["boards"]), 64)
+        self.assertNotIn("admission", node)
+        self.assertNotIn("effectiveness", node)
+
+    def test_exact_declaration_orders_are_frozen(self):
+        orders = {
+            e.R0APlanEvidenceV2: "protocol_seed boards",
+            e.R0AConcurrencyEvidenceV2: "concurrency run_id envelope components family_summaries containment",
+            e.R0AComponentEvidenceV2: "component complete_interval wall_intervals monitor units setup_waves progress",
+            e.R0AIntervalV2: "started_ns finished_ns",
+            e.R0AWallIntervalV2: "phase positions interval",
+            e.R0AMonitorEvidenceV2: "coordinator_private_peak_bytes combined_peak_bytes memory_sample_count",
+            e.R0AUnitEvidenceV2: "position target setup",
+            e.R0ACaseEvidenceV2: "receipt observation payload archive family owned_bytes readback_complete",
+            e.R0APayloadAxesV2: "logical_sum_bytes legacy_bundle_bytes wb02_wire_bytes physical_frame_bytes",
+            e.R0AArchiveEvidenceV2: "relative_directory streams",
+            e.R0AByteCountV2: "physical_bytes logical_bytes record_count",
+            e.R0ASetupWaveV2: "route positions setup_interval target_interval monitor readback_complete",
+            e.R0AProgressV2: "position done total",
+            e.R0ATelemetryV2: "worker_memory coordinator_memory combined_memory decision_wall arm_wall shadow_wall "
+                "physical_inputs oracle resources_complete cleanup_complete watchdogs_complete prior_binding_intervals",
+            e.R0AOracleTelemetryV2: "probes calls wall_ns intervals",
+            e.R0ARouteContainmentV2: "route max_worker_memory_bytes max_coordinator_memory_bytes max_combined_memory_bytes "
+                "max_decision_wall_ns max_arm_wall_ns max_case_wall_ns max_shadow_wall_ns max_physical_inputs "
+                "max_logical_sum_bytes max_legacy_bundle_bytes max_wb02_wire_bytes max_physical_frame_bytes "
+                "launcher_wall_ns watchdogs_complete resources_complete cleanup_complete progress_complete "
+                "readback_complete watchdog_breaches resource_breaches",
+        }
+        for cls, order in orders.items():
+            with self.subTest(cls=cls.__name__):
+                self.assertEqual(tuple(f.name for f in fields(cls)), tuple(order.split()))
+
+    def test_root_and_nested_unknown_missing_and_duplicate_fields_fail(self):
+        # One representative at each new closed nested shape; no archive is opened.
+        node = json.loads(self.raw)
+        paths = ((), ("plan",), ("concurrencies", 0), ("concurrencies", 0, "components", 0),
+            ("concurrencies", 0, "components", 0, "monitor"),
+            ("concurrencies", 0, "components", 0, "units", 0, "target", "payload"),
+            ("concurrencies", 0, "family_summaries", 0), ("concurrencies", 0, "containment", 0))
+        for path in paths:
+            target = node
+            for part in path:
+                target = target[part]
+            original = dict(target)
+            key = next(iter(target))
+            del target[key]
+            with self.subTest(path=path, missing=key), self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(_json(node) + b"\n")
+            target.update(original)
+            target["unexpected"] = 0
+            with self.subTest(path=path, extra=True), self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(_json(node) + b"\n")
+            del target["unexpected"]
+        duplicate = self.raw.replace(b'"finished_ns":', b'"finished_ns":0,"finished_ns":', 1)
+        with self.assertRaises(ValueError):
+            e.decode_r0a_observations_v2(duplicate)
+
+    def test_noncanonical_wire_numbers_input_types_and_bounds_fail(self):
+        for raw in (self.raw[:-1], self.raw + b"\n", self.raw[:-1] + b"\r\n", b" " + self.raw,
+                    self.raw + b" ", self.raw + b"{}"):
+            with self.subTest(suffix=raw[-5:]), self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(raw)
+        for token in (b"1.0", b"1e0", b"NaN", b"Infinity", b"-Infinity", b"true", b"-1",
+                      str(1 << 64).encode("ascii")):
+            raw = self.raw.replace(b'"memory_sample_count":3', b'"memory_sample_count":' + token, 1)
+            with self.subTest(token=token), self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(raw)
+        for value in (b"", None, bytearray(b"{}\n"), memoryview(b"{}\n"), "{}\n"):
+            with self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(value)
+        with self.assertRaises(ValueError):
+            e.decode_r0a_observations_v2(b"x" * (67_108_864 + 1))
+
+    def test_closed_c_component_summary_containment_and_run_identity_orders(self):
+        value, concurrency = self.value, self.value.concurrencies[0]
+        self.assertEqual(tuple(v.concurrency for v in value.concurrencies), (1, 2, 4))
+        self.assertEqual(tuple(v.component for v in concurrency.components), ("P", "K", "O", "D", "O_K_BIND", "O_D_REPEAT"))
+        for field in ("components", "family_summaries", "containment"):
+            source = getattr(concurrency, field)
+            for bad in (source[::-1], source[:-1], source + source[:1], list(source)):
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    replace(concurrency, **{field: bad})
+        with self.assertRaises(ValueError):
+            replace(value, concurrencies=value.concurrencies[::-1])
+        with self.assertRaises(ValueError):
+            replace(value, concurrencies=(concurrency, replace(value.concurrencies[1], run_id=concurrency.run_id),
+                                         value.concurrencies[2]))
+
+    def test_unit_progress_wave_and_stream_orders_are_not_silently_normalized(self):
+        component = self.value.concurrencies[1].components[1]
+        for field in ("units", "progress", "setup_waves"):
+            source = getattr(component, field)
+            for bad in (source[::-1], source[:-1], source + source[:1], list(source)):
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    replace(component, **{field: bad})
+        archive = component.units[0].target.archive
+        self.assertEqual(len(archive.streams), 55)
+        for bad in (archive.streams[::-1], archive.streams[:-1], archive.streams + archive.streams[:1]):
+            with self.assertRaises(ValueError):
+                replace(archive, streams=bad)
+        with self.assertRaises(ValueError):
+            replace(component.progress[0], done=2)
+
+    def test_plan_seed_board_identity_and_profile_bindings_are_closed(self):
+        from experiments import program_k_e2_identity as identity
+        plan = self.value.plan
+        for bad in (plan.boards[::-1], plan.boards[:-1], plan.boards + plan.boards[:1]):
+            with self.assertRaises(ValueError):
+                replace(plan, boards=bad)
+        with self.assertRaises(ValueError):
+            replace(plan, protocol_seed=b"\0" * 32)
+        for field, bad in (("schema", e.R0A_OBSERVATIONS_V1),
+            ("protocol", replace(self.value.protocol, sha256="0" * 64)),
+            ("size_basis", e.SizeBasisV2("0" * 64)), ("codec_profile_sha256", "0" * 64)):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(self.value, **{field: bad})
+        profile_node = json.loads(self.value.codec_profile_bytes)
+        profile_node["status"] = "UNQUALIFIED"
+        from hashlib import sha256
+        raw = _json(profile_node)
+        digest = sha256(raw).hexdigest()
+        with self.assertRaises(ValueError):
+            replace(self.value, codec_profile_bytes=raw, codec_profile_sha256=digest, size_basis=e.SizeBasisV2(digest))
+        self.assertEqual(plan.protocol_seed.hex(), identity.PROTOCOL_SHA256)
+
+    def test_expected_binding_mismatch_does_not_trigger_live_authentication(self):
+        for kwargs in (dict(expected_profile_sha256="0" * 64),
+                       dict(expected_provenance_sha256="0" * 64), dict(expected_source_head="0" * 40)):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                e.decode_r0a_observations_v2(self.raw, **kwargs)
+
+    def test_complete_claim_flags_receipts_breaches_and_missing_setup_fail(self):
+        c = self.value.concurrencies[0]
+        case = c.components[1].units[0].target
+        for status in (records.AuditStatus.FAIL, records.AuditStatus.INCOMPLETE):
+            with self.assertRaises(ValueError):
+                replace(case, receipt=replace(case.receipt, status=status))
+        for field in ("resources_complete", "cleanup_complete", "watchdogs_complete"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(case.observation, **{field: False})
+        with self.assertRaises(ValueError):
+            replace(case, readback_complete=False)
+        for field in ("watchdog_breaches", "resource_breaches"):
+            with self.assertRaises(ValueError):
+                replace(c.containment[0], **{field: 1})
+        units = (replace(c.components[1].units[0], setup=None),) + c.components[1].units[1:]
+        with self.assertRaises(ValueError):
+            replace(c.components[1], units=units)
+        with self.assertRaises(ValueError):
+            replace(c.components[1].setup_waves[0], readback_complete=False)
+
+    def test_safe_path_claims_numeric_bools_and_exact_record_types(self):
+        case = self.value.concurrencies[0].components[0].units[0].target
+        for path in ("/absolute", "C:/absolute", "../escape", "a/../b", "a/./b", "a//b", "a\\b", "", True):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                replace(case.archive, relative_directory=path)
+        for field in ("physical_bytes", "logical_bytes", "record_count"):
+            for bad in (True, -1, 1 << 64, 1.0, "1"):
+                with self.subTest(field=field, bad=bad), self.assertRaises(ValueError):
+                    replace(case.owned_bytes, **{field: bad})
+        with self.assertRaises(ValueError):
+            replace(case, receipt=records.encode(self.value.runtime))
+        with self.assertRaises(ValueError):
+            replace(case.payload, wb02_wire_bytes=48 + case.payload.physical_frame_bytes)
+
+    def test_raw_summaries_reconcile_independent_totals_and_distinct_witnesses(self):
+        c = self.value.concurrencies[0]
+        summary = c.family_summaries[0]
+        owned = tuple(v.target.owned_bytes for v in c.components[0].units)
+        self.assertEqual(summary.physical_total_bytes, sum(v.physical_bytes for v in owned))
+        self.assertEqual(summary.logical_total_bytes, sum(v.logical_bytes for v in owned))
+        self.assertEqual(summary.record_count, 64)
+        self.assertEqual(summary.physical_max_unit_bytes, owned[0].physical_bytes)
+        self.assertEqual(summary.logical_max_unit_bytes, owned[1].logical_bytes)
+        for field in ("physical_total_bytes", "logical_total_bytes", "physical_max_unit_bytes",
+                      "logical_max_unit_bytes", "record_count"):
+            wrong = replace(summary, **{field: getattr(summary, field) + 1})
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(c, family_summaries=(wrong,) + c.family_summaries[1:])
+
+    def test_physical_only_and_logical_only_changes_have_no_cross_credit(self):
+        original = readiness.derive_r0a_dual_maxima_v2(tuple((c.concurrency, c.family_summaries)
+                                                          for c in self.value.concurrencies))
+        component = self.value.concurrencies[2].components[0]
+        for field, axis, other in (("physical_bytes", "physical", "logical"),
+                                   ("logical_bytes", "logical", "physical")):
+            case = component.units[2].target
+            changed_case = replace(case, owned_bytes=replace(case.owned_bytes, **{field: 700}))
+            units = list(component.units)
+            units[2] = replace(units[2], target=changed_case)
+            value = _r0a_change_component_v2(self.value, 2, 0, replace(component, units=tuple(units)))
+            maxima = readiness.derive_r0a_dual_maxima_v2(tuple((c.concurrency, c.family_summaries)
+                                                            for c in value.concurrencies))
+            self.assertEqual(getattr(maxima, axis).primary, 700)
+            self.assertEqual(getattr(maxima, other), getattr(original, other))
+
+    def test_zero_oracle_is_complete_and_k_bind_can_have_nonempty_archive(self):
+        value = self.value
+        for ci in range(3):
+            for component_index in (2, 5):
+                component = value.concurrencies[ci].components[component_index]
+                units = tuple(replace(unit, target=replace(unit.target,
+                    owned_bytes=e.R0AByteCountV2(0, 0, 0))) for unit in component.units)
+                value = _r0a_change_component_v2(value, ci, component_index, replace(component, units=units))
+        maxima = readiness.derive_r0a_dual_maxima_v2(tuple((c.concurrency, c.family_summaries)
+                                                         for c in value.concurrencies))
+        self.assertEqual((maxima.physical.oracle_primary, maxima.logical.oracle_repeat), (0, 0))
+        for c in value.concurrencies:
+            self.assertTrue(all(c.family_summaries[i].completed_units == 64 for i in (2, 3)))
+            case = c.components[4].units[0].target
+            self.assertIsNone(case.family)
+            self.assertEqual(case.owned_bytes, e.R0AByteCountV2(0, 0, 0))
+            self.assertGreater(sum(s.byte_length for s in case.archive.streams), 0)
+
+    def test_containment_reconciliation_keeps_runtime_monitor_peak_independent(self):
+        c = self.value.concurrencies[0]
+        containment = c.containment[0]
+        self.assertEqual(containment.max_coordinator_memory_bytes, 25)
+        self.assertEqual(containment.max_combined_memory_bytes, 40)
+        self.assertEqual(c.components[0].units[0].target.observation.coordinator_memory, 20)
+        self.assertEqual((containment.max_logical_sum_bytes, containment.max_legacy_bundle_bytes,
+            containment.max_wb02_wire_bytes, containment.max_physical_frame_bytes), (1000, 1200, 2000, 1500))
+        for field in ("max_coordinator_memory_bytes", "max_combined_memory_bytes", "launcher_wall_ns",
+                      "max_logical_sum_bytes", "max_wb02_wire_bytes"):
+            changed = replace(containment, **{field: getattr(containment, field) + 1})
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(c, containment=(changed,) + c.containment[1:])
+
+    def test_setup_only_variable_memory_does_not_borrow_target_or_global_peaks(self):
+        concurrency = self.value.concurrencies[1]
+        for component_index, setup_route in ((4, "O_K_SETUP"), (5, "O_D_SETUP")):
+            component = concurrency.components[component_index]
+            first = component.units[0]
+            target = replace(first.target, observation=replace(first.target.observation,
+                coordinator_memory=700, combined_memory=800))
+            setup = replace(first.setup, observation=replace(first.setup.observation,
+                coordinator_memory=250, combined_memory=350))
+            units = (replace(first, target=target, setup=setup),) + component.units[1:]
+            waves = (replace(component.setup_waves[0], monitor=e.R0AMonitorEvidenceV2(300, 400, 4)),) + component.setup_waves[1:]
+            changed = replace(component, units=units, setup_waves=waves,
+                              monitor=e.R0AMonitorEvidenceV2(900, 1100, 5))
+            components = list(concurrency.components)
+            components[component_index] = changed
+            summaries = {item.route: item for item in e.derive_r0a_containment_v2(tuple(components))}
+            with self.subTest(component=component.component):
+                self.assertEqual((summaries[component.component].max_coordinator_memory_bytes,
+                    summaries[component.component].max_combined_memory_bytes), (900, 1100))
+                self.assertEqual((summaries[setup_route].max_coordinator_memory_bytes,
+                    summaries[setup_route].max_combined_memory_bytes), (300, 400))
+                self.assertEqual(summaries[setup_route].max_case_wall_ns, 5)
+                self.assertEqual(summaries[component.component].max_case_wall_ns, 50)
+                self.assertEqual(summaries[setup_route].launcher_wall_ns, 32 * 10)
+
+    def test_k_d_copied_target_bytes_remain_in_target_family_not_reference(self):
+        baseline = readiness.derive_r0a_dual_maxima_v2(tuple((c.concurrency, c.family_summaries)
+                                                          for c in self.value.concurrencies))
+        concurrency = self.value.concurrencies[2]
+        for index, target_family in ((1, "k_control"), (3, "determinism")):
+            component = concurrency.components[index]
+            first = component.units[0]
+            target = replace(first.target, owned_bytes=replace(first.target.owned_bytes, physical_bytes=700))
+            changed = replace(component, units=(replace(first, target=target),) + component.units[1:])
+            components = list(concurrency.components)
+            components[index] = changed
+            summaries = e.summarize_r0a_components_v2(tuple(components))
+            maxima = readiness.derive_r0a_dual_maxima_v2(tuple(
+                (c.concurrency, summaries if c.concurrency == 4 else c.family_summaries)
+                for c in self.value.concurrencies))
+            with self.subTest(family=target_family):
+                self.assertEqual(getattr(maxima.physical, target_family), 700)
+                self.assertEqual(maxima.physical.reference, baseline.physical.reference)
+                self.assertEqual(maxima.logical, baseline.logical)
+            with self.assertRaises(ValueError):
+                replace(component, units=(replace(first, target=replace(first.target, family="reference")),)
+                                         + component.units[1:])
+
+    def test_every_nested_reader_has_closed_fields_without_opening_full_archive(self):
+        component = self.value.concurrencies[1].components[4]
+        telemetry = replace(component.units[0].target.observation,
+            oracle=e.R0AOracleTelemetryV2(1, 1, 3, (e.R0AIntervalV2(130, 133),)))
+        cases = (
+            (e._r0a_read_interval, e._r0a_interval_node(component.complete_interval), ((),)),
+            (e._r0a_read_monitor, e._r0a_monitor_node(component.monitor), ((),)),
+            (e._r0a_read_telemetry, e._r0a_telemetry_node(telemetry),
+             ((), ("oracle",), ("oracle", "intervals", 0), ("prior_binding_intervals", 0))),
+            (e._r0a_read_case, e._r0a_case_node(component.units[0].target),
+             ((), ("receipt",), ("payload",), ("archive",), ("archive", "streams", 0), ("owned_bytes",))),
+            (e._r0a_read_wave, e._r0a_wave_node(component.setup_waves[0]),
+             ((), ("setup_interval",), ("target_interval",), ("monitor",))),
+            (e._r0a_read_component, e._r0a_component_node(component),
+             (("wall_intervals", 0), ("units", 0), ("progress", 0))),
+            (e._r0a_read_concurrency, e._r0a_concurrency_node(self.value.concurrencies[1]),
+             (("envelope",), ("family_summaries", 0), ("containment", 0))),
+        )
+        for reader, node, paths in cases:
+            for path in paths:
+                target = node
+                for part in path:
+                    target = target[part]
+                original = dict(target)
+                for field in original:
+                    del target[field]
+                    with self.subTest(reader=reader.__name__, path=path, missing=field), self.assertRaises(ValueError):
+                        reader(node)
+                    target[field] = original[field]
+                target["unexpected"] = None
+                with self.subTest(reader=reader.__name__, path=path, extra=True), self.assertRaises(ValueError):
+                    reader(node)
+                del target["unexpected"]
+
+    def test_oracle_and_binding_telemetry_require_exact_counts_intervals_and_clocks(self):
+        interval = e.R0AIntervalV2(10, 15)
+        valid = e.R0AOracleTelemetryV2(1, 1, 5, (interval,))
+        for fields_changed in (dict(probes=2), dict(calls=2), dict(wall_ns=6), dict(probes=True),
+                               dict(intervals=()), dict(intervals=[interval])):
+            with self.subTest(fields=fields_changed), self.assertRaises(ValueError):
+                replace(valid, **fields_changed)
+        with self.assertRaises(ValueError):
+            e.R0AOracleTelemetryV2(2, 1, 10, (interval, e.R0AIntervalV2(14, 19)))
+        with self.assertRaises(ValueError):
+            e.R0AIntervalV2(15, 10)
+        with self.assertRaises(ValueError):
+            e.R0AIntervalV2(True, 10)
+        observation = self.value.concurrencies[0].components[0].units[0].target.observation
+        for changes in (dict(combined_memory=9), dict(decision_wall=3), dict(resources_complete=1),
+                        dict(prior_binding_intervals=(e.R0AIntervalV2(10, 20), e.R0AIntervalV2(19, 21)))):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(observation, **changes)
+
+    def test_frozen_exact_types_and_encoder_revalidate_corrupted_nested_claims(self):
+        component = self.value.concurrencies[0].components[0]
+        case = component.units[0].target
+        for value in (self.value, self.value.plan, self.value.concurrencies[0], component,
+                      component.monitor, case, case.owned_bytes, case.archive, case.payload,
+                      case.observation, case.observation.oracle, component.progress[0]):
+            self.assertFalse(hasattr(value, "__dict__"))
+            self.assertNotIn(type(value), e._FACT_TYPES.values())
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+        forged = replace(case.owned_bytes)
+        object.__setattr__(forged, "physical_bytes", True)
+        forged_case = replace(case)
+        object.__setattr__(forged_case, "owned_bytes", forged)
+        forged_unit = replace(component.units[0])
+        object.__setattr__(forged_unit, "target", forged_case)
+        forged_component = replace(component)
+        object.__setattr__(forged_component, "units", (forged_unit,) + component.units[1:])
+        forged_concurrency = replace(self.value.concurrencies[0])
+        object.__setattr__(forged_concurrency, "components", (forged_component,) + forged_concurrency.components[1:])
+        forged_root = replace(self.value)
+        object.__setattr__(forged_root, "concurrencies", (forged_concurrency,) + self.value.concurrencies[1:])
+        with self.assertRaises(ValueError):
+            e.encode_r0a_observations_v2(forged_root)
+
+    def test_embedded_record_strings_are_exact_and_not_alternate_json_or_types(self):
+        runtime = records.encode(self.value.runtime).decode("ascii")
+        self.assertEqual(e._r0a_read_rec(runtime, records.RuntimeIdentity), self.value.runtime)
+        alternatives = (json.dumps(json.loads(runtime)), runtime + "\n", runtime.encode("ascii"),
+                        records.encode(self.value.plan.boards[0]).decode("ascii"))
+        for raw in alternatives:
+            with self.subTest(raw=repr(raw)[:60]), self.assertRaises(ValueError):
+                e._r0a_read_rec(raw, records.RuntimeIdentity)
+
+    def test_v1_registry_literal_and_helpers_remain_independent(self):
+        baseline = e.fact_node_v1((b"\x00\xff", Fraction(3, 2), records.StreamDigest("operations", "d" * 64, 0, 0)))
+        forbidden = AssertionError("V1 must not dispatch to R0A V2")
+        with patch.object(e, "encode_r0a_observations_v2", side_effect=forbidden), \
+                patch.object(e, "decode_r0a_observations_v2", side_effect=forbidden), \
+                patch.object(e, "provenance_digest_v2", side_effect=forbidden):
+            self.assertEqual(e.fact_node_v1(e.fact_read_v1(baseline)), baseline)
+        for value in (self.value, self.value.plan, self.value.concurrencies[0],
+                      self.value.concurrencies[0].components[0]):
+            self.assertNotIn(type(value), e._FACT_TYPES.values())
+            with self.assertRaises(ValueError):
+                e.fact_node_v1(value)
+        with self.assertRaises(ValueError):
+            e.decode_r0a_observations_v2(_json({"fact": "R0AObservationsV2", "fields": {}}) + b"\n")
+
+    def test_pure_codec_reconciliation_and_maxima_never_touch_real_archives(self):
+        from experiments import program_k_e2_qualification as qualification
+        from experiments import program_k_e2_store as store
+        forbidden = AssertionError("Pure claims are not durable authentication")
+        with ExitStack() as stack:
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "write_bytes"),
+                (Path, "exists"), (Path, "resolve"), (Path, "iterdir"), (Path, "is_symlink"),
+                (subprocess, "run"), (physical, "capture_qualified_profile"),
+                (qualification, "capture_sources_v2"), (h, "capture_run_provenance_v2"),
+                (h, "launch_r0a"), (h, "launch_r0b"), (h, "_begin_run"),
+                (operational, "measure_r0_component"), (operational, "_persist_r0"),
+                (store, "scan_framed_stream"), (store, "FramedStreamPullReader")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            stack.enter_context(patch("builtins.open", side_effect=forbidden))
+            value = e.decode_r0a_observations_v2(e.encode_r0a_observations_v2(self.value))
+            maxima = readiness.derive_r0a_dual_maxima_v2(tuple((c.concurrency, c.family_summaries)
+                                                             for c in value.concurrencies))
+            self.assertEqual(readiness.derive_dual_targets(maxima).physical.primary,
+                             (3 * maxima.physical.primary + 1) // 2)
+
+
+class R0AWallReconstructionV2Tests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.value = _r0a_supplied_fixture_v2()
+
+    def component(self, name, concurrency_index=1):
+        return next(v for v in self.value.concurrencies[concurrency_index].components if v.component == name)
+
+    def test_p_k_d_o_use_only_complete_boundary_including_orchestration_once(self):
+        for name in ("P", "K", "D", "O"):
+            component = self.component(name)
+            self.assertEqual(e.r0a_component_wall_v2(component),
+                             component.complete_interval.finished_ns - component.complete_interval.started_ns)
+            self.assertEqual(tuple(v.phase for v in component.wall_intervals), ("COMPLETE_ROUTE",))
+            with self.assertRaises(ValueError):
+                replace(component, wall_intervals=component.wall_intervals +
+                    (e.R0AWallIntervalV2("ORCHESTRATION", (), e.R0AIntervalV2(10, 20)),))
+
+    def test_k_bind_global_union_counts_concurrent_binding_once(self):
+        component = self.component("O_K_BIND")
+        # c=2: 32 waves * (encode5 + shared bind10 + two admission1) + overhead20.
+        self.assertEqual(e.r0a_component_wall_v2(component), 32 * 17 + 20)
+        naive = sum(v.interval.finished_ns - v.interval.started_ns for v in component.wall_intervals)
+        self.assertGreater(naive, e.r0a_component_wall_v2(component))
+        self.assertGreater(component.complete_interval.finished_ns, e.r0a_component_wall_v2(component))
+
+    def test_k_bind_missing_duplicate_or_wrong_phase_coverage_fails(self):
+        component = self.component("O_K_BIND")
+        for phase in ("ORCHESTRATION", "PRIOR_ENCODE", "PRIOR_BIND", "PARENT_ADMISSION", "CLEANUP"):
+            index = next(i for i, item in enumerate(component.wall_intervals) if item.phase == phase)
+            items = component.wall_intervals
+            for bad in (items[:index] + items[index + 1:], items[:index] + (items[index],) + items[index:]):
+                with self.subTest(phase=phase), self.assertRaises(ValueError):
+                    replace(component, wall_intervals=bad)
+        encoding = next(v for v in component.wall_intervals if v.phase == "PRIOR_ENCODE")
+        changed = replace(encoding, positions=(0,))
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=tuple(changed if v is encoding else v for v in component.wall_intervals))
+
+    def test_k_bind_exact_prior_binding_multiset_and_parent_positions(self):
+        component = self.component("O_K_BIND")
+        for phase in ("PRIOR_BIND", "PARENT_ADMISSION"):
+            item = next(v for v in component.wall_intervals if v.phase == phase)
+            changed = replace(item, positions=(63,))
+            with self.subTest(phase=phase), self.assertRaises(ValueError):
+                replace(component, wall_intervals=tuple(changed if v is item else v for v in component.wall_intervals))
+        item = next(v for v in component.wall_intervals if v.phase == "PRIOR_BIND")
+        changed = replace(item, interval=replace(item.interval, finished_ns=item.interval.finished_ns + 1))
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=tuple(changed if v is item else v for v in component.wall_intervals))
+
+    def test_d_repeat_includes_orchestration_target_waves_cleanup_without_setup(self):
+        component = self.component("O_D_REPEAT")
+        self.assertEqual(e.r0a_component_wall_v2(component), 10 + 32 * 60 + 10)
+        self.assertEqual(tuple(v.phase for v in component.wall_intervals).count("TARGET_PHASE"), 32)
+        setup_wall = sum(v.setup_interval.finished_ns - v.setup_interval.started_ns for v in component.setup_waves)
+        containment = self.value.concurrencies[1].containment[-1]
+        self.assertEqual(containment.launcher_wall_ns, setup_wall)
+        span = component.setup_waves[-1].setup_interval.finished_ns - component.setup_waves[0].setup_interval.started_ns
+        self.assertNotEqual(containment.launcher_wall_ns, span)
+        self.assertNotEqual(containment.launcher_wall_ns, component.complete_interval.finished_ns -
+                            e.r0a_component_wall_v2(component))
+
+    def test_d_repeat_phase_mismatch_overlap_and_chronology_fail(self):
+        component = self.component("O_D_REPEAT")
+        target = next(v for v in component.wall_intervals if v.phase == "TARGET_PHASE")
+        changed = replace(target, interval=replace(target.interval, finished_ns=target.interval.finished_ns - 1))
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=tuple(changed if v is target else v for v in component.wall_intervals))
+        orchestration = component.wall_intervals[0]
+        overlapping = replace(orchestration, interval=e.R0AIntervalV2(10, target.interval.started_ns + 1))
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=(overlapping,) + component.wall_intervals[1:])
+        wave = component.setup_waves[0]
+        with self.assertRaises(ValueError):
+            replace(wave, setup_interval=e.R0AIntervalV2(wave.target_interval.started_ns,
+                                                       wave.target_interval.started_ns + 1))
+
+    def test_zero_duration_required_phase_remains_present_and_canonical_order_is_enforced(self):
+        component = self.component("O_D_REPEAT")
+        phase = component.wall_intervals[0]
+        zero = replace(phase, interval=e.R0AIntervalV2(10, 10))
+        changed = replace(component, wall_intervals=(zero,) + component.wall_intervals[1:])
+        self.assertEqual(e.r0a_component_wall_v2(changed), e.r0a_component_wall_v2(component) - 10)
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=component.wall_intervals[1:])
+        with self.assertRaises(ValueError):
+            replace(component, wall_intervals=component.wall_intervals[::-1])
+        for bad in ("ROUTE_OVERHEAD", "orchestration", "SETUP"):
+            with self.assertRaises(ValueError):
+                replace(phase, phase=bad)
+
+
 if __name__ == "__main__":
     unittest.main()
