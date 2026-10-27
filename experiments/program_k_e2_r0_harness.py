@@ -3296,6 +3296,253 @@ def _postprocess_r0b(plan, coordinator_result, identity_seal, root, envelope, ou
 # POSTPROCESS_END
 
 
+@dataclass(frozen=True, slots=True)
+class _V2PostprocessingResult:
+    """Closed synthetic support facts; never an R0 admission or research verdict."""
+
+    phases: tuple
+    analysis_result: analysis.AnalysisResult
+    streams: tuple
+    artifacts: tuple
+    progress_stream: records.StreamDigest
+    complete_wall_ns: int
+    bootstrap_replicates: int
+    bootstrap_n: int
+    bootstrap_progress_count: int
+    shared_bootstrap_complete: bool
+    compact_scalar_bootstrap: bool
+    streaming_reconstruction: bool
+    readback_complete: bool
+    progress_bounded: bool
+    qualification_complete: bool
+    cleanup_complete: bool
+    qualification_identity_seal: records.StreamDigest
+    synthetic_non_evidence: bool = True
+
+
+def _v2_postprocess_binding(plan, materialization, readback, root, profile, envelope, check):
+    """Bind already-produced facts and metadata; perform no semantic readback."""
+    _need(type(materialization) is _V2SyntheticMaterialization
+          and type(readback) is _V2ReadbackResult, "V2_POSTPROCESS_MATERIALIZATION_REQUIRED")
+    _need(type(plan) is tuple and plan == materialization.materialization_plan,
+          "V2_POSTPROCESS_PLAN_BINDING")
+    _need(materialization.progress_complete is True and materialization.cleanup_complete is True
+          and materialization.synthetic_non_evidence is True, "V2_POSTPROCESS_MATERIALIZATION_INCOMPLETE")
+    _need(type(materialization.ledger) is readiness.ProceduralLedger,
+          "V2_POSTPROCESS_LEDGER_REQUIRED")
+    readiness.ProceduralLedger.__post_init__(materialization.ledger)
+    _need(not materialization.ledger.reservation_pending
+          and materialization.ledger.reserved_excess == 0
+          and materialization.ledger.capacity == materialization.b_proc
+          and materialization.remaining_procedural_budget ==
+              materialization.b_proc - materialization.ledger.committed_excess,
+          "V2_POSTPROCESS_LEDGER_BINDING")
+    expected = _v2_materialization_evidence(materialization, readback.targets, profile, envelope)
+    path = root / "materialization-v2.json"
+    _need(path.is_file() and not path.is_symlink() and not path.is_junction(),
+          "V2_POSTPROCESS_METADATA_FILE")
+    size = path.stat().st_size
+    reservation = _v2_serialized_reservation(envelope.max_payload_bytes, size)
+    _need(reservation <= envelope.coordinator_memory_cap_bytes
+          and reservation <= envelope.memory_cap_bytes, "V2_POSTPROCESS_SERIALIZED_RESERVATION")
+    _need(size == readback.materialization_metadata_byte_length, "V2_POSTPROCESS_METADATA_LENGTH")
+    data = bytearray()
+    with store._reader(path) as stream:
+        while True:
+            check()
+            chunk = stream.read(65_536)
+            if not chunk:
+                break
+            data.extend(chunk)
+            _need(len(data) <= size, "V2_POSTPROCESS_METADATA_LENGTH")
+    _need(len(data) == size, "V2_POSTPROCESS_METADATA_LENGTH")
+    data = bytes(data)
+    fact = evidence.V2ArchiveFileEvidence("streams/materialization-v2.json", size,
+                                         sha256(data).hexdigest())
+    metadata = evidence.decode_materialization_v2(data, expected_profile_sha256=profile.sha256.hex())
+    _need(metadata == expected, "V2_POSTPROCESS_MATERIALIZATION_METADATA_BINDING")
+    _v2_archive_readback_binding(readback, metadata, fact, profile, envelope)
+    _need(materialization.coordinator.streams == readback.streams,
+          "V2_POSTPROCESS_READBACK_SEALS")
+    check()
+
+
+def _v2_postprocess_scan(root, seal, profile, envelope, check, visit):
+    """One bounded transport pass, distinct from independent semantic qualification."""
+    _need(type(seal) is records.StreamDigest, "V2_POSTPROCESS_STREAM_SEAL_REQUIRED")
+    records.StreamDigest.__post_init__(seal)
+    reader = store.FramedStreamPullReader(root, seal.name,
+        physical.context_for(seal.name, profile.sha256), max_payload_bytes=envelope.max_payload_bytes)
+    try:
+        while True:
+            check()
+            row = reader.pull()
+            if row is None:
+                break
+            length = row.frame_length
+            del row
+            visit(length)
+            check()
+        observed = reader.close()
+        _need(observed == seal, "V2_POSTPROCESS_STREAM_READBACK_MISMATCH")
+        check()
+        return observed
+    except BaseException:
+        reader.invalidate()
+        raise
+
+
+def _postprocess_r0b_v2(plan, materialization, readback, identity_seal, root, profile, envelope,
+                        output_root, *, expected_identity, source_recheck,
+                        clock=time.perf_counter_ns, progress=None, check=lambda: None, _analyze=None):
+    """Independent RF02 qualification and unchanged analysis, disconnected from launchers.
+
+    Validation runs before aggregation. Phase facts retain readiness's canonical
+    order, just as the historical owner does. The supplied source callback is
+    the future live owner's responsibility; this seam never captures provenance.
+    """
+    _need(callable(check) and callable(clock) and (progress is None or callable(progress)),
+          "V2_POSTPROCESS_OBSERVER_REQUIRED")
+    _need(_analyze is None or callable(_analyze), "POSTPROCESS_ANALYZER_REQUIRED")
+    check()
+    qualification._validate_identity_v2(plan, expected_identity, profile, envelope, source_recheck)
+    readiness._constants()
+    _need(type(identity_seal) is records.StreamDigest and identity_seal.name == qualification.IDENTITY_STREAM,
+          "V2_POSTPROCESS_IDENTITY_SEAL_REQUIRED")
+    records.StreamDigest.__post_init__(identity_seal)
+    root, output_root = Path(root), Path(output_root)
+    _need(root.is_dir() and not root.is_symlink() and not root.is_junction(),
+          "V2_POSTPROCESS_STREAM_ROOT_REQUIRED")
+    root, output_root = root.resolve(strict=True), output_root.resolve()
+    _need(output_root != root and root not in output_root.parents
+          and output_root not in root.parents, "POSTPROCESS_SEPARATE_OUTPUT_ROOT_REQUIRED")
+    _v2_postprocess_binding(plan, materialization, readback, root, profile, envelope, check)
+    qualification._receipt_plan_v2(plan, materialization.coordinator, identity_seal)
+    qualification._source_recheck_v2(expected_identity, source_recheck)
+    check()
+    output_root.mkdir()
+    writer = store.FramedStreamWriter(output_root, "postprocessing_operations",
+        physical.context_for("postprocessing_operations", profile.sha256),
+        max_payload_bytes=envelope.max_payload_bytes)
+    try:
+        def checked_clock():
+            check()
+            return clock()
+        meter = _PostprocessClock(envelope, checked_clock, progress, writer)
+        seals = materialization.coordinator.streams + (identity_seal,)
+        total = sum(seal.record_count for seal in seals)
+        meter.begin(records.Phase.VALIDATION, "records", total)
+        qualified = qualification.validate_v2_materialization_semantics(root, plan,
+            materialization.coordinator, identity_seal, expected_identity, profile, envelope,
+            source_recheck=source_recheck, check=meter.check,
+            progress=lambda done, count: meter.emit("records", done, count))
+        _need(type(qualified) is qualification._V2QualificationResult
+              and qualified.semantic_complete is True and qualified.synthetic_non_evidence is True
+              and qualified.streams == seals and qualified.identity_records == expected_identity
+              and len(qualified.rows) == len(plan), "V2_POSTPROCESS_QUALIFICATION_BINDING")
+        _v2_postprocess_binding(plan, materialization, readback, root, profile, envelope, meter.check)
+        rows = qualified.rows
+        del qualified
+        meter.finish()
+
+        replicates, seen = identity.BOOTSTRAP_REPLICATES, -1
+        meter.begin(records.Phase.AGGREGATION, "replicates", replicates)
+        def observe(done, count):
+            nonlocal seen
+            _need(type(done) is int and type(count) is int and count == replicates
+                  and done == seen + 1 and 0 <= done <= count, "POSTPROCESS_BOOTSTRAP_PROGRESS_MISMATCH")
+            seen = done
+            meter.emit("replicates", done, count)
+        digest = identity.corpus_digest(plan[0].protocol_seed, len(plan), tuple(work.board.game_index for work in plan))
+        analyze = analysis.analyze_effectiveness if _analyze is None else _analyze
+        result = analyze(rows, protocol_seed=plan[0].protocol_seed, corpus_digest=digest,
+            concurrency=envelope.concurrency, gate_statuses=None,
+            context=("SYNTHETIC_R0B_OPERATIONAL_ONLY_NOT_EFFECTIVENESS_EVIDENCE",), bootstrap_progress=observe)
+        _need(type(result) is analysis.AnalysisResult, "POSTPROCESS_ANALYSIS_RESULT_REQUIRED")
+        analysis.AnalysisResult.__post_init__(result)
+        _need(seen == replicates and result.n == len(plan) and result.overall is None
+              and result.context == ("SYNTHETIC_R0B_OPERATIONAL_ONLY_NOT_EFFECTIVENESS_EVIDENCE",)
+              and result.concurrency == envelope.concurrency
+              and result.bootstrap.replicates == replicates
+              and result.bootstrap.accepted_draws == len(plan) * replicates
+              and result.bootstrap.seed_hex == analysis.bootstrap_seed(plan[0].protocol_seed, digest).hex(),
+              "POSTPROCESS_FULL_SHARED_BOOTSTRAP_REQUIRED")
+        del rows
+        meter.finish()
+
+        meter.begin(records.Phase.PUBLICATION, "analysis", 1)
+        analysis_bytes = report.render_analysis_json(result)
+        meter.emit("bytes", 0, len(analysis_bytes))
+        analysis_artifact = _postprocess_publish(output_root / "analysis.json", analysis_bytes, meter)
+        del analysis_bytes
+        meter.finish()
+
+        total = sum(seal.byte_length for seal in seals) + analysis_artifact.byte_length
+        meter.begin(records.Phase.READBACK, "bytes", total)
+        read = 0
+        def read_visit(count):
+            nonlocal read
+            read += count
+            meter.emit("bytes", read, total)
+        for seal in seals:
+            _v2_postprocess_scan(root, seal, profile, envelope, meter.check, read_visit)
+        _postprocess_artifact_readback(output_root / analysis_artifact.name, analysis_artifact, read_visit)
+        meter.finish()
+
+        meter.begin(records.Phase.REPORT, "analysis", 1)
+        html = report.render_report_html(result).encode("utf-8")
+        meter.emit("bytes", 0, len(html))
+        html_artifact = _postprocess_publish(output_root / "report.html", html, meter)
+        del html
+        _postprocess_artifact_readback(output_root / html_artifact.name, html_artifact, lambda _: meter.check())
+        qualification._source_recheck_v2(expected_identity, source_recheck)
+        meter.finish()
+        writer.checkpoint()
+        event_seal = writer.seal()
+        telemetry_count = 0
+        def telemetry_visit(_):
+            nonlocal telemetry_count
+            telemetry_count += 1
+            now = meter.check()
+            if progress is not None:
+                progress(PostprocessProgress(records.Phase.READBACK, "telemetry_records", telemetry_count,
+                    event_seal.record_count, now - meter.started, 0))
+            meter.check()
+        _v2_postprocess_scan(output_root, event_seal, profile, envelope, meter.check, telemetry_visit)
+        qualification._source_recheck_v2(expected_identity, source_recheck)
+        complete_wall = meter.check() - meter.started
+        phases = tuple(meter.measurements[phase] for phase in readiness.POSTPROCESS_PHASES)
+        _need(complete_wall >= sum(value.wall_ns for value in phases), "POSTPROCESS_WALL_ACCOUNTING")
+        writer.close()
+        return _V2PostprocessingResult(phases, result, seals, (analysis_artifact, html_artifact), event_seal,
+            complete_wall, replicates, len(plan), seen + 1, True, True, True, True, True, True, True,
+            identity_seal, True)
+    finally:
+        writer.close()
+
+
+def _v2_postprocess_support(result):
+    """Adapt completed support facts to the unchanged Slice-1O close API."""
+    _need(type(result) is _V2PostprocessingResult and result.synthetic_non_evidence is True
+          and all(value is True for value in (result.shared_bootstrap_complete,
+              result.compact_scalar_bootstrap, result.streaming_reconstruction, result.readback_complete,
+              result.progress_bounded, result.qualification_complete, result.cleanup_complete)),
+          "V2_POSTPROCESS_COMPLETE_SUPPORT_REQUIRED")
+    _need(type(result.streams) is tuple and result.streams[-1:] == (result.qualification_identity_seal,)
+          and result.qualification_identity_seal.name == "qualification_identity"
+          and result.progress_stream.name == "postprocessing_operations", "V2_POSTPROCESS_SUPPORT_SEALS")
+    _need(type(result.artifacts) is tuple and len(result.artifacts) == 2
+          and all(type(value) is PostprocessArtifact for value in result.artifacts)
+          and tuple(value.name for value in result.artifacts) == ("analysis.json", "report.html"),
+          "V2_POSTPROCESS_SUPPORT_ARTIFACTS")
+    return {"qualification_identity_seal": result.qualification_identity_seal,
+            "postprocessing_operations_seal": result.progress_stream,
+            "analysis_file": FileFact("postprocessing/analysis.json", result.artifacts[0].byte_length,
+                                      result.artifacts[0].sha256),
+            "report_file": FileFact("postprocessing/report.html", result.artifacts[1].byte_length,
+                                    result.artifacts[1].sha256)}
+
+
 # EVIDENCE_LAUNCH_BEGIN
 class ActualRunAuthorization(Enum):
     R0_A = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_A"

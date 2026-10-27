@@ -6368,6 +6368,527 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
 
 
 
+# Slice 1P shares this non-TestCase fixture with qualification tests. Importing
+# these helpers never registers or re-runs another module's unittest classes.
+_SLICE1P_DATA = None
+
+
+@contextmanager
+def _slice1p_count_domain(counts):
+    original = readiness._unit_counts_v2
+    def validate(value):
+        if type(value) is tuple and all(type(v) is int for v in value) and value == counts:
+            return value
+        return original(value)
+    with patch.object(readiness, "_unit_counts_v2", side_effect=validate):
+        yield
+
+
+@contextmanager
+def _slice1p_plan_domain(plan):
+    # Four explicit coverage positions cannot obey production's minimum-256
+    # selector domain. Only this exact immutable fixture plan is admitted.
+    original = operational.validate_work_plan
+    def validate(value):
+        if type(value) is tuple and value == plan:
+            if len(value) != 4 or tuple(v.position for v in value) != (0, 1, 2, 3):
+                raise AssertionError("Exact bounded Slice 1P plan required")
+            for work in value:
+                execution.BoardWork.__post_init__(work)
+            return value
+        return original(value)
+    with patch.object(operational, "validate_work_plan", side_effect=validate):
+        yield
+
+
+@contextmanager
+def _slice1p_semantic_guards(*, allow_bootstrap=False):
+    import socket
+    with _EvidenceExitStack() as stack:
+        forbidden = [(execution, "_materialize_board"), (execution, "MinesweeperEngine"),
+            (execution.runner, "run_k_p0"), (execution.runner, "run_k_control"),
+            (readiness, "search_synthetic_corpus"), (readiness, "target_counts"),
+            (socket, "create_connection"), (socket.socket, "connect"),
+            (h.qualification, "capture_sources"), (h.qualification, "_identity_records"),
+            (h.qualification, "_Lane"), (h.store, "scan_stream"), (h.store, "scan_framed_stream"),
+            (physical, "capture_qualified_profile"), (operational, "_bind_prior_bundle"),
+            (execution, "encode_bundle_v2")]
+        forbidden += [(h, name) for name in ("construct_reference_v2", "construct_text_family_v2",
+            "_materialize_v2_plan", "_materialize_v2_unit", "_construct_v2_materialization_work",
+            "_readback_synthetic_v2", "_readback_v2_plan", "_v2_readback_unit", "_v2_readback_prior",
+            "_v2_readback_constructor", "_v2_readback_support", "_capture_qualified_codec_profile")]
+        if not allow_bootstrap:
+            forbidden.append((h.analysis, "_shared_bootstrap"))
+        for owner, name in forbidden:
+            stack.enter_context(patch.object(owner, name,
+                side_effect=AssertionError("Slice 1P must consume durable RF02 independently")))
+        stack.enter_context(patch("benchmark_board.generate_board",
+                                  side_effect=AssertionError("No board generation")))
+        yield
+
+
+def _slice1p_fixture_data():
+    global _SLICE1P_DATA
+    if _SLICE1P_DATA is not None:
+        return _SLICE1P_DATA
+    runtime = records.RuntimeIdentity(platform.python_implementation(), platform.python_version(),
+        os.name, platform.platform(), platform.machine(), None)
+    source = tuple(replace(work, runtime=runtime, run_id="synthetic-i7-slice1p-four-work")
+                   for work in V2SyntheticMaterializerTests.source_plan())
+    plan = h._v2_materialization_plan(source)
+    counts = V2SyntheticMaterializerTests.counts(plan)
+    profile = h._capture_qualified_codec_profile()
+    provisional = readiness.DualComponentSizes(*(readiness.ComponentSizes(1, 1, 1, 1, 1, 1)
+                                                 for _ in range(2)))
+    envelope = SyntheticMaterializationTests.envelope(max_payload_bytes=1048576)
+    with V2SyntheticMaterializerTests.forbidden_workloads():
+        baselines = []
+        for work in plan:
+            if work.k_control_selected or work.determinism_selected:
+                baselines.extend(h._reference_bundles(work, h._reference_prefix(0), 0))
+            else:
+                baselines.append(h._build_primary_v2_baseline(work, provisional, profile, envelope)[0])
+        cap = max(execution.legacy_bundle_size(bundle) for bundle in baselines) + 4096
+        envelope = replace(envelope, max_payload_bytes=cap)
+        def view(bundle):
+            return execution.decode_bundle_view_v2(execution.encode_bundle_v2(bundle, profile.sha256,
+                max_payload_bytes=cap), profile.sha256, max_payload_bytes=cap)
+        views = tuple(view(bundle) for bundle in baselines)
+        logical = readiness.ComponentSizes(*(max(_text_family_metrics(v, family)[1] for v in views)
+                                             for family in readiness.V2_FAMILIES))
+        # Calibrate only bounded fixture targets, at canonical h=0. The real
+        # constructors, trial budget, eligibility and arithmetic remain intact.
+        floors = {}
+        for family in readiness.V2_FAMILIES[:-1]:
+            measured = []
+            multiplicity = 4 if family.startswith("oracle_") else 1
+            for bundle, baseline in zip(baselines, views):
+                if not _text_family_metrics(baseline, family)[1]:
+                    continue
+                fixed = _text_with_literal(bundle, family, "SYNTHETIC_NON_EVIDENCE|L:|H:")
+                ell = (max(0, getattr(logical, family) - _text_logical_bytes(fixed, family))
+                       + multiplicity - 1) // multiplicity
+                candidate = _text_with_literal(fixed, family,
+                    "SYNTHETIC_NON_EVIDENCE|L:" + "x" * ell + "|H:")
+                measured.append(_text_family_metrics(view(candidate), family))
+            floor = min(v[0] for v in measured)
+            if not all(floor <= p <= floor + 4096 and length >= getattr(logical, family)
+                       for p, length in measured):
+                raise AssertionError(("No common bounded Slice 1P text window", family, measured))
+            floors[family] = floor
+        targets = readiness.DualComponentSizes(readiness.ComponentSizes(**floors, reference=1),
+            replace(logical, reference=logical.reference + h._reference_prefix(7).added_length(7)))
+        bounds = {}
+        for work in plan:
+            if work.k_control_selected or work.determinism_selected:
+                group = tuple(bundle for bundle in baselines if bundle.work_position == work.position)
+                low, high = h._reference_q_bounds(group, targets, h._reference_prefix(cap // 26), cap)
+                if high is None or not 0 <= low <= high < 10000:
+                    raise AssertionError(("Unbounded Slice 1P Reference fixture", low, high))
+                bounds[work.position] = (low, high)
+        with tempfile.TemporaryDirectory() as directory, _slice1p_count_domain(counts), \
+                patch.object(operational.harness, "_coordinator_private_bytes", return_value=100):
+            materialization = h._materialize_v2_plan(source, plan, targets, profile, envelope, directory,
+                counts, h._new_v2_materialization_ledger(targets, counts),
+                readiness.minimum_archive_preflight(targets.physical, counts, 0))
+            h._publish_v2_materialization(directory, materialization, targets, profile, envelope)
+            with patch.object(h.qualification, "validate_v2_materialization_semantics",
+                    side_effect=AssertionError("Slice 1N cannot delegate to Slice 1P")):
+                readback = h._readback_v2_plan(directory, source, targets, profile, envelope, counts)
+            files = tuple((path.name, path.read_bytes()) for path in sorted(Path(directory).iterdir()))
+    indices = tuple(work.board.game_index for work in plan)
+    expected = (records.ProtocolIdentity(h.qualification._PROTOCOL, identity.PROTOCOL_SHA256,
+        h.qualification._BLOB, h.qualification._FREEZE), records.CorpusIdentity("SYNTHETIC_I7",
+        min(indices), max(indices) + 1, len(plan), indices,
+        identity.corpus_digest(plan[0].protocol_seed, len(plan), indices).hex(), ()), runtime,
+        records.SourceBlobIdentity("synthetic/slice1p/additional.py", "a" * 40, "b" * 64, 17),
+        records.SourceBlobIdentity("synthetic/slice1p/materializer.py", "c" * 40, "d" * 64, 23))
+    _SLICE1P_DATA = dict(plan=plan, source_plan=source, materialization=materialization,
+        coordinator_result=materialization.coordinator, readback=readback, profile=profile,
+        envelope=envelope, targets=targets, counts=counts, expected_identity=expected,
+        reference_bounds=tuple(sorted(bounds.items())), files=files)
+    return _SLICE1P_DATA
+
+
+@contextmanager
+def _slice1p_fixture(*, with_identity=False, fresh_readback=False):
+    data = _slice1p_fixture_data()
+    with tempfile.TemporaryDirectory() as directory, _slice1p_count_domain(data["counts"]), \
+            _slice1p_plan_domain(data["plan"]):
+        experiment = Path(directory) / "experiment"
+        root = experiment / "streams"
+        root.mkdir(parents=True)
+        for name, raw in data["files"]:
+            (root / name).write_bytes(raw)
+        fixture = {key: value for key, value in data.items() if key != "files"}
+        fixture.update(root=root, experiment_root=experiment, output_root=experiment / "postprocessing",
+                       source_recheck=lambda: data["expected_identity"])
+        if fresh_readback:
+            with patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                    patch.object(h.qualification, "validate_v2_materialization_semantics",
+                        side_effect=AssertionError("Slice 1N cannot delegate to Slice 1P")):
+                fixture["readback"] = h._readback_v2_plan(root, data["source_plan"], data["targets"],
+                    data["profile"], data["envelope"], data["counts"])
+        if with_identity:
+            fixture["identity_seal"] = h.qualification._write_identity_v2(root, data["plan"],
+                data["expected_identity"], data["profile"], data["envelope"],
+                source_recheck=fixture["source_recheck"])
+        yield fixture
+
+
+class ZZV2SemanticPostprocessingTests(unittest.TestCase):
+    """One new real bootstrap, last; all fault cases inject bounded analysis."""
+
+    @staticmethod
+    def arguments(fixture):
+        return {name: fixture[name] for name in ("plan", "materialization", "readback", "identity_seal",
+            "root", "profile", "envelope", "output_root", "expected_identity", "source_recheck")}
+
+    def execute(self, fixture, **changes):
+        arguments = self.arguments(fixture)
+        arguments["_analyze"] = _bounded_postprocess_analyze
+        with _slice1p_semantic_guards():
+            return h._postprocess_r0b_v2(**(arguments | changes))
+
+    def assert_no_close(self, fixture):
+        self.assertFalse((fixture["experiment_root"] / "COMPLETE.json").exists())
+        self.assertFalse((fixture["experiment_root"] / "manifest.json").exists())
+
+    def test_bindings_fail_before_progress_or_semantic_work(self):
+        for mutation in ("plan", "materialization", "readback", "seals", "profile", "metadata", "identity", "source"):
+            with self.subTest(mutation=mutation), _slice1p_fixture(with_identity=True) as fixture:
+                changes = {}
+                if mutation == "plan":
+                    changes["plan"] = fixture["source_plan"]
+                elif mutation == "materialization":
+                    changes["materialization"] = replace(fixture["materialization"], cleanup_complete=False)
+                elif mutation == "readback":
+                    changes["readback"] = replace(fixture["readback"], readback_complete=False)
+                elif mutation == "seals":
+                    changed = tuple(replace(v, sha256="0" * 64) if i == 0 else v
+                                    for i, v in enumerate(fixture["readback"].streams))
+                    changes["readback"] = replace(fixture["readback"], streams=changed)
+                elif mutation == "profile":
+                    changes["readback"] = replace(fixture["readback"], codec_profile_sha256="0" * 64)
+                elif mutation == "metadata":
+                    path = fixture["root"] / "materialization-v2.json"
+                    path.write_bytes(path.read_bytes() + b" ")
+                elif mutation == "identity":
+                    changes["identity_seal"] = fixture["materialization"].coordinator.streams[0]
+                else:
+                    changes["source_recheck"] = lambda: ()
+                with patch.object(h.qualification, "validate_v2_materialization_semantics",
+                        side_effect=AssertionError("Invalid binding reached qualification")), self.assertRaises(ValueError):
+                    self.execute(fixture, **changes)
+                self.assertFalse(fixture["output_root"].exists())
+                self.assert_no_close(fixture)
+
+    def test_validation_failure_preserves_progress_without_analysis(self):
+        with _slice1p_fixture(with_identity=True) as fixture:
+            error = RuntimeError("SLICE1P_VALIDATION_FAILURE")
+            with patch.object(h.qualification, "validate_v2_materialization_semantics", side_effect=error), \
+                    self.assertRaises(RuntimeError) as raised:
+                self.execute(fixture, _analyze=lambda *a, **k: self.fail("No analysis after validation failure"))
+            self.assertIs(raised.exception, error)
+            path = fixture["output_root"] / "postprocessing_operations.pkf"
+            before = path.read_bytes()
+            self.assertGreater(len(before), 0)
+            self.assertFalse((fixture["output_root"] / "analysis.json").exists())
+            with self.assertRaises((ValueError, OSError)):
+                self.execute(fixture)
+            self.assertEqual(path.read_bytes(), before)
+            self.assert_no_close(fixture)
+
+    def test_analyze_and_both_renderers_fail_without_close_ready_support(self):
+        cases = ((None, None), (h.report, "render_analysis_json"), (h.report, "render_report_html"))
+        for owner, name in cases:
+            with self.subTest(boundary=name or "analyze"), _slice1p_fixture(with_identity=True) as fixture:
+                error = RuntimeError("SLICE1P_ANALYZE_OR_RENDER_FAILURE")
+                with _EvidenceExitStack() as stack:
+                    changes = {}
+                    if owner is None:
+                        changes["_analyze"] = lambda *a, **k: (_ for _ in ()).throw(error)
+                    else:
+                        stack.enter_context(patch.object(owner, name, side_effect=error))
+                    with self.assertRaises(RuntimeError) as raised:
+                        self.execute(fixture, **changes)
+                    self.assertIs(raised.exception, error)
+                self.assertTrue((fixture["output_root"] / "postprocessing_operations.pkf").exists())
+                self.assertFalse((fixture["output_root"] / "report.html").exists())
+                self.assert_no_close(fixture)
+
+    def test_analysis_and_report_write_flush_fsync_failures_keep_partial_bytes(self):
+        for filename in ("analysis.json", "report.html"):
+            for operation in ("write", "flush", "fsync"):
+                with self.subTest(filename=filename, operation=operation), \
+                        _slice1p_fixture(with_identity=True) as fixture:
+                    original_open, original_fsync = h.store._exclusive, h.os.fsync
+                    target_fd, calls = [], []
+                    error = OSError("SLICE1P_ARTIFACT_IO_FAILURE")
+                    class BrokenFile:
+                        def __init__(self, file):
+                            self.file = file
+                        def __enter__(self):
+                            return self
+                        def __exit__(self, *args):
+                            self.file.close()
+                        def __getattr__(self, name):
+                            return getattr(self.file, name)
+                        def write(self, data):
+                            if operation == "write":
+                                calls.append("write")
+                                self.file.write(data[:min(7, len(data))])
+                                raise error
+                            return self.file.write(data)
+                        def flush(self):
+                            if operation == "flush":
+                                calls.append("flush")
+                                raise error
+                            return self.file.flush()
+                    def opened(path):
+                        file = original_open(path)
+                        if Path(path).name == filename:
+                            target_fd.append(file.fileno())
+                            return BrokenFile(file)
+                        return file
+                    def fsync(fd):
+                        if operation == "fsync" and fd in target_fd:
+                            calls.append("fsync")
+                            raise error
+                        return original_fsync(fd)
+                    with patch.object(h.store, "_exclusive", side_effect=opened), \
+                            patch.object(h.os, "fsync", side_effect=fsync), self.assertRaises(OSError) as raised:
+                        self.execute(fixture)
+                    self.assertIs(raised.exception, error)
+                    self.assertEqual(calls, [operation])
+                    path = fixture["output_root"] / filename
+                    before = path.read_bytes()
+                    self.assertGreater(len(before), 0)
+                    with self.assertRaises((ValueError, OSError)):
+                        self.execute(fixture)
+                    self.assertEqual(path.read_bytes(), before)
+                    self.assert_no_close(fixture)
+
+    def test_artifact_and_source_readback_tampering_fails_closed(self):
+        for target in ("analysis.json", "report.html", "source.pkf"):
+            with self.subTest(target=target), _slice1p_fixture(with_identity=True) as fixture:
+                original = h._postprocess_artifact_readback
+                changed = []
+                def artifact(path, fact, visit):
+                    if Path(path).name == target:
+                        Path(path).write_bytes(Path(path).read_bytes() + b" ")
+                        changed.append(target)
+                    return original(path, fact, visit)
+                def progress(fact):
+                    if target == "source.pkf" and not changed and fact.phase is records.Phase.READBACK:
+                        path = fixture["root"] / "boards.pkf"
+                        raw = path.read_bytes()
+                        path.write_bytes(raw[:-1] + bytes((raw[-1] ^ 1,)))
+                        changed.append(target)
+                with patch.object(h, "_postprocess_artifact_readback", side_effect=artifact), \
+                        self.assertRaises(ValueError):
+                    self.execute(fixture, progress=progress)
+                self.assertEqual(changed, [target])
+                self.assert_no_close(fixture)
+
+    def test_progress_append_checkpoint_seal_and_readback_fail_closed(self):
+        for operation in ("append", "checkpoint", "seal", "readback"):
+            with self.subTest(operation=operation), _slice1p_fixture(with_identity=True) as fixture:
+                calls = []
+                error = OSError("SLICE1P_PROGRESS_FAILURE")
+                original_scan = h._v2_postprocess_scan
+                def scanned(root, seal, *args):
+                    if seal.name == "postprocessing_operations":
+                        calls.append("readback")
+                        path = Path(root) / "postprocessing_operations.pkf"
+                        raw = path.read_bytes()
+                        path.write_bytes(raw[:-1] + bytes((raw[-1] ^ 1,)))
+                    return original_scan(root, seal, *args)
+                with _EvidenceExitStack() as stack:
+                    if operation == "readback":
+                        stack.enter_context(patch.object(h, "_v2_postprocess_scan", side_effect=scanned))
+                    else:
+                        original = getattr(h.store.FramedStreamWriter, operation)
+                        def failed(writer, *args, **kwargs):
+                            if writer._stream_name == "postprocessing_operations":
+                                calls.append(operation)
+                                raise error
+                            return original(writer, *args, **kwargs)
+                        stack.enter_context(patch.object(h.store.FramedStreamWriter, operation, failed))
+                    with self.assertRaises((ValueError, OSError)):
+                        self.execute(fixture)
+                self.assertEqual(calls, [operation])
+                path = fixture["output_root"] / "postprocessing_operations.pkf"
+                before = path.read_bytes()
+                with self.assertRaises((ValueError, OSError)):
+                    self.execute(fixture)
+                self.assertEqual(path.read_bytes(), before)
+                self.assert_no_close(fixture)
+
+    def test_final_source_change_check_interrupt_and_observer_failure_keep_no_success(self):
+        for mode in ("source", "check", "observer", "interrupt"):
+            with self.subTest(mode=mode), _slice1p_fixture(with_identity=True) as fixture:
+                calls = []
+                error = KeyboardInterrupt("SLICE1P_INTERRUPT") if mode == "interrupt" else RuntimeError("SLICE1P_CHECK")
+                def recheck():
+                    if (fixture["output_root"] / "report.html").exists():
+                        calls.append("source")
+                        return ()
+                    return fixture["expected_identity"]
+                def checked():
+                    if (fixture["output_root"] / "analysis.json").exists():
+                        calls.append(mode)
+                        raise error
+                def observe(fact):
+                    if fact.phase is records.Phase.AGGREGATION and fact.processed > 0:
+                        calls.append(mode)
+                        raise error
+                changes = ({"source_recheck": recheck} if mode == "source" else
+                           {"progress": observe} if mode == "observer" else {"check": checked})
+                with self.assertRaises((ValueError, RuntimeError, KeyboardInterrupt)):
+                    self.execute(fixture, **changes)
+                self.assertEqual(calls, [mode])
+                self.assert_no_close(fixture)
+
+    def test_each_phase_wall_timeout_rejects_completion(self):
+        for phase in readiness.POSTPROCESS_PHASES:
+            with self.subTest(phase=phase), _slice1p_fixture(with_identity=True) as fixture:
+                offset = [0]
+                def observe(fact):
+                    if fact.phase is phase:
+                        offset[0] += 2_000_000
+                ticks = iter(range(1, 10 ** 12))
+                def clock():
+                    return next(ticks) + offset[0]
+                envelope = replace(fixture["envelope"], **{phase.value.lower() + "_wall_ms": 1})
+                with self.assertRaisesRegex(ValueError, "POSTPROCESS_PHASE_TIMEOUT"):
+                    self.execute(fixture, envelope=envelope, clock=clock, progress=observe)
+                self.assert_no_close(fixture)
+
+    def test_bad_analysis_and_bootstrap_progress_cannot_make_support(self):
+        for mode in ("no_result", "context", "progress_missing", "progress_reordered"):
+            with self.subTest(mode=mode), _slice1p_fixture(with_identity=True) as fixture:
+                def analyze(rows, **kwargs):
+                    if mode == "no_result":
+                        return object()
+                    if mode.startswith("progress_"):
+                        callback = kwargs["bootstrap_progress"]
+                        if mode == "progress_reordered":
+                            callback(1, 10000)
+                        kwargs["bootstrap_progress"] = lambda *_: None
+                    result = _bounded_postprocess_analyze(rows, **kwargs)
+                    return replace(result, context=("WRONG",)) if mode == "context" else result
+                with self.assertRaisesRegex(ValueError, "ANALYSIS|BOOTSTRAP"):
+                    self.execute(fixture, _analyze=analyze)
+                self.assertFalse((fixture["output_root"] / "analysis.json").exists())
+                self.assert_no_close(fixture)
+
+    def test_v1_materializer_coordinator_postprocess_archive_and_launch_stay_disconnected(self):
+        with _EvidenceExitStack() as stack:
+            for name in ("_postprocess_r0b_v2", "_v2_postprocess_binding", "_v2_postprocess_scan", "_v2_postprocess_support"):
+                stack.enter_context(patch.object(h, name, side_effect=AssertionError("No Slice 1P on V1")))
+            for name in ("_validate_identity_v2", "_write_identity_v2", "validate_v2_materialization_semantics"):
+                stack.enter_context(patch.object(h.qualification, name, side_effect=AssertionError("No V2 qualification")))
+            V2FullMaterializerV1IsolationTests().test_historical_materializer_coordinator_and_r0_never_activate_full_v2_path()
+            OperatorEvidenceTests().test_public_launch_requires_exact_authorization_before_any_io_or_workers()
+
+    def test_zz_one_new_real_four_work_bootstrap_semantic_support_and_archive_close(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        with _slice1p_fixture(with_identity=True, fresh_readback=True) as fixture:
+            self.assertEqual(fixture["counts"], (4, 1, 2, 1, 1, 2))
+            self.assertEqual(fixture["materialization"].coordinator.durable_units, 6)
+            self.assertEqual(fixture["plan"][0].runtime, records.RuntimeIdentity(platform.python_implementation(),
+                platform.python_version(), os.name, platform.platform(), platform.machine(), None))
+            self.assertTrue(fixture["plan"][0].run_id.startswith("synthetic-i7-"))
+            self.assertEqual(fixture["plan"][0].protocol_seed.hex(), identity.PROTOCOL_SHA256)
+            progress, reads, writes, scans = [], [], [], []
+            original_reader, original_exclusive = h.store._reader, h.store._exclusive
+            original_scan, original_qualify = h._v2_postprocess_scan, h.qualification.validate_v2_materialization_semantics
+            class Probe:
+                def __init__(self, file, path):
+                    self.manager, self.file, self.path = file, file, Path(path)
+                def __getattr__(self, name):
+                    return getattr(self.file, name)
+                def __enter__(self):
+                    self.file = self.manager.__enter__()
+                    return self
+                def __exit__(self, *args):
+                    return self.manager.__exit__(*args)
+                def read(self, size=-1):
+                    if type(size) is not int or not 1 <= size <= 65536:
+                        raise AssertionError(("Unbounded Slice 1P read", self.path.name, size))
+                    reads.append((self.path.name, size))
+                    return self.file.read(size)
+                def write(self, data):
+                    if not 0 < len(data) <= 65536:
+                        raise AssertionError(("Unbounded Slice 1P write", self.path.name, len(data)))
+                    writes.append((self.path.name, len(data)))
+                    return self.file.write(data)
+            def scan(root, seal, *args):
+                scans.append(seal.name)
+                return original_scan(root, seal, *args)
+            actual_bootstrap = h.analysis._shared_bootstrap
+            with _slice1p_semantic_guards(allow_bootstrap=True), \
+                    patch.object(h.store, "_reader", side_effect=lambda path: Probe(original_reader(path), path)), \
+                    patch.object(h.store, "_exclusive", side_effect=lambda path: Probe(original_exclusive(path), path)), \
+                    patch.object(h, "_v2_postprocess_scan", side_effect=scan), \
+                    patch.object(h.qualification, "validate_v2_materialization_semantics", wraps=original_qualify) as qualified, \
+                    patch.object(h.analysis, "_shared_bootstrap", wraps=actual_bootstrap) as bootstrap:
+                result = h._postprocess_r0b_v2(**self.arguments(fixture), progress=progress.append)
+            bootstrap.assert_called_once()
+            qualified.assert_called_once()
+            self.assertEqual(len(bootstrap.call_args.args[0]), 4)
+            self.assertEqual((result.bootstrap_replicates, result.bootstrap_n, result.bootstrap_progress_count),
+                             (10000, 4, 10001))
+            self.assertEqual(result.analysis_result.bootstrap.accepted_draws, 40000)
+            self.assertEqual(result.analysis_result.n, 4)
+            self.assertIsNone(result.analysis_result.overall)
+            self.assertEqual(result.analysis_result.context,
+                             ("SYNTHETIC_R0B_OPERATIONAL_ONLY_NOT_EFFECTIVENESS_EVIDENCE",))
+            self.assertEqual(result.streams, fixture["coordinator_result"].streams + (fixture["identity_seal"],))
+            self.assertEqual(scans, [v.name for v in result.streams] + ["postprocessing_operations"])
+            self.assertTrue(reads and writes)
+            self.assertEqual(tuple(v.phase for v in result.phases), readiness.POSTPROCESS_PHASES)
+            self.assertTrue(all(v.complete and v.progress_bounded and v.processed == v.total for v in result.phases))
+            self.assertGreaterEqual(result.complete_wall_ns, sum(v.wall_ns for v in result.phases))
+            for name in ("shared_bootstrap_complete", "compact_scalar_bootstrap", "streaming_reconstruction",
+                         "readback_complete", "progress_bounded", "qualification_complete", "cleanup_complete",
+                         "synthetic_non_evidence"):
+                self.assertIs(getattr(result, name), True)
+            self.assertFalse(hasattr(result, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                result.qualification_complete = False
+            output = fixture["output_root"]
+            self.assertEqual((output / "analysis.json").read_bytes(), h.report.render_analysis_json(result.analysis_result))
+            self.assertEqual((output / "report.html").read_bytes(), h.report.render_report_html(result.analysis_result).encode("utf-8"))
+            self.assertEqual({p.name for p in output.iterdir()},
+                             {"analysis.json", "report.html", "postprocessing_operations.pkf"})
+            support = h._v2_postprocess_support(result)
+            self.assertEqual(support["qualification_identity_seal"], fixture["identity_seal"])
+            self.assertEqual(support["postprocessing_operations_seal"], result.progress_stream)
+            authorities = dict(selection_receipt_sha256="a" * 64,
+                corpus_sha256=fixture["expected_identity"][1].corpus_sha256, source_sha256="c" * 64)
+            with patch.object(h.qualification, "validate_v2_materialization_semantics",
+                    side_effect=AssertionError("Archive validator is structural only")), \
+                    patch.object(h, "_postprocess_r0b_v2", side_effect=AssertionError("No repeated postprocessing")), \
+                    patch.object(h.analysis, "_shared_bootstrap", side_effect=AssertionError("Only one new bootstrap")):
+                closed = h._close_v2_experiment_archive(fixture["experiment_root"], fixture["readback"],
+                    fixture["profile"], fixture["envelope"], **support, **authorities)
+                self.assertEqual(h._validate_closed_v2_experiment_archive(fixture["experiment_root"],
+                    fixture["profile"], fixture["envelope"], **authorities), closed)
+            files = tuple(sorted(p.relative_to(fixture["experiment_root"]).as_posix()
+                                 for p in fixture["experiment_root"].rglob("*") if p.is_file()))
+            self.assertEqual(files, evidence.V2_ARCHIVE_FINAL_PATHS)
+            self.assertEqual(len(files), 64)
+            self.assertFalse(any(name.endswith(".jsonl") for name in files))
+            print("SLICE1P_BOUNDED_POSTPROCESS " + json.dumps(dict(new_actual_bootstraps=1, n=4,
+                replicates=result.bootstrap_replicates, accepted_draws=result.analysis_result.bootstrap.accepted_draws,
+                source_streams=len(result.streams), files=len(files), archive_bytes=closed.accounting.archive_bytes,
+                attributable_bytes=closed.accounting.attributable_bytes,
+                fixed_bytes=closed.accounting.fixed_allowance_bytes,
+                reference_bounds=fixture["reference_bounds"], complete_wall_ns=result.complete_wall_ns), sort_keys=True))
+
+
 class V2FullMaterializerV1IsolationTests(unittest.TestCase):
     def test_historical_materializer_coordinator_and_r0_never_activate_full_v2_path(self):
         from tests.test_program_k_e2_operational import StreamingCoordinatorTests, R0ComponentTests, _plan

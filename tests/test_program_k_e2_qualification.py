@@ -809,5 +809,454 @@ class QualificationTests(unittest.TestCase):
             self.assertFalse((Path(fixture.root) / "COMPLETE.json").exists())
 
 
+class V2QualificationTests(unittest.TestCase):
+    @contextmanager
+    def fixture(self, *, with_identity=True):
+        from tests.test_program_k_e2_r0_harness import _slice1p_fixture
+        with _slice1p_fixture(with_identity=with_identity) as fixture:
+            yield fixture
+
+    def validate(self, fixture, **changes):
+        from tests.test_program_k_e2_r0_harness import _slice1p_semantic_guards
+        arguments = {name: fixture[name] for name in ("root", "plan", "coordinator_result", "identity_seal",
+                     "expected_identity", "profile", "envelope", "source_recheck")}
+        with _slice1p_semantic_guards():
+            return q.validate_v2_materialization_semantics(**(arguments | changes))
+
+    @staticmethod
+    def entries(fixture, name):
+        values = []
+        with store.FramedStreamPullReader(fixture["root"], name,
+                q.physical.context_for(name, fixture["profile"].sha256),
+                max_payload_bytes=fixture["envelope"].max_payload_bytes) as reader:
+            while (row := reader.pull()) is not None:
+                values.append((row.key, row.record))
+        return values
+
+    @staticmethod
+    def rewrite(fixture, name, entries, *, profile_sha=None):
+        # Test-only resealing distinguishes semantic rejection from SHA failure.
+        context = q.physical.context_for(name, profile_sha or fixture["profile"].sha256)
+        raw = b"".join(q.physical.encode_frame(records.encode(value), key, context,
+            max_payload_bytes=fixture["envelope"].max_payload_bytes) for key, value in entries)
+        (fixture["root"] / (name + ".pkf")).write_bytes(raw)
+        seal = records.StreamDigest(name, sha256(raw).hexdigest(), len(raw), len(entries))
+        if name == q.IDENTITY_STREAM:
+            fixture["identity_seal"] = seal
+        else:
+            coordinator = fixture["coordinator_result"]
+            seals = tuple(seal if value.name == name else value for value in coordinator.streams)
+            fixture["coordinator_result"] = replace(coordinator, streams=seals,
+                archive_bytes=sum(value.byte_length for value in seals))
+
+    @staticmethod
+    def files(root):
+        return {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
+
+    def test_real_four_work_independent_semantics_and_detached_progress_result(self):
+        with self.fixture() as fixture:
+            progress, sources = [], []
+            before = self.files(fixture["root"])
+            result = self.validate(fixture, source_recheck=lambda: sources.append(True) or fixture["expected_identity"],
+                                   progress=lambda *value: progress.append(value))
+            self.assertIs(type(result), q._V2QualificationResult)
+            self.assertTrue(result.semantic_complete and result.synthetic_non_evidence)
+            self.assertEqual(len(result.rows), 4)
+            self.assertTrue(all(type(row) is analysis.BoardAnalysisRow for row in result.rows))
+            self.assertEqual(tuple(row.position for row in result.rows), (0, 1, 2, 3))
+            self.assertEqual(result.streams, fixture["coordinator_result"].streams + (fixture["identity_seal"],))
+            self.assertEqual(result.identity_records, fixture["expected_identity"])
+            total = sum(seal.record_count for seal in result.streams)
+            self.assertEqual(progress, [(done, total) for done in range(total + 1)])
+            self.assertEqual(sources, [True, True])
+            self.assertEqual(self.files(fixture["root"]), before)
+            self.assertFalse(hasattr(result, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                result.semantic_complete = False
+
+    def test_identity_writer_binds_exact_precaptured_additional_sources_and_fresh_readback(self):
+        with self.fixture(with_identity=False) as fixture:
+            before, sources = self.files(fixture["root"]), []
+            expected = fixture["expected_identity"]
+            with patch.object(q, "capture_sources", side_effect=AssertionError("No live capture")), \
+                    patch.object(q, "_identity_records", side_effect=AssertionError("No V1 identity capture")):
+                seal = q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                    fixture["profile"], fixture["envelope"], source_recheck=lambda: sources.append(True) or expected)
+            self.assertEqual(sources, [True, True])
+            self.assertEqual(tuple(self.entries(fixture, q.IDENTITY_STREAM)),
+                             tuple(((i,), value) for i, value in enumerate(expected)))
+            after = self.files(fixture["root"])
+            self.assertEqual(set(after) - set(before), {"qualification_identity.pkf"})
+            self.assertTrue(all(after[name] == raw for name, raw in before.items()))
+            self.assertEqual((seal.byte_length, seal.sha256),
+                             (len(after["qualification_identity.pkf"]), sha256(after["qualification_identity.pkf"]).hexdigest()))
+            self.assertEqual(tuple(value.path for value in expected[3:]),
+                             ("synthetic/slice1p/additional.py", "synthetic/slice1p/materializer.py"))
+            with self.assertRaises(ValueError):
+                q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                    fixture["profile"], fixture["envelope"], source_recheck=fixture["source_recheck"])
+            self.assertEqual(self.files(fixture["root"]), after)
+
+    def test_identity_preflight_rejects_wrong_tuple_records_plan_order_and_source_without_creation(self):
+        with self.fixture(with_identity=False) as fixture:
+            expected = fixture["expected_identity"]
+            candidates = (list(expected), expected[:2], (expected[1], expected[0]) + expected[2:],
+                (replace(expected[0], sha256="0" * 64),) + expected[1:],
+                (expected[0], replace(expected[1], corpus_sha256="0" * 64)) + expected[2:],
+                expected[:2] + (replace(expected[2], architecture="wrong"),) + expected[3:],
+                expected[:3] + expected[3:][::-1], expected + expected[-1:], expected[:3] + (object(),))
+            before = self.files(fixture["root"])
+            for values in candidates:
+                with self.subTest(values=repr(values)[:50]), self.assertRaises(ValueError):
+                    q._write_identity_v2(fixture["root"], fixture["plan"], values,
+                        fixture["profile"], fixture["envelope"], source_recheck=lambda: values)
+                self.assertEqual(self.files(fixture["root"]), before)
+            for recheck in (None, lambda: (), lambda: list(expected)):
+                with self.assertRaises(ValueError):
+                    q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                        fixture["profile"], fixture["envelope"], source_recheck=recheck)
+                self.assertEqual(self.files(fixture["root"]), before)
+            for field, bad in (("profile", object()), ("envelope", object())):
+                arguments = {name: fixture[name] for name in ("profile", "envelope")}
+                arguments[field] = bad
+                with self.assertRaises(ValueError):
+                    q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                        **arguments, source_recheck=fixture["source_recheck"])
+                self.assertEqual(self.files(fixture["root"]), before)
+
+    def test_identity_partial_append_checkpoint_seal_readback_and_source_failures_retain_bytes(self):
+        for case in ("append", "checkpoint", "fsync", "seal", "readback", "source"):
+            with self.subTest(case=case), self.fixture(with_identity=False) as fixture, ExitStack() as stack:
+                expected = fixture["expected_identity"]
+                calls, source_calls = [0], [0]
+                if case == "append":
+                    original = store.FramedStreamWriter.append
+                    def append(writer, *args):
+                        calls[0] += 1
+                        if calls[0] == 2:
+                            raise OSError("V2_IDENTITY_APPEND_FAULT")
+                        return original(writer, *args)
+                    stack.enter_context(patch.object(store.FramedStreamWriter, "append", new=append))
+                elif case in ("checkpoint", "seal"):
+                    stack.enter_context(patch.object(store.FramedStreamWriter, case, side_effect=OSError("IDENTITY_FAULT")))
+                elif case == "fsync":
+                    stack.enter_context(patch.object(os, "fsync", side_effect=OSError("IDENTITY_FSYNC_FAULT")))
+                elif case == "readback":
+                    stack.enter_context(patch.object(store.FramedStreamPullReader, "pull", side_effect=ValueError("IDENTITY_FAULT")))
+                def recheck():
+                    source_calls[0] += 1
+                    return () if case == "source" and source_calls[0] == 2 else expected
+                with self.assertRaises((ValueError, OSError)):
+                    q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                        fixture["profile"], fixture["envelope"], source_recheck=recheck)
+                path = fixture["root"] / "qualification_identity.pkf"
+                self.assertTrue(path.exists())
+                before = self.files(fixture["root"])
+                with self.assertRaises(ValueError):
+                    q._write_identity_v2(fixture["root"], fixture["plan"], expected,
+                        fixture["profile"], fixture["envelope"], source_recheck=lambda: expected)
+                self.assertEqual(self.files(fixture["root"]), before)
+
+    def test_directory_missing_extra_jsonl_directory_and_link_rejected_before_readers(self):
+        for case in ("missing", "extra_pkf", "jsonl", "directory", "symlink", "junction"):
+            with self.subTest(case=case), self.fixture() as fixture, ExitStack() as stack:
+                root = fixture["root"]
+                if case == "missing":
+                    (root / "boards.pkf").unlink()
+                elif case == "directory":
+                    (root / "extra").mkdir()
+                elif case in ("symlink", "junction"):
+                    method = "is_symlink" if case == "symlink" else "is_junction"
+                    original = getattr(Path, method)
+                    stack.enter_context(patch.object(Path, method,
+                        new=lambda path: path == root / "boards.pkf" or original(path)))
+                else:
+                    (root / ("extra.pkf" if case == "extra_pkf" else "boards.jsonl")).write_bytes(b"")
+                with patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("No reader before layout")), \
+                        self.assertRaises(ValueError):
+                    self.validate(fixture)
+
+    def test_serialized_reservation_exact_max_and_both_caps_fail_before_open(self):
+        self.assertEqual(q._serialized_reservation_v2(67_108_864, 67_108_864), 402_786_480)
+        for values in ((True, 1), (1, True), (1, 0), (1, 2), (67_108_865, 1)):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                q._serialized_reservation_v2(*values)
+        with self.fixture() as fixture:
+            amount = q._serialized_reservation_v2(fixture["envelope"].max_payload_bytes,
+                (fixture["root"] / "materialization-v2.json").stat().st_size)
+            for combined in (False, True):
+                envelope = replace(fixture["envelope"], worker_memory_cap_bytes=amount - 1,
+                    coordinator_memory_cap_bytes=amount - 1,
+                    memory_cap_bytes=amount - 1 if combined else fixture["envelope"].memory_cap_bytes)
+                with patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("No reader before reserve")), \
+                        self.assertRaisesRegex(ValueError, "V2_QUALIFICATION_SERIALIZED_RESERVATION_CAP"):
+                    self.validate(fixture, envelope=envelope)
+
+    def test_crc_wrong_context_and_resealed_wrong_keys_families_missing_extra_rows(self):
+        for case in ("crc", "profile", "position", "rank", "index", "missing", "extra", "row"):
+            with self.subTest(case=case), self.fixture() as fixture:
+                name = "boards"
+                entries = self.entries(fixture, name)
+                if case == "crc":
+                    path = fixture["root"] / "boards.pkf"
+                    raw = bytearray(path.read_bytes())
+                    raw[-1] ^= 1
+                    path.write_bytes(raw)
+                elif case == "profile":
+                    self.rewrite(fixture, name, entries, profile_sha=b"\x77" * 32)
+                else:
+                    key, value = entries[0]
+                    if case in ("position", "rank", "index"):
+                        changed = list(key)
+                        changed[("position", "rank", "index").index(case)] += 1
+                        entries[0] = tuple(changed), value
+                    elif case == "missing":
+                        entries.pop(0)
+                    elif case == "extra":
+                        last_key, last = entries[-1]
+                        entries.append((last_key[:2] + (last_key[2] + 1,), last))
+                    else:
+                        entries[0] = key, replace(value, fingerprint="wrong-canonical-board")
+                    self.rewrite(fixture, name, entries)
+                with self.assertRaises(ValueError):
+                    self.validate(fixture)
+
+    def test_semantic_pair_model_public_child_and_copied_d_k_premises_rejected(self):
+        for case in ("pair", "model", "oracle", "evaluator", "d_prior", "k_prior"):
+            with self.subTest(case=case), self.fixture() as fixture:
+                name = {"pair": "pairs", "model": "control_physical_inputs", "oracle": "oracle_b_audits",
+                    "evaluator": "evaluators", "d_prior": "control_decision_spans",
+                    "k_prior": "control_maintenance"}[case]
+                entries = self.entries(fixture, name)
+                index = (next(i for i, (key, _) in enumerate(entries) if key[1] == (1 if case == "d_prior" else 2))
+                         if case.endswith("prior") else 0)
+                key, value = entries[index]
+                if case == "pair":
+                    changed = replace(value, ww_delta_us=(value.ww_delta_us or 0) + 1)
+                elif case == "model":
+                    changed = replace(value, input_us=value.input_us + 1, cumulative_us=value.cumulative_us + 1)
+                elif case == "oracle":
+                    changed = replace(value, input_digest="0" * 64)
+                elif case == "evaluator":
+                    changed = replace(value, status=records.EvaluationStatus.FAIL, reason_code="SYNTHETIC_FALSE")
+                elif case == "d_prior":
+                    changed = replace(value, duration_ns=value.duration_ns + 1)
+                else:
+                    changed = replace(value, timings=tuple((name, duration + 1 if duration is not None else None)
+                                                          for name, duration in value.timings))
+                entries[index] = key, changed
+                self.rewrite(fixture, name, entries)
+                with self.assertRaises(ValueError):
+                    self.validate(fixture)
+
+    def test_logical_prior_checks_headers_status_and_copies_without_transport_encoding(self):
+        with self.fixture() as fixture:
+            work = fixture["plan"][3]
+            values = {}
+            for kind in (execution.WorkerKind.PRIMARY, execution.WorkerKind.DETERMINISM):
+                rank = op._kind_rank(kind)
+                streams = {name: tuple(records.encode(record) for key, record in self.entries(fixture, name)
+                                      if key[:2] == (work.position, rank)) for name in execution.STREAM_NAMES}
+                values[kind] = q._reconstruct(work, kind, streams, q.load_timing_table(), fixture["envelope"])
+            primary, candidate = values[execution.WorkerKind.PRIMARY], values[execution.WorkerKind.DETERMINISM]
+            with patch.object(execution, "encode_bundle", side_effect=AssertionError("No legacy prior")), \
+                    patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("No WB02 prior")), \
+                    patch.object(op, "_bind_prior_bundle", side_effect=AssertionError("No V1 prior")):
+                q._prior_bundle_v2(candidate, primary, execution.WorkerKind.DETERMINISM)
+                changed_header = replace(candidate.projection_headers[0], total_model_us=candidate.projection_headers[0].total_model_us + 1)
+                with self.assertRaisesRegex(ValueError, "REPEAT_FIRST_HEADER_BINDING"):
+                    q._prior_bundle_v2(replace(candidate, projection_headers=(changed_header,) + candidate.projection_headers[1:]),
+                                       primary, execution.WorkerKind.DETERMINISM)
+                for state, reason in ((records.AuditStatus.FAIL, "FIRST_FAILURE_CANNOT_BE_UPGRADED"),
+                                      (records.AuditStatus.INCOMPLETE, "FIRST_INCOMPLETE_CANNOT_BE_UPGRADED")):
+                    changed = replace(primary)
+                    object.__setattr__(changed, "status", state)
+                    with self.assertRaisesRegex(ValueError, reason):
+                        q._prior_bundle_v2(candidate, changed, execution.WorkerKind.DETERMINISM)
+
+    def test_accepted_v2_operations_have_no_unit_start_and_all_sequence_tampering_fails(self):
+        for case in ("unit_start", "delete", "reorder", "duplicate", "reason", "status", "missing_progress",
+                     "extra_progress", "final", "elapsed"):
+            with self.subTest(case=case), self.fixture() as fixture:
+                events = [value for _, value in self.entries(fixture, "operations")]
+                self.assertEqual(sum(value.event_kind is records.EventKind.START for value in events), 1)
+                terminal = next(i for i, value in enumerate(events) if value.unit_id.endswith(":SYNTHETIC_MATERIALIZATION"))
+                progress = next(i for i, value in enumerate(events) if value.unit_id.startswith("durable_primary_count:"))
+                if case == "unit_start":
+                    events.insert(terminal, replace(events[terminal], unit_id="0:PRIMARY",
+                        event_kind=records.EventKind.START, status=records.OperationStatus.RUNNING))
+                elif case == "delete":
+                    events.pop(terminal)
+                elif case == "reorder":
+                    events[terminal], events[progress] = events[progress], events[terminal]
+                elif case == "duplicate":
+                    events.insert(terminal, events[terminal])
+                elif case == "reason":
+                    events[terminal] = replace(events[terminal], unit_id="0:PRIMARY:ADMITTED")
+                elif case == "status":
+                    events[terminal] = replace(events[terminal], status=records.OperationStatus.INCOMPLETE)
+                elif case == "missing_progress":
+                    events.pop(progress)
+                elif case == "extra_progress":
+                    events.insert(progress, events[progress])
+                elif case == "final":
+                    events[-1] = replace(events[-1], unit_id="coordinator")
+                else:
+                    events[0] = replace(events[0], elapsed_ns=events[1].elapsed_ns + 1)
+                self.rewrite(fixture, "operations", [((index,), replace(value, ordinal=index))
+                                                     for index, value in enumerate(events)])
+                with self.assertRaises(ValueError):
+                    self.validate(fixture)
+
+    def test_v2_exact_one_resource_per_operation_and_memory_semantics(self):
+        for case in ("missing", "extra", "worker", "combined", "cap", "unit", "role", "zero"):
+            with self.subTest(case=case), self.fixture() as fixture:
+                values = [value for _, value in self.entries(fixture, "resources")]
+                value = values[0]
+                if case == "missing":
+                    values.pop(0)
+                elif case == "extra":
+                    values.append(values[-1])
+                else:
+                    changes = {"worker": {"worker_bytes": 1, "combined_bytes": value.coordinator_bytes + 1},
+                        "combined": {"worker_bytes": 1, "combined_bytes": value.coordinator_bytes + 1},
+                        "cap": {"coordinator_bytes": fixture["envelope"].coordinator_memory_cap_bytes + 1,
+                                "combined_bytes": fixture["envelope"].coordinator_memory_cap_bytes + 1},
+                        "unit": {"unit_id": "foreign"}, "role": {"process_role": records.ProcessRole.COORDINATOR},
+                        "zero": {"coordinator_bytes": 0, "combined_bytes": 0}}[case]
+                    values[0] = replace(value, **changes)
+                self.rewrite(fixture, "resources", [((index,), value) for index, value in enumerate(values)])
+                with self.assertRaises(ValueError):
+                    self.validate(fixture)
+
+    def test_identity_rows_seals_and_recheck_before_after_validation_fail_closed(self):
+        for case in ("changed", "missing", "extra", "seal", "before", "after"):
+            with self.subTest(case=case), self.fixture() as fixture:
+                changes = {}
+                if case in ("before", "after"):
+                    calls = [0]
+                    def recheck():
+                        calls[0] += 1
+                        return () if case == "before" or calls[0] == 2 else fixture["expected_identity"]
+                    changes["source_recheck"] = recheck
+                elif case == "seal":
+                    fixture["identity_seal"] = replace(fixture["identity_seal"], sha256="0" * 64)
+                else:
+                    values = [value for _, value in self.entries(fixture, q.IDENTITY_STREAM)]
+                    if case == "changed":
+                        values[-1] = replace(values[-1], sha256="0" * 64)
+                    elif case == "missing":
+                        values.pop()
+                    else:
+                        values.append(values[-1])
+                    self.rewrite(fixture, q.IDENTITY_STREAM, [((i,), value) for i, value in enumerate(values)])
+                with self.assertRaises(ValueError):
+                    self.validate(fixture, **changes)
+
+    def test_exact_coordinator_receipt_schedule_status_reason_and_seals_are_required(self):
+        with self.fixture() as fixture:
+            original = fixture["coordinator_result"]
+            first = original.receipts[0]
+            changes = ({"status": records.AuditStatus.INCOMPLETE}, {"reason_codes": ("INCOMPLETE",)},
+                {"receipts": original.receipts[::-1]}, {"receipts": original.receipts[:-1]},
+                {"receipts": (replace(first, reason="ADMITTED"),) + original.receipts[1:]},
+                {"receipts": (replace(first, exit_code=0),) + original.receipts[1:]},
+                {"receipts": (replace(first, status=records.AuditStatus.INCOMPLETE),) + original.receipts[1:]},
+                {"durable_units": original.durable_units + 1}, {"durable_primary_boards": True},
+                {"archive_bytes": original.archive_bytes + 1}, {"streams": original.streams[::-1]},
+                {"streams": original.streams[:-1]}, {"streams": original.streams + original.streams[:1]})
+            with patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("No malformed coordinator read")):
+                for change in changes:
+                    with self.subTest(change=change), self.assertRaises(ValueError):
+                        self.validate(fixture, coordinator_result=replace(original, **change))
+
+    def test_check_failure_and_deadline_abort_before_semantic_success(self):
+        with self.fixture() as fixture:
+            marker = KeyboardInterrupt("V2_CHECK_FAILED")
+            def check():
+                raise marker
+            with patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("No reader after cancellation")), \
+                    self.assertRaises(KeyboardInterrupt) as caught:
+                self.validate(fixture, check=check)
+            self.assertIs(caught.exception, marker)
+            ticks = chain((0,), repeat(10 ** 30))
+            with patch.object(q.time, "monotonic_ns", side_effect=lambda: next(ticks)), \
+                    patch.object(store, "FramedStreamPullReader", side_effect=AssertionError("No reader after timeout")), \
+                    self.assertRaisesRegex(ValueError, "V2_QUALIFICATION_TIMEOUT"):
+                self.validate(fixture)
+
+    def test_qualification_failure_invalidates_every_reader_even_after_eof_close(self):
+        for final_failure in (False, True):
+            with self.subTest(final_failure=final_failure), self.fixture() as fixture:
+                opened, calls = [], [0]
+                original = store.FramedStreamPullReader
+                def reader(*args, **kwargs):
+                    value = original(*args, **kwargs)
+                    opened.append(value)
+                    return value
+                marker = KeyboardInterrupt("V2_QUALIFICATION_CANCELLATION")
+                def progress(done, total):
+                    if not final_failure and done == 2:
+                        raise marker
+                def recheck():
+                    calls[0] += 1
+                    if final_failure and calls[0] == 2:
+                        raise marker
+                    return fixture["expected_identity"]
+                with patch.object(store, "FramedStreamPullReader", side_effect=reader), self.assertRaises(KeyboardInterrupt) as caught:
+                    self.validate(fixture, source_recheck=recheck, progress=progress)
+                self.assertIs(caught.exception, marker)
+                self.assertEqual(len(opened), 56)
+                self.assertTrue(all(value.completed_digest is None and value._closed and value._poisoned for value in opened))
+
+    def test_demand_pull_has_no_decoded_future_rows_and_one_global_inflation(self):
+        with self.fixture() as fixture:
+            active, maximum, pulled = [0], [0], []
+            original_pull, original_decode = store.FramedStreamPullReader.pull, q.physical.decode_frame
+            def decode(*args, **kwargs):
+                self.assertEqual(active[0], 1)
+                return original_decode(*args, **kwargs)
+            def pull(reader):
+                active[0] += 1
+                maximum[0] = max(maximum[0], active[0])
+                try:
+                    row = original_pull(reader)
+                    if row is not None:
+                        pulled.append((reader._stream_name, row.key))
+                    return row
+                finally:
+                    active[0] -= 1
+            with patch.object(store.FramedStreamPullReader, "pull", new=pull), \
+                    patch.object(q.physical, "decode_frame", side_effect=decode):
+                result = self.validate(fixture)
+            execution_keys = [key for name, key in pulled if name in execution.STREAM_NAMES]
+            self.assertEqual([key[:2] for key in execution_keys], sorted(key[:2] for key in execution_keys))
+            self.assertEqual(maximum[0], 1)
+            self.assertEqual(len(pulled), sum(seal.record_count for seal in result.streams))
+
+    def test_v1_qualification_stays_independent_of_all_v2_helpers_without_new_bootstrap(self):
+        # Exercise the unchanged V1 path through complete semantic validation,
+        # stopping at its analysis boundary without a new actual bootstrap.
+        if not hasattr(QualificationTests, "sources"):
+            QualificationTests.setUpClass()
+        fixture_owner = QualificationTests()
+        with fixture_owner.fixture() as fixture, ExitStack() as stack:
+            for name in ("_source_recheck_v2", "_validate_identity_v2", "_write_identity_v2",
+                    "_serialized_reservation_v2", "_receipt_plan_v2", "_prior_bundle_v2", "_unit_v2",
+                    "_operations_v2", "_resources_v2", "validate_v2_materialization_semantics"):
+                stack.enter_context(patch.object(q, name, side_effect=AssertionError("V1 must remain independent")))
+            for owner, name in ((store, "FramedStreamWriter"), (store, "FramedStreamPullReader"),
+                                (q.physical, "capture_qualified_profile")):
+                stack.enter_context(patch.object(owner, name, side_effect=AssertionError("No V2 path")))
+            marker = AssertionError("V1 reached unchanged analysis boundary")
+            analyzed = stack.enter_context(patch.object(analysis, "analyze_effectiveness", side_effect=marker))
+            with self.assertRaises(AssertionError) as caught:
+                fixture_owner.qualify(fixture)
+            self.assertIs(caught.exception, marker)
+            analyzed.assert_called_once()
+            self.assertTrue(list(Path(fixture.root).glob("*.jsonl")))
+            self.assertFalse(list(Path(fixture.root).glob("*.pkf")))
+
+
 if __name__ == "__main__":
     unittest.main()

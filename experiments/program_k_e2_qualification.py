@@ -33,6 +33,7 @@ from experiments import program_k_e2_game as game
 from experiments import program_k_e2_analysis as analysis
 from experiments import program_k_e2_report as report
 from experiments import program_k_oracles as oracles
+from experiments import program_k_e2_physical as physical
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -664,3 +665,315 @@ def qualify(root, plan, coordinator_result, identity_seal, envelope):
         return QualificationResult(status, (), tuple(rows), verified, analysis_json, report_html)
     except (ValueError, TypeError, KeyError, AttributeError, OSError, subprocess.SubprocessError):
         return QualificationResult(records.AuditStatus.INCOMPLETE, ("INTEGRATION_POSTPROCESSING_INCOMPLETE",), (), verified)
+
+
+@dataclass(frozen=True, slots=True)
+class _V2QualificationResult:
+    """Detached independent semantics, never a research/admission verdict."""
+    rows: tuple
+    streams: tuple
+    identity_records: tuple
+    serialized_reservation_bytes: int
+    semantic_complete: bool = True
+    synthetic_non_evidence: bool = True
+
+
+def _source_recheck_v2(expected_identity, source_recheck):
+    _need(callable(source_recheck), "V2_SOURCE_RECHECK_REQUIRED")
+    observed = source_recheck()
+    _need(type(observed) is tuple and len(observed) == len(expected_identity)
+          and all(type(actual) is type(expected) for actual, expected in zip(observed, expected_identity)),
+          "V2_SOURCE_IDENTITY_CHANGED")
+    for value in observed:
+        records.encode(value)
+    _need(observed == expected_identity, "V2_SOURCE_IDENTITY_CHANGED")
+
+
+def _validate_identity_v2(plan, expected_identity, profile, envelope, source_recheck):
+    """Validate supplied provenance; never capture Git or relax historical hygiene."""
+    _plan(plan)
+    _need(type(profile) is physical.CodecProfile, "V2_QUALIFIED_PROFILE_REQUIRED")
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    _need(type(expected_identity) is tuple and len(expected_identity) >= 3, "V2_IDENTITY_TUPLE_REQUIRED")
+    prefix = (records.ProtocolIdentity, records.CorpusIdentity, records.RuntimeIdentity)
+    _need(tuple(type(value) for value in expected_identity[:3]) == prefix
+          and all(type(value) is records.SourceBlobIdentity for value in expected_identity[3:]),
+          "V2_IDENTITY_RECORD_TYPES")
+    for value in expected_identity:
+        _need(len(records.encode(value)) <= envelope.max_payload_bytes, "V2_IDENTITY_RECORD_CAP")
+    indices = tuple(work.board.game_index for work in plan)
+    corpus = records.CorpusIdentity("SYNTHETIC_I7", min(indices), max(indices) + 1,
+        len(plan), indices, identity.corpus_digest(plan[0].protocol_seed, len(plan), indices).hex(), ())
+    _need(expected_identity[:3] == (records.ProtocolIdentity(_PROTOCOL, identity.PROTOCOL_SHA256, _BLOB, _FREEZE),
+          corpus, plan[0].runtime), "V2_IDENTITY_PLAN_BINDING")
+    paths = tuple(value.path for value in expected_identity[3:])
+    _need(paths == tuple(sorted(set(paths))), "V2_IDENTITY_SOURCE_ORDER")
+    _source_recheck_v2(expected_identity, source_recheck)
+    return expected_identity
+
+
+def _write_identity_v2(root, plan, expected_identity, profile, envelope, *, source_recheck, check=lambda: None):
+    """Publish only the pre-captured RF02 identity; failure retains created bytes."""
+    _need(callable(check), "V2_QUALIFICATION_CHECK_REQUIRED")
+    check()
+    _validate_identity_v2(plan, expected_identity, profile, envelope, source_recheck)
+    root = Path(root)
+    _need(root.is_dir() and not root.is_symlink() and not root.is_junction(), "V2_IDENTITY_ROOT")
+    target = root / (IDENTITY_STREAM + ".pkf")
+    _need(not target.exists() and not target.is_symlink(), "V2_IDENTITY_ALREADY_EXISTS")
+    writer = reader = None
+    try:
+        check()
+        writer = store.FramedStreamWriter(root, IDENTITY_STREAM,
+            physical.context_for(IDENTITY_STREAM, profile.sha256), max_payload_bytes=envelope.max_payload_bytes)
+        for ordinal, value in enumerate(expected_identity):
+            check()
+            writer.append((ordinal,), value)
+        writer.checkpoint()
+        check()
+        seal = writer.seal()
+        check()
+        reader = store.FramedStreamPullReader(root, IDENTITY_STREAM,
+            physical.context_for(IDENTITY_STREAM, profile.sha256), max_payload_bytes=envelope.max_payload_bytes)
+        for ordinal, expected in enumerate(expected_identity):
+            check()
+            row = reader.pull()
+            _need(row is not None and row.key == (ordinal,) and type(row.record) is type(expected)
+                  and row.record == expected and row.logical_bytes == records.encode(expected),
+                  "V2_IDENTITY_READBACK_MISMATCH")
+            del row
+        _need(reader.pull() is None and reader.close() == seal, "V2_IDENTITY_SEAL_MISMATCH")
+        check()
+        _source_recheck_v2(expected_identity, source_recheck)
+        check()
+        return seal
+    except BaseException:
+        if reader is not None:
+            reader.invalidate()
+        if writer is not None:
+            try:
+                writer.close()
+            except BaseException:
+                pass
+        raise
+
+
+def _serialized_reservation_v2(max_payload_bytes, context_bytes):
+    _need(type(max_payload_bytes) is int and 0 < max_payload_bytes <= physical.MAX_PAYLOAD_BYTES
+          and type(context_bytes) is int and 0 < context_bytes <= max_payload_bytes,
+          "V2_QUALIFICATION_CONTEXT_CAP")
+    return 5 * max_payload_bytes + context_bytes + 131072 + 2223 + 1
+
+
+def _receipt_plan_v2(plan, result, identity_seal):
+    _need(type(result) is operational.CoordinatorResult and type(result.receipts) is tuple
+          and type(result.streams) is tuple and result.status is records.AuditStatus.PASS
+          and type(result.reason_codes) is tuple and not result.reason_codes, "V2_COORDINATOR_PASS_REQUIRED")
+    scheduled = tuple((work.position, kind) for work in plan for kind in operational._kinds(work))
+    for receipt in result.receipts:
+        _need(type(receipt) is operational.UnitReceipt, "V2_EXACT_RECEIPT_REQUIRED")
+        operational.UnitReceipt.__post_init__(receipt)
+        _need(receipt.status is records.AuditStatus.PASS and receipt.reason == "SYNTHETIC_MATERIALIZATION"
+              and receipt.exit_code is None, "V2_CONSTRUCTOR_RECEIPT_REQUIRED")
+    _need(tuple((value.position, value.kind) for value in result.receipts) == scheduled,
+          "V2_RECEIPT_SCHEDULE")
+    _need(type(result.durable_units) is int and result.durable_units == len(scheduled)
+          and type(result.durable_primary_boards) is int and result.durable_primary_boards == len(plan),
+          "V2_DURABLE_COUNT_MISMATCH")
+    seals = result.streams + (identity_seal,)
+    for seal in seals:
+        _need(type(seal) is records.StreamDigest, "V2_EXACT_STREAM_SEAL_REQUIRED")
+        records.StreamDigest.__post_init__(seal)
+    _need(tuple(seal.name for seal in seals) == _STREAMS + (IDENTITY_STREAM,), "V2_STREAM_SEAL_COVERAGE")
+    _need(type(result.archive_bytes) is int and result.archive_bytes == sum(v.byte_length for v in result.streams),
+          "V2_DURABLE_BYTE_COUNT_MISMATCH")
+    return seals
+
+
+def _prior_bundle_v2(candidate, primary, kind):
+    """Compare retained logical premises; never encode a primary transport."""
+    _need(type(primary) is execution.WorkerBundle and primary.kind is execution.WorkerKind.PRIMARY
+          and type(candidate) is execution.WorkerBundle and candidate.kind is kind,
+          "V2_PRIMARY_PREMISE_REQUIRED")
+    actual, expected = dict(candidate.streams), dict(primary.streams)
+    if kind is execution.WorkerKind.DETERMINISM:
+        names = tuple(name for name in expected if name.startswith("control_") or name.startswith("kp0_"))
+        _need(all(actual.get(name) == expected[name] for name in names), "REPEAT_FIRST_PREMISE_BINDING")
+        _need(candidate.projection_headers[:len(primary.projection_headers)] == primary.projection_headers,
+              "REPEAT_FIRST_HEADER_BINDING")
+        _need(primary.status is not records.AuditStatus.FAIL or candidate.status is records.AuditStatus.FAIL,
+              "FIRST_FAILURE_CANNOT_BE_UPGRADED")
+        _need(primary.status is not records.AuditStatus.INCOMPLETE or candidate.status is not records.AuditStatus.PASS,
+              "FIRST_INCOMPLETE_CANNOT_BE_UPGRADED")
+    else:
+        _need(kind is execution.WorkerKind.K_CONTROL, "V2_PRIOR_KIND")
+        _need(actual.get("control_maintenance") == expected.get("control_maintenance"), "KCONTROL_REFERENCE_BINDING")
+
+
+def _unit_v2(readers, pull, work, kind, table, envelope, check):
+    rank, values, logical_size, physical_size = operational._kind_rank(kind), {}, 0, 0
+    for name in execution.STREAM_NAMES:
+        data, local = [], 0
+        reader = readers[name]
+        while True:
+            check()
+            key = reader.peek_key()
+            if key is None:
+                break
+            _need(len(key) == 3 and key[:2] >= (work.position, rank), "V2_UNIT_KEY_ORDER")
+            if key[:2] != (work.position, rank):
+                break
+            row = pull(reader)
+            _need(row is not None and row.key == (work.position, rank, local)
+                  and type(row.record) is execution._family(name), "V2_UNIT_KEY_OR_RECORD_FAMILY")
+            state = getattr(row.record, "status", None)
+            _need(state not in (records.AuditStatus.FAIL, records.AuditStatus.INCOMPLETE,
+                  records.EvaluationStatus.FAIL)
+                  and getattr(row.record, "classification", None) != "IMPLEMENTATION_IDENTITY_FAIL",
+                  "V2_DURABLE_SEMANTIC_FAILURE")
+            logical_size += len(row.logical_bytes)
+            physical_size += row.frame_length
+            _need(logical_size <= envelope.max_payload_bytes and physical_size <= envelope.max_payload_bytes,
+                  "V2_QUALIFICATION_UNIT_CAP")
+            data.append(row.logical_bytes)
+            local += 1
+            del row
+        values[name] = tuple(data)
+    check()
+    result = _reconstruct(work, kind, values, table, envelope)
+    check()
+    return result
+
+
+def _operations_v2(reader, pull, result, check):
+    ordinal, elapsed, primaries = 0, -1, 0
+    def consume(unit, event_kind, status):
+        nonlocal ordinal, elapsed
+        check()
+        row = pull(reader)
+        _need(row is not None and type(row.record) is records.OperationEventRecord and row.key == (ordinal,),
+              "V2_OPERATION_KEY_OR_TYPE")
+        value = row.record
+        _need((value.phase, value.unit_id, value.event_kind, value.status, value.ordinal) ==
+              (records.Phase.EXECUTION, unit, event_kind, status, ordinal)
+              and value.elapsed_ns >= elapsed, "V2_OPERATION_SEQUENCE")
+        ordinal, elapsed = ordinal + 1, value.elapsed_ns
+    consume("coordinator", records.EventKind.START, records.OperationStatus.RUNNING)
+    for receipt in result.receipts:
+        consume(operational._unit_id(receipt.position, receipt.kind) + ":" + receipt.reason,
+                records.EventKind.END, records.OperationStatus.COMPLETED)
+        if receipt.kind is execution.WorkerKind.PRIMARY:
+            primaries += 1
+            consume("durable_primary_count:" + str(primaries), records.EventKind.PROGRESS, records.OperationStatus.RUNNING)
+    consume("coordinator:ADMISSION_END", records.EventKind.END, records.OperationStatus.COMPLETED)
+    _need(reader.peek_key() is None and primaries == result.durable_primary_boards, "V2_OPERATION_COVERAGE")
+
+
+def _resources_v2(reader, pull, result, envelope, check):
+    elapsed = -1
+    for ordinal, receipt in enumerate(result.receipts):
+        check()
+        row = pull(reader)
+        _need(row is not None and type(row.record) is records.ResourceSampleRecord and row.key == (ordinal,),
+              "V2_RESOURCE_KEY_OR_TYPE")
+        value = row.record
+        _need(value.unit_id == operational._unit_id(receipt.position, receipt.kind)
+              and value.worker_bytes == 0 and value.process_role is records.ProcessRole.COMBINED
+              and value.method is records.MemoryMethod.PRIVATE_BYTES
+              and 0 < value.coordinator_bytes == value.combined_bytes
+              and value.coordinator_bytes <= envelope.coordinator_memory_cap_bytes
+              and value.combined_bytes <= envelope.memory_cap_bytes and value.elapsed_ns >= elapsed,
+              "V2_RESOURCE_IDENTITY_OR_CAP")
+        elapsed = value.elapsed_ns
+        del row, value
+    _need(reader.peek_key() is None, "V2_EXTRA_RESOURCE_SAMPLE")
+
+
+def validate_v2_materialization_semantics(root, plan, coordinator_result, identity_seal, expected_identity,
+        profile, envelope, *, source_recheck, check=lambda: None, progress=None):
+    """Independent RF02 semantic pull; no constructor, readback or analysis call."""
+    _need(callable(check) and (progress is None or callable(progress)), "V2_QUALIFICATION_CALLBACK")
+    check()
+    _validate_identity_v2(plan, expected_identity, profile, envelope, source_recheck)
+    seals = _receipt_plan_v2(plan, coordinator_result, identity_seal)
+    root = Path(root)
+    _need(root.is_dir() and not root.is_symlink() and not root.is_junction(), "V2_QUALIFICATION_ROOT")
+    paths = tuple(root.iterdir())
+    _need({path.name for path in paths} == {seal.name + ".pkf" for seal in seals} | {"materialization-v2.json"}
+          and all(path.is_file() and not path.is_symlink() and not path.is_junction() for path in paths),
+          "V2_QUALIFICATION_DIRECTORY_COVERAGE")
+    context_bytes = (root / "materialization-v2.json").stat().st_size
+    reservation = _serialized_reservation_v2(envelope.max_payload_bytes, context_bytes)
+    _need(reservation <= envelope.coordinator_memory_cap_bytes and reservation <= envelope.memory_cap_bytes,
+          "V2_QUALIFICATION_SERIALIZED_RESERVATION_CAP")
+    deadline = time.monotonic_ns() + envelope.validation_wall_ms * 1_000_000
+    def checked():
+        check()
+        _need(time.monotonic_ns() < deadline, "V2_QUALIFICATION_TIMEOUT")
+    total, consumed = sum(seal.record_count for seal in seals), 0
+    def pull(reader):
+        nonlocal consumed
+        checked()
+        row = reader.pull()
+        checked()
+        if row is not None:
+            consumed += 1
+            _need(consumed <= total, "V2_QUALIFICATION_EXTRA_ROW")
+            if progress is not None:
+                progress(consumed, total)
+            checked()
+        return row
+    readers, rows = {}, []
+    try:
+        checked()
+        if progress is not None:
+            progress(0, total)
+        for seal in seals:
+            checked()
+            readers[seal.name] = store.FramedStreamPullReader(root, seal.name,
+                physical.context_for(seal.name, profile.sha256), max_payload_bytes=envelope.max_payload_bytes)
+        for ordinal, expected in enumerate(expected_identity):
+            row = pull(readers[IDENTITY_STREAM])
+            _need(row is not None and row.key == (ordinal,) and type(row.record) is type(expected)
+                  and row.record == expected, "V2_IDENTITY_CONTENT_MISMATCH")
+            del row
+        _need(readers[IDENTITY_STREAM].peek_key() is None, "V2_EXTRA_IDENTITY_RECORD")
+        table = load_timing_table()
+        for work in plan:
+            primary = None
+            for kind in operational._kinds(work):
+                bundle = _unit_v2(readers, pull, work, kind, table, envelope, checked)
+                if kind is execution.WorkerKind.PRIMARY:
+                    primary = bundle
+                    control, kp0 = (execution.restore_projection(bundle, role) for role in ("control", "kp0"))
+                    pair = game.pair_projections(control, kp0).pair
+                    rows.append(analysis.BoardAnalysisRow(work.position, pair, control.total_model_us,
+                        kp0.total_model_us, control.comparable_compute_ns, kp0.comparable_compute_ns))
+                    del control, kp0, pair
+                else:
+                    _prior_bundle_v2(bundle, primary, kind)
+                del bundle
+            del primary
+        for name in execution.STREAM_NAMES:
+            checked()
+            _need(readers[name].peek_key() is None, "V2_UNSCHEDULED_EXECUTION_ROW")
+        _operations_v2(readers["operations"], pull, coordinator_result, checked)
+        _resources_v2(readers["resources"], pull, coordinator_result, envelope, checked)
+        verified = []
+        for seal in seals:
+            checked()
+            observed = readers[seal.name].close()
+            _need(observed == seal, "V2_QUALIFICATION_SEAL_MISMATCH")
+            verified.append(observed)
+        _need(consumed == total and len(rows) == len(plan), "V2_QUALIFICATION_ROW_COVERAGE")
+        _source_recheck_v2(expected_identity, source_recheck)
+        checked()
+        return _V2QualificationResult(tuple(rows), tuple(verified), expected_identity, reservation)
+    except BaseException:
+        for reader in readers.values():
+            try:
+                reader.invalidate()
+            except BaseException:
+                pass
+        raise
