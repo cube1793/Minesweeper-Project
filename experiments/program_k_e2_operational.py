@@ -1020,6 +1020,11 @@ def _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
                               and telemetry[1] == sum(value.status is not records.AuditStatus.INCOMPLETE
                                                       for value in children), "ORACLE_TIMING_EVIDENCE_BINDING")
                     for name, values in candidate.streams:
+                        # V2 R0 repeat timing belongs to this worker; copied
+                        # PRIMARY spans remain intact as independently checked prior evidence.
+                        if v2 and kind is execution.WorkerKind.DETERMINISM and name in (
+                                "control_decision_spans", "kp0_decision_spans"):
+                            continue
                         if name.endswith("decision_spans") or name == "kcontrol_maintenance":
                             for encoded in values:
                                 value = records.decode(encoded)

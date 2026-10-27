@@ -4269,5 +4269,276 @@ class R0V2MonitorTests(unittest.TestCase):
         self.assertEqual((monitor.memory_sample_count, snapshot[-1]), (0, 0))
 
 
+def _r0_c1_timing_bundle(bundle, copied_ns=200, repeat_ns=50):
+    """Change timing observations only, preserving all semantic/prior records."""
+    values = dict(bundle.streams)
+    for role, duration in (("control", copied_ns), ("kp0", copied_ns - 1),
+                           ("repeat_control", repeat_ns), ("repeat_kp0", repeat_ns - 1)):
+        name = role + "_decision_spans"
+        if name in values:
+            values[name] = tuple(records.encode(replace(records.decode(data), duration_ns=duration))
+                                 for data in values[name])
+    headers = tuple(replace(header, comparable_compute_ns=sum(
+        records.decode(data).duration_ns for data in values[header.role + "_decision_spans"]))
+        for header in bundle.projection_headers)
+    return replace(bundle, streams=tuple((name, values[name]) for name, _ in bundle.streams),
+                   projection_headers=headers)
+
+
+def _r0_c1_timing_worker(production_target, arguments, primary, bundle, arm_ns):
+    """Real worker codec/telemetry; supplied literal outcomes and controlled arm clock."""
+    work, kind = arguments[:2]
+    method = {execution.WorkerKind.PRIMARY: "execute_primary", execution.WorkerKind.DETERMINISM: "execute_repeat",
+              execution.WorkerKind.K_CONTROL: "execute_k_control"}[kind]
+    epoch = time.perf_counter_ns()
+    counter = [epoch]
+    def clock():
+        value = counter[0]
+        counter[0] += arm_ns
+        return value
+    def execute(*args, **kwargs):
+        if kind is not execution.WorkerKind.PRIMARY:
+            assert args[1] == primary
+        if "prior_binding_observer" in kwargs:
+            kwargs["prior_binding_observer"](execution.PriorBindingTimingFact(
+                work.position, kind, clock(), clock()))
+        streams = dict(bundle.streams)
+        arms = (("K_CONTROL", "kcontrol_maintenance"),) if kind is execution.WorkerKind.K_CONTROL else (
+            ("CONTROL", ("repeat_" if kind is execution.WorkerKind.DETERMINISM else "") + "control_physical_inputs"),
+            ("K_P0", ("repeat_" if kind is execution.WorkerKind.DETERMINISM else "") + "kp0_physical_inputs"))
+        for arm, name in arms:
+            kwargs["observer"]("ARM_START", arm)
+            for _ in streams[name]:
+                kwargs["observer"]("BEFORE_INPUT", arm)
+            kwargs["observer"]("ARM_END", arm)
+        if "oracle_timing_observer" in kwargs:
+            prefix = "repeat_" if kind is execution.WorkerKind.DETERMINISM else ""
+            probes = 2 * sum(records.decode(data).action_ordinal > 0
+                             for data in streams[prefix + "kp0_decisions"])
+            calls = sum(records.decode(data).status is not records.AuditStatus.INCOMPLETE
+                        for data in streams[prefix + "oracle_b_audits"])
+            # Applicability intervals are supplied zero-duration observations,
+            # in the same epoch, with truthful durable probe/call counts.
+            intervals = tuple((epoch, epoch) for _ in range(probes))
+            kwargs["oracle_timing_observer"](execution.audit.OracleBTimingFact(
+                execution._arm(work, records.Arm.K_P0, repeat=bool(prefix)), probes, calls, 0, intervals))
+        return bundle
+    with patch.object(execution, method, side_effect=execute), \
+            patch.object(execution, "decision_watchdog_targets", return_value=((), ())), \
+            patch.object(op.time, "perf_counter_ns", side_effect=clock):
+        production_target(*arguments)
+
+
+class R0V2CurrentDecisionTimingTests(unittest.TestCase):
+    """C1 regression: genuine parent aggregation over intact literal WB02 records."""
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_program_k_e2_execution import _literal_context, _literal_work
+        cls.profile = _r0_v2_supplied_profile()
+        cls.base_work = replace(_literal_work(), run_id="R0-C1-literal-timing")
+        with _literal_context(cls.base_work):
+            primary = execution.execute_primary(cls.base_work)
+            repeated = execution.execute_repeat(cls.base_work, primary)
+            kcontrol = execution.execute_k_control(cls.base_work, primary)
+        cls.base_bundles = (primary, repeated, kcontrol)
+        cls.envelope = _envelope(max_decision_wall_ms=1000, max_arm_wall_ms=5000,
+            max_case_wall_ms=15000, max_job_wall_ms=30000, max_launcher_wall_ms=45000,
+            max_physical_inputs=30, max_payload_bytes=1_000_000, archive_cap_bytes=5_000_000,
+            max_ipc_frame_bytes=4096)
+
+    def fixture(self, component, *, repeat_ns=50, copied_ns=200):
+        work = op._r0_work(self.base_work, component)
+        bundles = []
+        for source in self.base_bundles:
+            streams = []
+            for name, data in source.streams:
+                if name == "control_maintenance" and source.kind is execution.WorkerKind.PRIMARY \
+                        and not (work.k_control_selected or work.determinism_selected):
+                    continue
+                if name in ("oracle_b_coverage", "repeat_oracle_b_coverage"):
+                    data = tuple(records.encode(replace(records.decode(row), selected=work.oracle_b_selected))
+                                 for row in data)
+                if name in ("oracle_b_audits", "repeat_oracle_b_audits") and not work.oracle_b_selected:
+                    data = ()
+                if name == "kcontrol_maintenance":
+                    data = tuple(records.encode(replace(records.decode(row), timings=tuple(
+                        (key, 70 if key == "v1_plan_position_ns" and value is not None else
+                         30 if key == "shadow_ns" and value is not None else value)
+                        for key, value in records.decode(row).timings))) for row in data)
+                streams.append((name, data))
+            bundles.append(_r0_c1_timing_bundle(replace(source, streams=tuple(streams)), copied_ns, repeat_ns))
+        return work, tuple(bundles)
+
+    def supervise(self, component, *, v2=True, r0=True, repeat_ns=50, arm_ns=100,
+                  envelope=None, mismatched_prior=False):
+        work, bundles = self.fixture(component, repeat_ns=repeat_ns)
+        index = (0 if component in (op.R0Component.PRIMARY, op.R0Component.ORACLE_B)
+                 else 2 if component in (op.R0Component.K_CONTROL, op.R0Component.ORACLE_K_BIND) else 1)
+        primary, bundle = bundles[0], bundles[index]
+        if mismatched_prior:
+            bundle = _r0_c1_timing_bundle(bundle, copied_ns=201, repeat_ns=repeat_ns)
+        for candidate in (primary, bundle):
+            execution.revalidate_bundle(candidate, work, candidate.kind,
+                                        max_payload_bytes=self.envelope.max_payload_bytes)
+        envelope = self.envelope if envelope is None else envelope
+        prior = None if index == 0 else (execution.encode_bundle_v2(primary, self.profile.sha256)
+                                        if v2 else execution.encode_bundle(primary))
+        context = op.multiprocessing.get_context("spawn")
+        api, pids, targets, boundaries = _FakeJobAPI(), [], [], []
+        expected_target = op._worker_main_v2_r0 if v2 and r0 else op._worker_main_v2 if v2 else op._worker_main
+        def process(*, target, args):
+            self.assertIs(target, expected_target)
+            targets.append(target)
+            return context.Process(target=_r0_c1_timing_worker,
+                                   args=(target, args, primary, bundle, arm_ns))
+        def attach(pid, cap):
+            pids.append(pid)
+            return api, object(), lambda: 512
+        accepted_fresh = op._fresh_wb02_context
+        def fresh(*args, **kwargs):
+            boundaries.append((args, kwargs))
+            return accepted_fresh(*args, **kwargs)
+        proxy = SimpleNamespace(Pipe=context.Pipe, Event=context.Event, Process=process)
+        ledger = op._MemoryLedger(envelope)
+        started = time.monotonic_ns()
+        with patch.object(op.multiprocessing, "get_context", return_value=proxy), \
+                patch.object(op.harness, "_attach_memory_job", side_effect=attach), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200), \
+                patch.object(op, "_fresh_wb02_context", side_effect=fresh), \
+                patch.object(execution, "_materialize_board", side_effect=AssertionError("Parent generated board")), \
+                patch.object(execution.physical, "capture_qualified_profile", side_effect=AssertionError("Live profile capture")):
+            args = (work, bundle.kind, prior, envelope, ledger, threading.Event(), started, started)
+            result = (op._supervise_r0_operation_v2(*args, self.profile.sha256) if v2 and r0 else
+                      op._supervise_operation_v2(*args, self.profile.sha256) if v2 else
+                      op._supervise_operation(*args, r0_observe=r0))
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(api.closed, 1)
+        self.assertFalse(ledger.values)
+        self.assertFalse(any(child.pid in pids for child in op.multiprocessing.active_children()))
+        self.assertFalse(any(t.name == "program-k-e2-ipc-reader" and t.is_alive() for t in threading.enumerate()))
+        return result, work, bundle, primary, boundaries
+
+    @staticmethod
+    def telemetry(observation):
+        from experiments import program_k_e2_r0_evidence as evidence
+        probes, calls, wall, intervals = observation.oracle
+        return evidence.R0ATelemetryV2(observation.worker_memory, observation.coordinator_memory,
+            observation.combined_memory, observation.decision_wall, observation.arm_wall,
+            observation.shadow_wall, observation.physical_inputs,
+            evidence.R0AOracleTelemetryV2(probes, calls, wall,
+                tuple(evidence.R0AIntervalV2(*value) for value in intervals)),
+            observation.resources_complete, observation.cleanup_complete, observation.watchdogs_complete,
+            tuple(evidence.R0AIntervalV2(*value) for value in observation.prior_binding_intervals))
+
+    def test_d_and_oracle_repeat_use_current_spans_without_losing_copied_records(self):
+        for component in (op.R0Component.DETERMINISM, op.R0Component.ORACLE_D_REPEAT):
+            with self.subTest(component=component):
+                result, work, expected, primary, boundaries = self.supervise(component)
+                self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+                self.assertEqual((result.observation.decision_wall, result.observation.arm_wall), (50, 100))
+                decoded = execution.decode_bundle_v2(result.wire, self.profile.sha256)
+                self.assertEqual(decoded, expected)
+                values, first = dict(decoded.streams), dict(primary.streams)
+                for role, duration in (("control", 200), ("kp0", 199),
+                                       ("repeat_control", 50), ("repeat_kp0", 49)):
+                    rows = values[role + "_decision_spans"]
+                    self.assertTrue(rows)
+                    self.assertEqual({records.decode(row).duration_ns for row in rows}, {duration})
+                    if not role.startswith("repeat_"):
+                        self.assertEqual(rows, first[role + "_decision_spans"])
+                converted = self.telemetry(result.observation)
+                self.assertEqual((converted.decision_wall, converted.arm_wall), (50, 100))
+                for name in ("worker_memory", "coordinator_memory", "combined_memory", "decision_wall",
+                             "arm_wall", "shadow_wall", "physical_inputs", "resources_complete",
+                             "cleanup_complete", "watchdogs_complete"):
+                    self.assertEqual(getattr(converted, name), getattr(result.observation, name))
+                self.assertEqual(tuple((i.started_ns, i.finished_ns) for i in converted.prior_binding_intervals),
+                                 result.observation.prior_binding_intervals)
+                self.assertEqual((converted.oracle.probes, converted.oracle.calls, converted.oracle.wall_ns,
+                    tuple((i.started_ns, i.finished_ns) for i in converted.oracle.intervals)), result.observation.oracle)
+                self.assertEqual([call[0][2] for call in boundaries],
+                                 [execution.WorkerKind.DETERMINISM, execution.WorkerKind.PRIMARY])
+                prior_wire = execution.encode_bundle_v2(primary, self.profile.sha256)
+                received = execution.decode_bundle_view_v2(result.wire, self.profile.sha256)
+                accepted_fresh = op._fresh_wb02_context
+                with tempfile.TemporaryDirectory() as directory, \
+                        patch.object(op, "_fresh_wb02_context", wraps=accepted_fresh) as admitted, \
+                        patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("Sealing re-encoded WB02")):
+                    budget = op._R0V2ComponentArchiveBudget(component, self.envelope)
+                    claims = op._seal_r0_case_v2(directory, work, result, self.envelope,
+                        self.profile, budget, phase="target", prior_primary_wire=prior_wire)
+                    root = Path(directory) / claims.relative_directory
+                    for role in ("control", "kp0", "repeat_control", "repeat_kp0"):
+                        name = role + "_decision_spans"
+                        expected_frames = b"".join(row.frame_bytes for row in received.rows if row.stream_name == name)
+                        self.assertEqual((root / (name + ".pkf")).read_bytes(), expected_frames)
+                        durable = []
+                        seal = store.scan_framed_stream(root, name,
+                            execution.physical.context_for(name, self.profile.sha256),
+                            visit=lambda key, record, logical, length: durable.append((key, logical)))
+                        self.assertEqual(tuple(logical for _, logical in durable), values[name])
+                        self.assertEqual(tuple(key for key, _ in durable),
+                                         tuple((work.position, 1, i) for i in range(len(values[name]))))
+                        self.assertEqual(seal, next(item for item in claims.streams if item.name == name))
+                    self.assertEqual([call.args[2] for call in admitted.call_args_list],
+                                     [execution.WorkerKind.DETERMINISM, execution.WorkerKind.PRIMARY])
+
+    def test_primary_keeps_its_own_control_and_kp0_span_maximum(self):
+        result, _, _, _, calls = self.supervise(op.R0Component.PRIMARY, arm_ns=300)
+        self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+        self.assertEqual((result.observation.decision_wall, result.observation.arm_wall), (200, 300))
+        self.assertEqual(len(calls), 1)
+        self.telemetry(result.observation)
+
+    def test_k_control_keeps_current_v1_plan_and_shadow_timing(self):
+        result, _, _, _, calls = self.supervise(op.R0Component.K_CONTROL)
+        self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+        self.assertEqual((result.observation.decision_wall, result.observation.shadow_wall,
+                          result.observation.arm_wall), (70, 30, 100))
+        self.assertEqual([call[0][2] for call in calls],
+                         [execution.WorkerKind.K_CONTROL, execution.WorkerKind.PRIMARY])
+        self.telemetry(result.observation)
+
+    def test_current_repeat_decision_cap_still_fails_and_discards_wire(self):
+        envelope = replace(self.envelope, max_decision_wall_ms=1, monitor_interval_ms=1)
+        for component in (op.R0Component.DETERMINISM, op.R0Component.ORACLE_D_REPEAT):
+            with self.subTest(component=component):
+                result, _, _, _, _ = self.supervise(component, repeat_ns=1_000_000, envelope=envelope)
+                self.assertIs(result.receipt.status, records.AuditStatus.INCOMPLETE, result.receipt)
+                self.assertEqual(result.receipt.reason, "DECISION_TIMEOUT")
+                self.assertIsNone(result.wire)
+                self.assertEqual((result.logical_bytes, result.physical_frame_bytes,
+                    result.legacy_bundle_bytes, result.wb02_wire_bytes), (0, 0, 0, 0))
+
+    def test_current_repeat_arm_cap_still_fails_and_discards_wire(self):
+        envelope = replace(self.envelope, max_decision_wall_ms=1, max_arm_wall_ms=1, monitor_interval_ms=1)
+        result, _, _, _, _ = self.supervise(op.R0Component.DETERMINISM, arm_ns=1_000_000, envelope=envelope)
+        self.assertIs(result.receipt.status, records.AuditStatus.INCOMPLETE, result.receipt)
+        self.assertEqual(result.receipt.reason, "ARM_TIMEOUT")
+        self.assertIsNone(result.wire)
+
+    def test_historical_v1_r0_retains_copied_span_aggregation(self):
+        result, _, _, _, calls = self.supervise(op.R0Component.DETERMINISM, v2=False)
+        self.assertIs(type(result), op._OperationResult)
+        self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+        self.assertEqual((result.observation.decision_wall, result.observation.arm_wall), (200, 100))
+        self.assertEqual(calls, [])
+
+    def test_non_r0_v2_keeps_transport_and_no_r0_observation(self):
+        result, _, expected, _, calls = self.supervise(op.R0Component.DETERMINISM, r0=False)
+        self.assertIs(type(result), op._V2OperationResult)
+        self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+        self.assertIsNone(result.observation)
+        self.assertEqual(execution.decode_bundle_v2(result.wire, self.profile.sha256), expected)
+        self.assertEqual([call[0][2] for call in calls],
+                         [execution.WorkerKind.DETERMINISM, execution.WorkerKind.PRIMARY])
+
+    def test_copied_prior_timing_mismatch_still_fails_exact_prior_binding(self):
+        result, _, _, _, _ = self.supervise(op.R0Component.DETERMINISM, mismatched_prior=True)
+        self.assertIs(result.receipt.status, records.AuditStatus.FAIL, result.receipt)
+        self.assertEqual(result.receipt.reason, "MALFORMED_IPC_OR_IDENTITY")
+        self.assertIsNone(result.wire)
+
+
 if __name__ == "__main__":
     unittest.main()
