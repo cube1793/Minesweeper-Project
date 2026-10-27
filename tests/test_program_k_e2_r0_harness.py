@@ -6948,3 +6948,403 @@ class V2FullMaterializerV1IsolationTests(unittest.TestCase):
                                  "program-k-e2-r0b-experiment/v1")
                 self.assertEqual(h.store.read_completion_receipt(root).manifest_sha256,
                                  h.sha256((root / "manifest.json").read_bytes()).hexdigest())
+
+
+@_evidence_contextmanager
+def _slice1q_provenance_fixture():
+    """Synthetic committed Git observations; production V2 checks stay intact."""
+    q = h.qualification
+    original_root = q._ROOT
+    committed = {path: ("bounded Slice 1Q source: " + path + "\n").encode("ascii")
+                 for path in q._V2_SOURCE_PATHS}
+    for path in (q._PROTOCOL, q._AMENDMENT):
+        committed[path] = (original_root / path).read_bytes()
+    frozen = dict(committed)
+    state = dict(head="a" * 40, status=b"", committed=committed, calls=[],
+                 head_reads=0, head_after=None, ancestor_failure=None, blob_reads=0,
+                 on_blobs=None, on_git=None)
+
+    def git(*args, data=None):
+        state["calls"].append(args)
+        if state["on_git"] is not None:
+            state["on_git"](args)
+        if args == ("rev-parse", "HEAD"):
+            state["head_reads"] += 1
+            head = state["head"]
+            if state["head_after"] is not None and state["head_reads"] >= state["head_after"]:
+                head = "b" * 40
+            return head.encode("ascii") + b"\n"
+        if args == ("status", "--porcelain=v1", "--untracked-files=all"):
+            return state["status"]
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            if args[2] == state["ancestor_failure"]:
+                raise q.QualificationError("SOURCE_IDENTITY_UNAVAILABLE")
+            return b""
+        raise AssertionError("Unexpected or mutating Git call: " + repr(args))
+
+    def blobs(refs):
+        state["blob_reads"] += 1
+        result = []
+        for ref in refs:
+            revision, path = ref.split(":", 1)
+            source = frozen if revision in (q._E1, q._FREEZE) else committed
+            if path not in source:
+                raise q.QualificationError("SOURCE_BLOB_REQUIRED")
+            data = source[path]
+            blob = q.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+            result.append((blob, data))
+        if state["on_blobs"] is not None:
+            state["on_blobs"](refs)
+        return tuple(result)
+
+    with tempfile.TemporaryDirectory(prefix="bounded-slice1q-provenance-") as directory, \
+            _EvidenceExitStack() as stack:
+        root = Path(directory)
+        for path, data in committed.items():
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        receipt_path = root / "accepted-receipt-copy.json"
+        receipt_path.write_bytes(_accepted_receipt_bytes())
+        receipt = h.load_selection_receipt(receipt_path)
+        stack.enter_context(patch.object(q, "_ROOT", root))
+        stack.enter_context(patch.object(q, "_git", side_effect=git))
+        stack.enter_context(patch.object(q, "_blobs", side_effect=blobs))
+        yield root, receipt, state
+
+
+@_evidence_contextmanager
+def _slice1q_v1_guards():
+    """Every new live owner is forbidden on unchanged V1 routes."""
+    with _EvidenceExitStack() as stack:
+        for owner, names in ((h, ("capture_run_provenance_v2", "_recheck_provenance_v2",
+                                 "_qualification_identity_v2", "_source_recheck_callback_v2")),
+                             (h.qualification, ("capture_sources_v2", "_validate_sources_v2",
+                                                "_validate_identity_v2", "_write_identity_v2",
+                                                "validate_v2_materialization_semantics"))):
+            for name in names:
+                stack.enter_context(patch.object(owner, name, side_effect=AssertionError("No V2 in V1")))
+        stack.enter_context(patch.object(physical, "capture_qualified_profile",
+                                        side_effect=AssertionError("No V1 codec profile")))
+        stack.enter_context(patch.object(h.store, "FramedStreamWriter",
+                                        side_effect=AssertionError("No RF02 in V1")))
+        stack.enter_context(patch.object(h.store, "FramedStreamPullReader",
+                                        side_effect=AssertionError("No RF02 in V1")))
+        stack.enter_context(patch.object(h.analysis, "_shared_bootstrap",
+                                        side_effect=AssertionError("No additional real bootstrap")))
+        yield
+
+
+class V2LiveProvenanceBridgeTests(unittest.TestCase):
+    """Bounded source/identity ownership, no live admission or materialization."""
+
+    @staticmethod
+    def profile():
+        from tests.test_program_k_e2_physical import _qualified_node, _json_bytes
+        return physical.decode_profile(_json_bytes(_qualified_node()))
+
+    def test_capture_exact_selection_head_sources_working_runtime_and_environment_read_only(self):
+        q = h.qualification
+        with _slice1q_provenance_fixture() as (root, receipt, state):
+            before = {path: (root / path).read_bytes() for path in q._V2_SOURCE_PATHS}
+            with _profile_read_only(), \
+                    patch.object(q, "capture_sources", side_effect=AssertionError("No V1 source capture")), \
+                    patch.object(h, "capture_run_provenance", side_effect=AssertionError("No V1 provenance")):
+                value = h.capture_run_provenance_v2(receipt)
+            self.assertIs(type(value), h.RunProvenance)
+            self.assertEqual(value.selection_source_head, h.SELECTION_SOURCE_HEAD)
+            self.assertEqual(value.r0_harness_source_head, state["head"])
+            self.assertEqual(tuple(v.path for v in value.sources), q._V2_SOURCE_PATHS)
+            self.assertEqual(value.runtime, h._runtime_identity())
+            self.assertEqual(value.executable, h.sys.executable)
+            self.assertIs(value.dont_write_bytecode, True)
+            self.assertEqual(os.environ["PYTHONDONTWRITEBYTECODE"], "1")
+            for source, working in zip(value.sources, value.working_files):
+                data = before[source.path]
+                blob = q.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+                self.assertEqual((source.blob_id, source.sha256, source.byte_length),
+                                 (blob, h.sha256(data).hexdigest(), len(data)))
+                self.assertEqual(working, (source.path, source.sha256, source.byte_length, False))
+            self.assertEqual(before, {path: (root / path).read_bytes() for path in before})
+            self.assertEqual(h._fact_read(h._fact_node(value)), value)
+            for ancestor in (h.SELECTION_SOURCE_HEAD, h.SETUP_REPAIR_HEAD):
+                self.assertIn(("merge-base", "--is-ancestor", ancestor, state["head"]), state["calls"])
+
+    def test_capture_rejects_receipt_dirty_index_worktree_untracked_and_ancestry(self):
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            Path(receipt.path).write_bytes(receipt.canonical_bytes + b"\n")
+            with self.assertRaises(ValueError):
+                h.capture_run_provenance_v2(receipt)
+        for status in (b" M experiments/program_k_e2_r0_harness.py\n",
+                       b"M  experiments/program_k_e2_physical.py\n", b"?? candidate.py\n"):
+            with self.subTest(status=status), _slice1q_provenance_fixture() as (_, receipt, state):
+                state["status"] = status
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+        for ancestor in (h.SELECTION_SOURCE_HEAD, h.SETUP_REPAIR_HEAD):
+            with self.subTest(ancestor=ancestor), _slice1q_provenance_fixture() as (_, receipt, state):
+                state["ancestor_failure"] = ancestor
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+
+    def test_capture_binds_only_proven_crlf_and_exact_frozen_working_authorities(self):
+        path = "experiments/program_k_e2_physical.py"
+        with _slice1q_provenance_fixture() as (root, receipt, state):
+            data = state["committed"][path]
+            raw = data.replace(b"\n", b"\r\n")
+            (root / path).write_bytes(raw)
+            value = h.capture_run_provenance_v2(receipt)
+            self.assertEqual(next(v for v in value.working_files if v[0] == path),
+                             (path, h.sha256(raw).hexdigest(), len(raw), True))
+            for bad in (data + b"semantic drift\n", data.replace(b"\n", b"\r"), data + b" "):
+                (root / path).write_bytes(bad)
+                with self.subTest(bad=bad), self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+        for authority in (h.qualification._PROTOCOL, h.qualification._AMENDMENT):
+            with self.subTest(authority=authority), _slice1q_provenance_fixture() as (root, receipt, state):
+                (root / authority).write_bytes(state["committed"][authority].replace(b"\n", b"\r\n"))
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+
+    def test_capture_missing_v2_owner_and_substituted_source_identities_fail(self):
+        q = h.qualification
+        for path in ("experiments/program_k_e2_physical.py", "experiments/program_k_e2_r0_evidence.py"):
+            with self.subTest(path=path), _slice1q_provenance_fixture() as (_, receipt, state):
+                del state["committed"][path]
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            sources = q.capture_sources_v2()
+            index = next(i for i, source in enumerate(sources) if source.path.endswith("physical.py")
+                         and source.path.startswith("experiments/"))
+            for changes in ({"blob_id": "b" * 40}, {"sha256": "c" * 64}, {"byte_length": 0}):
+                changed = sources[:index] + (replace(sources[index], **changes),) + sources[index + 1:]
+                with self.subTest(changes=changes), patch.object(q, "capture_sources_v2", return_value=changed):
+                    with self.assertRaises(ValueError):
+                        h.capture_run_provenance_v2(receipt)
+            for changed in (sources[:-1], sources[::-1], sources + (sources[-1],)):
+                with self.subTest(paths=tuple(v.path for v in changed)), \
+                        patch.object(q, "capture_sources_v2", return_value=changed):
+                    with self.assertRaises(ValueError):
+                        h.capture_run_provenance_v2(receipt)
+
+    def test_capture_environment_and_head_drift_fail_closed(self):
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            with patch.dict(os.environ, {"PYTHONDONTWRITEBYTECODE": "0"}), self.assertRaises(ValueError):
+                h.capture_run_provenance_v2(receipt)
+            with patch.object(h.sys, "dont_write_bytecode", False), self.assertRaises(ValueError):
+                h.capture_run_provenance_v2(receipt)
+            with patch.object(h.sys, "executable", ""), self.assertRaises(ValueError):
+                h.capture_run_provenance_v2(receipt)
+        for head_after in (2, 3, 4):
+            with self.subTest(head_after=head_after), _slice1q_provenance_fixture() as (_, receipt, state):
+                state["head_after"] = head_after
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+
+    def test_capture_rechecks_environment_and_working_bytes_after_first_observation(self):
+        for drift in ("runtime", "executable", "bytecode_flag", "environment", "working"):
+            with self.subTest(drift=drift), _slice1q_provenance_fixture() as (root, receipt, state), \
+                    _EvidenceExitStack() as stack:
+                runtime = h._runtime_identity()
+                if drift == "runtime":
+                    stack.enter_context(patch.object(h, "_runtime_identity",
+                        side_effect=(runtime, replace(runtime, python_version="changed"))))
+                elif drift == "working":
+                    original = Path.read_bytes
+                    target = root / h.qualification._V2_SOURCE_PATHS[0]
+                    reads = []
+                    def read(path):
+                        data = original(path)
+                        if path == target:
+                            reads.append(None)
+                            if len(reads) > 1:
+                                return data + b"changed after first byte observation\n"
+                        return data
+                    stack.enter_context(patch.object(Path, "read_bytes", autospec=True, side_effect=read))
+                else:
+                    stack.enter_context(patch.object(h.sys, "executable", h.sys.executable))
+                    stack.enter_context(patch.object(h.sys, "dont_write_bytecode", True))
+                    stack.enter_context(patch.dict(os.environ, {"PYTHONDONTWRITEBYTECODE": "1"}))
+                    def changed(_):
+                        if drift == "executable":
+                            h.sys.executable += ".changed"
+                        elif drift == "bytecode_flag":
+                            h.sys.dont_write_bytecode = False
+                        else:
+                            os.environ["PYTHONDONTWRITEBYTECODE"] = "0"
+                    state["on_blobs"] = changed
+                with self.assertRaises(ValueError):
+                    h.capture_run_provenance_v2(receipt)
+
+    def test_fresh_recheck_exact_equality_and_source_runtime_executable_head_status_drift(self):
+        for drift in ("source", "runtime", "executable", "head", "worktree", "index", "untracked"):
+            with self.subTest(drift=drift), _slice1q_provenance_fixture() as (root, receipt, state), \
+                    _EvidenceExitStack() as stack:
+                value = h.capture_run_provenance_v2(receipt)
+                before = state["head_reads"]
+                self.assertIs(h._recheck_provenance_v2(receipt, value), value)
+                self.assertGreater(state["head_reads"], before)
+                if drift == "source":
+                    path = "experiments/program_k_e2_r0_evidence.py"
+                    state["committed"][path] += b"new committed source\n"
+                    (root / path).write_bytes(state["committed"][path])
+                elif drift == "runtime":
+                    stack.enter_context(patch.object(h, "_runtime_identity",
+                        return_value=replace(value.runtime, python_version="changed")))
+                elif drift == "executable":
+                    stack.enter_context(patch.object(h.sys, "executable", value.executable + ".changed"))
+                elif drift == "head":
+                    state["head"] = "b" * 40
+                else:
+                    state["status"] = {"worktree": b" M tracked.py\n", "index": b"M  tracked.py\n",
+                                       "untracked": b"?? extra.py\n"}[drift]
+                with self.assertRaises(ValueError):
+                    h._recheck_provenance_v2(receipt, value)
+
+    def test_bridge_is_pure_and_preserves_exact_identity_order_objects_and_corpus(self):
+        q = h.qualification
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            value = h.capture_run_provenance_v2(receipt)
+            plan = SyntheticMaterializationTests.plan()
+            with patch.object(q, "_git", side_effect=AssertionError("Pure bridge has no Git")), \
+                    patch.object(q, "_blobs", side_effect=AssertionError("Pure bridge has no blobs")), \
+                    patch.object(q, "capture_sources", side_effect=AssertionError("Pure bridge has no V1 capture")), \
+                    patch.object(q, "capture_sources_v2", side_effect=AssertionError("Pure bridge has no capture")), \
+                    patch.object(h, "capture_run_provenance_v2", side_effect=AssertionError("No live capture")), \
+                    patch.object(Path, "read_bytes", side_effect=AssertionError("Pure bridge has no source IO")), \
+                    patch.object(h, "_runtime_identity", side_effect=AssertionError("Pure bridge has no runtime capture")):
+                expected = h._qualification_identity_v2(plan, value)
+                callback = h._source_recheck_callback_v2(receipt, value, plan)
+                self.assertTrue(callable(callback))
+            self.assertEqual(tuple(type(v) for v in expected[:3]),
+                             (records.ProtocolIdentity, records.CorpusIdentity, records.RuntimeIdentity))
+            self.assertEqual(expected[0], records.ProtocolIdentity(q._PROTOCOL, identity.PROTOCOL_SHA256,
+                                                                   q._BLOB, q._FREEZE))
+            indices = tuple(v.board.game_index for v in plan)
+            self.assertEqual(expected[1], records.CorpusIdentity("SYNTHETIC_I7", min(indices), max(indices) + 1,
+                len(plan), indices, identity.corpus_digest(plan[0].protocol_seed, len(plan), indices).hex(), ()))
+            self.assertIs(expected[2], value.runtime)
+            self.assertEqual(expected[3:], value.sources)
+            for actual, source in zip(expected[3:], value.sources):
+                self.assertIs(actual, source)
+
+    def test_bridge_rejects_runtime_mismatch_noncanonical_sources_and_wrong_plan(self):
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            value = h.capture_run_provenance_v2(receipt)
+            plan = SyntheticMaterializationTests.plan()
+            changed_runtime = tuple(replace(work, runtime=replace(value.runtime, architecture="changed"))
+                                    for work in plan)
+            with self.assertRaises(ValueError):
+                h._qualification_identity_v2(changed_runtime, value)
+            for sources in (value.sources[:-1], value.sources[::-1], value.sources + (value.sources[-1],)):
+                forged = replace(value)
+                object.__setattr__(forged, "sources", sources)
+                with self.subTest(sources=sources), self.assertRaises(ValueError):
+                    h._qualification_identity_v2(plan, forged)
+            for changed in ((), list(plan), tuple(replace(work, protocol_seed=b"x" * 32) for work in plan),
+                            tuple(replace(work, run_id="not-synthetic") for work in plan)):
+                with self.subTest(plan=changed), self.assertRaises(ValueError):
+                    h._qualification_identity_v2(changed, value)
+
+    def test_callback_freshly_reauthenticates_without_changing_identity_or_source_objects(self):
+        with _slice1q_provenance_fixture() as (_, receipt, state):
+            value = h.capture_run_provenance_v2(receipt)
+            plan = SyntheticMaterializationTests.plan()
+            expected = h._qualification_identity_v2(plan, value)
+            callback = h._source_recheck_callback_v2(receipt, value, plan)
+            before = state["head_reads"]
+            self.assertEqual(callback(), expected)
+            self.assertGreater(state["head_reads"], before)
+            self.assertIsNone(h.qualification._source_recheck_v2(expected, callback))
+            state["head"] = "b" * 40
+            with self.assertRaises(ValueError):
+                h.qualification._source_recheck_v2(expected, callback)
+
+    def test_bridge_output_is_accepted_unchanged_by_existing_validator_and_rf02_writer(self):
+        q = h.qualification
+        with _slice1q_provenance_fixture() as (_, receipt, _), tempfile.TemporaryDirectory() as directory:
+            value = h.capture_run_provenance_v2(receipt)
+            plan, profile, envelope = SyntheticMaterializationTests.plan(), self.profile(), SyntheticMaterializationTests.envelope()
+            expected = h._qualification_identity_v2(plan, value)
+            callback = h._source_recheck_callback_v2(receipt, value, plan)
+            self.assertIs(q._validate_identity_v2(plan, expected, profile, envelope, callback), expected)
+            seal = q._write_identity_v2(directory, plan, expected, profile, envelope, source_recheck=callback)
+            reader = h.store.FramedStreamPullReader(directory, q.IDENTITY_STREAM,
+                physical.context_for(q.IDENTITY_STREAM, profile.sha256), max_payload_bytes=envelope.max_payload_bytes)
+            observed = []
+            while reader.peek_key() is not None:
+                row = reader.pull()
+                self.assertEqual(row.key, (len(observed),))
+                self.assertEqual(row.logical_bytes, records.encode(expected[len(observed)]))
+                observed.append(row.record)
+            self.assertEqual(reader.close(), seal)
+            self.assertEqual(tuple(observed), expected)
+            self.assertEqual(tuple(path.name for path in Path(directory).iterdir()), ("qualification_identity.pkf",))
+
+    def test_existing_before_after_identity_checks_reject_live_callback_drift_and_preserve_bytes(self):
+        q = h.qualification
+        for after_write in (False, True):
+            with self.subTest(after_write=after_write), _slice1q_provenance_fixture() as (_, receipt, state), \
+                    tempfile.TemporaryDirectory() as directory:
+                value = h.capture_run_provenance_v2(receipt)
+                plan, profile, envelope = SyntheticMaterializationTests.plan(), self.profile(), SyntheticMaterializationTests.envelope()
+                expected = h._qualification_identity_v2(plan, value)
+                callback = h._source_recheck_callback_v2(receipt, value, plan)
+                calls = []
+                def recheck():
+                    calls.append(None)
+                    if len(calls) == (2 if after_write else 1):
+                        state["head"] = "b" * 40
+                    return callback()
+                with self.assertRaises(ValueError):
+                    q._write_identity_v2(directory, plan, expected, profile, envelope, source_recheck=recheck)
+                target = Path(directory) / "qualification_identity.pkf"
+                self.assertEqual(target.exists(), after_write)
+                if after_write:
+                    self.assertGreater(target.stat().st_size, 0)
+
+    def test_existing_identity_validator_rejects_changed_corpus_or_changed_source_tuple(self):
+        q = h.qualification
+        with _slice1q_provenance_fixture() as (_, receipt, _):
+            value = h.capture_run_provenance_v2(receipt)
+            plan, profile, envelope = SyntheticMaterializationTests.plan(), self.profile(), SyntheticMaterializationTests.envelope()
+            expected = h._qualification_identity_v2(plan, value)
+            callback = h._source_recheck_callback_v2(receipt, value, plan)
+            other_plan = SyntheticMaterializationTests.plan(2)
+            changed_corpus = h._qualification_identity_v2(other_plan, value)
+            with self.assertRaises(ValueError):
+                q._validate_identity_v2(plan, changed_corpus, profile, envelope, callback)
+            source = replace(expected[-1], sha256="f" * 64)
+            changed_source = expected[:-1] + (source,)
+            with self.assertRaises(ValueError):
+                q._validate_identity_v2(plan, changed_source, profile, envelope, callback)
+
+    def test_historical_capture_and_recheck_never_activate_v2_or_redefine_v1_sources(self):
+        q = h.qualification
+        historical_paths = tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL, q._REPAIR_TEST)
+                                          + q._E2 + q._R0_SOURCE_PATHS)))
+        with _provenance_fixture() as (_, receipt, _), _slice1q_v1_guards():
+            value = h.capture_run_provenance(receipt)
+            self.assertEqual(tuple(v.path for v in value.sources), historical_paths)
+            self.assertIs(h._recheck_provenance(receipt, value), value)
+            self.assertEqual(tuple(v.path for v in q.capture_sources()), historical_paths)
+            self.assertNotIn("experiments/program_k_e2_physical.py", historical_paths)
+            self.assertNotIn("experiments/program_k_e2_r0_evidence.py", historical_paths)
+
+    def test_historical_r0a_launcher_outer_finish_and_manifest_remain_v1_only(self):
+        with _slice1q_v1_guards(), _fake_r0a_launch() as (root, receipt, fixtures, calls):
+            output = root / "results" / "slice1q-v1-only"
+            manifest = h.launch_r0a(receipt.path, output, tuple(v[1] for v in fixtures),
+                                   authorization=FixtureAuthorization("R0_A"))
+            self.assertEqual(len(calls), 18)
+            self.assertEqual(manifest["schema"], "program-k-e2-r0-run/v1")
+            self.assertEqual(h.validate_existing_run(output, receipt), manifest)
+            self.assertFalse(list(output.rglob("*.pkf")))
+            V1MetadataSeamCompatibilityTests().test_existing_v1_schema_owners_retain_exact_identifiers()
+
+    def test_historical_r0b_launcher_never_activates_v2_capture_or_identity(self):
+        with _slice1q_v1_guards():
+            R0BLauncherAssemblyTests.setUpClass()
+            fixture_test = R0BLauncherAssemblyTests()
+            fixture_test.test_public_r0b_connects_frozen_inputs_finalization_reaped_monitor_and_final_source_check()

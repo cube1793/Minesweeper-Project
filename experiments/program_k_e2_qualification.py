@@ -152,6 +152,78 @@ def capture_sources():
                  sha256(current[path][1]).hexdigest(), len(current[path][1])) for path in paths)
 
 
+# V2 owns its source closure independently of historical I7 candidate capture.
+# The two remediation modules own physical transport and canonical evidence.
+# Package initialization and core_engine's two local imports complete the
+# production import closure; the remaining owners reuse historical identities.
+_V2_SOURCE_PATHS = tuple(sorted(set(
+    _PROTECTED + ("benchmark_board.py", _PROTOCOL, _REPAIR_TEST) + _E2 + _R0_SOURCE_PATHS
+    + ("board_analyzer.py", "board_snapshot.py", "experiments/__init__.py",
+       "experiments/program_k_e2_physical.py", "experiments/program_k_e2_r0_evidence.py"))))
+
+
+def _validate_sources_v2(sources):
+    """Require the exact V2 source vocabulary without capturing live state."""
+    _need(type(sources) is tuple and bool(sources)
+          and all(type(value) is records.SourceBlobIdentity for value in sources),
+          "V2_SOURCE_IDENTITIES_REQUIRED")
+    for value in sources:
+        records.SourceBlobIdentity.__post_init__(value)
+    paths = tuple(value.path for value in sources)
+    _need(paths == _V2_SOURCE_PATHS and paths == tuple(sorted(set(paths))),
+          "V2_SOURCE_PATH_COVERAGE_OR_ORDER")
+    return sources
+
+
+def capture_sources_v2(*, expected_head=None):
+    """Authenticate only committed-clean V2 sources; no candidate exceptions.
+
+    The optional HEAD binds an enclosing live provenance capture to this same
+    snapshot. Working-file byte authentication belongs to that live owner.
+    Historical capture_sources retains its separate I7 contract unchanged.
+    """
+    head = _git("rev-parse", "HEAD").strip().decode("ascii")
+    _need(len(head) == 40 and all(value in "0123456789abcdef" for value in head),
+          "V2_COMMITTED_HEAD_REQUIRED")
+    _need(expected_head is None or (type(expected_head) is str and expected_head == head),
+          "V2_SOURCE_HEAD_CHANGED")
+    _need(not _git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "V2_COMMITTED_CLEAN_SOURCE_REQUIRED")
+    paths = _V2_SOURCE_PATHS
+    _need(type(paths) is tuple and paths == tuple(sorted(set(paths))),
+          "V2_SOURCE_PATH_COVERAGE_OR_ORDER")
+    refs = tuple(head + ":" + path for path in paths)
+    refs += tuple(_E1 + ":" + path for path in _PROTECTED)
+    refs += (_FREEZE + ":" + _PROTOCOL,)
+    blobs = _blobs(refs)
+    _need(type(blobs) is tuple and len(blobs) == len(refs), "V2_SOURCE_BLOB_COVERAGE")
+    for blob in blobs:
+        _need(type(blob) is tuple and len(blob) == 2
+              and type(blob[0]) is str and type(blob[1]) is bytes,
+              "V2_SOURCE_BLOB_REQUIRED")
+        oid, data = blob
+        _need(sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest() == oid,
+              "V2_SOURCE_BLOB_IDENTITY_DRIFT")
+    current = dict(zip(paths, blobs[:len(paths)]))
+    for index, path in enumerate(_PROTECTED):
+        _need(current[path] == blobs[len(paths) + index], "E1_CORE_IDENTITY_DRIFT")
+    protocol_blob = blobs[-1]
+    _need(current[_PROTOCOL] == protocol_blob and protocol_blob[0] == _BLOB,
+          "FROZEN_PROTOCOL_IDENTITY_DRIFT")
+    identity.validate_protocol_bytes(protocol_blob[1])
+    amendment = current[_AMENDMENT][1]
+    _need(len(amendment) == _AMENDMENT_BYTE_LENGTH
+          and sha256(amendment).hexdigest() == _AMENDMENT_SHA256,
+          "FROZEN_AMENDMENT_IDENTITY_DRIFT")
+    sources = _validate_sources_v2(tuple(records.SourceBlobIdentity(
+        path, current[path][0], sha256(current[path][1]).hexdigest(), len(current[path][1]))
+        for path in paths))
+    _need(_git("rev-parse", "HEAD").strip().decode("ascii") == head
+          and not _git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "V2_SOURCE_CHANGED_DURING_CAPTURE")
+    return sources
+
+
 def _plan(plan):
     operational.validate_work_plan(plan)
     _need(plan[0].protocol_seed.hex() == identity.PROTOCOL_SHA256, "PROTOCOL_SEED_MISMATCH")

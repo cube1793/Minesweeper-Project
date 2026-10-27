@@ -1258,5 +1258,185 @@ class V2QualificationTests(unittest.TestCase):
             self.assertFalse(list(Path(fixture.root).glob("*.pkf")))
 
 
+class V2SourceCaptureTests(unittest.TestCase):
+    """Synthetic Git observations never authorize the dirty review checkout."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Immutable accepted authorities are fixture data, not live admission.
+        cls.protocol_bytes = q._git("cat-file", "blob", q._BLOB)
+        cls.amendment_bytes = q._git("show", "HEAD:" + q._AMENDMENT)
+
+    @contextmanager
+    def capture(self, *, statuses=(b"",), heads=("a" * 40,), mutation=None):
+        observations = {"commands": [], "refs": [], "head": 0, "status": 0}
+        payloads = {path: ("synthetic committed " + path + "\n").encode("ascii")
+                    for path in q._V2_SOURCE_PATHS}
+        payloads[q._PROTOCOL] = self.protocol_bytes
+        payloads[q._AMENDMENT] = self.amendment_bytes
+
+        def git(*args, data=None):
+            observations["commands"].append(args)
+            if args == ("rev-parse", "HEAD"):
+                ordinal = observations["head"]
+                observations["head"] += 1
+                return heads[min(ordinal, len(heads) - 1)].encode("ascii") + b"\n"
+            if args == ("status", "--porcelain=v1", "--untracked-files=all"):
+                ordinal = observations["status"]
+                observations["status"] += 1
+                return statuses[min(ordinal, len(statuses) - 1)]
+            if args == ("ls-files", "--", q._E2[-1]):
+                return q._E2[-1].encode("ascii") + b"\n"
+            raise AssertionError("No source capture write or unrelated Git query: " + repr(args))
+
+        def blobs(refs):
+            observations["refs"].append(refs)
+            values = []
+            for ref in refs:
+                commit, path = ref.split(":", 1)
+                data = payloads[path]
+                if mutation == "protected" and commit == heads[0] and path == q._PROTECTED[0]:
+                    data += b"changed protected source\n"
+                elif mutation == "protocol" and path == q._PROTOCOL:
+                    data += b"changed frozen protocol\n"
+                elif mutation == "amendment" and path == q._AMENDMENT:
+                    data += b"changed frozen amendment\n"
+                oid = q.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+                if mutation == "blob" and path == "experiments/program_k_e2_physical.py":
+                    oid = "f" * 40
+                values.append((oid, data))
+            if mutation == "missing":
+                values.pop()
+            elif mutation == "substituted":
+                position = q._V2_SOURCE_PATHS.index("experiments/program_k_e2_r0_evidence.py")
+                oid, data = values[position]
+                values[position] = (oid, data + b"substituted source\n")
+            return tuple(values)
+
+        with patch.object(q, "_git", side_effect=git), \
+                patch.object(q, "_blobs", side_effect=blobs), \
+                patch.object(q, "capture_sources", side_effect=AssertionError("No V1 capture")):
+            yield observations, payloads
+
+    def test_exact_committed_head_blob_sha_length_and_canonical_source_closure(self):
+        with self.capture() as (observed, payloads):
+            sources = q.capture_sources_v2(expected_head="a" * 40)
+        paths = tuple(value.path for value in sources)
+        historical = tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL,
+            q._REPAIR_TEST) + q._E2 + q._R0_SOURCE_PATHS)))
+        additions = ("board_analyzer.py", "board_snapshot.py", "experiments/__init__.py",
+                     "experiments/program_k_e2_physical.py", "experiments/program_k_e2_r0_evidence.py")
+        self.assertEqual(paths, tuple(sorted(historical + additions)))
+        self.assertEqual(paths, tuple(sorted(set(paths))))
+        self.assertEqual(observed["refs"][0][:len(paths)], tuple("a" * 40 + ":" + path for path in paths))
+        self.assertEqual(observed["head"], 2)
+        self.assertEqual(observed["status"], 2)
+        for value in sources:
+            data = payloads[value.path]
+            self.assertIs(type(value), records.SourceBlobIdentity)
+            self.assertEqual(value.blob_id,
+                q.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest())
+            self.assertEqual(value.sha256, sha256(data).hexdigest())
+            self.assertEqual(value.byte_length, len(data))
+        self.assertIs(q._validate_sources_v2(sources), sources)
+
+    def test_dirty_index_worktree_untracked_and_historical_candidate_exceptions_rejected(self):
+        for status in (b" M core_engine.py\n", b"M  experiments/program_k_e2_physical.py\n",
+                b"?? unrelated.py\n", b"?? experiments/program_k_e2_qualification.py\n",
+                b"?? tests/test_program_k_e2_qualification.py\n",
+                b" M tests/test_program_k_e2_operational.py\n"):
+            with self.subTest(status=status), self.capture(statuses=(status,)) as (observed, _):
+                with self.assertRaisesRegex(q.QualificationError, "V2_COMMITTED_CLEAN_SOURCE_REQUIRED"):
+                    q.capture_sources_v2()
+                self.assertEqual(observed["refs"], [])
+
+    def test_expected_head_and_midcapture_head_or_status_drift_fail_closed(self):
+        with self.capture() as (observed, _):
+            with self.assertRaisesRegex(q.QualificationError, "V2_SOURCE_HEAD_CHANGED"):
+                q.capture_sources_v2(expected_head="b" * 40)
+            self.assertEqual(observed["refs"], [])
+        for options in ({"heads": ("a" * 40, "b" * 40)},
+                        {"statuses": (b"", b" M experiments/program_k_e2_r0_evidence.py\n")},
+                        {"statuses": (b"", b"M  core_engine.py\n")},
+                        {"statuses": (b"", b"?? unexpected.py\n")}):
+            with self.subTest(options=options), self.capture(**options):
+                with self.assertRaisesRegex(q.QualificationError, "V2_SOURCE_CHANGED_DURING_CAPTURE"):
+                    q.capture_sources_v2()
+
+    def test_invalid_head_is_not_a_committed_identity(self):
+        for head in ("", "a" * 39, "A" * 40, "g" * 40):
+            with self.subTest(head=head), self.capture(heads=(head,)):
+                with self.assertRaisesRegex(q.QualificationError, "V2_COMMITTED_HEAD_REQUIRED"):
+                    q.capture_sources_v2()
+
+    def test_missing_substituted_and_drifted_v2_source_blobs_fail_closed(self):
+        for mutation, reason in (("missing", "V2_SOURCE_BLOB_COVERAGE"),
+                                 ("substituted", "V2_SOURCE_BLOB_IDENTITY_DRIFT"),
+                                 ("blob", "V2_SOURCE_BLOB_IDENTITY_DRIFT")):
+            with self.subTest(mutation=mutation), self.capture(mutation=mutation):
+                with self.assertRaisesRegex(q.QualificationError, reason):
+                    q.capture_sources_v2()
+        with self.capture(), patch.object(q, "_blobs", side_effect=q.QualificationError("SOURCE_BLOB_REQUIRED")):
+            with self.assertRaisesRegex(q.QualificationError, "SOURCE_BLOB_REQUIRED"):
+                q.capture_sources_v2()
+
+    def test_protected_protocol_and_amendment_continuity_remain_exact(self):
+        for mutation, reason in (("protected", "E1_CORE_IDENTITY_DRIFT"),
+                                 ("protocol", "FROZEN_PROTOCOL_IDENTITY_DRIFT"),
+                                 ("amendment", "FROZEN_AMENDMENT_IDENTITY_DRIFT")):
+            with self.subTest(mutation=mutation), self.capture(mutation=mutation):
+                with self.assertRaisesRegex(q.QualificationError, reason):
+                    q.capture_sources_v2()
+        with self.capture(), patch.object(identity, "validate_protocol_bytes",
+                wraps=identity.validate_protocol_bytes) as validate:
+            q.capture_sources_v2()
+            validate.assert_called_once_with(self.protocol_bytes)
+
+    def test_source_vocabulary_rejects_missing_substitution_order_duplicate_and_forgery(self):
+        with self.capture():
+            sources = q.capture_sources_v2()
+        physical_index = q._V2_SOURCE_PATHS.index("experiments/program_k_e2_physical.py")
+        substituted = replace(sources[physical_index], path="experiments/substituted.py")
+        cases = (sources[:physical_index] + sources[physical_index + 1:],
+                 sources[:physical_index] + (substituted,) + sources[physical_index + 1:],
+                 tuple(reversed(sources)), sources + (sources[-1],), list(sources), (object(),))
+        for values in cases:
+            with self.subTest(values=type(values).__name__), self.assertRaises(q.QualificationError):
+                q._validate_sources_v2(values)
+        forged = object.__new__(records.SourceBlobIdentity)
+        for name, value in (("path", "../bad"), ("blob_id", "a" * 40),
+                            ("sha256", "b" * 64), ("byte_length", 1)):
+            object.__setattr__(forged, name, value)
+        with self.assertRaises(ValueError):
+            q._validate_sources_v2((forged,) + sources[1:])
+
+    def test_capture_performs_no_working_file_write_or_git_mutation(self):
+        with self.capture() as (observed, _), ExitStack() as stack:
+            for method in ("read_bytes", "write_bytes", "write_text", "open", "unlink", "mkdir"):
+                stack.enter_context(patch.object(Path, method, side_effect=AssertionError("No file operation")))
+            stack.enter_context(patch.object(q.subprocess, "run", side_effect=AssertionError("No unowned subprocess")))
+            q.capture_sources_v2(expected_head="a" * 40)
+        self.assertEqual(observed["commands"], [
+            ("rev-parse", "HEAD"), ("status", "--porcelain=v1", "--untracked-files=all"),
+            ("rev-parse", "HEAD"), ("status", "--porcelain=v1", "--untracked-files=all")])
+
+    def test_historical_capture_keeps_its_own_path_set_and_never_calls_v2(self):
+        from experiments import program_k_e2_r0_harness as harness
+        historical_capture = q.capture_sources
+        with self.capture(), ExitStack() as stack:
+            stack.enter_context(patch.object(q, "capture_sources_v2", side_effect=AssertionError("No V2 capture")))
+            stack.enter_context(patch.object(q, "_validate_sources_v2", side_effect=AssertionError("No V2 vocabulary")))
+            for name in ("capture_run_provenance_v2", "_recheck_provenance_v2",
+                         "_qualification_identity_v2", "_source_recheck_callback_v2"):
+                stack.enter_context(patch.object(harness, name, side_effect=AssertionError("No V2 live owner")))
+            stack.enter_context(patch.object(Path, "read_bytes", return_value=b"historical candidate bytes\n"))
+            values = historical_capture()
+        paths = tuple(value.path for value in values)
+        self.assertEqual(paths, tuple(sorted(set(q._PROTECTED + ("benchmark_board.py", q._PROTOCOL,
+            q._REPAIR_TEST) + q._E2 + q._R0_SOURCE_PATHS))))
+        self.assertFalse(set(paths) & {"board_analyzer.py", "board_snapshot.py", "experiments/__init__.py",
+            "experiments/program_k_e2_physical.py", "experiments/program_k_e2_r0_evidence.py"})
+
+
 if __name__ == "__main__":
     unittest.main()

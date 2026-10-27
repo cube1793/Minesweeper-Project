@@ -283,6 +283,102 @@ def _recheck_provenance(receipt, provenance):
     return provenance
 
 
+def capture_run_provenance_v2(receipt):
+    """Authenticate live V2 owners without starting a run or changing V1 facts."""
+    _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+    _need(load_selection_receipt(receipt.path) == receipt, "SELECTION_RECEIPT_CHANGED")
+    _need(sys.dont_write_bytecode is True and os.environ.get("PYTHONDONTWRITEBYTECODE") == "1",
+          "PYTHONDONTWRITEBYTECODE_REQUIRED")
+    runtime, executable = _runtime_identity(), sys.executable
+    head = qualification._git("rev-parse", "HEAD").strip().decode("ascii")
+    _need(not qualification._git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "COMMITTED_CLEAN_SOURCE_REQUIRED")
+    for ancestor in (SELECTION_SOURCE_HEAD, SETUP_REPAIR_HEAD):
+        qualification._git("merge-base", "--is-ancestor", ancestor, head)
+    sources = qualification.capture_sources_v2(expected_head=head)
+    qualification._validate_sources_v2(sources)
+    blobs = qualification._blobs(tuple(head + ":" + value.path for value in sources))
+    _need(len(blobs) == len(sources), "SOURCE_BLOB_CHANGED")
+    working = []
+    for source, (blob, data) in zip(sources, blobs):
+        _need((blob, sha256(data).hexdigest(), len(data)) ==
+              (source.blob_id, source.sha256, source.byte_length), "SOURCE_BLOB_CHANGED")
+        raw = (qualification._ROOT / source.path).read_bytes()
+        if source.path == qualification._AMENDMENT:
+            _need(len(raw) == qualification._AMENDMENT_BYTE_LENGTH
+                  and sha256(raw).hexdigest() == qualification._AMENDMENT_SHA256,
+                  "FROZEN_WORKING_AMENDMENT_DRIFT")
+        elif source.path == qualification._PROTOCOL:
+            identity.validate_protocol_bytes(raw)
+        # Keep the proven V1 raw/blob boundary: only CRLF normalization is allowed.
+        _need(raw == data or raw.replace(b"\r\n", b"\n") == data, "WORKING_SOURCE_IDENTITY_DRIFT")
+        working.append((source.path, sha256(raw).hexdigest(), len(raw), raw != data))
+    for path, digest, length, _ in working:
+        raw = (qualification._ROOT / path).read_bytes()
+        _need((sha256(raw).hexdigest(), len(raw)) == (digest, length),
+              "SOURCE_CHANGED_DURING_CAPTURE")
+    _need(qualification._git("rev-parse", "HEAD").strip().decode("ascii") == head
+          and not qualification._git("status", "--porcelain=v1", "--untracked-files=all").strip(),
+          "SOURCE_CHANGED_DURING_CAPTURE")
+    _need(load_selection_receipt(receipt.path) == receipt, "SELECTION_RECEIPT_CHANGED")
+    _need(_runtime_identity() == runtime and sys.executable == executable
+          and sys.dont_write_bytecode is True and os.environ.get("PYTHONDONTWRITEBYTECODE") == "1",
+          "V2_PYTHON_ENVIRONMENT_CHANGED")
+    return RunProvenance(SELECTION_SOURCE_HEAD, head, sources, tuple(working),
+                         runtime, executable, sys.dont_write_bytecode)
+
+
+def _recheck_provenance_v2(receipt, provenance):
+    """Fresh committed-source, working-byte and runtime authentication."""
+    _need(type(provenance) is RunProvenance, "V2_RUN_PROVENANCE_REQUIRED")
+    RunProvenance.__post_init__(provenance)
+    qualification._validate_sources_v2(provenance.sources)
+    _need(capture_run_provenance_v2(receipt) == provenance, "V2_SOURCE_CHANGED_DURING_RUN")
+    return provenance
+
+
+def _qualification_identity_v2(plan, provenance):
+    """Pure composition from captured facts; the Slice-1P seam owns validation.
+
+    Only identity-scope plan preconditions are repeated here: historical _plan
+    also observes the live platform, which does not belong in this pure bridge.
+    No committed-source, runtime, profile or evidence capture occurs here.
+    """
+    _need(type(provenance) is RunProvenance, "V2_RUN_PROVENANCE_REQUIRED")
+    RunProvenance.__post_init__(provenance)
+    qualification._validate_sources_v2(provenance.sources)
+    operational.validate_work_plan(plan)
+    _need(plan[0].runtime == provenance.runtime, "V2_PLAN_PROVENANCE_RUNTIME_MISMATCH")
+    _need(plan[0].protocol_seed.hex() == identity.PROTOCOL_SHA256, "PROTOCOL_SEED_MISMATCH")
+    _need(plan[0].run_id.startswith("synthetic-i7-"), "SYNTHETIC_I7_IDENTITY_REQUIRED")
+    indices = tuple(work.board.game_index for work in plan)
+    _need(all(not (1_000_000_000 <= index < 1_001_100_000 or 2_010_000 <= index < 2_010_100)
+              for index in indices), "RESEARCH_OR_HOLDOUT_DOMAIN_FORBIDDEN")
+    corpus = records.CorpusIdentity("SYNTHETIC_I7", min(indices), max(indices) + 1,
+        len(plan), indices, identity.corpus_digest(plan[0].protocol_seed, len(plan), indices).hex(), ())
+    return (records.ProtocolIdentity(qualification._PROTOCOL, identity.PROTOCOL_SHA256,
+                qualification._BLOB, qualification._FREEZE), corpus, provenance.runtime) + provenance.sources
+
+
+def _source_recheck_callback_v2(receipt, provenance, plan):
+    """Supply the same zero-argument live seam to all accepted Slice-1P owners.
+
+    Creating the callback only composes captured facts. Each invocation freshly
+    authenticates the receipt, committed V2 source, working bytes and runtime.
+    It never launches a workload or persists outer R0 evidence.
+    """
+    _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+    AcceptedSelectionReceipt.__post_init__(receipt)
+    expected = _qualification_identity_v2(plan, provenance)
+
+    def recheck():
+        observed = _qualification_identity_v2(plan, _recheck_provenance_v2(receipt, provenance))
+        _need(observed == expected, "V2_QUALIFICATION_IDENTITY_CHANGED")
+        return observed
+
+    return recheck
+
+
 def build_selected_work_plan(receipt, run_id):
     """Pure own-corpus validation; no board generation or corpus search."""
     _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
