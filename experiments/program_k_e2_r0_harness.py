@@ -3527,6 +3527,172 @@ def _collect_r0a_concurrency_v2(work, anchor, envelope, profile, *, cancel=None,
         raise
 
 
+@dataclass(frozen=True, slots=True, init=False)
+class _R0AObservationsFileV2:
+    """Detached disk-readback result, never an outer run publication authority."""
+    observations: evidence.R0AObservationsV2
+    relative_path: str
+    byte_length: int
+    sha256: str
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("R0-A observations results belong to successful assembly/readback only.")
+
+    def __post_init__(self):
+        _need(type(self.observations) is evidence.R0AObservationsV2, "R0A_OBSERVATIONS_FILE_VALUE")
+        evidence.R0AObservationsV2.__post_init__(self.observations)
+        _need(type(self.relative_path) is str and self.relative_path == "r0a-observations-v2.json",
+              "R0A_OBSERVATIONS_FILE_PATH")
+        _integer(self.byte_length, 1)
+        _need(self.byte_length <= physical.MAX_PAYLOAD_BYTES, "R0A_OBSERVATIONS_FILE_BOUND")
+        _need(type(self.sha256) is str and len(self.sha256) == 64
+              and all(char in "0123456789abcdef" for char in self.sha256), "R0A_OBSERVATIONS_FILE_HASH")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0-A observations results are private invocation-local facts.")
+
+
+def _r0a_observations_path_v2(anchor, output_path):
+    """The already-preflighted anchor has one explicit, fresh observations child."""
+    root, path = Path(anchor).absolute(), Path(output_path).absolute()
+    _need(path.name == "r0a-observations-v2.json" and path.parent == root,
+          "R0A_OBSERVATIONS_OUTPUT_PATH")
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return path
+    raise HarnessError("R0A_OBSERVATIONS_OUTPUT_ALREADY_EXISTS")
+
+
+def _r0a_observations_result_v2(value, work, envelope):
+    """Bind a collector result to this invocation without rebuilding its facts."""
+    _need(type(value) is evidence.R0AConcurrencyEvidenceV2, "R0A_OBSERVATIONS_CONCURRENCY_TYPE")
+    evidence.R0AConcurrencyEvidenceV2.__post_init__(value)
+    _need(value.concurrency == envelope.concurrency and value.envelope == envelope
+          and value.run_id == work[0].run_id, "R0A_OBSERVATIONS_CONCURRENCY_BINDING")
+    for component in value.components:
+        route = operational.R0Component(component.component)
+        for unit in component.units:
+            cases = (("target", unit.target),) if unit.setup is None else (
+                ("setup", unit.setup), ("target", unit.target))
+            for phase, case in cases:
+                _need(case.archive.relative_directory == operational._r0_case_path_v2(
+                    envelope.concurrency, route, unit.position, phase), "R0A_OBSERVATIONS_CASE_PATH")
+    return value
+
+
+def _assemble_r0a_observations_v2(receipt, provenance, plan, work_by_concurrency,
+                                   envelopes, profile, anchor, output_path, *, live_recheck,
+                                   cancel=None, progress=None):
+    """Assemble supplied R0-A facts; no capture, materialization or run authorization.
+
+    The future public owner supplies live authentication through seven mandatory
+    zero-argument gates. A normal callback return is sufficient; no returned
+    token is evidence. Any failure preserves all existing bytes and returns no
+    successful result, including failures after observations publication.
+    """
+    _need(cancel is None or (callable(getattr(cancel, "is_set", None))
+                            and callable(getattr(cancel, "set", None))), "CANCELLATION_TOKEN")
+    cancel = threading.Event() if cancel is None else cancel
+
+    def checkpoint():
+        _need(not cancel.is_set(), "CANCELLED")
+        live_recheck()
+        _need(not cancel.is_set(), "CANCELLED")
+
+    try:
+        _need(not cancel.is_set(), "CANCELLED")
+        _need(callable(live_recheck), "R0A_OBSERVATIONS_LIVE_RECHECK")
+        _need(progress is None or callable(progress), "R0A_OBSERVATIONS_PROGRESS_CALLBACK")
+        _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+        AcceptedSelectionReceipt.__post_init__(receipt)
+        selection_digest = sha256(receipt.canonical_bytes).hexdigest()
+        _need(selection_digest == SELECTION_RECEIPT_SHA256, "SELECTION_RECEIPT_SHA256")
+        _need(type(provenance) is RunProvenance, "V2_RUN_PROVENANCE_REQUIRED")
+        RunProvenance.__post_init__(provenance)
+        qualification._validate_sources_v2(provenance.sources)
+        provenance_sha256 = evidence.provenance_digest_v2(provenance.selection_source_head,
+            provenance.r0_harness_source_head, provenance.sources, provenance.working_files,
+            provenance.runtime, provenance.executable, provenance.dont_write_bytecode)
+        _need(type(plan) is readiness.R0APlan, "R0A_OBSERVATIONS_PLAN_TYPE")
+        readiness.R0APlan.__post_init__(plan)
+        _need(plan.protocol_seed == bytes.fromhex(identity.PROTOCOL_SHA256), "R0A_OBSERVATIONS_FROZEN_SEED")
+        physical.require_qualified_profile(profile)
+        profile_sha256 = profile.sha256.hex()
+        _need(type(work_by_concurrency) is tuple and len(work_by_concurrency) == 3,
+              "R0A_OBSERVATIONS_WORK_TUPLE")
+        _need(type(envelopes) is tuple and len(envelopes) == 3, "R0A_OBSERVATIONS_ENVELOPES")
+        for envelope in envelopes:
+            operational._envelope(envelope)
+        _need(tuple(envelope.concurrency for envelope in envelopes) == (1, 2, 4),
+              "R0A_OBSERVATIONS_CONCURRENCY_ORDER")
+        for work, envelope in zip(work_by_concurrency, envelopes):
+            _r0a_collector_inputs_v2(work, envelope, profile, cancel, progress)
+            _need(tuple(item.board.game_index for item in work) == plan.ordered_indices
+                  and all(item.protocol_seed == plan.protocol_seed and item.runtime == provenance.runtime
+                          for item in work), "R0A_OBSERVATIONS_WORK_BINDING")
+        boards = tuple(item.board for item in work_by_concurrency[0])
+        _need(all(tuple(item.board for item in work) == boards for work in work_by_concurrency),
+              "R0A_OBSERVATIONS_BOARD_DRIFT")
+        _need(len({work[0].run_id for work in work_by_concurrency}) == 3,
+              "R0A_OBSERVATIONS_DISTINCT_RUN_IDS")
+        components = tuple(operational.R0Component(name) for name in evidence.R0A_COMPONENTS_V2)
+        for envelope in envelopes:
+            anchor = _r0a_collector_paths_v2(anchor, envelope, components)
+        output_path = _r0a_observations_path_v2(anchor, output_path)
+
+        checkpoint()  # 1: before c1.
+        concurrencies = []
+        for work, envelope in zip(work_by_concurrency, envelopes):
+            adapter = None if progress is None else (
+                lambda component, fact, c=envelope.concurrency: progress(c, component, fact))
+            _need(not cancel.is_set(), "CANCELLED")
+            collected = _collect_r0a_concurrency_v2(work, anchor, envelope, profile,
+                                                  cancel=cancel, progress=adapter)
+            checkpoint()  # 2, 3, 4: immediately after c1, c2, c4 respectively.
+            concurrencies.append(_r0a_observations_result_v2(collected, work, envelope))
+        plan_evidence = evidence.R0APlanEvidenceV2(plan.protocol_seed,
+            tuple(item.board for item in work_by_concurrency[0]))
+        _need(tuple(board.game_index for board in plan_evidence.boards) == plan.ordered_indices,
+              "R0A_OBSERVATIONS_PLAN_BINDING")
+        protocol = records.ProtocolIdentity(identity.PROTOCOL_PATH, identity.PROTOCOL_SHA256,
+            identity.PROTOCOL_BLOB_ID, identity.FREEZE_COMMIT)
+        value = evidence.R0AObservationsV2(evidence.R0A_OBSERVATIONS_V2, selection_digest,
+            provenance.r0_harness_source_head, provenance_sha256, protocol, readiness.AmendmentProvenance(),
+            provenance.runtime, plan_evidence, profile.canonical_bytes, profile_sha256,
+            evidence.SizeBasisV2(profile_sha256), tuple(concurrencies))
+        encoded = evidence.encode_r0a_observations_v2(value)
+        checkpoint()  # 5: complete canonical bytes, before exclusive publication.
+        _r0a_collector_paths_v2(anchor, envelopes[0], ())
+        _r0a_observations_path_v2(anchor, output_path)
+        _need(not cancel.is_set(), "CANCELLED")
+        _exclusive_bytes(output_path, encoded)
+        persisted = Path(output_path).read_bytes()
+        _need(0 < len(persisted) <= physical.MAX_PAYLOAD_BYTES, "R0A_OBSERVATIONS_FILE_BOUND")
+        _need(persisted == encoded, "R0A_OBSERVATIONS_DISK_BYTES")
+        decoded = evidence.decode_r0a_observations_v2(persisted,
+            expected_profile_sha256=profile_sha256, expected_provenance_sha256=provenance_sha256,
+            expected_source_head=provenance.r0_harness_source_head,
+            expected_selection_receipt_sha256=selection_digest, expected_plan=plan_evidence,
+            expected_runtime=provenance.runtime)
+        _need(decoded == value, "R0A_OBSERVATIONS_DECODE_BINDING")
+        _need(evidence.encode_r0a_observations_v2(decoded) == persisted, "R0A_OBSERVATIONS_REENCODE_BINDING")
+        checkpoint()  # 6: independent disk decode/readback completed.
+        result = object.__new__(_R0AObservationsFileV2)
+        for name, item in (("observations", decoded), ("relative_path", "r0a-observations-v2.json"),
+                           ("byte_length", len(persisted)), ("sha256", sha256(persisted).hexdigest())):
+            object.__setattr__(result, name, item)
+        _R0AObservationsFileV2.__post_init__(result)
+        checkpoint()  # 7: fully validated carrier, immediately before return.
+        return result
+    except BaseException:
+        try:
+            cancel.set()
+        except BaseException:
+            pass  # Preserve the original failure even if a supplied token malfunctions.
+        raise
+
+
 @dataclass(frozen=True, slots=True)
 class SyntheticMaterialization:
     coordinator: operational.CoordinatorResult

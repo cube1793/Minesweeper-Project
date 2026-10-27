@@ -8896,3 +8896,591 @@ class R0ACollectorIntegrationV2Tests(unittest.TestCase):
                     self.assertEqual(rows, ())
                 self.assertEqual(seen, [execution.WorkerKind.PRIMARY] if primary is None else
                     [execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL])
+
+
+def _slice1v_supplied_observations():
+    """Literal 1R claims with 1U paths; not generated boards or case authentication."""
+    from tests.test_program_k_e2_r0_evidence import _r0a_supplied_fixture_v2
+    value = _r0a_supplied_fixture_v2()
+    concurrencies = []
+    for concurrency in value.concurrencies:
+        components = []
+        for component in concurrency.components:
+            owner = operational.R0Component(component.component)
+            units = []
+            for unit in component.units:
+                def case_path(case, phase):
+                    return replace(case, archive=replace(case.archive,
+                        relative_directory=operational._r0_case_path_v2(
+                            concurrency.concurrency, owner, unit.position, phase)))
+                units.append(replace(unit, target=case_path(unit.target, "target"),
+                    setup=None if unit.setup is None else case_path(unit.setup, "setup")))
+            components.append(replace(component, units=tuple(units)))
+        concurrencies.append(replace(concurrency, components=tuple(components)))
+    return replace(value, concurrencies=tuple(concurrencies))
+
+
+class _Slice1VFixture:
+    """Fake collector boundary with small archive sentinels and real public codec."""
+
+    def __init__(self, root, observations):
+        self.root = Path(root)
+        self.output = self.root / "r0a-observations-v2.json"
+        # The path intentionally does not exist: 1V may authenticate supplied bytes only.
+        self.receipt = h.AcceptedSelectionReceipt(str(self.root / "absent-receipt.json"),
+                                                  _accepted_receipt_bytes())
+        self.observations = observations
+        self.profile = physical.decode_profile(observations.codec_profile_bytes)
+        self.plan = readiness.R0APlan(observations.plan.protocol_seed,
+                                     tuple(board.game_index for board in observations.plan.boards))
+        sources = tuple(records.SourceBlobIdentity(path, "a" * 40, "b" * 64, 10)
+                        for path in h.qualification._V2_SOURCE_PATHS)
+        working = tuple((source.path, source.sha256, source.byte_length, False) for source in sources)
+        self.provenance = h.RunProvenance(h.SELECTION_SOURCE_HEAD, "c" * 40, sources, working,
+                                          observations.runtime, "C:\\supplied\\python.exe", True)
+        self.work = tuple(tuple(operational.R0Work(position, board, self.plan.protocol_seed,
+            concurrency.run_id, self.provenance.runtime) for position, board in enumerate(observations.plan.boards))
+            for concurrency in observations.concurrencies)
+        self.envelopes = tuple(value.envelope for value in observations.concurrencies)
+        self.cancel = threading.Event()
+        self.calls, self.events, self.emitted = [], [], []
+        self.active = self.maximum_active = self.rechecks = 0
+        self.fail_concurrency = self.fail_recheck = None
+        self.returned = {}
+
+    def collect(self, work, anchor, envelope, profile, *, cancel, progress):
+        concurrency = envelope.concurrency
+        self.calls.append((work, anchor, envelope, profile, cancel, progress))
+        self.events.append(("enter", concurrency))
+        self.active += 1
+        self.maximum_active = max(self.maximum_active, self.active)
+        try:
+            directory = Path(anchor) / "calibration" / ("c" + str(concurrency))
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "sentinel").write_bytes(("preserve-c" + str(concurrency)).encode("ascii"))
+            if concurrency == self.fail_concurrency:
+                raise RuntimeError("collector failure")
+            value = self.returned.get(concurrency, self.observations.concurrencies[(1, 2, 4).index(concurrency)])
+            if progress is not None:
+                for component in value.components:
+                    owner = operational.R0Component(component.component)
+                    for fact in component.progress:
+                        self.emitted.append((concurrency, owner, fact))
+                        progress(owner, fact)
+            return value
+        finally:
+            self.active -= 1
+            self.events.append(("exit", concurrency))
+
+    def recheck(self):
+        self.rechecks += 1
+        self.events.append(("recheck", self.rechecks))
+        if self.rechecks == self.fail_recheck:
+            raise RuntimeError("live drift")
+        return object()  # Deliberately different each time: never an authority token.
+
+    def invoke(self, **changes):
+        arguments = dict(receipt=self.receipt, provenance=self.provenance, plan=self.plan,
+            work_by_concurrency=self.work, envelopes=self.envelopes, profile=self.profile,
+            anchor=self.root, output_path=self.output, live_recheck=self.recheck,
+            cancel=self.cancel, progress=None)
+        arguments.update(changes)
+        return h._assemble_r0a_observations_v2(**arguments)
+
+
+class R0AObservationsAssemblyV2Tests(unittest.TestCase):
+    """Slice 1V outer boundary only; collectors are always bounded supplied fakes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.supplied = _slice1v_supplied_observations()
+
+    @_evidence_contextmanager
+    def fixture(self):
+        with tempfile.TemporaryDirectory(prefix="slice1v-outer-") as directory:
+            fixture = _Slice1VFixture(directory, self.supplied)
+            with patch.object(h, "_collect_r0a_concurrency_v2", new=fixture.collect):
+                yield fixture
+
+    @staticmethod
+    def corrupt(value, **changes):
+        value = replace(value)
+        for name, changed in changes.items():
+            object.__setattr__(value, name, changed)
+        return value
+
+    @staticmethod
+    def work_slot(fixture, slot, offset, **changes):
+        work = list(fixture.work)
+        values = list(work[slot])
+        values[offset] = R0AObservationsAssemblyV2Tests.corrupt(values[offset], **changes)
+        work[slot] = tuple(values)
+        return tuple(work)
+
+    def assert_preflight_rejected(self, fixture, **changes):
+        before = tuple(fixture.root.rglob("*"))
+        with self.assertRaises((ValueError, TypeError, OSError)):
+            fixture.invoke(**changes)
+        self.assertEqual(fixture.calls, [])
+        self.assertEqual(tuple(fixture.root.rglob("*")), before)
+        self.assertFalse(fixture.output.exists())
+        self.assertTrue(fixture.cancel.is_set())
+
+    def test_exact_receipt_provenance_plan_profile_and_callback_types(self):
+        for kind in ("receipt-object", "receipt-subclass", "receipt-bytes", "provenance-object",
+                     "provenance-subclass", "plan-object", "plan-subclass", "profile-object",
+                     "profile-subclass", "profile-unqualified", "profile-corrupt", "live", "progress"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                changes = {}
+                if kind.endswith("-object"):
+                    changes[kind[:-7]] = object()
+                elif kind.endswith("-subclass"):
+                    name = kind[:-9]
+                    value = getattr(f, name)
+                    subclass = type("SuppliedSubclass", (type(value),), {})
+                    changes[name] = subclass(**{field.name: getattr(value, field.name) for field in fields(value)})
+                elif kind == "receipt-bytes":
+                    changes["receipt"] = self.corrupt(f.receipt, canonical_bytes=b"{}\n")
+                elif kind == "profile-corrupt":
+                    changes["profile"] = self.corrupt(f.profile, canonical_bytes=b"{}")
+                elif kind == "profile-unqualified":
+                    node = json.loads(f.profile.canonical_bytes)
+                    node["status"] = "UNQUALIFIED_SLICE_1A"
+                    changes["profile"] = physical.decode_profile(physical._json(node))
+                else:
+                    changes["live_recheck" if kind == "live" else "progress"] = object()
+                self.assert_preflight_rejected(f, **changes)
+
+    def test_provenance_fields_and_v2_source_coverage_reject_before_collection(self):
+        for field, value in (("selection_source_head", "d" * 40), ("r0_harness_source_head", "bad"),
+                             ("runtime", None), ("executable", ""), ("dont_write_bytecode", False),
+                             ("working_files", ()), ("sources", ()), ("sources", "missing"),
+                             ("sources", "reordered")):
+            with self.subTest(field=field, value=value), self.fixture() as f:
+                changes = {field: value}
+                if value == "missing":
+                    changes = dict(sources=f.provenance.sources[:-1], working_files=f.provenance.working_files[:-1])
+                elif value == "reordered":
+                    changes = dict(sources=f.provenance.sources[::-1], working_files=f.provenance.working_files[::-1])
+                self.assert_preflight_rejected(f, provenance=self.corrupt(f.provenance, **changes))
+
+    def test_plan_seed_and_first_64_identity_revalidation(self):
+        for kind in ("wrong-seed", "wrong-indices", "duplicate", "reordered"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                if kind == "wrong-seed":
+                    plan = readiness.build_r0a_plan(b"x" * 32)
+                else:
+                    indices = f.plan.ordered_indices
+                    changed = indices[::-1] if kind == "reordered" else (indices[1],) + indices[1:]
+                    if kind == "wrong-indices":
+                        changed = (0,) + indices[1:]
+                    plan = self.corrupt(f.plan, ordered_indices=changed)
+                self.assert_preflight_rejected(f, plan=plan)
+
+    def test_tuple_work_position_board_seed_run_and_runtime_cross_bindings(self):
+        cases = ("outer-list", "outer-short", "outer-long", "inner-list", "inner-short", "work-object",
+                 "position", "board-index", "board-drift", "duplicate-board", "seed", "duplicate-run",
+                 "empty-run", "invalid-run", "nonprintable-run", "runtime-none", "runtime-within",
+                 "runtime-cross", "runtime-provenance", "envelope-list", "envelope-short",
+                 "envelope-order", "envelope-object")
+        for kind in cases:
+            with self.subTest(kind=kind), self.fixture() as f:
+                work, envelopes = f.work, f.envelopes
+                runtime = replace(f.provenance.runtime, architecture="different")
+                if kind == "outer-list": work = list(work)
+                elif kind == "outer-short": work = work[:2]
+                elif kind == "outer-long": work = work + work[:1]
+                elif kind == "inner-list": work = (list(work[0]),) + work[1:]
+                elif kind == "inner-short": work = (work[0][:-1],) + work[1:]
+                elif kind == "work-object": work = ((object(),) + work[0][1:],) + work[1:]
+                elif kind == "position": work = self.work_slot(f, 2, 0, position=1)
+                elif kind == "board-index": work = self.work_slot(f, 2, 0, board=replace(work[2][0].board, game_index=0))
+                elif kind == "board-drift": work = self.work_slot(f, 2, 0, board=replace(work[2][0].board, fingerprint="other"))
+                elif kind == "duplicate-board": work = self.work_slot(f, 2, 0, board=work[2][1].board)
+                elif kind == "seed": work = self.work_slot(f, 2, 0, protocol_seed=b"x" * 32)
+                elif kind == "duplicate-run": work = (work[0], tuple(replace(w, run_id=work[0][0].run_id) for w in work[1]), work[2])
+                elif kind in ("empty-run", "invalid-run", "nonprintable-run"):
+                    bad = {"empty-run": "R0-", "invalid-run": "wrong", "nonprintable-run": "R0-\x01"}[kind]
+                    work = self.work_slot(f, 2, 0, run_id=bad)
+                elif kind == "runtime-none": work = self.work_slot(f, 2, 0, runtime=None)
+                elif kind == "runtime-within": work = self.work_slot(f, 2, 0, runtime=runtime)
+                elif kind == "runtime-cross": work = work[:2] + (tuple(replace(w, runtime=runtime) for w in work[2]),)
+                elif kind == "runtime-provenance": work = tuple(tuple(replace(w, runtime=runtime) for w in values) for values in work)
+                elif kind == "envelope-list": envelopes = list(envelopes)
+                elif kind == "envelope-short": envelopes = envelopes[:2]
+                elif kind == "envelope-order": envelopes = envelopes[::-1]
+                elif kind == "envelope-object": envelopes = (object(),) + envelopes[1:]
+                self.assert_preflight_rejected(f, work_by_concurrency=work, envelopes=envelopes)
+
+    def test_invalid_and_precancelled_tokens_do_not_collect(self):
+        for token in (object(), type("NoSetter", (), {"is_set": lambda self: False})(),
+                      type("NoGetter", (), {"set": lambda self: None})()):
+            with self.subTest(token=type(token).__name__), self.fixture() as f:
+                with self.assertRaises((ValueError, TypeError)):
+                    f.invoke(cancel=token)
+                self.assertEqual(f.calls, [])
+                self.assertEqual(tuple(f.root.iterdir()), ())
+        with self.fixture() as f:
+            f.cancel.set()
+            self.assert_preflight_rejected(f)
+            self.assertEqual(f.rechecks, 0)
+
+    def test_wrong_arity_recheck_and_broken_cancel_set_preserve_original_failure(self):
+        with self.fixture() as f:
+            self.assert_preflight_rejected(f, live_recheck=lambda required: None)
+        with self.fixture() as f:
+            class BrokenSetter:
+                def is_set(self): return False
+                def set(self): raise RuntimeError("broken cancellation setter")
+            failure = RuntimeError("original callback failure")
+            def recheck(): raise failure
+            with self.assertRaises(RuntimeError) as raised:
+                f.invoke(cancel=BrokenSetter(), live_recheck=recheck)
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(f.calls, [])
+
+    def test_all_concurrency_component_paths_preflight_before_c1(self):
+        for concurrency in (1, 2, 4):
+            for component in h.evidence.R0A_COMPONENTS_V2:
+                with self.subTest(concurrency=concurrency, component=component), self.fixture() as f:
+                    occupied = f.root / "calibration" / ("c" + str(concurrency)) / component
+                    occupied.mkdir(parents=True)
+                    self.assert_preflight_rejected(f)
+                    self.assertTrue(occupied.is_dir())
+
+    def test_output_and_anchor_paths_fail_before_collection(self):
+        for kind in ("missing-anchor", "file-anchor", "output-file", "output-directory",
+                     "wrong-name", "outside-child", "nested-child", "parent-alias", "bad-calibration"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                changes = {}
+                if kind == "missing-anchor": changes["anchor"] = f.root / "missing"
+                elif kind == "file-anchor":
+                    target = f.root / "file"
+                    target.write_bytes(b"keep")
+                    changes["anchor"] = target
+                elif kind == "output-file": f.output.write_bytes(b"keep")
+                elif kind == "output-directory": f.output.mkdir()
+                elif kind == "wrong-name": changes["output_path"] = f.root / "r0a-observations.json"
+                elif kind == "outside-child": changes["output_path"] = f.root.parent / f.output.name
+                elif kind == "nested-child": changes["output_path"] = f.root / "nested" / f.output.name
+                elif kind == "parent-alias": changes["output_path"] = f.root / "nested" / ".." / f.output.name
+                else: (f.root / "calibration").write_bytes(b"keep")
+                before = {str(p): p.read_bytes() for p in f.root.rglob("*") if p.is_file()}
+                with self.assertRaises((ValueError, TypeError, OSError)):
+                    f.invoke(**changes)
+                self.assertEqual(f.calls, [])
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual({str(p): p.read_bytes() for p in f.root.rglob("*") if p.is_file()}, before)
+
+    def test_detectable_reparse_and_output_link_are_rejected(self):
+        from types import SimpleNamespace
+        original = Path.lstat
+        for kind in ("anchor", "output"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                def lstat(path, *args, **kwargs):
+                    if kind == "anchor" and path == f.root:
+                        info = original(path, *args, **kwargs)
+                        return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+                    if kind == "output" and path == f.output:
+                        return SimpleNamespace(st_mode=h.stat.S_IFLNK, st_file_attributes=0x400)
+                    return original(path, *args, **kwargs)
+                with patch.object(Path, "lstat", new=lstat), self.assertRaises((ValueError, OSError)):
+                    f.invoke()
+                self.assertEqual(f.calls, [])
+                self.assertTrue(f.cancel.is_set())
+
+    def test_exact_sequential_calls_content_and_seven_gate_trace(self):
+        with self.fixture() as f:
+            encode = h.evidence.encode_r0a_observations_v2
+            decode = h.evidence.decode_r0a_observations_v2
+            write = h._exclusive_bytes
+            encoded_values, decoded_values = [], []
+            def encoding(value):
+                encoded_values.append(value)
+                return encode(value)
+            def writing(path, data):
+                f.events.append(("write",))
+                return write(path, data)
+            def decoding(data, **bindings):
+                value = decode(data, **bindings)
+                f.events.append(("decode",))
+                decoded_values.append((value, bindings))
+                return value
+            with patch.object(h.evidence, "encode_r0a_observations_v2", new=encoding), \
+                    patch.object(h.evidence, "decode_r0a_observations_v2", new=decoding), \
+                    patch.object(h, "_exclusive_bytes", new=writing):
+                result = f.invoke()
+            self.assertEqual(f.events, [("recheck", 1), ("enter", 1), ("exit", 1), ("recheck", 2),
+                ("enter", 2), ("exit", 2), ("recheck", 3), ("enter", 4), ("exit", 4), ("recheck", 4),
+                ("recheck", 5), ("write",), ("decode",), ("recheck", 6), ("recheck", 7)])
+            self.assertEqual(f.maximum_active, 1)
+            for index, call in enumerate(f.calls):
+                self.assertIs(call[0], f.work[index])
+                self.assertEqual(Path(call[1]), f.root)
+                self.assertIs(call[2], f.envelopes[index])
+                self.assertIs(call[3], f.profile)
+                self.assertIs(call[4], f.cancel)
+            expected = replace(f.observations, source_head=f.provenance.r0_harness_source_head,
+                provenance_sha256=h.evidence.provenance_digest_v2(f.provenance.selection_source_head,
+                    f.provenance.r0_harness_source_head, f.provenance.sources, f.provenance.working_files,
+                    f.provenance.runtime, f.provenance.executable, f.provenance.dont_write_bytecode))
+            self.assertEqual(result.observations, expected)
+            self.assertIs(result.observations, decoded_values[0][0])
+            self.assertIsNot(result.observations, encoded_values[0])
+            self.assertIsNot(result.observations.concurrencies[0], f.observations.concurrencies[0])
+            bindings = decoded_values[0][1]
+            self.assertEqual(bindings, dict(expected_profile_sha256=f.profile.sha256.hex(),
+                expected_provenance_sha256=expected.provenance_sha256,
+                expected_source_head=f.provenance.r0_harness_source_head,
+                expected_selection_receipt_sha256=h.SELECTION_RECEIPT_SHA256,
+                expected_plan=expected.plan, expected_runtime=f.provenance.runtime))
+            self.assertFalse(f.cancel.is_set())
+
+    def test_none_cancel_creates_exactly_one_shared_invocation_event(self):
+        with self.fixture() as f:
+            original = threading.Event
+            with patch.object(h.threading, "Event", wraps=original) as factory:
+                f.invoke(cancel=None)
+            self.assertEqual(factory.call_count, 1)
+            tokens = [call[4] for call in f.calls]
+            self.assertTrue(all(token is tokens[0] for token in tokens))
+            self.assertIsNot(tokens[0], f.cancel)
+            self.assertFalse(tokens[0].is_set())
+
+    def test_each_collector_failure_stops_later_work_and_preserves_archives(self):
+        for failed in (1, 2, 4):
+            with self.subTest(failed=failed), self.fixture() as f:
+                f.fail_concurrency = failed
+                with patch.object(h.evidence, "encode_r0a_observations_v2", side_effect=AssertionError("no encode")), \
+                        self.assertRaisesRegex(RuntimeError, "collector failure"):
+                    f.invoke()
+                expected = (1, 2, 4)[:(1, 2, 4).index(failed) + 1]
+                self.assertEqual(tuple(call[2].concurrency for call in f.calls), expected)
+                self.assertTrue(f.cancel.is_set())
+                self.assertFalse(f.output.exists())
+                for concurrency in expected:
+                    self.assertEqual((f.root / "calibration" / ("c" + str(concurrency)) / "sentinel").read_bytes(),
+                                     ("preserve-c" + str(concurrency)).encode("ascii"))
+
+    def test_each_live_gate_failure_preserves_written_file_and_never_returns(self):
+        for gate in range(1, 8):
+            with self.subTest(gate=gate), self.fixture() as f:
+                f.fail_recheck = gate
+                with self.assertRaisesRegex(RuntimeError, "live drift"):
+                    f.invoke()
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual(f.rechecks, gate)
+                self.assertEqual(tuple(call[2].concurrency for call in f.calls), (1, 2, 4)[:min(gate - 1, 3)])
+                self.assertEqual(f.output.exists(), gate >= 6)
+                if gate >= 6:
+                    self.assertEqual(h.evidence.encode_r0a_observations_v2(
+                        h.evidence.decode_r0a_observations_v2(f.output.read_bytes())), f.output.read_bytes())
+
+    def test_cancellation_set_by_each_live_callback_prevents_success(self):
+        for gate in range(1, 8):
+            with self.subTest(gate=gate), self.fixture() as f:
+                def recheck():
+                    f.recheck()
+                    if f.rechecks == gate:
+                        f.cancel.set()
+                with self.assertRaisesRegex(ValueError, "CANCELLED"):
+                    f.invoke(live_recheck=recheck)
+                self.assertEqual(f.rechecks, gate)
+                self.assertEqual(f.output.exists(), gate >= 6)
+
+    def test_progress_forwards_all_original_immutable_facts_without_synthesis(self):
+        with self.fixture() as f:
+            received = []
+            result = f.invoke(progress=lambda *args: received.append(args))
+            self.assertEqual(len(received), 1152)
+            self.assertEqual(received, f.emitted)
+            expected = [(c.concurrency, operational.R0Component(component.component), fact)
+                        for c in f.observations.concurrencies for component in c.components for fact in component.progress]
+            self.assertEqual(received, expected)
+            for supplied, forwarded in zip(expected, received):
+                self.assertIs(supplied[1], forwarded[1])
+                self.assertIs(supplied[2], forwarded[2])
+            self.assertEqual(result.observations.concurrencies, f.observations.concurrencies)
+
+    def test_progress_exception_stops_later_collection_and_sets_cancel(self):
+        for failure_position in (1, 385, 1152):
+            with self.subTest(failure_position=failure_position), self.fixture() as f:
+                received = []
+                def progress(*args):
+                    received.append(args)
+                    if len(received) == failure_position:
+                        raise RuntimeError("observer failure")
+                with self.assertRaisesRegex(RuntimeError, "observer failure"):
+                    f.invoke(progress=progress)
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual(len(received), failure_position)
+                self.assertEqual(len(f.calls), (failure_position - 1) // 384 + 1)
+                self.assertFalse(f.output.exists())
+
+    def test_collector_return_type_identity_and_canonical_paths_are_bound(self):
+        for kind in ("type", "concurrency", "envelope", "run", "path"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                value = f.observations.concurrencies[0]
+                if kind == "type": value = object()
+                elif kind == "concurrency": value = f.observations.concurrencies[1]
+                elif kind == "envelope": value = replace(value, envelope=replace(value.envelope, max_physical_inputs=999))
+                elif kind == "run": value = replace(value, run_id="R0-another")
+                else:
+                    component = value.components[0]
+                    unit = component.units[0]
+                    target = replace(unit.target, archive=replace(unit.target.archive,
+                        relative_directory="calibration/c2/P/00/target"))
+                    component = replace(component, units=(replace(unit, target=target),) + component.units[1:])
+                    value = replace(value, components=(component,) + value.components[1:])
+                f.returned[1] = value
+                with self.assertRaises((ValueError, TypeError)):
+                    f.invoke()
+                self.assertEqual(len(f.calls), 1)
+                self.assertTrue(f.cancel.is_set())
+                self.assertFalse(f.output.exists())
+
+    def test_exclusive_fsync_independent_read_and_exact_file_fact(self):
+        with self.fixture() as f:
+            original_read = Path.read_bytes
+            reads = []
+            def read(path):
+                data = original_read(path)
+                if path == f.output:
+                    reads.append(data)
+                return data
+            with patch.object(Path, "read_bytes", new=read), patch.object(h.os, "fsync", wraps=os.fsync) as fsync:
+                result = f.invoke()
+            self.assertGreaterEqual(len(reads), 2)
+            self.assertEqual(fsync.call_count, 1)
+            data = original_read(f.output)
+            self.assertEqual(data, h.evidence.encode_r0a_observations_v2(result.observations))
+            self.assertEqual((result.relative_path, result.byte_length, result.sha256),
+                             (f.output.name, len(data), h.sha256(data).hexdigest()))
+            count = len(f.calls)
+            with self.assertRaises((ValueError, OSError)):
+                f.invoke()
+            self.assertEqual(len(f.calls), count)
+            self.assertEqual(original_read(f.output), data)
+            with self.assertRaises(FileExistsError):
+                h._exclusive_bytes(f.output, b"replacement")
+            self.assertEqual(original_read(f.output), data)
+
+    def test_corrupted_independent_disk_bytes_cannot_be_accepted(self):
+        for kind in ("truncate", "append", "substitute", "duplicate", "spacing", "order"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                write = h._exclusive_bytes
+                damaged = []
+                def corrupt_write(path, data):
+                    result = write(path, data)
+                    if kind == "truncate": changed = data[:-1]
+                    elif kind == "append": changed = data + b"x"
+                    elif kind == "substitute": changed = data.replace(b"ADMITTED", b"REJECTED", 1)
+                    elif kind == "duplicate": changed = b'{"schema":"duplicate",' + data[1:]
+                    elif kind == "spacing": changed = b" " + data
+                    else:
+                        node = dict(reversed(tuple(json.loads(data).items())))
+                        changed = json.dumps(node, sort_keys=False, separators=(",", ":")).encode("ascii") + b"\n"
+                    Path(path).write_bytes(changed)
+                    damaged.append(changed)
+                    return result
+                with patch.object(h, "_exclusive_bytes", new=corrupt_write), self.assertRaises(ValueError):
+                    f.invoke()
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual(f.output.read_bytes(), damaged[0])
+                self.assertEqual(f.rechecks, 5)
+
+    def test_each_expected_decoder_binding_mismatch_rejects_preserving_disk(self):
+        names = ("expected_profile_sha256", "expected_provenance_sha256", "expected_source_head",
+                 "expected_selection_receipt_sha256", "expected_plan", "expected_runtime")
+        for name in names:
+            with self.subTest(name=name), self.fixture() as f:
+                decoder = h.evidence.decode_r0a_observations_v2
+                def decode(data, **bindings):
+                    if name == "expected_plan":
+                        plan = bindings[name]
+                        bindings[name] = replace(plan, boards=(replace(plan.boards[0], fingerprint="wrong"),) + plan.boards[1:])
+                    elif name == "expected_runtime": bindings[name] = replace(bindings[name], architecture="wrong")
+                    else: bindings[name] = "f" * (40 if name == "expected_source_head" else 64)
+                    return decoder(data, **bindings)
+                with patch.object(h.evidence, "decode_r0a_observations_v2", new=decode), self.assertRaises(ValueError):
+                    f.invoke()
+                self.assertTrue(f.output.is_file())
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual(f.rechecks, 5)
+
+    def test_write_fsync_and_decode_failures_keep_artifacts_without_retry(self):
+        for kind in ("encode", "short-write", "fsync", "decode", "final-carrier"):
+            with self.subTest(kind=kind), self.fixture() as f, _EvidenceExitStack() as stack:
+                failure = RuntimeError(kind + " failed")
+                if kind == "encode": stack.enter_context(patch.object(h.evidence, "encode_r0a_observations_v2", side_effect=failure))
+                elif kind == "short-write":
+                    def partial(path, data):
+                        with Path(path).open("xb") as stream:
+                            stream.write(data[:20])
+                        raise failure
+                    stack.enter_context(patch.object(h, "_exclusive_bytes", new=partial))
+                elif kind == "fsync": stack.enter_context(patch.object(h.os, "fsync", side_effect=failure))
+                elif kind == "decode": stack.enter_context(patch.object(h.evidence, "decode_r0a_observations_v2", side_effect=failure))
+                else: stack.enter_context(patch.object(h._R0AObservationsFileV2, "__post_init__", side_effect=failure))
+                with self.assertRaises(RuntimeError) as raised:
+                    f.invoke()
+                self.assertIs(raised.exception, failure)
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual(f.output.exists(), kind != "encode")
+                self.assertEqual(len(f.calls), 3)
+                self.assertEqual(len(list(f.root.glob("calibration/c*/sentinel"))), 3)
+
+    def test_private_result_is_owner_created_frozen_slotted_detached_nonserializable(self):
+        import pickle
+        with self.fixture() as f:
+            result = f.invoke()
+            self.assertIs(type(result), h._R0AObservationsFileV2)
+            self.assertEqual(tuple(field.name for field in fields(result)),
+                             ("observations", "relative_path", "byte_length", "sha256"))
+            self.assertFalse(hasattr(result, "__dict__"))
+            with self.assertRaises((TypeError, ValueError)):
+                type(result)(result.observations, result.relative_path, result.byte_length, result.sha256)
+            with self.assertRaises((TypeError, ValueError)):
+                type(result)()
+            with self.assertRaises(FrozenInstanceError):
+                result.byte_length = 0
+            with self.assertRaises(TypeError):
+                pickle.dumps(result)
+            with self.assertRaises((TypeError, ValueError)):
+                h._fact_node(result)
+            self.assertIsNot(result.observations.plan, f.observations.plan)
+            self.assertIsNot(result.observations.plan.boards[0], f.observations.plan.boards[0])
+
+    def test_outer_boundary_never_captures_launches_admits_or_uses_v1_evidence(self):
+        import benchmark_board
+        guards = ((h, ("capture_run_provenance_v2", "_recheck_provenance_v2", "_capture_qualified_codec_profile",
+                       "_runtime_identity", "load_selection_receipt", "launch_r0a", "launch_r0b", "_materialize_r0a_work",
+                       "write_r0a_evidence", "read_r0a_evidence", "_measure_r0a", "adapt_r0a_concurrency",
+                       "_finish_run", "_validate_run_manifest", "_fresh_ignored_root", "_begin_run", "_fail_run")),
+                  (physical, ("capture_profile", "capture_qualified_profile")),
+                  (h.qualification, ("_git", "_blobs", "capture_sources_v2")),
+                  (readiness, ("target_counts", "search_synthetic_corpus", "derive_r0b_sizing_plan",
+                               "select_operating_candidate", "project_execution", "project_archive",
+                               "project_memory", "derive_r0a_dual_maxima_v2")),
+                  (benchmark_board, ("generate_board",)),
+                  (h.analysis, ("_shared_bootstrap", "analyze_effectiveness")),
+                  (h.store, ("write_completion_receipt",)))
+        with self.fixture() as f, _EvidenceExitStack() as stack:
+            for owner, names in guards:
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("forbidden owner: " + name)))
+            result = f.invoke()
+            self.assertEqual(result.relative_path, "r0a-observations-v2.json")
+            self.assertEqual({path.name for path in f.root.iterdir()}, {"calibration", result.relative_path})
+
+    def test_existing_v1_1u_and_synthetic_owners_do_not_activate_outer_assembly(self):
+        for owner in (h.launch_r0a, h.launch_r0b, h.write_r0a_evidence, h.read_r0a_evidence,
+                      h._measure_r0a, h.adapt_r0a_concurrency, h._finish_run, h._validate_run_manifest,
+                      h._collect_r0a_component_v2, h._collect_r0a_concurrency_v2,
+                      h._materialize_v2_plan, h._readback_v2_plan, h._postprocess_r0b_v2):
+            with self.subTest(owner=owner.__name__):
+                self.assertNotIn("_assemble_r0a_observations_v2", inspect.getsource(owner))
+        source = inspect.getsource(h._assemble_r0a_observations_v2)
+        self.assertNotIn("R0_RUN_V2", source)
+        self.assertFalse(hasattr(h, "launch_r0a_v2"))
+        self.assertFalse(hasattr(h, "validate_existing_run_v2"))
