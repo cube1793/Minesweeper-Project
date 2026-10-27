@@ -4858,6 +4858,7 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, self.forbidden_workloads(), \
                 patch.object(h, "_materialize_v2_plan", return_value=marker) as lower, \
                 patch.object(h, "_publish_v2_materialization", return_value=object()) as publish, \
+                patch.object(h, "_close_v2_experiment_archive", side_effect=AssertionError("No live V2 archive close")), \
                 patch.object(h, "_construct_v2_materialization_work",
                              side_effect=AssertionError("No full constructor")) as constructor, \
                 patch.object(operational._V2EvidenceSink, "__init__",
@@ -5802,6 +5803,571 @@ class V2SyntheticMaterializerTests(unittest.TestCase):
         self.assertEqual(calls, ["sealed_lower_return", "publication"])
 
 
+    @contextmanager
+    def archive_count_domain(self):
+        # Only the bounded count domain is extended. Production minimum,
+        # capacity, per-family policy, and reconciliation arithmetic run intact.
+        original = readiness._unit_counts_v2
+        counts = self.counts(self.plan)
+        def validate(value):
+            if type(value) is tuple and all(type(count) is int for count in value) and value == counts:
+                return value
+            return original(value)
+        with patch.object(readiness, "_unit_counts_v2", side_effect=validate):
+            yield
+
+    def archive_materialization_files(self):
+        cls = type(self)
+        if not hasattr(cls, "_archive_materialization_files"):
+            with tempfile.TemporaryDirectory() as directory, self.archive_count_domain(), self.forbidden_workloads(), \
+                    patch.object(operational.harness, "_coordinator_private_bytes", return_value=100), \
+                    patch.object(h, "_construct_v2_materialization_work",
+                        side_effect=lambda work, *args, **kwargs: self.constructed[work.position]):
+                counts = self.counts(self.plan)
+                ledger = h._new_v2_materialization_ledger(self.targets, counts)
+                minimum = readiness.minimum_archive_preflight(self.targets.physical, counts, 0)
+                materialization = h._materialize_v2_plan(self.plan, self.materialization_plan, self.targets,
+                    self.profile, self.envelope, directory, counts, ledger, minimum)
+                h._publish_v2_materialization(directory, materialization, self.targets, self.profile, self.envelope)
+                cls._archive_materialization_files = {
+                    path.name: path.read_bytes() for path in Path(directory).iterdir()}
+        return cls._archive_materialization_files
+
+    @contextmanager
+    def archive_fixture(self, *, analysis_bytes=None, report_bytes=None):
+        with tempfile.TemporaryDirectory() as directory, self.archive_count_domain():
+            root = Path(directory) / "experiment"
+            streams = root / "streams"
+            streams.mkdir(parents=True)
+            for name, raw in self.archive_materialization_files().items():
+                (streams / name).write_bytes(raw)
+            with self.independent_readback_guards(), \
+                    patch.object(operational.harness, "_coordinator_private_bytes", return_value=100):
+                readback = h._readback_v2_plan(streams, self.plan, self.targets, self.profile,
+                                               self.envelope, self.counts(self.plan))
+            self.assertFalse((streams / "qualification_identity.pkf").exists())
+            post = root / "postprocessing"
+            post.mkdir()
+            # Registry-valid transport fixtures only: they deliberately make no
+            # semantic qualification, postprocessing, or effectiveness claim.
+            with h.store.FramedStreamWriter(streams, "qualification_identity",
+                    physical.context_for("qualification_identity", self.profile.sha256)) as writer:
+                writer.append((0,), self.plan[0].runtime)
+                qualification = writer.seal()
+            event = records.OperationEventRecord(records.Phase.EXECUTION, "slice1o-transport-only",
+                records.EventKind.PROGRESS, 0, 0, records.OperationStatus.RUNNING)
+            with h.store.FramedStreamWriter(post, "postprocessing_operations",
+                    physical.context_for("postprocessing_operations", self.profile.sha256)) as writer:
+                writer.append((0,), event)
+                postprocessing = writer.seal()
+            analysis_bytes = (b'{"classification":"TRANSPORT_FIXTURE_ONLY"}\n'
+                              if analysis_bytes is None else analysis_bytes)
+            report_bytes = (b"<!doctype html><p>Transport fixture only.</p>\n"
+                            if report_bytes is None else report_bytes)
+            (post / "analysis.json").write_bytes(analysis_bytes)
+            (post / "report.html").write_bytes(report_bytes)
+            yield dict(root=root, readback=readback, profile=self.profile, envelope=self.envelope,
+                qualification_identity_seal=qualification, postprocessing_operations_seal=postprocessing,
+                analysis_file=h.FileFact("postprocessing/analysis.json", len(analysis_bytes), h.sha256(analysis_bytes).hexdigest()),
+                report_file=h.FileFact("postprocessing/report.html", len(report_bytes), h.sha256(report_bytes).hexdigest()),
+                selection_receipt_sha256="a" * 64, corpus_sha256="b" * 64, source_sha256="c" * 64)
+
+    @contextmanager
+    def archive_close_guards(self):
+        with self.independent_readback_guards(), _EvidenceExitStack() as stack:
+            for name in ("_readback_v2_plan", "_readback_synthetic_v2", "_postprocess_r0b", "launch_r0b",
+                         "_fact_node", "_fact_read"):
+                stack.enter_context(patch.object(h, name,
+                    side_effect=AssertionError("Archive closure cannot run semantic owners or V1 codecs")))
+            stack.enter_context(patch.object(h.qualification, "write_identity",
+                side_effect=AssertionError("Archive closure cannot generate qualification identity")))
+            yield
+
+    def close_archive(self, fixture, **changes):
+        with self.archive_close_guards():
+            return h._close_v2_experiment_archive(**(fixture | changes))
+
+    def validate_archive(self, fixture, **changes):
+        arguments = {name: fixture[name] for name in (
+            "root", "profile", "envelope", "selection_receipt_sha256", "corpus_sha256", "source_sha256")}
+        with self.archive_close_guards():
+            return h._validate_closed_v2_experiment_archive(**(arguments | changes))
+
+    @staticmethod
+    def archive_bytes(root):
+        return {path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()}
+
+    def test_v2_archive_real_four_work_close_inventory_and_structural_validator(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        with self.archive_fixture() as fixture:
+            checks, progress = [], []
+            closed = self.close_archive(fixture, check=lambda: checks.append(None),
+                                        progress=lambda *event: progress.append(event))
+            root, readback = fixture["root"], fixture["readback"]
+            actual = self.archive_bytes(root)
+            self.assertEqual(set(actual), set(evidence.V2_ARCHIVE_FINAL_PATHS))
+            self.assertEqual(len(actual), 64)
+            self.assertEqual({path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()},
+                             {"streams", "postprocessing"})
+            self.assertFalse(any(name.endswith(".jsonl") for name in actual))
+            accounting, manifest, completion = closed.accounting, closed.manifest, closed.completion
+            attributable = sum(len(actual[path]) for path in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+            fixed = sum(len(raw) for path, raw in actual.items() if path not in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+            self.assertEqual(len(evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS), 53)
+            self.assertEqual(accounting.attributable_bytes, attributable)
+            self.assertEqual(attributable, sum(value.physical_bytes for value in readback.family_totals))
+            self.assertEqual((accounting.fixed_allowance_bytes, accounting.archive_bytes), (fixed, attributable + fixed))
+            self.assertEqual(tuple(value.path for value in accounting.files), tuple(sorted(actual)))
+            self.assertEqual(len(accounting.files), len(set(value.path for value in accounting.files)))
+            for fact in accounting.files:
+                self.assertEqual((fact.byte_length, fact.sha256), (len(actual[fact.path]), h.sha256(actual[fact.path]).hexdigest()))
+            self.assertEqual((manifest.attributable_bytes, manifest.projected_fixed_bytes,
+                manifest.projected_archive_bytes), (attributable, fixed, attributable + fixed))
+            self.assertGreaterEqual(accounting.archive_bytes, readback.physical_minimum_total + fixed)
+            self.assertEqual((manifest.e_final, manifest.b_proc, manifest.remaining_procedural_budget),
+                             (readback.e_final, readback.b_proc, readback.remaining_procedural_budget))
+            expected_minimum = sum(count * getattr(self.targets.physical, family)
+                                   for family, count in readback.family_counts)
+            self.assertEqual(readback.physical_minimum_total, expected_minimum)
+            self.assertEqual(readback.e_final, attributable - expected_minimum)
+            self.assertEqual(manifest.codec_profile_sha256, self.profile.sha256.hex())
+            self.assertTrue(manifest.materialization_readback_complete and manifest.synthetic_non_evidence)
+            self.assertFalse(manifest.runtime_peak_is_independent)
+            self.assertTrue(manifest.constructor_rejections_are_runtime_provenance)
+            self.assertEqual(manifest.classification, "SYNTHETIC_NON_EFFECTIVENESS")
+            self.assertEqual(manifest.materialization_file.path, "streams/materialization-v2.json")
+            self.assertEqual(manifest.qualification_identity_stream, fixture["qualification_identity_seal"])
+            self.assertEqual(manifest.postprocessing_operations_stream, fixture["postprocessing_operations_seal"])
+            self.assertEqual(manifest.analysis_file.sha256, fixture["analysis_file"].sha256)
+            self.assertEqual(manifest.report_file.sha256, fixture["report_file"].sha256)
+            self.assertEqual(evidence.encode_archive_manifest_v2(manifest), actual["manifest.json"])
+            self.assertEqual(evidence.decode_archive_manifest_v2(actual["manifest.json"],
+                expected_profile_sha256=self.profile.sha256.hex()), manifest)
+            pre = tuple(value for value in accounting.files if value.path not in ("manifest.json", "COMPLETE.json"))
+            self.assertEqual(tuple((v.path, v.byte_length, v.sha256) for v in manifest.inventory_before_manifest_receipt),
+                             tuple((v.path, v.byte_length, v.sha256) for v in pre))
+            self.assertNotIn("manifest_sha256", json.loads(actual["manifest.json"]))
+            self.assertEqual(completion.manifest_sha256, h.sha256(actual["manifest.json"]).hexdigest())
+            self.assertEqual(h.store.read_completion_receipt(root), completion)
+            status = json.loads(actual["status.json"])
+            self.assertFalse(status["archive_closed"])
+            self.assertTrue(status["materialization_readback_complete"])
+            self.assertTrue(status["materialization_integrity_reauthenticated"])
+            self.assertTrue(status["support_files_present"] and status["cleanup_complete"])
+            before = self.archive_bytes(root)
+            self.assertEqual(self.validate_archive(fixture), closed)
+            self.assertEqual(self.archive_bytes(root), before)
+            self.assertGreaterEqual(len(checks), len(actual))
+            order, last = [], {}
+            for stage, done, total in progress:
+                if stage not in last:
+                    order.append(stage)
+                    self.assertEqual(done, 0)
+                else:
+                    self.assertEqual(total, last[stage][1])
+                    self.assertGreaterEqual(done, last[stage][0])
+                self.assertLessEqual(done, total)
+                last[stage] = done, total
+            self.assertEqual(tuple(order), ("support_authentication", "coordinator_status", "manifest_inventory",
+                "projected_accounting", "manifest_write", "completion_write", "final_inventory", "final_accounting"))
+            self.assertTrue(all(done == total for done, total in last.values()))
+            self.assertEqual(progress[-1][0], "final_accounting")
+            self.assertFalse(hasattr(closed, "__dict__"))
+            with self.assertRaises(FrozenInstanceError):
+                closed.accounting = None
+            print("SLICE1O_BOUNDED_CLOSE " + json.dumps({
+                "attributable_bytes": attributable, "fixed_bytes": fixed,
+                "archive_bytes": accounting.archive_bytes, "physical_minimum": readback.physical_minimum_total,
+                "b_proc": readback.b_proc, "e_final": readback.e_final,
+                "remaining": readback.remaining_procedural_budget,
+                "manifest_bytes": len(actual["manifest.json"]), "completion_bytes": len(actual["COMPLETE.json"])},
+                sort_keys=True, separators=(",", ":")))
+
+    def test_v2_archive_manifest_registry_and_receipt_sorted_orders_reconcile_exactly(self):
+        with self.archive_fixture() as fixture:
+            closed = self.close_archive(fixture)
+            seals = closed.manifest.streams
+            names = execution.STREAM_NAMES + ("operations", "resources", "qualification_identity", "postprocessing_operations")
+            self.assertEqual(tuple(value.name for value in seals), names)
+            self.assertEqual(len(set(names)), 57)
+            self.assertNotEqual(names, tuple(sorted(names)))
+            with self.assertRaises(records.RecordError):
+                replace(closed.completion, streams=seals)
+            ordered = tuple(sorted(seals, key=lambda value: value.name))
+            self.assertEqual(replace(closed.completion, streams=ordered), closed.completion)
+            self.assertEqual({value.name: value for value in seals},
+                             {value.name: value for value in closed.completion.streams})
+            self.assertEqual(tuple(value.name for value in closed.completion.streams), tuple(sorted(names)))
+            original = records.encode(closed.completion)
+            for case in ("same_name_changed_digest", "missing", "extra", "duplicate", "wrong_order"):
+                candidate = closed.completion
+                if case == "same_name_changed_digest":
+                    values = (replace(ordered[0], sha256="0" * 64),) + ordered[1:]
+                elif case == "missing":
+                    values = ordered[:-1]
+                elif case == "extra":
+                    values = tuple(sorted(ordered + (records.StreamDigest("extra", "0" * 64, 0, 0),), key=lambda value: value.name))
+                elif case == "duplicate":
+                    values = (ordered[0],) + ordered
+                else:
+                    values = tuple(reversed(ordered))
+                with self.subTest(case=case):
+                    if case in ("duplicate", "wrong_order"):
+                        with self.assertRaises(records.RecordError):
+                            replace(candidate, streams=values)
+                        continue
+                    candidate = replace(candidate, streams=values)
+                    (fixture["root"] / "COMPLETE.json").write_bytes(records.encode(candidate) + b"\n")
+                    with self.assertRaises(ValueError):
+                        self.validate_archive(fixture)
+                    (fixture["root"] / "COMPLETE.json").write_bytes(original + b"\n")
+
+    def test_v2_archive_close_reauthenticates_materialization_and_support_before_new_files(self):
+        paths = ("streams/boards.pkf", "streams/operations.pkf", "streams/resources.pkf",
+            "streams/materialization-v2.json", "streams/qualification_identity.pkf",
+            "postprocessing/postprocessing_operations.pkf", "postprocessing/analysis.json", "postprocessing/report.html")
+        for name in paths:
+            with self.subTest(path=name), self.archive_fixture() as fixture:
+                path = fixture["root"] / name
+                raw = bytearray(path.read_bytes())
+                raw[-1] ^= 1
+                path.write_bytes(raw)
+                before = self.archive_bytes(fixture["root"])
+                with self.assertRaises(ValueError):
+                    self.close_archive(fixture)
+                self.assertEqual(self.archive_bytes(fixture["root"]), before)
+                self.assertFalse((fixture["root"] / "coordinator.json").exists())
+                self.assertFalse((fixture["root"] / "COMPLETE.json").exists())
+
+    def test_v2_archive_closed_validator_rejects_independent_final_file_tampering(self):
+        paths = ("streams/boards.pkf", "streams/operations.pkf", "streams/qualification_identity.pkf",
+            "postprocessing/postprocessing_operations.pkf", "streams/materialization-v2.json",
+            "postprocessing/analysis.json", "postprocessing/report.html", "coordinator.json", "status.json",
+            "manifest.json", "COMPLETE.json")
+        with self.archive_fixture() as fixture:
+            self.close_archive(fixture)
+            originals = self.archive_bytes(fixture["root"])
+            for name in paths:
+                with self.subTest(path=name):
+                    path = fixture["root"] / name
+                    raw = bytearray(originals[name])
+                    raw[-1] ^= 1
+                    path.write_bytes(raw)
+                    before = self.archive_bytes(fixture["root"])
+                    with self.assertRaises(ValueError):
+                        self.validate_archive(fixture)
+                    self.assertEqual(self.archive_bytes(fixture["root"]), before)
+                    path.write_bytes(originals[name])  # Separate tamper case, never production repair.
+
+    def test_v2_archive_rejects_missing_extra_directories_links_and_preexisting_close_files(self):
+        for case in ("missing", "extra_pkf", "extra_jsonl", "extra_file", "extra_directory", "manifest", "complete"):
+            with self.subTest(case=case), self.archive_fixture() as fixture:
+                root = fixture["root"]
+                if case == "missing":
+                    (root / "postprocessing/report.html").unlink()
+                elif case == "extra_directory":
+                    (root / "unexpected").mkdir()
+                else:
+                    name = {"extra_pkf": "streams/extra.pkf", "extra_jsonl": "streams/boards.jsonl",
+                        "extra_file": "unaccounted.bin", "manifest": "manifest.json", "complete": "COMPLETE.json"}[case]
+                    (root / name).write_bytes(b"unexpected")
+                before = self.archive_bytes(root)
+                inventories = []
+                original = h._inventory
+                def inventory(*args, **kwargs):
+                    result = original(*args, **kwargs)
+                    inventories.append(result)
+                    return result
+                with patch.object(h, "_inventory", side_effect=inventory), self.assertRaises(ValueError):
+                    self.close_archive(fixture)
+                self.assertEqual(self.archive_bytes(root), before)
+                self.assertFalse((root / "coordinator.json").exists())
+                self.assertTrue(inventories)
+                if case in ("extra_pkf", "extra_jsonl", "extra_file"):
+                    self.assertIn(name, {value.path for value in inventories[0]})
+        for link_method in ("is_symlink", "is_junction"):
+            with self.subTest(link=link_method), self.archive_fixture() as fixture:
+                target = fixture["root"] / "postprocessing/report.html"
+                original = getattr(Path, link_method)
+                def link(path):
+                    return path == target or original(path)
+                before = self.archive_bytes(fixture["root"])
+                with patch.object(Path, link_method, new=link), self.assertRaises(ValueError):
+                    self.close_archive(fixture)
+                self.assertEqual(self.archive_bytes(fixture["root"]), before)
+
+    def test_v2_archive_exact_readback_support_and_authority_inputs_fail_before_publication(self):
+        class DigestSubclass(str):
+            pass
+        with self.archive_fixture() as fixture:
+            root, readback = fixture["root"], fixture["readback"]
+            changes = [{"readback": object()}, {"analysis_file": object()},
+                {"qualification_identity_seal": fixture["postprocessing_operations_seal"]},
+                {"postprocessing_operations_seal": fixture["qualification_identity_seal"]},
+                {"analysis_file": replace(fixture["analysis_file"], path="analysis.json")},
+                {"report_file": replace(fixture["report_file"], sha256="0" * 64)}]
+            for name in ("readback_complete", "progress_complete", "synthetic_non_evidence",
+                         "constructor_rejections_are_runtime_provenance"):
+                changes.append({"readback": replace(readback, **{name: False})})
+            changes.extend(({"readback": replace(readback, runtime_peak_is_independent=True)},
+                {"readback": replace(readback, streams=readback.streams[::-1])},
+                {"readback": replace(readback, e_final=readback.e_final + 1)},
+                {"readback": replace(readback, remaining_procedural_budget=readback.remaining_procedural_budget + 1)},
+                {"readback": replace(readback, materialization_metadata_sha256="0" * 64)},
+                {"readback": replace(readback, materialization_metadata_byte_length=readback.materialization_metadata_byte_length + 1)}))
+            for name in ("selection_receipt_sha256", "corpus_sha256", "source_sha256"):
+                for value in (True, "A" * 64, "0" * 63, DigestSubclass("0" * 64)):
+                    changes.append({name: value})
+            before = self.archive_bytes(root)
+            for index, change in enumerate(changes):
+                with self.subTest(case=index), self.assertRaises(ValueError):
+                    self.close_archive(fixture, **change)
+                self.assertEqual(self.archive_bytes(root), before)
+                self.assertFalse((root / "coordinator.json").exists())
+
+    def test_v2_archive_projected_exact_caps_and_cap_plus_one_without_large_files(self):
+        fixed_cap, archive_cap = identity.FIXED_REPORT_RECEIPT_ALLOWANCE, identity.MAX_ARCHIVE_BYTES
+        def files(attributable, supporting):
+            return (h.FileFact("coordinator.json", supporting, "0" * 64),
+                    h.FileFact("streams/boards.pkf", attributable, "1" * 64))
+        projected = dict(manifest_bytes=17, completion_bytes=23)
+        self.assertEqual(h._v2_archive_partition(files(1, fixed_cap - 40), **projected),
+                         (1, fixed_cap, fixed_cap + 1))
+        with self.assertRaisesRegex(ValueError, "V2_FIXED_ALLOWANCE_CAP"):
+            h._v2_archive_partition(files(1, fixed_cap - 39), **projected)
+        self.assertEqual(h._v2_archive_partition(files(archive_cap - 100, 60), **projected),
+                         (archive_cap - 100, 100, archive_cap))
+        with self.assertRaisesRegex(ValueError, "V2_ARCHIVE_CAP"):
+            h._v2_archive_partition(files(archive_cap - 99, 60), **projected)
+        original = h._v2_archive_partition
+        for reason in ("V2_FIXED_ALLOWANCE_CAP", "V2_ARCHIVE_CAP"):
+            reached = []
+            def partition(values, *, manifest_bytes=0, completion_bytes=0):
+                if manifest_bytes or completion_bytes:
+                    reached.append((manifest_bytes, completion_bytes))
+                    extras = manifest_bytes + completion_bytes
+                    virtual = (files(1, fixed_cap + 1 - extras) if reason == "V2_FIXED_ALLOWANCE_CAP"
+                               else files(archive_cap + 1 - extras, 0))
+                    return original(virtual, manifest_bytes=manifest_bytes, completion_bytes=completion_bytes)
+                return original(values)
+            with self.subTest(reason=reason), self.archive_fixture() as fixture, \
+                    patch.object(h, "_v2_archive_partition", side_effect=partition):
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.close_archive(fixture)
+                self.assertEqual(len(reached), 1)
+                self.assertTrue(all(value > 0 for value in reached[0]))
+                self.assertTrue((fixture["root"] / "coordinator.json").exists())
+                self.assertTrue((fixture["root"] / "status.json").exists())
+                self.assertFalse((fixture["root"] / "manifest.json").exists())
+                self.assertFalse((fixture["root"] / "COMPLETE.json").exists())
+
+    def test_v2_archive_fixed_support_and_logical_surplus_never_provide_family_credit(self):
+        outcomes = []
+        for padding in (0, 1000):
+            with self.archive_fixture(report_bytes=b"<p>Transport only.</p>" + b"x" * padding) as fixture:
+                closed = self.close_archive(fixture)
+                outcomes.append(closed)
+        smaller, larger = outcomes
+        self.assertLess(smaller.accounting.fixed_allowance_bytes, larger.accounting.fixed_allowance_bytes)
+        self.assertEqual(smaller.accounting.attributable_bytes, larger.accounting.attributable_bytes)
+        self.assertEqual((smaller.manifest.b_proc, smaller.manifest.e_final, smaller.manifest.remaining_procedural_budget),
+                         (larger.manifest.b_proc, larger.manifest.e_final, larger.manifest.remaining_procedural_budget))
+        with self.archive_count_domain():
+            manifest = smaller.manifest
+            totals = (replace(manifest.family_totals[0], logical_bytes=manifest.family_totals[0].logical_bytes + 1000),) + manifest.family_totals[1:]
+            h._v2_archive_reconcile(manifest.targets, manifest.family_counts, totals,
+                manifest.physical_minimum_total, manifest.b_proc, manifest.e_final, manifest.remaining_procedural_budget)
+            before = h._v2_archive_partition(smaller.accounting.files)
+            self.assertEqual(before, (smaller.accounting.attributable_bytes,
+                                     smaller.accounting.fixed_allowance_bytes, smaller.accounting.archive_bytes))
+            self.assertEqual(before, h._v2_archive_partition(smaller.accounting.files))
+            primary_floor = manifest.family_counts[0][1] * manifest.targets.physical.primary
+            short = (replace(manifest.family_totals[0], physical_bytes=primary_floor - 1, physical_excess=0),) + manifest.family_totals[1:]
+            with self.assertRaisesRegex(ValueError, "V2_ARCHIVE_DUAL_MINIMUM_SHORTFALL"):
+                h._v2_archive_reconcile(manifest.targets, manifest.family_counts, short,
+                    manifest.physical_minimum_total, manifest.b_proc, manifest.e_final, manifest.remaining_procedural_budget)
+
+    def test_v2_archive_check_and_progress_failures_preserve_prefix_and_cannot_claim_close(self):
+        stages = ("support_authentication", "coordinator_status", "manifest_inventory", "projected_accounting",
+                  "manifest_write", "completion_write", "final_inventory", "final_accounting")
+        for stage in stages:
+            with self.subTest(stage=stage), self.archive_fixture() as fixture:
+                observed = []
+                marker = RuntimeError("bounded close progress failure")
+                def progress(current, done, total):
+                    observed.append((current, done, total))
+                    if current == stage and done == 0:
+                        raise marker
+                with self.assertRaises(RuntimeError) as caught:
+                    self.close_archive(fixture, progress=progress)
+                self.assertIs(caught.exception, marker)
+                self.assertNotIn(("final_accounting", 1, 1), observed)
+                if stage in stages[:5]:
+                    self.assertFalse((fixture["root"] / "manifest.json").exists())
+                if stage in stages[:6]:
+                    self.assertFalse((fixture["root"] / "COMPLETE.json").exists())
+        with self.archive_fixture() as fixture:
+            before = self.archive_bytes(fixture["root"])
+            marker = KeyboardInterrupt("bounded close containment failure")
+            def check():
+                raise marker
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                self.close_archive(fixture, check=check)
+            self.assertIs(caught.exception, marker)
+            self.assertEqual(self.archive_bytes(fixture["root"]), before)
+
+    def test_v2_archive_partial_publication_and_final_inventory_failure_never_return_success(self):
+        for case in ("manifest", "completion_write", "completion_fsync", "final_inventory"):
+            with self.subTest(case=case), self.archive_fixture() as fixture, _EvidenceExitStack() as stack:
+                root = fixture["root"]
+                before = self.archive_bytes(root)
+                original_exclusive, original_inventory = h._exclusive_bytes, h._inventory
+                original_receipt, original_fsync = h.store.write_completion_receipt, os.fsync
+                completion_active = [False]
+                def exclusive(path, data):
+                    if case == "manifest" and Path(path).name == "manifest.json":
+                        with Path(path).open("xb") as stream:
+                            stream.write(data[:17])
+                        raise OSError("SLICE1O_PARTIAL_MANIFEST")
+                    return original_exclusive(path, data)
+                def write_complete(stream, data):
+                    stream.write(data[:17])
+                    raise OSError("SLICE1O_PARTIAL_COMPLETION")
+                def receipt(*args, **kwargs):
+                    completion_active[0] = True
+                    try:
+                        return original_receipt(*args, **kwargs)
+                    finally:
+                        completion_active[0] = False
+                def fsync(descriptor):
+                    if case == "completion_fsync" and completion_active[0]:
+                        raise OSError("SLICE1O_COMPLETION_FSYNC")
+                    return original_fsync(descriptor)
+                def inventory(*args, **kwargs):
+                    values = original_inventory(*args, **kwargs)
+                    if case == "final_inventory" and (root / "COMPLETE.json").exists():
+                        return tuple(replace(value, byte_length=value.byte_length + 1)
+                                     if value.path == "status.json" else value for value in values)
+                    return values
+                stack.enter_context(patch.object(h, "_exclusive_bytes", side_effect=exclusive))
+                stack.enter_context(patch.object(h, "_inventory", side_effect=inventory))
+                stack.enter_context(patch.object(h.store, "write_completion_receipt", side_effect=receipt))
+                stack.enter_context(patch.object(os, "fsync", side_effect=fsync))
+                if case == "completion_write":
+                    stack.enter_context(patch.object(h.store, "_write_complete", side_effect=write_complete))
+                events = []
+                with self.assertRaises((ValueError, OSError)):
+                    self.close_archive(fixture, progress=lambda *event: events.append(event))
+                self.assertNotIn(("final_accounting", 1, 1), events)
+                after = self.archive_bytes(root)
+                self.assertTrue(all(after[name] == raw for name, raw in before.items()))
+                self.assertTrue((root / "coordinator.json").exists() and (root / "status.json").exists())
+                if case == "manifest":
+                    self.assertEqual((root / "manifest.json").stat().st_size, 17)
+                    self.assertFalse((root / "COMPLETE.json").exists())
+                elif case == "completion_write":
+                    self.assertEqual((root / "COMPLETE.json").stat().st_size, 17)
+                else:
+                    self.assertTrue((root / "COMPLETE.json").exists())
+                with self.assertRaises(ValueError):
+                    self.close_archive(fixture)
+                self.assertEqual(self.archive_bytes(root), after)
+
+    def test_v2_archive_check_callback_interrupts_during_inventory(self):
+        with self.archive_fixture() as fixture:
+            original = h._inventory
+            active, checks = [False], []
+            marker = RuntimeError("SLICE1O_INVENTORY_CHECK")
+            def inventory(*args, **kwargs):
+                active[0] = True
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    active[0] = False
+            def check():
+                if active[0]:
+                    checks.append(True)
+                    if len(checks) == 3:
+                        raise marker
+            before = self.archive_bytes(fixture["root"])
+            with patch.object(h, "_inventory", side_effect=inventory), self.assertRaises(RuntimeError) as caught:
+                self.close_archive(fixture, check=check)
+            self.assertIs(caught.exception, marker)
+            self.assertEqual(len(checks), 3)
+            self.assertEqual(self.archive_bytes(fixture["root"]), before)
+
+    def test_v2_archive_canonical_materialization_change_after_readback_is_detected(self):
+        with self.archive_fixture() as fixture:
+            streams = fixture["root"] / "streams"
+            node = self.metadata_node(streams)
+            node["runtime_monitor_peak_coordinator_private_bytes"] += 1
+            self.write_metadata_node(streams, node)
+            before = self.archive_bytes(fixture["root"])
+            with self.assertRaisesRegex(ValueError, "V2_ARCHIVE_METADATA_CHANGED_AFTER_READBACK"):
+                self.close_archive(fixture)
+            self.assertEqual(self.archive_bytes(fixture["root"]), before)
+
+    def test_v2_archive_written_coordinator_status_drift_prevents_manifest(self):
+        for name in ("coordinator.json", "status.json"):
+            with self.subTest(path=name), self.archive_fixture() as fixture:
+                changed = []
+                def progress(stage, done, total):
+                    if stage == "coordinator_status" and done == 1:
+                        path = fixture["root"] / name
+                        raw = bytearray(path.read_bytes())
+                        raw[-1] ^= 1
+                        path.write_bytes(raw)
+                        changed.append(bytes(raw))
+                with self.assertRaisesRegex(ValueError, "V2_ARCHIVE_PRE_MANIFEST_DRIFT"):
+                    self.close_archive(fixture, progress=progress)
+                self.assertEqual((fixture["root"] / name).read_bytes(), changed[0])
+                self.assertFalse((fixture["root"] / "manifest.json").exists())
+                self.assertFalse((fixture["root"] / "COMPLETE.json").exists())
+
+    def test_v2_archive_manifest_materialization_and_authority_binding_survive_receipt_rehash(self):
+        with self.archive_fixture() as fixture:
+            closed = self.close_archive(fixture)
+            path = fixture["root"] / "manifest.json"
+            original_manifest = path.read_bytes()
+            original_completion = (fixture["root"] / "COMPLETE.json").read_bytes()
+            cases = {
+                "schema": lambda node: node.update(schema="program-k-e2-r0b-experiment/v1"),
+                "registry_order": lambda node: node["streams"].reverse(),
+                "source_identity": lambda node: node.update(source_plan_identity="0" * 64),
+                "materialization_identity": lambda node: node.update(materialization_plan_identity="0" * 64),
+                "family_count": lambda node: node["family_counts"][0].__setitem__(1, 5),
+                "targets": lambda node: node["targets"]["logical"].update(primary=node["targets"]["logical"]["primary"] + 1),
+                "family_total": lambda node: node["family_totals"][0].update(logical_bytes=node["family_totals"][0]["logical_bytes"] + 1),
+                "minimum": lambda node: node.update(physical_minimum_total=node["physical_minimum_total"] + 1),
+                "b_proc": lambda node: node.update(b_proc=node["b_proc"] + 1),
+                "e_final": lambda node: node.update(e_final=node["e_final"] + 1),
+                "remaining": lambda node: node.update(remaining_procedural_budget=node["remaining_procedural_budget"] + 1),
+                "operation_count": lambda node: node.update(durable_operation_count=node["durable_operation_count"] + 1),
+                "primary_count": lambda node: node.update(durable_primary_count=node["durable_primary_count"] + 1),
+                "runtime_peak_label": lambda node: node.update(runtime_peak_is_independent=True),
+                "sample_above_runtime_peak": lambda node: node.update(durable_sample_max_coordinator_private_bytes=node["runtime_monitor_peak_coordinator_private_bytes"] + 1),
+                "selection_authority": lambda node: node.update(selection_receipt_sha256="0" * 64),
+            }
+            for name, mutate in cases.items():
+                with self.subTest(case=name):
+                    node = json.loads(original_manifest)
+                    mutate(node)
+                    data = json.dumps(node, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii") + b"\n"
+                    path.write_bytes(data)
+                    receipt = replace(closed.completion, manifest_sha256=h.sha256(data).hexdigest())
+                    (fixture["root"] / "COMPLETE.json").write_bytes(records.encode(receipt) + b"\n")
+                    with self.assertRaises(ValueError):
+                        self.validate_archive(fixture)
+            path.write_bytes(original_manifest)
+            (fixture["root"] / "COMPLETE.json").write_bytes(original_completion)
+            for name in ("selection_receipt_sha256", "corpus_sha256", "source_sha256"):
+                with self.subTest(external_authority=name), self.assertRaises(ValueError):
+                    self.validate_archive(fixture, **{name: "0" * 64})
+
+
+
+
 class V2FullMaterializerV1IsolationTests(unittest.TestCase):
     def test_historical_materializer_coordinator_and_r0_never_activate_full_v2_path(self):
         from tests.test_program_k_e2_operational import StreamingCoordinatorTests, R0ComponentTests, _plan
@@ -5810,7 +6376,12 @@ class V2FullMaterializerV1IsolationTests(unittest.TestCase):
                  "_build_primary_v2_baseline", "_materialize_v2_unit", "_capture_qualified_codec_profile",
                  "_publish_v2_materialization", "_readback_synthetic_v2", "_readback_v2_plan",
                  "_v2_serialized_reservation", "_v2_materialization_evidence", "_v2_readback_constructor",
-                 "_v2_readback_prior", "_v2_readback_unit", "_v2_readback_support")
+                 "_v2_readback_prior", "_v2_readback_unit", "_v2_readback_support",
+                 "_close_v2_experiment_archive", "_validate_closed_v2_experiment_archive",
+                 "_v2_archive_authority", "_v2_archive_inventory", "_v2_archive_file", "_v2_archive_read_bytes",
+                 "_v2_archive_bind_seals", "_v2_archive_scan_support", "_v2_archive_reconcile",
+                 "_v2_archive_readback_binding", "_v2_archive_peak", "_v2_archive_partition",
+                 "_v2_archive_coordinator", "_v2_archive_status", "_v2_archive_completion", "_v2_archive_project")
         with _EvidenceExitStack() as stack:
             for name in names:
                 stack.enter_context(patch.object(h, name, side_effect=AssertionError("No full V2 historical path")))
@@ -5818,6 +6389,7 @@ class V2FullMaterializerV1IsolationTests(unittest.TestCase):
                                              side_effect=AssertionError("No V1 profile capture")))
             for owner, name in ((evidence, "encode_materialization_v2"),
                     (evidence, "decode_materialization_v2"), (evidence, "plan_identity_v2"),
+                    (evidence, "encode_archive_manifest_v2"), (evidence, "decode_archive_manifest_v2"),
                     (h.store, "FramedStreamPullReader")):
                 stack.enter_context(patch.object(owner, name,
                     side_effect=AssertionError("No V2 evidence or PKF reader in V1")))
@@ -5851,3 +6423,7 @@ class V2FullMaterializerV1IsolationTests(unittest.TestCase):
                 self.assertTrue((root / "COMPLETE.json").exists())
                 self.assertGreater(accounting.archive_bytes, 0)
                 self.assertFalse(list(root.rglob("*.pkf")))
+                self.assertEqual(json.loads((root / "manifest.json").read_bytes())["schema"],
+                                 "program-k-e2-r0b-experiment/v1")
+                self.assertEqual(h.store.read_completion_receipt(root).manifest_sha256,
+                                 h.sha256((root / "manifest.json").read_bytes()).hexdigest())

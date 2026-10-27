@@ -777,6 +777,278 @@ class V2MaterializationEvidenceTests(unittest.TestCase):
             self.assertEqual(e.encode_size_basis(e.SizeBasisV2(PROFILE)), _json(BASIS_FIELDS))
 
 
+class V2ArchiveManifestEvidenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from experiments import program_k_e2_identity as identity
+        cls.streams = tuple(records.StreamDigest(name, format(index + 1, "064x"), index + 1, 1)
+                            for index, name in enumerate(execution.STREAM_NAMES + (
+                                "operations", "resources", "qualification_identity", "postprocessing_operations")))
+        stream_files = {}
+        for seal in cls.streams:
+            prefix = "postprocessing/" if seal.name == "postprocessing_operations" else "streams/"
+            path = prefix + seal.name + ".pkf"
+            stream_files[path] = e.V2ArchiveFileEvidence(path, seal.byte_length, seal.sha256)
+        cls.inventory = tuple(stream_files.get(path) or e.V2ArchiveFileEvidence(path, 3, "f" * 64)
+                              for path in e.V2_ARCHIVE_PRE_MANIFEST_PATHS)
+        by_path = {fact.path: fact for fact in cls.inventory}
+        targets = readiness.DualComponentSizes(*(readiness.ComponentSizes(1, 1, 0, 0, 1, 1) for _ in range(2)))
+        cls.value = e.V2ArchiveManifestEvidence(
+            schema=e.R0B_EXPERIMENT_V2, kind="archive_manifest", classification="SYNTHETIC_NON_EFFECTIVENESS",
+            synthetic_non_evidence=True, selection_receipt_sha256="1" * 64, corpus_sha256="2" * 64,
+            source_sha256="3" * 64, protocol_sha256=identity.PROTOCOL_SHA256,
+            materialization_file=by_path["streams/materialization-v2.json"], codec_profile_sha256=PROFILE,
+            size_basis=e.SizeBasisV2(PROFILE), source_plan_identity="4" * 64, materialization_plan_identity="5" * 64,
+            family_counts=tuple(zip(readiness.V2_FAMILIES, (1, 0, 0, 0, 0, 0))), targets=targets,
+            family_totals=tuple(e.V2FamilyTotalEvidence(family, 1 if family == "primary" else 0,
+                1 if family == "primary" else 0, 0) for family in readiness.V2_FAMILIES),
+            e_final=0, b_proc=1000, remaining_procedural_budget=1000, physical_minimum_total=1,
+            materialization_readback_complete=True, readback_streams=cls.streams[:-2], durable_operation_count=1,
+            durable_primary_count=1, durable_sample_max_coordinator_private_bytes=200,
+            runtime_monitor_peak_coordinator_private_bytes=300, runtime_peak_is_independent=False,
+            constructor_rejections_are_runtime_provenance=True, qualification_identity_stream=cls.streams[-2],
+            postprocessing_operations_stream=cls.streams[-1], analysis_file=by_path["postprocessing/analysis.json"],
+            report_file=by_path["postprocessing/report.html"], streams=cls.streams,
+            inventory_before_manifest_receipt=cls.inventory,
+            attributable_bytes=sum(seal.byte_length for seal in cls.streams[:53]),
+            projected_fixed_bytes=0, projected_archive_bytes=0,
+            fixed_allowance_cap=identity.FIXED_REPORT_RECEIPT_ALLOWANCE, archive_cap=identity.MAX_ARCHIVE_BYTES,
+            scope=e.V2_ARCHIVE_SCOPE)
+        cls.raw = e.encode_archive_manifest_v2(cls.value)
+
+    def node(self):
+        return json.loads(self.raw)
+
+    def decode_node(self, node):
+        return e.decode_archive_manifest_v2(_json(node) + b"\n")
+
+    def test_canonical_ascii_final_lf_roundtrip_and_explicit_archive_identity(self):
+        self.assertEqual(self.raw, _json(self.node()) + b"\n")
+        self.assertTrue(self.raw.isascii())
+        self.assertFalse(self.raw.endswith(b"\n\n"))
+        self.assertEqual(e.decode_archive_manifest_v2(self.raw, expected_profile_sha256=PROFILE), self.value)
+        self.assertEqual(e.encode_archive_manifest_v2(e.decode_archive_manifest_v2(self.raw)), self.raw)
+        self.assertEqual(self.node()["schema"], "program-k-e2-r0b-experiment/v2")
+        self.assertEqual(self.node()["kind"], "archive_manifest")
+        self.assertEqual(self.node()["classification"], "SYNTHETIC_NON_EFFECTIVENESS")
+        self.assertNotIn("manifest_sha256", self.node())
+        self.assertNotIn("completion", self.node())
+        self.assertFalse(self.value.runtime_peak_is_independent)
+        self.assertTrue(self.value.constructor_rejections_are_runtime_provenance)
+
+    def test_exact_layout_paths_and_pre_manifest_inventory_exclude_future_files(self):
+        self.assertEqual(len(e.V2_ARCHIVE_ATTRIBUTABLE_PATHS), 53)
+        self.assertEqual(e.V2_ARCHIVE_ATTRIBUTABLE_PATHS,
+                         tuple("streams/" + name + ".pkf" for name in execution.STREAM_NAMES))
+        self.assertEqual(len(e.V2_ARCHIVE_PRE_MANIFEST_PATHS), 62)
+        self.assertEqual(len(e.V2_ARCHIVE_FINAL_PATHS), 64)
+        self.assertEqual(e.V2_ARCHIVE_FINAL_PATHS, tuple(sorted(set(e.V2_ARCHIVE_FINAL_PATHS))))
+        self.assertEqual(set(e.V2_ARCHIVE_FINAL_PATHS) - set(e.V2_ARCHIVE_PRE_MANIFEST_PATHS),
+                         {"manifest.json", "COMPLETE.json"})
+        self.assertEqual(tuple(f.path for f in self.value.inventory_before_manifest_receipt),
+                         e.V2_ARCHIVE_PRE_MANIFEST_PATHS)
+        for path in ("/streams/boards.pkf", "../streams/boards.pkf", "streams/../status.json",
+                     "streams\\boards.pkf", "streams//boards.pkf", "./status.json", "STATUS.json",
+                     "streams/boards.jsonl", "unexpected", "", True):
+            with self.subTest(path=path), self.assertRaises(e.EvidenceError):
+                e.V2ArchiveFileEvidence(path, 0, "a" * 64)
+
+    def test_archive_types_frozen_exact_and_excluded_from_v1_registry(self):
+        for value in (self.value, self.value.materialization_file):
+            self.assertFalse(hasattr(value, "__dict__"))
+            self.assertNotIn(type(value), e._FACT_TYPES.values())
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, fields(value)[0].name, None)
+            with self.assertRaises(e.EvidenceError):
+                e.fact_node_v1(value)
+            with self.assertRaises(e.EvidenceError):
+                e.fact_read_v1({"fact": type(value).__name__, "fields": {}})
+        class Derived(e.V2ArchiveManifestEvidence):
+            pass
+        values = {field.name: getattr(self.value, field.name) for field in fields(self.value)}
+        with self.assertRaises(e.EvidenceError):
+            e.encode_archive_manifest_v2(Derived(**values))
+        class DerivedFile(e.V2ArchiveFileEvidence):
+            pass
+        with self.assertRaises(e.EvidenceError):
+            replace(self.value, analysis_file=DerivedFile("postprocessing/analysis.json", 3, "f" * 64))
+
+    def test_every_closed_nested_object_rejects_unknown_and_missing_fields(self):
+        paths = ((), ("materialization_file",), ("size_basis",), ("targets",), ("targets", "physical"),
+                 ("targets", "logical"), ("family_totals", 0), ("readback_streams", 0),
+                 ("qualification_identity_stream",), ("postprocessing_operations_stream",),
+                 ("analysis_file",), ("report_file",), ("streams", 0), ("inventory_before_manifest_receipt", 0))
+        for path in paths:
+            shape = self.node()
+            for key in path:
+                shape = shape[key]
+            for field in tuple(shape) + ("unexpected",):
+                node = self.node()
+                target = node
+                for key in path:
+                    target = target[key]
+                if field == "unexpected":
+                    target[field] = None
+                else:
+                    del target[field]
+                with self.subTest(path=path, field=field), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+
+    def test_duplicate_noncanonical_non_ascii_and_wrong_wire_types_fail(self):
+        duplicate = b'{"kind":"archive_manifest",' + self.raw[1:]
+        nested = self.raw.replace(b'"byte_length":1,', b'"byte_length":1,"byte_length":1,', 1)
+        for raw in (self.raw[:-1], self.raw + b"\n", b" " + self.raw, self.raw + b" ",
+                    self.raw.replace(b'"e_final":0', b'"e_final": 0'), duplicate, nested,
+                    self.raw.replace(b'"kind":', b'"k\xffnd":')):
+            with self.subTest(raw=raw[:40]), self.assertRaises(e.EvidenceError):
+                e.decode_archive_manifest_v2(raw)
+        for raw in (bytearray(self.raw), memoryview(self.raw), self.raw.decode("ascii"), None, b""):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_archive_manifest_v2(raw)
+
+    def test_exact_integer_fields_no_float_nan_bool_or_coercion(self):
+        paths = tuple((field,) for field in ("e_final", "b_proc", "remaining_procedural_budget",
+            "physical_minimum_total", "durable_operation_count", "durable_primary_count",
+            "durable_sample_max_coordinator_private_bytes", "runtime_monitor_peak_coordinator_private_bytes",
+            "attributable_bytes", "projected_fixed_bytes", "projected_archive_bytes",
+            "fixed_allowance_cap", "archive_cap")) + (("family_counts", 0, 1),
+            ("targets", "physical", "primary"), ("family_totals", 0, "physical_bytes"),
+            ("streams", 0, "byte_length"), ("readback_streams", 0, "record_count"),
+            ("materialization_file", "byte_length"), ("inventory_before_manifest_receipt", 0, "byte_length"))
+        for path in paths:
+            for bad in (True, False, 1.0, "1", None, -1):
+                node = self.node()
+                target = node
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = bad
+                with self.subTest(path=path, bad=bad), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        for token in (b"NaN", b"Infinity", b"-Infinity", b"1e0"):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_archive_manifest_v2(self.raw.replace(b'"e_final":0', b'"e_final":' + token))
+
+    def test_identity_digests_profile_provenance_flags_and_caps_are_exact(self):
+        for field in ("selection_receipt_sha256", "corpus_sha256", "source_sha256", "protocol_sha256",
+                      "codec_profile_sha256", "source_plan_identity", "materialization_plan_identity"):
+            for bad in ("A" * 64, "a" * 63, "g" * 64, True, None):
+                node = self.node()
+                node[field] = bad
+                with self.subTest(field=field, bad=bad), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        for field, bad in (("schema", e.R0B_EXPERIMENT_V1), ("kind", "materialization"),
+                ("classification", "EFFECTIVENESS"), ("scope", "support-only"),
+                ("protocol_sha256", "a" * 64), ("fixed_allowance_cap", self.value.fixed_allowance_cap + 1),
+                ("archive_cap", self.value.archive_cap - 1)):
+            with self.subTest(field=field), self.assertRaises(e.EvidenceError):
+                replace(self.value, **{field: bad})
+        for field, expected in (("synthetic_non_evidence", True), ("materialization_readback_complete", True),
+                ("runtime_peak_is_independent", False), ("constructor_rejections_are_runtime_provenance", True)):
+            for bad in (not expected, int(expected), str(expected)):
+                with self.subTest(field=field, bad=bad), self.assertRaises(e.EvidenceError):
+                    replace(self.value, **{field: bad})
+        with self.assertRaises(e.EvidenceError):
+            replace(self.value, size_basis=e.SizeBasisV2("b" * 64))
+        for expected in ("0" * 64, bytes.fromhex(PROFILE), True, "A" * 64):
+            with self.assertRaises(e.EvidenceError):
+                e.decode_archive_manifest_v2(self.raw, expected_profile_sha256=expected)
+
+    def test_registry_order_missing_extra_duplicates_and_closed_family_order_fail(self):
+        for field in ("streams", "readback_streams", "family_counts", "family_totals",
+                      "inventory_before_manifest_receipt"):
+            for mutate in (lambda value: value[::-1], lambda value: value[:-1],
+                           lambda value: value + value[:1], lambda value: {}, lambda value: None):
+                node = self.node()
+                node[field] = mutate(node[field])
+                with self.subTest(field=field), self.assertRaises(e.EvidenceError):
+                    self.decode_node(node)
+        node = self.node()
+        node["streams"][0]["name"] = "extra"
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+        with self.assertRaises(e.EvidenceError):
+            replace(self.value, streams=tuple(sorted(self.streams, key=lambda seal: seal.name)))
+
+    def test_manifest_registry_order_and_receipt_sorted_order_bind_same_57_seals(self):
+        from experiments import program_k_e2_identity as identity
+        receipt_fields = dict(manifest_sha256="6" * 64, corpus_sha256=self.value.corpus_sha256,
+            source_sha256=self.value.source_sha256, protocol_sha256=identity.PROTOCOL_SHA256,
+            state=records.CompletionState.COMPLETED)
+        self.assertEqual(tuple(s.name for s in self.streams), e.V2_ARCHIVE_STREAM_NAMES)
+        with self.assertRaises(ValueError):
+            records.CompletionReceipt(streams=self.streams, **receipt_fields)
+        sorted_streams = tuple(sorted(self.streams, key=lambda seal: seal.name))
+        receipt = records.CompletionReceipt(streams=sorted_streams, **receipt_fields)
+        self.assertEqual(records.decode(records.encode(receipt)), receipt)
+        self.assertEqual(len(receipt.streams), 57)
+        self.assertEqual({s.name: s for s in receipt.streams}, {s.name: s for s in self.value.streams})
+        self.assertEqual(len({s.name for s in self.value.streams}), 57)
+        with self.assertRaises(ValueError):
+            records.CompletionReceipt(streams=sorted_streams + sorted_streams[-1:], **receipt_fields)
+
+    def test_repeated_stream_file_and_inventory_bindings_cannot_disagree(self):
+        paths = (("readback_streams", 0, "sha256"), ("qualification_identity_stream", "sha256"),
+                 ("postprocessing_operations_stream", "byte_length"), ("materialization_file", "sha256"),
+                 ("analysis_file", "byte_length"), ("report_file", "sha256"), ("streams", 0, "sha256"),
+                 ("inventory_before_manifest_receipt", 1, "sha256"))
+        # Inventory entry 1 is analysis.json in the fixed sorted layout.
+        self.assertEqual(self.inventory[1].path, "postprocessing/analysis.json")
+        for path in paths:
+            node = self.node()
+            target = node
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = "a" * 64 if path[-1] == "sha256" else target[path[-1]] + 1
+            with self.subTest(path=path), self.assertRaises(e.EvidenceError):
+                self.decode_node(node)
+        node = self.node()
+        node["inventory_before_manifest_receipt"].append({"path": "manifest.json", "byte_length": 0, "sha256": "0" * 64})
+        with self.assertRaises(e.EvidenceError):
+            self.decode_node(node)
+
+    def test_provisional_projection_is_shape_only_and_does_not_create_budget_credit(self):
+        # The close owner calculates the encoded-length fixed point and caps.
+        # Pure codec validation must allow a provisional zero and over-cap facts.
+        for fixed, archive in ((0, 0), (self.value.fixed_allowance_cap, self.value.archive_cap),
+                               (self.value.fixed_allowance_cap + 1, self.value.archive_cap + 1)):
+            value = replace(self.value, projected_fixed_bytes=fixed, projected_archive_bytes=archive)
+            decoded = e.decode_archive_manifest_v2(e.encode_archive_manifest_v2(value))
+            self.assertEqual((decoded.projected_fixed_bytes, decoded.projected_archive_bytes), (fixed, archive))
+            self.assertEqual((decoded.b_proc, decoded.e_final, decoded.remaining_procedural_budget), (1000, 0, 1000))
+
+    def test_encoder_revalidates_exact_frozen_nested_objects(self):
+        for field, bad in (("e_final", True), ("streams", []), ("inventory_before_manifest_receipt", []),
+                           ("scope", "wrong"), ("runtime_peak_is_independent", True)):
+            value = replace(self.value)
+            object.__setattr__(value, field, bad)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                e.encode_archive_manifest_v2(value)
+        file_fact = replace(self.value.materialization_file)
+        object.__setattr__(file_fact, "byte_length", True)
+        value = replace(self.value)
+        object.__setattr__(value, "materialization_file", file_fact)
+        with self.assertRaises(ValueError):
+            e.encode_archive_manifest_v2(value)
+
+    def test_archive_codec_is_pure_and_historical_and_materialization_codecs_remain_independent(self):
+        forbidden = AssertionError("Archive codec must not perform I/O, capture, readback or execution")
+        with ExitStack() as stack:
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "write_bytes"),
+                    (physical, "capture_profile"), (physical, "capture_qualified_profile"),
+                    (h, "_capture_qualified_codec_profile"), (h, "construct_reference_v2"),
+                    (h, "construct_text_family_v2"), (h, "_materialize_v2_plan"), (h, "_readback_v2_plan"),
+                    (e, "encode_materialization_v2"), (e, "decode_materialization_v2")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            self.assertEqual(e.decode_archive_manifest_v2(e.encode_archive_manifest_v2(self.value)), self.value)
+        with patch.object(e, "encode_archive_manifest_v2", side_effect=forbidden), \
+                patch.object(e, "decode_archive_manifest_v2", side_effect=forbidden):
+            self.assertEqual(_decode(_encode(_facts()[0])), _facts()[0])
+            # Reuse a literal fixture constructor; no profile capture or workload.
+            V2MaterializationEvidenceTests.setUpClass()
+            materialization = V2MaterializationEvidenceTests.value
+            self.assertEqual(e.decode_materialization_v2(e.encode_materialization_v2(materialization)), materialization)
+
+
 class ImportPurityTests(unittest.TestCase):
     def test_no_harness_import_dynamic_registry_or_side_effect_calls(self):
         source = Path(e.__file__).read_text(encoding="utf-8")

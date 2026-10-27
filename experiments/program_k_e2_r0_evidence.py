@@ -17,6 +17,7 @@ from experiments import program_k_e2_execution as execution
 from experiments import program_k_e2_operational as operational
 from experiments import program_k_e2_readiness as readiness
 from experiments import program_k_e2_physical as physical
+from experiments import program_k_e2_identity as identity
 
 
 class EvidenceError(ValueError):
@@ -648,3 +649,242 @@ def plan_identity_v2(plan):
             "k_control_selected": work.k_control_selected}
         digest.update(_v2_json(node) + b"\n")
     return digest.hexdigest()
+
+
+# Archive manifests have registry order; CompletionReceipt keeps its independent
+# historical sorted-name order. Neither order changes the other owner's codec.
+V2_ARCHIVE_STREAM_NAMES = execution.STREAM_NAMES + (
+    "operations", "resources", "qualification_identity", "postprocessing_operations")
+V2_ARCHIVE_ATTRIBUTABLE_PATHS = tuple("streams/" + name + ".pkf" for name in execution.STREAM_NAMES)
+V2_ARCHIVE_PRE_MANIFEST_PATHS = tuple(sorted(V2_ARCHIVE_ATTRIBUTABLE_PATHS + (
+    "streams/operations.pkf", "streams/resources.pkf", "streams/qualification_identity.pkf",
+    "streams/materialization-v2.json", "postprocessing/postprocessing_operations.pkf",
+    "postprocessing/analysis.json", "postprocessing/report.html", "coordinator.json", "status.json")))
+V2_ARCHIVE_FINAL_PATHS = tuple(sorted(V2_ARCHIVE_PRE_MANIFEST_PATHS + ("manifest.json", "COMPLETE.json")))
+V2_ARCHIVE_SCOPE = "experiment-local-all-bytes;execution-pkf-attributable;all-other-files-fixed-support"
+_V2_ARCHIVE_FILE_FIELDS = ("path", "byte_length", "sha256")
+_V2_ARCHIVE_FIELDS = (
+    "schema", "kind", "classification", "synthetic_non_evidence", "selection_receipt_sha256",
+    "corpus_sha256", "source_sha256", "protocol_sha256", "materialization_file", "codec_profile_sha256",
+    "size_basis", "source_plan_identity", "materialization_plan_identity", "family_counts", "targets",
+    "family_totals", "e_final", "b_proc", "remaining_procedural_budget", "physical_minimum_total",
+    "materialization_readback_complete", "readback_streams", "durable_operation_count", "durable_primary_count",
+    "durable_sample_max_coordinator_private_bytes", "runtime_monitor_peak_coordinator_private_bytes",
+    "runtime_peak_is_independent", "constructor_rejections_are_runtime_provenance",
+    "qualification_identity_stream", "postprocessing_operations_stream", "analysis_file", "report_file",
+    "streams", "inventory_before_manifest_receipt", "attributable_bytes", "projected_fixed_bytes",
+    "projected_archive_bytes", "fixed_allowance_cap", "archive_cap", "scope")
+
+
+@dataclass(frozen=True, slots=True)
+class V2ArchiveFileEvidence:
+    """Exact file identity in the closed experiment-local V2 layout."""
+
+    path: str
+    byte_length: int
+    sha256: str
+
+    def __post_init__(self):
+        _need(type(self.path) is str and self.path in V2_ARCHIVE_FINAL_PATHS, "V2_ARCHIVE_FILE_PATH")
+        _v2_integer(self.byte_length)
+        _profile_identity(self.sha256)
+
+
+@dataclass(frozen=True, slots=True)
+class V2ArchiveManifestEvidence:
+    """Structural bindings for a synthetic experiment archive, not admission.
+
+    Projected numbers are shape-checked here, including provisional zeroes for
+    the pure encoded-length fixed point. The close owner enforces final exact
+    accounting and caps before any manifest/completion publication.
+    """
+
+    schema: str
+    kind: str
+    classification: str
+    synthetic_non_evidence: bool
+    selection_receipt_sha256: str
+    corpus_sha256: str
+    source_sha256: str
+    protocol_sha256: str
+    materialization_file: V2ArchiveFileEvidence
+    codec_profile_sha256: str
+    size_basis: SizeBasisV2
+    source_plan_identity: str
+    materialization_plan_identity: str
+    family_counts: tuple
+    targets: readiness.DualComponentSizes
+    family_totals: tuple
+    e_final: int
+    b_proc: int
+    remaining_procedural_budget: int
+    physical_minimum_total: int
+    materialization_readback_complete: bool
+    readback_streams: tuple
+    durable_operation_count: int
+    durable_primary_count: int
+    durable_sample_max_coordinator_private_bytes: int
+    runtime_monitor_peak_coordinator_private_bytes: int
+    runtime_peak_is_independent: bool
+    constructor_rejections_are_runtime_provenance: bool
+    qualification_identity_stream: records.StreamDigest
+    postprocessing_operations_stream: records.StreamDigest
+    analysis_file: V2ArchiveFileEvidence
+    report_file: V2ArchiveFileEvidence
+    streams: tuple
+    inventory_before_manifest_receipt: tuple
+    attributable_bytes: int
+    projected_fixed_bytes: int
+    projected_archive_bytes: int
+    fixed_allowance_cap: int
+    archive_cap: int
+    scope: str
+
+    def __post_init__(self):
+        for value, expected in ((self.schema, R0B_EXPERIMENT_V2), (self.kind, "archive_manifest"),
+                (self.classification, "SYNTHETIC_NON_EFFECTIVENESS"), (self.scope, V2_ARCHIVE_SCOPE)):
+            _need(type(value) is str and value == expected, "V2_ARCHIVE_IDENTITY")
+        for value in (self.synthetic_non_evidence, self.materialization_readback_complete,
+                      self.constructor_rejections_are_runtime_provenance):
+            _v2_boolean(value)
+            _need(value, "V2_ARCHIVE_SYNTHETIC_READBACK_REQUIRED")
+        _v2_boolean(self.runtime_peak_is_independent)
+        _need(not self.runtime_peak_is_independent, "V2_ARCHIVE_RUNTIME_PEAK_PROVENANCE")
+        for value in (self.selection_receipt_sha256, self.corpus_sha256, self.source_sha256,
+                      self.protocol_sha256, self.codec_profile_sha256, self.source_plan_identity,
+                      self.materialization_plan_identity):
+            _profile_identity(value)
+        _need(self.protocol_sha256 == identity.PROTOCOL_SHA256, "V2_ARCHIVE_PROTOCOL_IDENTITY")
+        _basis(self.size_basis)
+        _need(self.size_basis.codec_profile_sha256 == self.codec_profile_sha256, "V2_ARCHIVE_PROFILE_IDENTITY")
+        _need(type(self.family_counts) is tuple and len(self.family_counts) == len(readiness.V2_FAMILIES),
+              "V2_ARCHIVE_FAMILY_COUNTS")
+        for pair, family in zip(self.family_counts, readiness.V2_FAMILIES):
+            _need(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str and pair[0] == family,
+                  "V2_ARCHIVE_FAMILY_COUNT_ORDER")
+            _v2_integer(pair[1], 0, 10000)
+        _v2_exact(self.targets, readiness.DualComponentSizes)
+        _need(type(self.family_totals) is tuple, "V2_ARCHIVE_FAMILY_TOTALS")
+        for total in self.family_totals:
+            _v2_exact(total, V2FamilyTotalEvidence)
+        _need(tuple(total.family for total in self.family_totals) == readiness.V2_FAMILIES,
+              "V2_ARCHIVE_FAMILY_TOTAL_ORDER")
+        for value in (self.e_final, self.b_proc, self.remaining_procedural_budget, self.physical_minimum_total,
+                      self.durable_operation_count, self.durable_primary_count,
+                      self.durable_sample_max_coordinator_private_bytes, self.attributable_bytes,
+                      self.projected_fixed_bytes, self.projected_archive_bytes,
+                      self.fixed_allowance_cap, self.archive_cap):
+            _v2_integer(value)
+        _v2_integer(self.runtime_monitor_peak_coordinator_private_bytes, 1)
+        _need(self.fixed_allowance_cap == identity.FIXED_REPORT_RECEIPT_ALLOWANCE
+              and self.archive_cap == identity.MAX_ARCHIVE_BYTES, "V2_ARCHIVE_CAP_IDENTITIES")
+        for streams, names in ((self.streams, V2_ARCHIVE_STREAM_NAMES),
+                (self.readback_streams, execution.STREAM_NAMES + ("operations", "resources"))):
+            _need(type(streams) is tuple, "V2_ARCHIVE_STREAM_TUPLE")
+            for stream in streams:
+                _v2_exact(stream, records.StreamDigest)
+            _need(tuple(stream.name for stream in streams) == names, "V2_ARCHIVE_STREAM_ORDER")
+        for stream in (self.qualification_identity_stream, self.postprocessing_operations_stream):
+            _v2_exact(stream, records.StreamDigest)
+        _need(self.readback_streams == self.streams[:-2]
+              and (self.qualification_identity_stream, self.postprocessing_operations_stream) == self.streams[-2:],
+              "V2_ARCHIVE_REPEATED_STREAM_BINDING")
+        _need(type(self.inventory_before_manifest_receipt) is tuple, "V2_ARCHIVE_INVENTORY_TUPLE")
+        for fact in self.inventory_before_manifest_receipt:
+            _v2_exact(fact, V2ArchiveFileEvidence)
+        _need(tuple(fact.path for fact in self.inventory_before_manifest_receipt) == V2_ARCHIVE_PRE_MANIFEST_PATHS,
+              "V2_ARCHIVE_PRE_MANIFEST_INVENTORY")
+        inventory = {fact.path: fact for fact in self.inventory_before_manifest_receipt}
+        for fact, path in ((self.materialization_file, "streams/materialization-v2.json"),
+                          (self.analysis_file, "postprocessing/analysis.json"),
+                          (self.report_file, "postprocessing/report.html")):
+            _v2_exact(fact, V2ArchiveFileEvidence)
+            _need(fact.path == path and fact == inventory[path], "V2_ARCHIVE_REPEATED_FILE_BINDING")
+        for stream in self.streams:
+            directory = "postprocessing/" if stream.name == "postprocessing_operations" else "streams/"
+            fact = inventory[directory + stream.name + ".pkf"]
+            _need((fact.byte_length, fact.sha256) == (stream.byte_length, stream.sha256),
+                  "V2_ARCHIVE_INVENTORY_STREAM_BINDING")
+
+
+def encode_archive_manifest_v2(value):
+    """Pure explicit archive shape; canonical ASCII JSON with one final LF."""
+    _v2_exact(value, V2ArchiveManifestEvidence)
+    nested = ("materialization_file", "size_basis", "family_counts", "targets", "family_totals",
+              "readback_streams", "qualification_identity_stream", "postprocessing_operations_stream",
+              "analysis_file", "report_file", "streams", "inventory_before_manifest_receipt")
+    node = {name: getattr(value, name) for name in _V2_ARCHIVE_FIELDS if name not in nested}
+    node["size_basis"] = json.loads(encode_size_basis(value.size_basis))
+    node["family_counts"] = [[family, count] for family, count in value.family_counts]
+    node["targets"] = {axis: {family: getattr(getattr(value.targets, axis), family)
+                             for family in readiness.V2_FAMILIES} for axis in ("physical", "logical")}
+    node["family_totals"] = [{name: getattr(total, name) for name in _V2_TOTAL_FIELDS}
+                             for total in value.family_totals]
+    for field in ("materialization_file", "analysis_file", "report_file"):
+        node[field] = {name: getattr(getattr(value, field), name) for name in _V2_ARCHIVE_FILE_FIELDS}
+    node["inventory_before_manifest_receipt"] = [
+        {name: getattr(fact, name) for name in _V2_ARCHIVE_FILE_FIELDS}
+        for fact in value.inventory_before_manifest_receipt]
+    for field in ("qualification_identity_stream", "postprocessing_operations_stream"):
+        node[field] = {name: getattr(getattr(value, field), name) for name in _V2_STREAM_FIELDS}
+    for field in ("streams", "readback_streams"):
+        node[field] = [{name: getattr(stream, name) for name in _V2_STREAM_FIELDS}
+                       for stream in getattr(value, field)]
+    return _v2_json(node) + b"\n"
+
+
+def decode_archive_manifest_v2(data, *, expected_profile_sha256=None):
+    """Decode structural bindings without performing I/O or semantic readback."""
+    _need(type(data) is bytes and 0 < len(data) <= physical.MAX_PAYLOAD_BYTES,
+          "V2_BOUNDED_ARCHIVE_METADATA_BYTES_REQUIRED")
+    if expected_profile_sha256 is not None:
+        _profile_identity(expected_profile_sha256)
+    try:
+        node = json.loads(data.decode("ascii"), object_pairs_hook=_v2_unique,
+                          parse_float=_no_float, parse_constant=_no_float)
+        _v2_fields(node, _V2_ARCHIVE_FIELDS)
+        values = dict(node)
+        values["size_basis"] = decode_size_basis(_v2_json(node["size_basis"]))
+        _need(type(node["family_counts"]) is list, "V2_ARCHIVE_FAMILY_COUNTS")
+        for pair in node["family_counts"]:
+            _need(type(pair) is list and len(pair) == 2, "V2_ARCHIVE_FAMILY_COUNT_PAIR")
+        values["family_counts"] = tuple(tuple(pair) for pair in node["family_counts"])
+        _v2_fields(node["targets"], ("physical", "logical"))
+        for axis in ("physical", "logical"):
+            _v2_fields(node["targets"][axis], readiness.V2_FAMILIES)
+        values["targets"] = readiness.DualComponentSizes(*(readiness.ComponentSizes(**node["targets"][axis])
+                                                            for axis in ("physical", "logical")))
+        _need(type(node["family_totals"]) is list, "V2_ARCHIVE_FAMILY_TOTALS")
+        totals = []
+        for total in node["family_totals"]:
+            _v2_fields(total, _V2_TOTAL_FIELDS)
+            totals.append(V2FamilyTotalEvidence(**total))
+        values["family_totals"] = tuple(totals)
+        for field in ("materialization_file", "analysis_file", "report_file"):
+            _v2_fields(node[field], _V2_ARCHIVE_FILE_FIELDS)
+            values[field] = V2ArchiveFileEvidence(**node[field])
+        _need(type(node["inventory_before_manifest_receipt"]) is list, "V2_ARCHIVE_INVENTORY_ARRAY")
+        inventory = []
+        for fact in node["inventory_before_manifest_receipt"]:
+            _v2_fields(fact, _V2_ARCHIVE_FILE_FIELDS)
+            inventory.append(V2ArchiveFileEvidence(**fact))
+        values["inventory_before_manifest_receipt"] = tuple(inventory)
+        for field in ("qualification_identity_stream", "postprocessing_operations_stream"):
+            _v2_fields(node[field], _V2_STREAM_FIELDS)
+            values[field] = records.StreamDigest(**node[field])
+        for field in ("streams", "readback_streams"):
+            _need(type(node[field]) is list, "V2_ARCHIVE_STREAM_ARRAY")
+            streams = []
+            for stream in node[field]:
+                _v2_fields(stream, _V2_STREAM_FIELDS)
+                streams.append(records.StreamDigest(**stream))
+            values[field] = tuple(streams)
+        value = V2ArchiveManifestEvidence(**values)
+        if expected_profile_sha256 is not None:
+            _need(value.codec_profile_sha256 == expected_profile_sha256, "V2_EXPECTED_PROFILE_MISMATCH")
+        _need(encode_archive_manifest_v2(value) == data, "V2_NONCANONICAL_ARCHIVE_METADATA")
+        return value
+    except EvidenceError:
+        raise
+    except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
+        raise EvidenceError("V2_MALFORMED_ARCHIVE_METADATA") from None

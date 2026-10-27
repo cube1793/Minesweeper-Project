@@ -2480,6 +2480,10 @@ class _V2ReadbackResult:
     runtime_monitor_peak_coordinator_private_bytes: int
     constructor_fact_count: int
     serialized_reservation_bytes: int
+    materialization_metadata_sha256: str
+    materialization_metadata_byte_length: int
+    codec_profile_sha256: str
+    targets: readiness.DualComponentSizes
     progress_complete: bool = True
     readback_complete: bool = True
     synthetic_non_evidence: bool = True
@@ -2673,6 +2677,7 @@ def _readback_v2_plan(root, source_plan, targets, profile, envelope, unit_counts
         data = stream.read(context_bytes + 1)
         _need(type(data) is bytes and len(data) == context_bytes, "V2_METADATA_READ_LENGTH")
     metadata = evidence.decode_materialization_v2(data, expected_profile_sha256=profile.sha256.hex())
+    metadata_sha256 = sha256(data).hexdigest()
     del data
     monitor.check()
     source_identity, materialization_identity = evidence.plan_identity_v2(source_plan), evidence.plan_identity_v2(plan)
@@ -2772,7 +2777,8 @@ def _readback_v2_plan(root, source_plan, targets, profile, envelope, unit_counts
         return _V2ReadbackResult(tuple(seals), source_identity, materialization_identity,
             tuple((family, counts[family]) for family in readiness.V2_FAMILIES), family_totals,
             minimum, ledger.capacity, final_excess, ledger.capacity - final_excess, operations, primaries,
-            sample_max, peak, len(facts), reservation)
+            sample_max, peak, len(facts), reservation, metadata_sha256, context_bytes,
+            profile.sha256.hex(), targets)
     except BaseException:
         for reader in readers.values():
             try:
@@ -3509,6 +3515,431 @@ def account_experiment_archive(root, materialization, *, check=lambda: None, pro
     total = attributable + fixed
     _need(total <= identity.MAX_ARCHIVE_BYTES, "R0B_ARCHIVE_CAP")
     return ArchiveAccounting(files, attributable, fixed, total)
+
+
+_V2_CLOSE_STAGES = ("support_authentication", "coordinator_status", "manifest_inventory",
+    "projected_accounting", "manifest_write", "completion_write", "final_inventory", "final_accounting")
+
+
+@dataclass(frozen=True, slots=True)
+class _V2ArchiveCloseResult:
+    """Structural closure only, never qualification semantics or R0 admission."""
+    manifest: evidence.V2ArchiveManifestEvidence
+    completion: records.CompletionReceipt
+    accounting: ArchiveAccounting
+    archive_closed: bool = True
+    structural_only: bool = True
+
+
+def _v2_archive_authority(selection_receipt_sha256, corpus_sha256, source_sha256):
+    for digest in (selection_receipt_sha256, corpus_sha256, source_sha256):
+        _need(type(digest) is str and len(digest) == 64
+              and all(character in "0123456789abcdef" for character in digest), "V2_ARCHIVE_AUTHORITY_HASH")
+
+
+def _v2_archive_inventory(root, expected_paths, check, progress=None):
+    root = Path(root)
+    check()
+    _need(root.is_dir() and not root.is_symlink() and not root.is_junction(), "V2_ARCHIVE_ROOT")
+    # Inventory every byte before rejecting unexpected file names. Directories
+    # need a separate closed layout check because the shared inventory skips them.
+    files = _inventory(root, check=check, progress=progress)
+    directories = []
+    for path in root.rglob("*"):
+        check()
+        _need(not path.is_symlink() and not path.is_junction(), "ARCHIVE_LINK_FORBIDDEN")
+        if path.is_dir():
+            directories.append(path.relative_to(root).as_posix())
+    _need(set(directories) == {"streams", "postprocessing"}
+          and tuple(value.path for value in files) == tuple(sorted(expected_paths)), "V2_ARCHIVE_LAYOUT")
+    check()
+    return files
+
+
+def _v2_archive_file(value, expected_path=None):
+    _need(type(value) is FileFact, "V2_ARCHIVE_FILE_FACT_REQUIRED")
+    FileFact.__post_init__(value)
+    _need(expected_path is None or value.path == expected_path, "V2_ARCHIVE_ARTIFACT_PATH")
+    return evidence.V2ArchiveFileEvidence(value.path, value.byte_length, value.sha256)
+
+
+def _v2_archive_read_bytes(root, fact, maximum, check):
+    _need(0 < fact.byte_length <= maximum, "V2_ARCHIVE_METADATA_CAP")
+    data = bytearray()
+    check()
+    with store._reader(Path(root) / fact.path) as stream:
+        while True:
+            check()
+            chunk = stream.read(min(65536, fact.byte_length - len(data) + 1))
+            _need(type(chunk) is bytes, "V2_ARCHIVE_INDETERMINATE_READ")
+            if not chunk:
+                break
+            data.extend(chunk)
+            _need(len(data) <= fact.byte_length, "V2_ARCHIVE_FILE_DRIFT")
+    result = bytes(data)
+    _need(len(result) == fact.byte_length and sha256(result).hexdigest() == fact.sha256,
+          "V2_ARCHIVE_FILE_DRIFT")
+    check()
+    return result
+
+
+def _v2_archive_bind_seals(files, seals):
+    by_path = {value.path: value for value in files}
+    _need(type(seals) is tuple and len({seal.name for seal in seals}) == len(seals), "V2_ARCHIVE_STREAM_COVERAGE")
+    for seal in seals:
+        _need(type(seal) is records.StreamDigest, "V2_ARCHIVE_STREAM_DIGEST")
+        records.StreamDigest.__post_init__(seal)
+        path = (("postprocessing/" if seal.name == "postprocessing_operations" else "streams/")
+                + seal.name + ".pkf")
+        _need(path in by_path and (by_path[path].byte_length, by_path[path].sha256)
+              == (seal.byte_length, seal.sha256), "V2_ARCHIVE_SEALED_STREAM_DRIFT")
+
+
+def _v2_archive_scan_support(root, seal, profile, envelope, check):
+    directory = Path(root) / ("postprocessing" if seal.name == "postprocessing_operations" else "streams")
+    check()
+    with store.FramedStreamPullReader(directory, seal.name, physical.context_for(seal.name, profile.sha256),
+                                      max_payload_bytes=envelope.max_payload_bytes) as reader:
+        while True:
+            check()
+            row = reader.pull()
+            check()
+            if row is None:
+                break
+            del row
+        _need(reader.close() == seal, "V2_ARCHIVE_SUPPORT_SEAL_MISMATCH")
+        check()
+
+
+def _v2_archive_reconcile(targets, family_counts, family_totals, minimum, b_proc, e_final, remaining):
+    _need(type(targets) is readiness.DualComponentSizes, "V2_ARCHIVE_TARGETS")
+    readiness.DualComponentSizes.__post_init__(targets)
+    _need(type(family_counts) is tuple and len(family_counts) == len(readiness.V2_FAMILIES),
+          "V2_ARCHIVE_FAMILY_COUNTS")
+    for pair, family in zip(family_counts, readiness.V2_FAMILIES):
+        _need(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str and pair[0] == family,
+              "V2_ARCHIVE_FAMILY_COUNTS")
+        _integer(pair[1])
+    _need(type(family_totals) is tuple and len(family_totals) == len(readiness.V2_FAMILIES),
+          "V2_ARCHIVE_FAMILY_TOTALS")
+    totals = []
+    for value, (family, count) in zip(family_totals, family_counts):
+        _need(type(value) is evidence.V2FamilyTotalEvidence and value.family == family, "V2_ARCHIVE_FAMILY_TOTALS")
+        evidence.V2FamilyTotalEvidence.__post_init__(value)
+        physical_floor = count * getattr(targets.physical, family)
+        logical_floor = count * getattr(targets.logical, family)
+        _need(value.physical_bytes >= physical_floor and value.logical_bytes >= logical_floor,
+              "V2_ARCHIVE_DUAL_MINIMUM_SHORTFALL")
+        _need(value.physical_excess == value.physical_bytes - physical_floor, "V2_ARCHIVE_EXCESS_PARTITION")
+        _need((count > 0 and getattr(targets.logical, family) > 0) or value.logical_bytes == 0,
+              "V2_ARCHIVE_ZERO_LOGICAL_FAMILY")
+        totals.append(_V2FamilyTotal(value.family, value.physical_bytes, value.logical_bytes, value.physical_excess))
+    for amount in (minimum, b_proc, e_final, remaining):
+        _integer(amount)
+    counts = tuple(count for _, count in family_counts)
+    fresh = _new_v2_materialization_ledger(targets, counts)
+    _need(minimum == readiness.minimum_archive_preflight(targets.physical, counts, 0)
+          and b_proc == fresh.capacity and remaining == b_proc - e_final, "V2_ARCHIVE_BUDGET_BINDING")
+    ledger = readiness.ProceduralLedger(b_proc, e_final)
+    _need(_reconcile_v2_materialization_totals(targets, counts, tuple(totals), ledger) == e_final,
+          "V2_ARCHIVE_EXCESS_RECONCILIATION")
+
+
+def _v2_archive_readback_binding(readback, metadata, metadata_file, profile, envelope):
+    _need(type(readback) is _V2ReadbackResult, "V2_ARCHIVE_READBACK_REQUIRED")
+    _v2_archive_authority(readback.materialization_metadata_sha256, readback.codec_profile_sha256,
+                          readback.source_plan_identity)
+    _v2_archive_authority(readback.materialization_plan_identity, readback.codec_profile_sha256,
+                          readback.source_plan_identity)
+    _need(type(readback.targets) is readiness.DualComponentSizes, "V2_ARCHIVE_TARGETS")
+    readiness.DualComponentSizes.__post_init__(readback.targets)
+    for value in (readback.readback_complete, readback.progress_complete, readback.synthetic_non_evidence,
+                  readback.constructor_rejections_are_runtime_provenance):
+        _need(value is True, "V2_ARCHIVE_READBACK_INCOMPLETE")
+    _need(readback.runtime_peak_is_independent is False, "V2_ARCHIVE_RUNTIME_PEAK_PROVENANCE")
+    for value in (readback.physical_minimum_total, readback.b_proc, readback.e_final,
+                  readback.remaining_procedural_budget, readback.durable_operation_count,
+                  readback.durable_primary_count, readback.durable_sample_max_coordinator_private_bytes,
+                  readback.runtime_monitor_peak_coordinator_private_bytes, readback.constructor_fact_count,
+                  readback.serialized_reservation_bytes, readback.materialization_metadata_byte_length):
+        _integer(value)
+    _need((metadata_file.sha256, metadata_file.byte_length) ==
+          (readback.materialization_metadata_sha256, readback.materialization_metadata_byte_length),
+          "V2_ARCHIVE_METADATA_CHANGED_AFTER_READBACK")
+    _need(readback.codec_profile_sha256 == profile.sha256.hex() == metadata.codec_profile_sha256
+          and readback.targets == metadata.targets, "V2_ARCHIVE_READBACK_PROFILE_TARGETS")
+    _need(type(readback.streams) is tuple and readback.streams == metadata.streams
+          and type(readback.family_counts) is tuple and readback.family_counts == metadata.family_counts,
+          "V2_ARCHIVE_READBACK_COVERAGE")
+    _need((readback.source_plan_identity, readback.materialization_plan_identity,
+           readback.physical_minimum_total, readback.b_proc, readback.e_final, readback.remaining_procedural_budget,
+           readback.durable_operation_count, readback.durable_primary_count,
+           readback.runtime_monitor_peak_coordinator_private_bytes, readback.constructor_fact_count) ==
+          (metadata.source_plan_identity, metadata.materialization_plan_identity,
+           metadata.physical_minimum_total, metadata.b_proc, metadata.committed_procedural_excess,
+           metadata.remaining_procedural_budget, metadata.durable_operation_count, metadata.durable_primary_count,
+           metadata.runtime_monitor_peak_coordinator_private_bytes, len(metadata.constructor_facts)),
+          "V2_ARCHIVE_READBACK_FACT_BINDING")
+    totals = _v2_family_totals(readback.family_totals)
+    _need(tuple((v.family, v.physical_bytes, v.logical_bytes, v.physical_excess) for v in totals) ==
+          tuple((v.family, v.physical_bytes, v.logical_bytes, v.physical_excess) for v in metadata.family_totals),
+          "V2_ARCHIVE_READBACK_TOTALS")
+    _need(readback.serialized_reservation_bytes == _v2_serialized_reservation(
+          envelope.max_payload_bytes, metadata_file.byte_length), "V2_ARCHIVE_READBACK_RESERVATION")
+    _v2_archive_peak(readback.durable_sample_max_coordinator_private_bytes,
+                     readback.runtime_monitor_peak_coordinator_private_bytes, envelope)
+
+
+def _v2_archive_peak(sample_max, runtime_peak, envelope):
+    _integer(sample_max, 1)
+    _integer(runtime_peak, 1)
+    _need(sample_max <= runtime_peak <= min(envelope.coordinator_memory_cap_bytes, envelope.memory_cap_bytes),
+          "V2_ARCHIVE_RUNTIME_PEAK_BOUND")
+
+
+def _v2_archive_partition(files, *, manifest_bytes=0, completion_bytes=0):
+    _need(type(files) is tuple, "V2_ARCHIVE_FILES_REQUIRED")
+    for value in files:
+        _need(type(value) is FileFact, "V2_ARCHIVE_FILE_FACT_REQUIRED")
+        FileFact.__post_init__(value)
+    _need(tuple(value.path for value in files) == tuple(sorted({value.path for value in files})),
+          "V2_ARCHIVE_PATH_ORDER")
+    _integer(manifest_bytes)
+    _integer(completion_bytes)
+    if manifest_bytes or completion_bytes:
+        _need(not {"manifest.json", "COMPLETE.json"}.intersection(value.path for value in files),
+              "V2_ARCHIVE_PROJECTION_DUPLICATION")
+    attributable = sum(value.byte_length for value in files if value.path in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+    fixed = sum(value.byte_length for value in files if value.path not in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+    fixed += manifest_bytes + completion_bytes
+    _need(fixed <= identity.FIXED_REPORT_RECEIPT_ALLOWANCE, "V2_FIXED_ALLOWANCE_CAP")
+    _need(attributable + fixed <= identity.MAX_ARCHIVE_BYTES, "V2_ARCHIVE_CAP")
+    return attributable, fixed, attributable + fixed
+
+
+def _v2_archive_coordinator(metadata):
+    return _canonical({"schema": evidence.R0B_EXPERIMENT_V2, "kind": "coordinator",
+        "source_plan_identity": metadata.source_plan_identity,
+        "materialization_plan_identity": metadata.materialization_plan_identity,
+        "codec_profile_sha256": metadata.codec_profile_sha256,
+        "durable_operation_count": metadata.durable_operation_count,
+        "durable_primary_count": metadata.durable_primary_count, "family_counts": metadata.family_counts,
+        "e_final": metadata.committed_procedural_excess, "b_proc": metadata.b_proc,
+        "remaining_procedural_budget": metadata.remaining_procedural_budget,
+        "attributable_experiment_bytes": metadata.attributable_experiment_bytes,
+        "materialization_readback_complete": True, "synthetic_non_evidence": True})
+
+
+def _v2_archive_status():
+    return _canonical({"schema": evidence.R0B_EXPERIMENT_V2, "kind": "status",
+        "state": "PRE_MANIFEST_COMPLETE_SYNTHETIC_NON_EVIDENCE",
+        "materialization_readback_complete": True, "materialization_integrity_reauthenticated": True,
+        "support_files_present": True, "cleanup_complete": True, "archive_closed": False})
+
+
+def _v2_archive_completion(manifest, digest):
+    return records.CompletionReceipt(digest, manifest.corpus_sha256, manifest.source_sha256,
+        identity.PROTOCOL_SHA256, tuple(sorted(manifest.streams, key=lambda seal: seal.name)),
+        records.CompletionState.COMPLETED)
+
+
+def _v2_archive_project(manifest, files, check):
+    # Only decimal widths depend on the manifest's own size, never its hash.
+    # A receipt SHA is always 64 hex characters, so its exact length is fixed.
+    receipt_length = len(records.encode(_v2_archive_completion(manifest, "0" * 64))) + 1
+    fixed_base = sum(value.byte_length for value in files
+                     if value.path not in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+    for _ in range(32):
+        check()
+        data = evidence.encode_archive_manifest_v2(manifest)
+        fixed = fixed_base + len(data) + receipt_length
+        total = manifest.attributable_bytes + fixed
+        if (manifest.projected_fixed_bytes, manifest.projected_archive_bytes) == (fixed, total):
+            break
+        _need(fixed >= manifest.projected_fixed_bytes and total >= manifest.projected_archive_bytes,
+              "V2_ARCHIVE_PROJECTION_REGRESSION")
+        manifest = replace(manifest, projected_fixed_bytes=fixed, projected_archive_bytes=total)
+    else:
+        raise HarnessError("V2_ARCHIVE_PROJECTION_NOT_STABLE")
+    completion = _v2_archive_completion(manifest, sha256(data).hexdigest())
+    completion_data = records.encode(completion) + b"\n"
+    _need(len(completion_data) == receipt_length, "V2_ARCHIVE_RECEIPT_LENGTH_DRIFT")
+    projected = _v2_archive_partition(files, manifest_bytes=len(data), completion_bytes=len(completion_data))
+    _need(projected == (manifest.attributable_bytes, manifest.projected_fixed_bytes, manifest.projected_archive_bytes),
+          "V2_ARCHIVE_PROJECTION_MISMATCH")
+    check()
+    return manifest, data, completion, completion_data
+
+
+def _close_v2_experiment_archive(root, readback, profile, envelope, *, qualification_identity_seal,
+        postprocessing_operations_seal, analysis_file, report_file, selection_receipt_sha256,
+        corpus_sha256, source_sha256, check=lambda: None, progress=None):
+    """Close already-owned synthetic supports; no qualification/analysis owner."""
+    _need(callable(check) and (progress is None or callable(progress)), "V2_CLOSE_CALLBACK")
+    check()
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    _v2_archive_authority(selection_receipt_sha256, corpus_sha256, source_sha256)
+    root = Path(root)
+    def observe(stage, done):
+        check()
+        if progress is not None:
+            progress(stage, done, 1)
+        check()
+    observe("support_authentication", 0)
+    initial_paths = set(evidence.V2_ARCHIVE_PRE_MANIFEST_PATHS) - {"coordinator.json", "status.json"}
+    files = _v2_archive_inventory(root, initial_paths, check)
+    by_path = {value.path: value for value in files}
+    metadata_file = by_path["streams/materialization-v2.json"]
+    metadata = evidence.decode_materialization_v2(_v2_archive_read_bytes(root, metadata_file,
+        envelope.max_payload_bytes, check), expected_profile_sha256=profile.sha256.hex())
+    _v2_archive_readback_binding(readback, metadata, metadata_file, profile, envelope)
+    _v2_archive_file(analysis_file, "postprocessing/analysis.json")
+    _v2_archive_file(report_file, "postprocessing/report.html")
+    _need(analysis_file == by_path[analysis_file.path] and report_file == by_path[report_file.path],
+          "V2_ARCHIVE_SUPPORT_ARTIFACT_DRIFT")
+    for seal, name in ((qualification_identity_seal, "qualification_identity"),
+                       (postprocessing_operations_seal, "postprocessing_operations")):
+        _need(type(seal) is records.StreamDigest and seal.name == name, "V2_ARCHIVE_SUPPORT_STREAM_NAME")
+        records.StreamDigest.__post_init__(seal)
+    streams = readback.streams + (qualification_identity_seal, postprocessing_operations_seal)
+    _need(tuple(seal.name for seal in streams) == evidence.V2_ARCHIVE_STREAM_NAMES, "V2_ARCHIVE_STREAM_COVERAGE")
+    _v2_archive_bind_seals(files, streams)
+    for seal in (qualification_identity_seal, postprocessing_operations_seal):
+        _v2_archive_scan_support(root, seal, profile, envelope, check)
+    _v2_archive_reconcile(metadata.targets, metadata.family_counts, metadata.family_totals,
+        metadata.physical_minimum_total, metadata.b_proc, metadata.committed_procedural_excess,
+        metadata.remaining_procedural_budget)
+    _need(sum(value.byte_length for value in files if value.path in evidence.V2_ARCHIVE_ATTRIBUTABLE_PATHS)
+          == metadata.attributable_experiment_bytes == sum(value.physical_bytes for value in metadata.family_totals),
+          "V2_ARCHIVE_ATTRIBUTABLE_MISMATCH")
+    observe("support_authentication", 1)
+    observe("coordinator_status", 0)
+    coordinator_data, status_data = _v2_archive_coordinator(metadata), _v2_archive_status()
+    close_files = (FileFact("coordinator.json", len(coordinator_data), sha256(coordinator_data).hexdigest()),
+                   FileFact("status.json", len(status_data), sha256(status_data).hexdigest()))
+    _exclusive_bytes(root / "coordinator.json", coordinator_data)
+    check()
+    _exclusive_bytes(root / "status.json", status_data)
+    observe("coordinator_status", 1)
+    observe("manifest_inventory", 0)
+    before = _v2_archive_inventory(root, evidence.V2_ARCHIVE_PRE_MANIFEST_PATHS, check)
+    _need(before == tuple(sorted(files + close_files, key=lambda value: value.path)),
+          "V2_ARCHIVE_PRE_MANIFEST_DRIFT")
+    observe("manifest_inventory", 1)
+    observe("projected_accounting", 0)
+    manifest = evidence.V2ArchiveManifestEvidence(
+        schema=evidence.R0B_EXPERIMENT_V2, kind="archive_manifest", classification="SYNTHETIC_NON_EFFECTIVENESS",
+        synthetic_non_evidence=True, selection_receipt_sha256=selection_receipt_sha256,
+        corpus_sha256=corpus_sha256, source_sha256=source_sha256, protocol_sha256=identity.PROTOCOL_SHA256,
+        materialization_file=_v2_archive_file(metadata_file), codec_profile_sha256=metadata.codec_profile_sha256,
+        size_basis=metadata.size_basis, source_plan_identity=metadata.source_plan_identity,
+        materialization_plan_identity=metadata.materialization_plan_identity, family_counts=metadata.family_counts,
+        targets=metadata.targets, family_totals=metadata.family_totals, e_final=readback.e_final,
+        b_proc=readback.b_proc, remaining_procedural_budget=readback.remaining_procedural_budget,
+        physical_minimum_total=readback.physical_minimum_total, materialization_readback_complete=True,
+        readback_streams=readback.streams, durable_operation_count=readback.durable_operation_count,
+        durable_primary_count=readback.durable_primary_count,
+        durable_sample_max_coordinator_private_bytes=readback.durable_sample_max_coordinator_private_bytes,
+        runtime_monitor_peak_coordinator_private_bytes=readback.runtime_monitor_peak_coordinator_private_bytes,
+        runtime_peak_is_independent=False, constructor_rejections_are_runtime_provenance=True,
+        qualification_identity_stream=qualification_identity_seal,
+        postprocessing_operations_stream=postprocessing_operations_seal,
+        analysis_file=_v2_archive_file(analysis_file), report_file=_v2_archive_file(report_file), streams=streams,
+        inventory_before_manifest_receipt=tuple(_v2_archive_file(value) for value in before),
+        attributable_bytes=metadata.attributable_experiment_bytes, projected_fixed_bytes=0, projected_archive_bytes=0,
+        fixed_allowance_cap=identity.FIXED_REPORT_RECEIPT_ALLOWANCE, archive_cap=identity.MAX_ARCHIVE_BYTES,
+        scope=evidence.V2_ARCHIVE_SCOPE)
+    manifest, data, completion, completion_data = _v2_archive_project(manifest, before, check)
+    observe("projected_accounting", 1)
+    observe("manifest_write", 0)
+    _exclusive_bytes(root / "manifest.json", data)
+    observe("manifest_write", 1)
+    observe("completion_write", 0)
+    store.write_completion_receipt(root, completion)
+    check()
+    _need(store.read_completion_receipt(root) == completion, "V2_ARCHIVE_COMPLETION_READBACK")
+    observe("completion_write", 1)
+    observe("final_inventory", 0)
+    final_files = _v2_archive_inventory(root, evidence.V2_ARCHIVE_FINAL_PATHS, check)
+    expected = tuple(sorted(before + (FileFact("manifest.json", len(data), sha256(data).hexdigest()),
+        FileFact("COMPLETE.json", len(completion_data), sha256(completion_data).hexdigest())), key=lambda value: value.path))
+    _need(final_files == expected, "V2_ARCHIVE_FINAL_INVENTORY_DRIFT")
+    observe("final_inventory", 1)
+    observe("final_accounting", 0)
+    amounts = _v2_archive_partition(final_files)
+    _need(amounts == (manifest.attributable_bytes, manifest.projected_fixed_bytes, manifest.projected_archive_bytes),
+          "V2_ARCHIVE_FINAL_ACCOUNTING_DRIFT")
+    _need(amounts[2] >= readback.physical_minimum_total + amounts[1], "V2_ARCHIVE_REALIZED_MINIMUM")
+    _v2_archive_reconcile(metadata.targets, metadata.family_counts, metadata.family_totals,
+        metadata.physical_minimum_total, metadata.b_proc, readback.e_final, metadata.remaining_procedural_budget)
+    accounting = ArchiveAccounting(final_files, *amounts)
+    observe("final_accounting", 1)
+    return _V2ArchiveCloseResult(manifest, completion, accounting)
+
+
+def _validate_closed_v2_experiment_archive(root, profile, envelope, *, selection_receipt_sha256,
+        corpus_sha256, source_sha256, check=lambda: None, progress=None):
+    """Read-only structural integrity; this does not repeat semantic readback."""
+    _need(callable(check) and (progress is None or callable(progress)), "V2_CLOSE_CALLBACK")
+    check()
+    physical.require_qualified_profile(profile)
+    operational._envelope(envelope)
+    _v2_archive_authority(selection_receipt_sha256, corpus_sha256, source_sha256)
+    root = Path(root)
+    files = _v2_archive_inventory(root, evidence.V2_ARCHIVE_FINAL_PATHS, check, progress)
+    by_path = {value.path: value for value in files}
+    data = _v2_archive_read_bytes(root, by_path["manifest.json"], physical.MAX_PAYLOAD_BYTES, check)
+    manifest = evidence.decode_archive_manifest_v2(data, expected_profile_sha256=profile.sha256.hex())
+    _need((manifest.selection_receipt_sha256, manifest.corpus_sha256, manifest.source_sha256, manifest.protocol_sha256)
+          == (selection_receipt_sha256, corpus_sha256, source_sha256, identity.PROTOCOL_SHA256), "V2_ARCHIVE_AUTHORITY_BINDING")
+    expected_completion = _v2_archive_completion(manifest, sha256(data).hexdigest())
+    expected_receipt_data = records.encode(expected_completion) + b"\n"
+    _need((by_path["COMPLETE.json"].byte_length, by_path["COMPLETE.json"].sha256)
+          == (len(expected_receipt_data), sha256(expected_receipt_data).hexdigest()), "V2_ARCHIVE_COMPLETION_FILE_DRIFT")
+    check()
+    completion = store.read_completion_receipt(root)
+    check()
+    _need(completion == expected_completion, "V2_ARCHIVE_COMPLETION_BINDING")
+    _need({seal.name: seal for seal in completion.streams} == {seal.name: seal for seal in manifest.streams}
+          and len(completion.streams) == len(manifest.streams) == 57, "V2_ARCHIVE_STREAM_MAPPING")
+    before = tuple(value for value in files if value.path not in ("manifest.json", "COMPLETE.json"))
+    _need(tuple(_v2_archive_file(value) for value in before) == manifest.inventory_before_manifest_receipt,
+          "V2_ARCHIVE_MANIFEST_INVENTORY_DRIFT")
+    _v2_archive_bind_seals(files, manifest.streams)
+    for value in (manifest.materialization_file, manifest.analysis_file, manifest.report_file):
+        _need(_v2_archive_file(by_path[value.path]) == value, "V2_ARCHIVE_SUPPORT_ARTIFACT_DRIFT")
+    metadata = evidence.decode_materialization_v2(_v2_archive_read_bytes(root, by_path[manifest.materialization_file.path],
+        envelope.max_payload_bytes, check), expected_profile_sha256=profile.sha256.hex())
+    _need((manifest.codec_profile_sha256, manifest.size_basis, manifest.source_plan_identity,
+        manifest.materialization_plan_identity, manifest.family_counts, manifest.targets, manifest.family_totals,
+        manifest.physical_minimum_total, manifest.b_proc, manifest.e_final, manifest.remaining_procedural_budget,
+        manifest.readback_streams, manifest.durable_operation_count, manifest.durable_primary_count,
+        manifest.runtime_monitor_peak_coordinator_private_bytes, manifest.attributable_bytes) ==
+        (metadata.codec_profile_sha256, metadata.size_basis, metadata.source_plan_identity,
+        metadata.materialization_plan_identity, metadata.family_counts, metadata.targets, metadata.family_totals,
+        metadata.physical_minimum_total, metadata.b_proc, metadata.committed_procedural_excess,
+        metadata.remaining_procedural_budget, metadata.streams, metadata.durable_operation_count,
+        metadata.durable_primary_count, metadata.runtime_monitor_peak_coordinator_private_bytes,
+        metadata.attributable_experiment_bytes), "V2_ARCHIVE_MATERIALIZATION_BINDING")
+    for name, expected_data in (("coordinator.json", _v2_archive_coordinator(metadata)), ("status.json", _v2_archive_status())):
+        _need(_v2_archive_read_bytes(root, by_path[name], envelope.max_payload_bytes, check) == expected_data,
+              "V2_ARCHIVE_COORDINATOR_STATUS_BINDING")
+    for seal in (manifest.qualification_identity_stream, manifest.postprocessing_operations_stream):
+        _v2_archive_scan_support(root, seal, profile, envelope, check)
+    _v2_archive_peak(manifest.durable_sample_max_coordinator_private_bytes,
+                     manifest.runtime_monitor_peak_coordinator_private_bytes, envelope)
+    amounts = _v2_archive_partition(files)
+    projected = _v2_archive_partition(before, manifest_bytes=len(data), completion_bytes=len(expected_receipt_data))
+    _need(amounts == projected == (manifest.attributable_bytes, manifest.projected_fixed_bytes,
+          manifest.projected_archive_bytes), "V2_ARCHIVE_FINAL_ACCOUNTING_DRIFT")
+    _need(amounts[0] == sum(value.physical_bytes for value in manifest.family_totals)
+          and amounts[2] >= manifest.physical_minimum_total + amounts[1], "V2_ARCHIVE_REALIZED_MINIMUM")
+    _v2_archive_reconcile(manifest.targets, manifest.family_counts, manifest.family_totals,
+        manifest.physical_minimum_total, manifest.b_proc, manifest.e_final, manifest.remaining_procedural_budget)
+    accounting = ArchiveAccounting(files, *amounts)
+    check()
+    return _V2ArchiveCloseResult(manifest, completion, accounting)
 
 
 def _r0a_evidence_node(measurements, components, traces):
