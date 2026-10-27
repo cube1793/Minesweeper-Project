@@ -1783,3 +1783,312 @@ def decode_r0a_observations_v2(data, *, expected_profile_sha256=None, expected_p
         raise
     except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
         raise EvidenceError("R0A_V2_MALFORMED_OBSERVATIONS") from None
+
+
+# Slice 1W: this literal vocabulary belongs to the historical run schema. Future
+# live source-closure changes must not redefine the identity of an existing run.
+R0_RUN_V2_SOURCE_PATHS = (
+    "benchmark_board.py",
+    "board_analyzer.py",
+    "board_snapshot.py",
+    "calibration/stage3_physical_profile_v1.json",
+    "core_engine.py",
+    "docs/stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md",
+    "docs/stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md",
+    "docs/stage3-extended/STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md",
+    "docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_SPEC.md",
+    "experiments/__init__.py",
+    "experiments/program_k_capability.py",
+    "experiments/program_k_e2_analysis.py",
+    "experiments/program_k_e2_audit.py",
+    "experiments/program_k_e2_evaluator.py",
+    "experiments/program_k_e2_execution.py",
+    "experiments/program_k_e2_game.py",
+    "experiments/program_k_e2_identity.py",
+    "experiments/program_k_e2_operational.py",
+    "experiments/program_k_e2_physical.py",
+    "experiments/program_k_e2_qualification.py",
+    "experiments/program_k_e2_r0_evidence.py",
+    "experiments/program_k_e2_r0_harness.py",
+    "experiments/program_k_e2_readiness.py",
+    "experiments/program_k_e2_records.py",
+    "experiments/program_k_e2_report.py",
+    "experiments/program_k_e2_store.py",
+    "experiments/program_k_evaluator.py",
+    "experiments/program_k_evidence.py",
+    "experiments/program_k_harness.py",
+    "experiments/program_k_oracles.py",
+    "experiments/program_k_policy.py",
+    "experiments/program_k_runner.py",
+    "simple_algorithm.py",
+    "simple_decision.py",
+    "simple_probability.py",
+    "stage3_physical.py",
+    "stage3_planner.py",
+    "stage3_runner.py",
+    "tests/test_program_k_e2_operational.py",
+    "tests/test_program_k_harness.py",
+    "tests/test_program_k_policy.py",
+    "tests/test_program_k_semantics.py",
+)
+R0_RUN_V2_SELECTION_RECEIPT_SHA256 = "72ea48582d3eb2c4eff82172b58fe88460a8a3747eee910efe5fc8a2deb6337c"
+R0_RUN_V2_SELECTION_RECEIPT_BYTES = 7364
+R0_RUN_V2_SELECTION_SOURCE_HEAD = "cdba3513c23df77ba44449af1e551889a6954768"
+R0_RUN_V2_CLASSIFICATION = "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE"
+R0_RUN_V2_STATUS = "COMPLETE_FOR_INDEPENDENT_REVIEW_NOT_ENVELOPE_ADMISSION"
+R0_RUN_V2_FORBIDDEN_ACTIONS = tuple((name, False) for name in (
+    "final_envelope_selected", "n_selected", "r0_admission_pass", "r0_b", "r0_b_pass",
+    "actual_e2", "actual_e2_ready", "effectiveness_analysis", "effectiveness_result",
+    "e3", "gate_p", "holdout", "target_recount", "synthetic_search", "bootstrap",
+    "project_git_mutation"))
+_R0_RUN_V2_COMPONENT_PHASES = (
+    ("P", ("target",)), ("K", ("setup", "target")), ("O", ("target",)),
+    ("D", ("setup", "target")), ("O_K_BIND", ("setup", "target")),
+    ("O_D_REPEAT", ("setup", "target")))
+_R0_RUN_V2_POSITIONS = tuple(format(position, "02d") for position in range(64))
+R0_RUN_V2_PRE_MANIFEST_FILE_COUNT = 105_602
+_R0_RUN_V2_FIELDS = (
+    "schema", "mode", "classification", "status", "selection_receipt_sha256",
+    "selection_receipt_byte_length", "selection_source_head", "source_head", "provenance_sha256",
+    "provenance", "protocol", "amendment", "codec_profile_sha256", "plan", "corpus_sha256",
+    "concurrency_runs", "observations_file", "inventory_before_manifest_receipt", "forbidden_actions")
+_R0_RUN_V2_PROVENANCE_FIELDS = (
+    "selection_source_head", "r0_harness_source_head", "sources", "working_files", "runtime",
+    "executable", "dont_write_bytecode")
+
+
+def r0_run_pre_manifest_paths_v2():
+    """Pure fixed vocabulary, allocated only when a caller requests the layout."""
+    return tuple(sorted(("INCOMPLETE.json", "r0a-observations-v2.json") + tuple(
+        "calibration/c" + str(concurrency) + "/" + component + "/" + position + "/" + phase
+        + "/" + name + ".pkf"
+        for concurrency in (1, 2, 4) for component, phases in _R0_RUN_V2_COMPONENT_PHASES
+        for position in _R0_RUN_V2_POSITIONS for phase in phases for name in _R0A_STREAMS_V2)))
+
+
+def _r0_run_path_v2(path):
+    _r0a_path(path)
+    if path in ("INCOMPLETE.json", "r0a-observations-v2.json"):
+        return
+    parts = path.split("/")
+    _need(len(parts) == 6 and parts[0] == "calibration" and parts[1] in ("c1", "c2", "c4")
+          and parts[3] in _R0_RUN_V2_POSITIONS and parts[5].endswith(".pkf")
+          and parts[5][:-4] in _R0A_STREAMS_V2, "R0_RUN_V2_FILE_PATH")
+    _need(any(parts[2] == component and parts[4] in phases
+              for component, phases in _R0_RUN_V2_COMPONENT_PHASES), "R0_RUN_V2_FILE_PATH")
+
+
+def _r0_run_plan_v2(plan):
+    """Validate supplied production identities only; never generate a board."""
+    _v2_exact(plan, R0APlanEvidenceV2)
+    for board in plan.boards:
+        _need((board.width, board.height, board.mines, board.first_click,
+               board.generator_identity, board.spec_identity) ==
+              (30, 16, 99, (0, 0), "V1", "EXPERT_GENERAL_V1"), "R0_RUN_V2_BOARD_METADATA")
+        _profile_identity(board.fingerprint)
+    return plan
+
+
+@dataclass(frozen=True, slots=True)
+class R0RunProvenanceV2:
+    """Recorded supplied capture facts, not a replay of historical live capture."""
+
+    selection_source_head: str
+    r0_harness_source_head: str
+    sources: tuple
+    working_files: tuple
+    runtime: records.RuntimeIdentity
+    executable: str
+    dont_write_bytecode: bool
+
+    def __post_init__(self):
+        provenance_digest_v2(self.selection_source_head, self.r0_harness_source_head,
+            self.sources, self.working_files, self.runtime, self.executable, self.dont_write_bytecode)
+        _need(self.selection_source_head == R0_RUN_V2_SELECTION_SOURCE_HEAD,
+              "R0_RUN_V2_SELECTION_SOURCE")
+        _need(tuple(source.path for source in self.sources) == R0_RUN_V2_SOURCE_PATHS,
+              "R0_RUN_V2_SOURCE_COVERAGE")
+
+
+@dataclass(frozen=True, slots=True)
+class R0RunFileV2:
+    path: str
+    byte_length: int
+    sha256: str
+
+    def __post_init__(self):
+        _r0_run_path_v2(self.path)
+        _r0a_uint(self.byte_length, 1 if self.path in
+                   ("INCOMPLETE.json", "r0a-observations-v2.json") else 0)
+        _profile_identity(self.sha256)
+
+
+@dataclass(frozen=True, slots=True)
+class R0RunManifestV2:
+    """Closed R0-A archive facts for independent review, never admission."""
+
+    schema: str
+    mode: str
+    classification: str
+    status: str
+    selection_receipt_sha256: str
+    selection_receipt_byte_length: int
+    selection_source_head: str
+    source_head: str
+    provenance_sha256: str
+    provenance: R0RunProvenanceV2
+    protocol: records.ProtocolIdentity
+    amendment: readiness.AmendmentProvenance
+    codec_profile_sha256: str
+    plan: R0APlanEvidenceV2
+    corpus_sha256: str
+    concurrency_runs: tuple
+    observations_file: R0RunFileV2
+    inventory_before_manifest_receipt: tuple
+    forbidden_actions: tuple
+
+    def __post_init__(self):
+        for value, expected in ((self.schema, R0_RUN_V2), (self.mode, "R0_A"),
+                (self.classification, R0_RUN_V2_CLASSIFICATION), (self.status, R0_RUN_V2_STATUS),
+                (self.selection_receipt_sha256, R0_RUN_V2_SELECTION_RECEIPT_SHA256),
+                (self.selection_source_head, R0_RUN_V2_SELECTION_SOURCE_HEAD)):
+            _need(type(value) is str and value == expected, "R0_RUN_V2_IDENTITY")
+        _r0a_uint(self.selection_receipt_byte_length, 1)
+        _need(self.selection_receipt_byte_length == R0_RUN_V2_SELECTION_RECEIPT_BYTES,
+              "R0_RUN_V2_SELECTION_LENGTH")
+        _r0a_head(self.source_head)
+        for value in (self.provenance_sha256, self.codec_profile_sha256, self.corpus_sha256):
+            _profile_identity(value)
+        _v2_exact(self.provenance, R0RunProvenanceV2)
+        p = self.provenance
+        _need(self.source_head == p.r0_harness_source_head
+              and self.selection_source_head == p.selection_source_head
+              and self.provenance_sha256 == provenance_digest_v2(p.selection_source_head,
+                  p.r0_harness_source_head, p.sources, p.working_files, p.runtime, p.executable,
+                  p.dont_write_bytecode), "R0_RUN_V2_PROVENANCE_BINDING")
+        _v2_exact(self.protocol, records.ProtocolIdentity)
+        _need(self.protocol == records.ProtocolIdentity(identity.PROTOCOL_PATH, identity.PROTOCOL_SHA256,
+            identity.PROTOCOL_BLOB_ID, identity.FREEZE_COMMIT), "R0_RUN_V2_PROTOCOL")
+        _v2_exact(self.amendment, readiness.AmendmentProvenance)
+        _need(type(self.amendment.byte_length) is int
+              and all(type(value) is str for value in (self.amendment.sha256,
+                  self.amendment.external_receipt, self.amendment.protocol_sha256,
+                  self.amendment.protocol_blob, self.amendment.protocol_commit)),
+              "R0_RUN_V2_AMENDMENT_FIELD_TYPES")
+        _r0_run_plan_v2(self.plan)
+        indices = tuple(board.game_index for board in self.plan.boards)
+        _need(self.corpus_sha256 == identity.corpus_digest(self.plan.protocol_seed, len(indices), indices).hex(),
+              "R0_RUN_V2_CORPUS")
+        _need(type(self.concurrency_runs) is tuple and len(self.concurrency_runs) == 3,
+              "R0_RUN_V2_CONCURRENCY_RUNS")
+        for pair, concurrency in zip(self.concurrency_runs, (1, 2, 4)):
+            _need(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is int and pair[0] == concurrency,
+                  "R0_RUN_V2_CONCURRENCY_RUNS")
+            run_id = pair[1]
+            _need(type(run_id) is str and run_id.startswith("R0-") and len(run_id) > 3
+                  and all(32 <= ord(char) < 127 for char in run_id), "R0_RUN_V2_RUN_ID")
+        _need(len({pair[1] for pair in self.concurrency_runs}) == 3, "R0_RUN_V2_DISTINCT_RUN_IDS")
+        _v2_exact(self.observations_file, R0RunFileV2)
+        _need(self.observations_file.path == "r0a-observations-v2.json", "R0_RUN_V2_OBSERVATIONS_PATH")
+        _need(type(self.inventory_before_manifest_receipt) is tuple
+              and len(self.inventory_before_manifest_receipt) == R0_RUN_V2_PRE_MANIFEST_FILE_COUNT,
+              "R0_RUN_V2_INVENTORY_COUNT")
+        for fact in self.inventory_before_manifest_receipt:
+            _v2_exact(fact, R0RunFileV2)
+        paths = tuple(fact.path for fact in self.inventory_before_manifest_receipt)
+        # Every legal path occurs once: the closed vocabulary has exactly this
+        # cardinality. No large path table is allocated at module import.
+        _need(paths == tuple(sorted(set(paths))), "R0_RUN_V2_INVENTORY_ORDER")
+        _need(self.observations_file == self.inventory_before_manifest_receipt[-1],
+              "R0_RUN_V2_OBSERVATIONS_FILE_BINDING")
+        _need(type(self.forbidden_actions) is tuple
+              and len(self.forbidden_actions) == len(R0_RUN_V2_FORBIDDEN_ACTIONS),
+              "R0_RUN_V2_FORBIDDEN_ACTIONS")
+        for pair, expected in zip(self.forbidden_actions, R0_RUN_V2_FORBIDDEN_ACTIONS):
+            _need(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str
+                  and pair[0] == expected[0] and pair[1] is False, "R0_RUN_V2_FORBIDDEN_ACTIONS")
+
+
+def _r0_run_file_node_v2(value):
+    return {"path": value.path, "byte_length": value.byte_length, "sha256": value.sha256}
+
+
+def encode_r0_run_manifest_v2(value):
+    """Encode the explicit bounded run vocabulary; never capture or publish."""
+    _v2_exact(value, R0RunManifestV2)
+    p, a = value.provenance, value.amendment
+    node = {"schema": value.schema, "mode": value.mode, "classification": value.classification,
+        "status": value.status, "selection_receipt_sha256": value.selection_receipt_sha256,
+        "selection_receipt_byte_length": value.selection_receipt_byte_length,
+        "selection_source_head": value.selection_source_head, "source_head": value.source_head,
+        "provenance_sha256": value.provenance_sha256,
+        "provenance": {"selection_source_head": p.selection_source_head,
+            "r0_harness_source_head": p.r0_harness_source_head,
+            "sources": [records.encode(source).decode("ascii") for source in p.sources],
+            "working_files": [[path, digest, length, normalized]
+                              for path, digest, length, normalized in p.working_files],
+            "runtime": records.encode(p.runtime).decode("ascii"), "executable": p.executable,
+            "dont_write_bytecode": p.dont_write_bytecode},
+        "protocol": records.encode(value.protocol).decode("ascii"),
+        "amendment": {"sha256": a.sha256, "byte_length": a.byte_length, "external_receipt": a.external_receipt,
+            "protocol_sha256": a.protocol_sha256, "protocol_blob": a.protocol_blob,
+            "protocol_commit": a.protocol_commit},
+        "codec_profile_sha256": value.codec_profile_sha256,
+        "plan": {"protocol_seed": value.plan.protocol_seed.hex(),
+            "boards": [records.encode(board).decode("ascii") for board in value.plan.boards]},
+        "corpus_sha256": value.corpus_sha256,
+        "concurrency_runs": [[concurrency, run_id] for concurrency, run_id in value.concurrency_runs],
+        "observations_file": _r0_run_file_node_v2(value.observations_file),
+        "inventory_before_manifest_receipt": [_r0_run_file_node_v2(fact)
+                                               for fact in value.inventory_before_manifest_receipt],
+        "forbidden_actions": dict(value.forbidden_actions)}
+    data = _v2_json(node) + b"\n"
+    _need(0 < len(data) <= physical.MAX_PAYLOAD_BYTES, "R0_RUN_V2_METADATA_BOUND")
+    return data
+
+
+def decode_r0_run_manifest_v2(data):
+    """Decode recorded authority without filesystem access or live recapture."""
+    _need(type(data) is bytes and 0 < len(data) <= physical.MAX_PAYLOAD_BYTES, "R0_RUN_V2_METADATA_BOUND")
+    try:
+        node = json.loads(data.decode("ascii"), object_pairs_hook=_v2_unique,
+                          parse_float=_no_float, parse_constant=_no_float)
+        _v2_fields(node, _R0_RUN_V2_FIELDS)
+        _need(_v2_json(node) + b"\n" == data, "R0_RUN_V2_NONCANONICAL_DOCUMENT")
+        p = node["provenance"]
+        _v2_fields(p, _R0_RUN_V2_PROVENANCE_FIELDS)
+        sources = tuple(_r0a_read_rec(source, records.SourceBlobIdentity)
+                        for source in _r0a_list(p["sources"], len(R0_RUN_V2_SOURCE_PATHS)))
+        working = []
+        for row in _r0a_list(p["working_files"], len(R0_RUN_V2_SOURCE_PATHS)):
+            _need(type(row) is list and len(row) == 4, "R0_RUN_V2_WORKING_ROW")
+            working.append(tuple(row))
+        provenance = R0RunProvenanceV2(p["selection_source_head"], p["r0_harness_source_head"], sources,
+            tuple(working), _r0a_read_rec(p["runtime"], records.RuntimeIdentity), p["executable"],
+            p["dont_write_bytecode"])
+        plan = _r0a_fields(node["plan"], "protocol_seed boards")
+        runs = []
+        for pair in _r0a_list(node["concurrency_runs"], 3):
+            _need(type(pair) is list and len(pair) == 2, "R0_RUN_V2_CONCURRENCY_RUNS")
+            runs.append(tuple(pair))
+        inventory = tuple(R0RunFileV2(**_r0a_fields(fact, "path byte_length sha256"))
+            for fact in _r0a_list(node["inventory_before_manifest_receipt"], R0_RUN_V2_PRE_MANIFEST_FILE_COUNT))
+        forbidden = node["forbidden_actions"]
+        _v2_fields(forbidden, tuple(name for name, _ in R0_RUN_V2_FORBIDDEN_ACTIONS))
+        value = R0RunManifestV2(node["schema"], node["mode"], node["classification"], node["status"],
+            node["selection_receipt_sha256"], node["selection_receipt_byte_length"],
+            node["selection_source_head"], node["source_head"], node["provenance_sha256"], provenance,
+            _r0a_read_rec(node["protocol"], records.ProtocolIdentity),
+            readiness.AmendmentProvenance(**_r0a_fields(node["amendment"],
+                "sha256 byte_length external_receipt protocol_sha256 protocol_blob protocol_commit")),
+            node["codec_profile_sha256"], R0APlanEvidenceV2(_v2_hex(plan["protocol_seed"]),
+                tuple(_r0a_read_rec(board, records.BoardIdentity) for board in _r0a_list(plan["boards"], 64))),
+            node["corpus_sha256"], tuple(runs),
+            R0RunFileV2(**_r0a_fields(node["observations_file"], "path byte_length sha256")),
+            inventory, tuple((name, forbidden[name]) for name, _ in R0_RUN_V2_FORBIDDEN_ACTIONS))
+        _need(encode_r0_run_manifest_v2(value) == data, "R0_RUN_V2_NONCANONICAL_DOCUMENT")
+        return value
+    except EvidenceError:
+        raise
+    except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
+        raise EvidenceError("R0_RUN_V2_MALFORMED_MANIFEST") from None

@@ -1794,5 +1794,361 @@ class R0AWallReconstructionV2Tests(unittest.TestCase):
                 replace(phase, phase=bad)
 
 
+def _r0_run_provenance_fixture_v2(runtime=None):
+    """Literal supplied provenance; no Git, source reads or runtime capture."""
+    runtime = runtime or records.RuntimeIdentity("FixturePython", "0", "fixture-os", "fixture-platform",
+                                                 "fixture-arch", None)
+    sources = tuple(records.SourceBlobIdentity(path, "b" * 40, "c" * 64, 123)
+                    for path in e.R0_RUN_V2_SOURCE_PATHS)
+    return e.R0RunProvenanceV2(e.R0_RUN_V2_SELECTION_SOURCE_HEAD, "d" * 40, sources,
+        tuple((source.path, source.sha256, source.byte_length, False) for source in sources),
+        runtime, "C:\\fixture\\python.exe", True)
+
+
+def _r0_run_observations_fixture_v2():
+    """Full production identity/layout shape with literal fingerprints only."""
+    value = _r0a_supplied_fixture_v2()
+    p = _r0_run_provenance_fixture_v2(value.runtime)
+    boards = tuple(replace(board, fingerprint="f" * 62 + format(position, "02x"),
+        generator_identity="V1", spec_identity="EXPERT_GENERAL_V1")
+        for position, board in enumerate(value.plan.boards))
+    concurrencies = []
+    for concurrency in value.concurrencies:
+        components = []
+        for component in concurrency.components:
+            route = operational.R0Component(component.component)
+            units = []
+            for unit in component.units:
+                target = replace(unit.target, archive=replace(unit.target.archive,
+                    relative_directory=operational._r0_case_path_v2(concurrency.concurrency, route,
+                                                                   unit.position, "target")))
+                setup = None if unit.setup is None else replace(unit.setup, archive=replace(unit.setup.archive,
+                    relative_directory=operational._r0_case_path_v2(concurrency.concurrency, route,
+                                                                   unit.position, "setup")))
+                units.append(replace(unit, target=target, setup=setup))
+            components.append(replace(component, units=tuple(units)))
+        concurrencies.append(replace(concurrency, components=tuple(components)))
+    return replace(value, source_head=p.r0_harness_source_head,
+        provenance_sha256=e.provenance_digest_v2(p.selection_source_head, p.r0_harness_source_head,
+            p.sources, p.working_files, p.runtime, p.executable, p.dont_write_bytecode),
+        plan=e.R0APlanEvidenceV2(value.plan.protocol_seed, boards), concurrencies=tuple(concurrencies))
+
+
+def _r0_run_manifest_fixture_v2(observations=None):
+    """Complete in-memory file facts, never a 105k-file physical archive."""
+    from hashlib import sha256
+    from experiments import program_k_e2_identity as identity
+    observations = observations or _r0_run_observations_fixture_v2()
+    p = _r0_run_provenance_fixture_v2(observations.runtime)
+    data = e.encode_r0a_observations_v2(observations)
+    observed = e.R0RunFileV2("r0a-observations-v2.json", len(data), sha256(data).hexdigest())
+    inventory = [e.R0RunFileV2("INCOMPLETE.json", 256, "e" * 64), observed]
+    for concurrency in observations.concurrencies:
+        for component in concurrency.components:
+            for unit in component.units:
+                for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target)):
+                    inventory.extend(e.R0RunFileV2(case.archive.relative_directory + "/" + stream.name + ".pkf",
+                        stream.byte_length, stream.sha256) for stream in case.archive.streams)
+    indices = tuple(board.game_index for board in observations.plan.boards)
+    return e.R0RunManifestV2(e.R0_RUN_V2, "R0_A", e.R0_RUN_V2_CLASSIFICATION, e.R0_RUN_V2_STATUS,
+        e.R0_RUN_V2_SELECTION_RECEIPT_SHA256, e.R0_RUN_V2_SELECTION_RECEIPT_BYTES,
+        e.R0_RUN_V2_SELECTION_SOURCE_HEAD, p.r0_harness_source_head, observations.provenance_sha256, p,
+        observations.protocol, observations.amendment, observations.codec_profile_sha256, observations.plan,
+        identity.corpus_digest(observations.plan.protocol_seed, len(indices), indices).hex(),
+        tuple((concurrency.concurrency, concurrency.run_id) for concurrency in observations.concurrencies),
+        observed, tuple(sorted(inventory, key=lambda fact: fact.path)), e.R0_RUN_V2_FORBIDDEN_ACTIONS)
+
+
+class R0RunManifestV2Tests(unittest.TestCase):
+    """Slice 1W schema tests use supplied facts; they never launch real work."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.observations = _r0_run_observations_fixture_v2()
+        cls.value = _r0_run_manifest_fixture_v2(cls.observations)
+        cls.raw = e.encode_r0_run_manifest_v2(cls.value)
+
+    def test_versioned_source_and_selection_constants_equal_current_live_owner(self):
+        from experiments import program_k_e2_qualification as qualification
+        self.assertEqual(e.R0_RUN_V2_SOURCE_PATHS, qualification._V2_SOURCE_PATHS)
+        self.assertEqual(e.R0_RUN_V2_SOURCE_PATHS, tuple(sorted(set(e.R0_RUN_V2_SOURCE_PATHS))))
+        self.assertEqual(e.R0_RUN_V2_SELECTION_SOURCE_HEAD, h.SELECTION_SOURCE_HEAD)
+        self.assertEqual(e.R0_RUN_V2_SELECTION_RECEIPT_SHA256, h.SELECTION_RECEIPT_SHA256)
+        self.assertEqual(e.R0_RUN_V2_SELECTION_RECEIPT_BYTES, h.SELECTION_RECEIPT_BYTES)
+
+    def test_exact_declared_fields_and_immutable_carriers(self):
+        expected = {
+            e.R0RunProvenanceV2: "selection_source_head r0_harness_source_head sources working_files runtime "
+                "executable dont_write_bytecode",
+            e.R0RunFileV2: "path byte_length sha256",
+            e.R0RunManifestV2: "schema mode classification status selection_receipt_sha256 "
+                "selection_receipt_byte_length selection_source_head source_head provenance_sha256 provenance "
+                "protocol amendment codec_profile_sha256 plan corpus_sha256 concurrency_runs observations_file "
+                "inventory_before_manifest_receipt forbidden_actions",
+        }
+        for owner, names in expected.items():
+            self.assertEqual(tuple(field.name for field in fields(owner)), tuple(names.split()))
+            self.assertEqual(owner.__slots__, tuple(names.split()))
+            self.assertTrue(owner.__dataclass_params__.frozen)
+            self.assertNotIn(owner, e._FACT_TYPES.values())
+        with self.assertRaises(FrozenInstanceError):
+            self.value.mode = "R0_B"
+
+    def test_roundtrip_exact_canonical_ascii_and_full_bindings(self):
+        self.assertEqual(self.raw, _json(json.loads(self.raw)) + b"\n")
+        self.assertTrue(self.raw.isascii())
+        decoded = e.decode_r0_run_manifest_v2(self.raw)
+        self.assertEqual(decoded, self.value)
+        self.assertEqual(e.encode_r0_run_manifest_v2(decoded), self.raw)
+        self.assertEqual(decoded.plan, self.observations.plan)
+        self.assertEqual(decoded.provenance.runtime, self.observations.runtime)
+        self.assertEqual(decoded.codec_profile_sha256, self.observations.codec_profile_sha256)
+        self.assertEqual(decoded.amendment, readiness.AmendmentProvenance())
+        self.assertNotIn("receipt_path", json.loads(self.raw))
+
+    def test_provenance_exact_source_coverage_working_shape_and_capture_facts(self):
+        p = self.value.provenance
+        changes = (
+            dict(selection_source_head="a" * 40), dict(r0_harness_source_head="A" * 40),
+            dict(sources=p.sources[:-1], working_files=p.working_files[:-1]),
+            dict(sources=p.sources[::-1]), dict(sources=list(p.sources)),
+            dict(working_files=p.working_files[::-1]), dict(working_files=list(p.working_files)),
+            dict(working_files=(list(p.working_files[0]),) + p.working_files[1:]),
+            dict(runtime=records.encode(p.runtime)), dict(executable=""),
+            dict(executable=Path("python.exe")), dict(dont_write_bytecode=False),
+            dict(dont_write_bytecode=1),
+        )
+        for values in changes:
+            with self.subTest(fields=tuple(values)), self.assertRaises(ValueError):
+                replace(p, **values)
+        for column, bad in ((1, "A" * 64), (2, True), (2, -1), (2, 1 << 64), (3, 0)):
+            row = list(p.working_files[0])
+            row[column] = bad
+            with self.subTest(column=column, bad=bad), self.assertRaises(ValueError):
+                replace(p, working_files=(tuple(row),) + p.working_files[1:])
+
+    def test_every_recorded_provenance_fact_is_digest_bound(self):
+        p = self.value.provenance
+        variations = (replace(p, r0_harness_source_head="a" * 40),
+            replace(p, executable=p.executable + "x"),
+            replace(p, runtime=replace(p.runtime, python_version="changed")),
+            replace(p, sources=(replace(p.sources[0], blob_id="a" * 40),) + p.sources[1:]),
+            replace(p, working_files=((p.working_files[0][0], "a" * 64, 124, True),) + p.working_files[1:]))
+        for provenance in variations:
+            with self.subTest(provenance=provenance.executable), self.assertRaises(ValueError):
+                replace(self.value, provenance=provenance)
+
+    def test_file_paths_are_the_closed_r0a_grammar(self):
+        valid = ("INCOMPLETE.json", "r0a-observations-v2.json",
+            "calibration/c1/P/00/target/boards.pkf",
+            "calibration/c4/O_D_REPEAT/63/setup/resources.pkf")
+        for path in valid:
+            self.assertEqual(e.R0RunFileV2(path, 1, "a" * 64).path, path)
+        invalid = ("", "/INCOMPLETE.json", "../INCOMPLETE.json", "x/../INCOMPLETE.json",
+            "C:/INCOMPLETE.json", "calibration\\c1\\P\\00\\target\\boards.pkf", "manifest.json",
+            "streams/boards.pkf", "calibration/c3/P/00/target/boards.pkf",
+            "calibration/c1/P/0/target/boards.pkf", "calibration/c1/P/64/target/boards.pkf",
+            "calibration/c1/P/00/setup/boards.pkf", "calibration/c1/O/00/setup/boards.pkf",
+            "calibration/c1/P/00/other/boards.pkf", "calibration/c1/UNKNOWN/00/target/boards.pkf",
+            "calibration/c1/P/00/target/unknown.pkf", "calibration/c1/P/00/target/boards.pkf/x")
+        for path in invalid:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                e.R0RunFileV2(path, 1, "a" * 64)
+
+    def test_file_digest_lengths_and_empty_streams(self):
+        path = "calibration/c1/P/00/target/boards.pkf"
+        self.assertEqual(e.R0RunFileV2(path, 0, "a" * 64).byte_length, 0)
+        for length in (-1, True, 1.0, "1", 1 << 64):
+            with self.subTest(length=length), self.assertRaises(ValueError):
+                e.R0RunFileV2(path, length, "a" * 64)
+        for digest in ("A" * 64, "g" * 64, "a" * 63, b"a" * 64, None):
+            with self.subTest(digest=digest), self.assertRaises(ValueError):
+                e.R0RunFileV2(path, 0, digest)
+        for path in ("INCOMPLETE.json", "r0a-observations-v2.json"):
+            with self.assertRaises(ValueError):
+                e.R0RunFileV2(path, 0, "a" * 64)
+
+    def test_fixed_manifest_identity_and_selection_fields(self):
+        changes = (("schema", e.R0_RUN_V1), ("schema", e.R0B_EXPERIMENT_V2),
+            ("mode", "R0_B"), ("classification", "EFFECTIVENESS"), ("status", "PASS"),
+            ("selection_receipt_sha256", "a" * 64), ("selection_receipt_byte_length", 7365),
+            ("selection_receipt_byte_length", True), ("selection_source_head", "a" * 40),
+            ("source_head", "a" * 40), ("provenance_sha256", "a" * 64),
+            ("codec_profile_sha256", "A" * 64), ("corpus_sha256", "a" * 64))
+        for name, bad in changes:
+            with self.subTest(name=name, bad=bad), self.assertRaises(ValueError):
+                replace(self.value, **{name: bad})
+
+    def test_protocol_and_all_six_amendment_fields(self):
+        class Text(str):
+            pass
+        class Integer(int):
+            pass
+        for name in ("path", "sha256", "blob_id", "freeze_commit"):
+            original = getattr(self.value.protocol, name)
+            bad = "other/protocol.md" if name == "path" else "a" * len(original)
+            with self.subTest(protocol=name), self.assertRaises(ValueError):
+                replace(self.value, protocol=replace(self.value.protocol, **{name: bad}))
+        for name in ("sha256", "byte_length", "external_receipt", "protocol_sha256", "protocol_blob", "protocol_commit"):
+            a = self.value.amendment
+            original = getattr(a, name)
+            bad = original + 1 if type(original) is int else original + "x"
+            forged = replace(a)
+            object.__setattr__(forged, name, bad)
+            with self.subTest(amendment=name), self.assertRaises(ValueError):
+                replace(self.value, amendment=forged)
+            substituted = replace(a)
+            object.__setattr__(substituted, name, Integer(original) if type(original) is int else Text(original))
+            with self.subTest(amendment_subclass=name), self.assertRaises(ValueError):
+                replace(self.value, amendment=substituted)
+
+    def test_production_plan_metadata_and_fingerprints(self):
+        board = self.value.plan.boards[0]
+        changes = (("width", 31), ("height", 17), ("mines", 98), ("first_click", (1, 0)),
+            ("generator_identity", "V2"), ("spec_identity", "OTHER"),
+            ("fingerprint", "A" * 64), ("fingerprint", "a" * 63), ("fingerprint", "g" * 64))
+        for name, bad in changes:
+            plan = replace(self.value.plan, boards=(replace(board, **{name: bad}),) + self.value.plan.boards[1:])
+            with self.subTest(name=name, bad=bad), self.assertRaises(ValueError):
+                replace(self.value, plan=plan)
+        with self.assertRaises(ValueError):
+            replace(self.value.plan, boards=self.value.plan.boards[::-1])
+
+    def test_concurrency_order_types_and_distinct_ids(self):
+        runs = self.value.concurrency_runs
+        changes = (list(runs), runs[::-1], runs[:-1], ((True, runs[0][1]),) + runs[1:],
+            ((1, "wrong"),) + runs[1:], ((1, "R0-"),) + runs[1:],
+            ((1, "R0-\n"),) + runs[1:], ((1, "R0-한글"),) + runs[1:],
+            (runs[0], (2, runs[0][1]), runs[2]), (list(runs[0]),) + runs[1:])
+        for bad in changes:
+            with self.subTest(runs=bad), self.assertRaises(ValueError):
+                replace(self.value, concurrency_runs=bad)
+
+    def test_inventory_is_complete_unique_sorted_and_observations_bound(self):
+        inventory = self.value.inventory_before_manifest_receipt
+        self.assertEqual(tuple(f.path for f in inventory), e.r0_run_pre_manifest_paths_v2())
+        self.assertEqual(len(inventory), 105602)
+        self.assertEqual(sum(f.path.endswith(".pkf") for f in inventory), 105600)
+        changes = (list(inventory), inventory[:-1], inventory[::-1],
+            (inventory[0], inventory[0]) + inventory[2:])
+        for bad in changes:
+            with self.subTest(kind=type(bad).__name__, length=len(bad)), self.assertRaises(ValueError):
+                replace(self.value, inventory_before_manifest_receipt=bad)
+        with self.assertRaises(ValueError):
+            replace(self.value, observations_file=replace(self.value.observations_file, sha256="b" * 64))
+
+    def test_forbidden_action_vocabulary_order_and_false_exactness(self):
+        names = ("final_envelope_selected", "n_selected", "r0_admission_pass", "r0_b", "r0_b_pass",
+            "actual_e2", "actual_e2_ready", "effectiveness_analysis", "effectiveness_result", "e3", "gate_p",
+            "holdout", "target_recount", "synthetic_search", "bootstrap", "project_git_mutation")
+        self.assertEqual(e.R0_RUN_V2_FORBIDDEN_ACTIONS, tuple((name, False) for name in names))
+        original = self.value.forbidden_actions
+        changes = (list(original), original[::-1], original[:-1],
+            ((original[0][0], True),) + original[1:], ((original[0][0], 0),) + original[1:],
+            (("unknown", False),) + original[1:])
+        for bad in changes:
+            with self.subTest(actions=bad), self.assertRaises(ValueError):
+                replace(self.value, forbidden_actions=bad)
+
+    def test_subclasses_and_forged_frozen_values_are_rejected(self):
+        class DerivedManifest(e.R0RunManifestV2):
+            pass
+        class DerivedFile(e.R0RunFileV2):
+            pass
+        class DerivedProvenance(e.R0RunProvenanceV2):
+            pass
+        values = {field.name: getattr(self.value, field.name) for field in fields(self.value)}
+        with self.assertRaises(ValueError):
+            e.encode_r0_run_manifest_v2(DerivedManifest(**values))
+        p = self.value.provenance
+        with self.assertRaises(ValueError):
+            replace(self.value, provenance=DerivedProvenance(**{field.name: getattr(p, field.name) for field in fields(p)}))
+        f = self.value.observations_file
+        with self.assertRaises(ValueError):
+            replace(self.value, observations_file=DerivedFile(f.path, f.byte_length, f.sha256))
+        forged = replace(self.value)
+        object.__setattr__(forged, "forbidden_actions", (("final_envelope_selected", 0),) + self.value.forbidden_actions[1:])
+        with self.assertRaises(ValueError):
+            e.encode_r0_run_manifest_v2(forged)
+
+    def test_duplicate_unknown_missing_fields_and_noncanonical_documents(self):
+        # Top-level errors are rejected before rebuilding the large inventory.
+        reordered = b'{"mode":"R0_A",' + self.raw[1:].replace(b'"mode":"R0_A",', b'', 1)
+        self.assertEqual(json.loads(reordered), json.loads(self.raw))
+        for raw in (self.raw.replace(b'{', b'{"mode":"R0_A",', 1),
+                    self.raw.replace(b'{', b'{"unknown":false,', 1),
+                    self.raw.replace(b'"mode":"R0_A",', b'', 1),
+                    b" " + self.raw, self.raw + b"\n", self.raw[:-1], self.raw + b"x",
+                    self.raw.replace(b'"mode":"R0_A"', b'"mode": "R0_A"', 1), reordered):
+            with self.subTest(prefix=raw[:30], size=len(raw)), self.assertRaises(ValueError):
+                e.decode_r0_run_manifest_v2(raw)
+
+    def test_malformed_nested_documents_and_v1_mixing(self):
+        # Each mutation starts from the complete valid document, so a missing
+        # inventory cannot mask a failure in the targeted nested reader.
+        original = json.loads(self.raw)
+        changes = (("provenance", {"fact": "RunProvenance", "fields": {}}),
+            ("plan", {"protocol_seed": 123, "boards": []}),
+            ("concurrency_runs", [1, 2, 4]), ("forbidden_actions", []),
+            ("observations_file", {"path": "r0a-observations-v2.json", "byte_length": True, "sha256": "a" * 64}),
+            ("protocol", {"record": original["protocol"]}), ("schema", e.R0_RUN_V1))
+        for name, value in changes:
+            node = dict(original)
+            node[name] = value
+            with self.subTest(field=name), self.assertRaises(ValueError):
+                e.decode_r0_run_manifest_v2(_json(node) + b"\n")
+        for token in (b"NaN", b"Infinity", b"1.0"):
+            raw = self.raw.replace(b'"selection_receipt_byte_length":7364',
+                                   b'"selection_receipt_byte_length":' + token, 1)
+            with self.subTest(token=token), self.assertRaises(ValueError):
+                e.decode_r0_run_manifest_v2(raw)
+
+    def test_complete_maximum_width_inventory_fits_existing_metadata_cap(self):
+        from experiments import program_k_e2_identity as identity
+        self.assertEqual(physical.MAX_PAYLOAD_BYTES, 67_108_864)
+        inventory = tuple(replace(fact, byte_length=identity.UINT64_MAX)
+                          for fact in self.value.inventory_before_manifest_receipt)
+        value = replace(self.value, inventory_before_manifest_receipt=inventory, observations_file=inventory[-1])
+        raw = e.encode_r0_run_manifest_v2(value)
+        self.assertLess(len(raw), physical.MAX_PAYLOAD_BYTES)
+        self.assertLess(max(len(fact.path) for fact in inventory), 73)
+        self.assertEqual(e.decode_r0_run_manifest_v2(raw), value)
+
+    def test_metadata_cap_is_enforced_by_both_codecs(self):
+        # An injected smaller ceiling proves the exact guard without allocating
+        # a second huge payload solely to cross the same arithmetic boundary.
+        with patch.object(physical, "MAX_PAYLOAD_BYTES", len(self.raw) - 1):
+            with self.assertRaisesRegex(ValueError, "METADATA_BOUND"):
+                e.decode_r0_run_manifest_v2(self.raw)
+            with self.assertRaisesRegex(ValueError, "METADATA_BOUND"):
+                e.encode_r0_run_manifest_v2(self.value)
+        for data in (b"", bytearray(self.raw[:32]), self.raw[:32].decode("ascii"), None):
+            with self.subTest(type=type(data)), self.assertRaises(ValueError):
+                e.decode_r0_run_manifest_v2(data)
+
+    def test_pure_codec_never_uses_live_owners_or_v1_dispatch(self):
+        import benchmark_board
+        from experiments import program_k_e2_qualification as qualification
+        forbidden = AssertionError("Run schema is supplied-fact only")
+        with ExitStack() as stack:
+            for owner, name in ((Path, "open"), (Path, "read_bytes"), (Path, "write_bytes"),
+                (Path, "resolve"), (subprocess, "run"), (qualification, "capture_sources_v2"),
+                (h, "capture_run_provenance_v2"), (physical, "capture_qualified_profile"),
+                (benchmark_board, "generate_board"), (e, "fact_node_v1"), (e, "fact_read_v1"),
+                (readiness, "target_counts"), (readiness, "search_synthetic_corpus")):
+                stack.enter_context(patch.object(owner, name, side_effect=forbidden))
+            stack.enter_context(patch("builtins.open", side_effect=forbidden))
+            self.assertEqual(e.decode_r0_run_manifest_v2(self.raw), self.value)
+
+    def test_v1_codec_is_independent_and_rejects_new_carriers(self):
+        baseline = e.fact_node_v1((b"\x01", Fraction(3, 2)))
+        with patch.object(e, "encode_r0_run_manifest_v2", side_effect=AssertionError("V1 isolation")), \
+                patch.object(e, "decode_r0_run_manifest_v2", side_effect=AssertionError("V1 isolation")):
+            self.assertEqual(e.fact_node_v1(e.fact_read_v1(baseline)), baseline)
+        for value in (self.value, self.value.provenance, self.value.observations_file):
+            with self.assertRaises(ValueError):
+                e.fact_node_v1(value)
+
+
 if __name__ == "__main__":
     unittest.main()

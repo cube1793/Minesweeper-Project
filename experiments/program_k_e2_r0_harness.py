@@ -4452,6 +4452,7 @@ def _v2_postprocess_support(result):
 class ActualRunAuthorization(Enum):
     R0_A = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_A"
     R0_B = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_B"
+    R0_A_V2 = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_A_V2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -5468,3 +5469,342 @@ def launch_r0b(receipt_path, root, r0a_root, envelope, *, authorization=None):
         _fail_run(root)
         raise
 # EVIDENCE_LAUNCH_END
+
+
+# Slice 1W: public V2 R0-A authority and archive closure. Historical owners above
+# retain their V1 schemas and lifecycle. A closed archive is never admission.
+def _r0_run_normal_v2(path, *, directory):
+    info = path.lstat()
+    _need(not stat.S_ISLNK(info.st_mode)
+          and not (getattr(info, "st_file_attributes", 0)
+                   & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)), "R0_RUN_V2_LINK_FORBIDDEN")
+    junction = getattr(path, "is_junction", None)
+    _need(junction is None or not junction(), "R0_RUN_V2_LINK_FORBIDDEN")
+    _need((stat.S_ISDIR if directory else stat.S_ISREG)(info.st_mode), "R0_RUN_V2_PATH_SHAPE")
+    return info
+
+
+def _r0_run_root_v2(path, *, existing):
+    """Inspect the lexical chain before any resolve can conceal an alias.
+
+    The accepted normal-filesystem model does not claim hostile-admin namespace
+    locking. Missing ancestors are allowed only during fresh-root preflight.
+    """
+    root = Path(path)
+    _need(".." not in root.parts, "R0_RUN_V2_PARENT_TRAVERSAL")
+    root = root.absolute()
+    for parent in reversed((root,) + tuple(root.parents)):
+        try:
+            _r0_run_normal_v2(parent, directory=True)
+        except FileNotFoundError:
+            _need(not existing, "R0_RUN_V2_ROOT_MISSING")
+    return root
+
+
+def _r0_run_not_failed_v2(root):
+    try:
+        (Path(root) / "FAILED.json").lstat()
+    except FileNotFoundError:
+        return
+    raise HarnessError("R0_RUN_V2_FAILED_OR_INCOMPLETE")
+
+
+def _r0_run_initial_v2(*, selection_receipt_sha256, source_head, provenance_sha256,
+                     codec_profile_sha256, protocol_seed, corpus_sha256):
+    return {"schema": evidence.R0_RUN_V2, "mode": "R0_A", "state": "INCOMPLETE_AT_CREATION",
+        "classification": "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE",
+        "selection_receipt_sha256": selection_receipt_sha256, "source_head": source_head,
+        "provenance_sha256": provenance_sha256, "codec_profile_sha256": codec_profile_sha256,
+        "protocol_sha256": identity.PROTOCOL_SHA256, "amendment_sha256": readiness.AMENDMENT_SHA256,
+        "amendment_byte_length": readiness.AMENDMENT_BYTE_LENGTH,
+        "protocol_seed": protocol_seed.hex(), "corpus_sha256": corpus_sha256}
+
+
+def _fail_run_v2(root):
+    """Best effort only; even a second BaseException preserves the first failure."""
+    try:
+        _exclusive_bytes(Path(root) / "FAILED.json", _canonical({"schema": evidence.R0_RUN_V2,
+            "mode": "R0_A", "state": "FAILED_OR_INCOMPLETE"}))
+    except BaseException:
+        pass
+
+
+def _materialize_r0a_boards_v2(plan, *, check=lambda: None):
+    """Future authorized launch only: retain identities, never generated layouts."""
+    from benchmark_board import BenchmarkBoard, BenchmarkSetSpec, EXPERT_GENERAL_V1, generate_board
+    _need(type(plan) is readiness.R0APlan, "R0_RUN_V2_PLAN_REQUIRED")
+    readiness.R0APlan.__post_init__(plan)
+    _need(plan.protocol_seed.hex() == identity.PROTOCOL_SHA256, "R0_RUN_V2_FROZEN_SEED")
+    spec = EXPERT_GENERAL_V1
+    _need(type(spec) is BenchmarkSetSpec
+          and (spec.benchmark_set_id, spec.width, spec.height, spec.num_mines,
+               spec.first_click_x, spec.first_click_y, spec.board_generator_version, spec.seed_scheme)
+          == ("EXPERT_GENERAL_V1", 30, 16, 99, 0, 0, "V1", "game_index")
+          and all(type(v) is int for v in (spec.width, spec.height, spec.num_mines,
+                                           spec.first_click_x, spec.first_click_y)), "R0_RUN_V2_BENCHMARK_SPEC")
+    boards = []
+    for index in plan.ordered_indices:
+        check()
+        generated = generate_board(spec, index)
+        try:
+            _need(type(generated) is BenchmarkBoard, "R0_RUN_V2_GENERATED_BOARD_TYPE")
+            _need(type(generated.game_index) is int and type(generated.seed) is int
+                  and generated.game_index == generated.seed == index, "R0_RUN_V2_GENERATED_BOARD_INDEX")
+            fingerprint = generated.board_fingerprint
+            _need(type(fingerprint) is str and len(fingerprint) == 64
+                  and all(c in "0123456789abcdef" for c in fingerprint), "R0_RUN_V2_GENERATED_FINGERPRINT")
+            boards.append(records.BoardIdentity(index, fingerprint, spec.width, spec.height, spec.num_mines,
+                (spec.first_click_x, spec.first_click_y), spec.board_generator_version, spec.benchmark_set_id))
+        finally:
+            generated = None
+        check()
+    value = evidence.R0APlanEvidenceV2(plan.protocol_seed, tuple(boards))
+    evidence._r0_run_plan_v2(value)
+    return value.boards
+
+
+def _r0_run_layout_v2(root, expected_paths, *, check=lambda: None):
+    """Exact regular-file and directory sets; never follow an alternate link."""
+    root = _r0_run_root_v2(root, existing=True)
+    _r0_run_not_failed_v2(root)
+    _need(type(expected_paths) is tuple and len(expected_paths) == len(set(expected_paths)),
+          "R0_RUN_V2_EXPECTED_PATHS")
+    files = set(expected_paths)
+    directories = set()
+    for name in expected_paths:
+        evidence._r0a_path(name)
+        parts = name.split("/")
+        directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    seen_files, seen_directories, pending = set(), set(), [root]
+    while pending:
+        check()
+        parent = pending.pop()
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                check()
+                path = parent / entry.name
+                relative = path.relative_to(root).as_posix()
+                info = path.lstat()
+                is_directory = stat.S_ISDIR(info.st_mode)
+                _r0_run_normal_v2(path, directory=is_directory)
+                if is_directory:
+                    _need(relative in directories, "R0_RUN_V2_UNEXPECTED_DIRECTORY")
+                    seen_directories.add(relative)
+                    pending.append(path)
+                else:
+                    _need(relative in files, "R0_RUN_V2_UNEXPECTED_FILE")
+                    seen_files.add(relative)
+    _need(seen_files == files and seen_directories == directories, "R0_RUN_V2_LAYOUT_COVERAGE")
+    check()
+    return root
+
+
+def _r0_run_read_bytes_v2(root, name, *, check=lambda: None):
+    """Bound metadata before allocation and reject length drift while reading."""
+    path = Path(root) / name
+    size = _r0_run_normal_v2(path, directory=False).st_size
+    _need(0 < size <= physical.MAX_PAYLOAD_BYTES, "R0_RUN_V2_METADATA_BOUND")
+    chunks, length = [], 0
+    with path.open("rb") as stream:
+        while True:
+            check()
+            chunk = stream.read(min(65536, size - length + 1))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            length += len(chunk)
+            _need(length <= size, "R0_RUN_V2_METADATA_DRIFT")
+    _need(length == size, "R0_RUN_V2_METADATA_DRIFT")
+    check()
+    return b"".join(chunks)
+
+
+def _r0_run_case_files_v2(observations):
+    """Derive file claims from exact accepted cases, not loose path prefixes."""
+    _need(type(observations) is evidence.R0AObservationsV2, "R0_RUN_V2_OBSERVATIONS_REQUIRED")
+    evidence.R0AObservationsV2.__post_init__(observations)
+    evidence._r0_run_plan_v2(observations.plan)
+    files = []
+    for concurrency in observations.concurrencies:
+        for component in concurrency.components:
+            owner = operational.R0Component(component.component)
+            for unit in component.units:
+                cases = (("target", unit.target),) if unit.setup is None else (
+                    ("setup", unit.setup), ("target", unit.target))
+                for phase, case in cases:
+                    relative = operational._r0_case_path_v2(concurrency.concurrency, owner, unit.position, phase)
+                    _need(case.archive.relative_directory == relative, "R0_RUN_V2_CASE_PATH")
+                    _need(tuple(v.name for v in case.archive.streams) == evidence._R0A_STREAMS_V2,
+                          "R0_RUN_V2_CASE_STREAMS")
+                    files.extend(evidence.R0RunFileV2(relative + "/" + stream.name + ".pkf",
+                        stream.byte_length, stream.sha256) for stream in case.archive.streams)
+    _need(len(files) == 105600, "R0_RUN_V2_CASE_COVERAGE")
+    return tuple(sorted(files, key=lambda value: value.path))
+
+
+def _r0_run_inventory_v2(root, observations, *, published=(), check=lambda: None):
+    """Physical reconciliation, with cancellation only inside long scans.
+
+    Eighteen standalone component budgets remain independent. This outer file
+    inventory deliberately applies no aggregate R0-B/Actual-E2 archive cap.
+    """
+    cases = _r0_run_case_files_v2(observations)
+    _need(type(published) is tuple and published in ((), ("manifest.json",),
+        ("manifest.json", "COMPLETE.json")), "R0_RUN_V2_PUBLICATION_PHASE")
+    paths = tuple(sorted(("INCOMPLETE.json", "r0a-observations-v2.json") + tuple(v.path for v in cases)))
+    root = _r0_run_layout_v2(root, tuple(sorted(paths + published)), check=check)
+    files = tuple(evidence.R0RunFileV2(v.path, v.byte_length, v.sha256)
+                  for v in _inventory(root, exclude=published, check=check))
+    _need(tuple(v.path for v in files) == paths, "R0_RUN_V2_INVENTORY_PATHS")
+    by_path = {v.path: v for v in files}
+    _need(all(by_path[v.path] == v for v in cases), "R0_RUN_V2_CASE_FILE_DRIFT")
+    encoded = evidence.encode_r0a_observations_v2(observations)
+    _need(by_path["r0a-observations-v2.json"] == evidence.R0RunFileV2(
+        "r0a-observations-v2.json", len(encoded), sha256(encoded).hexdigest()), "R0_RUN_V2_OBSERVATIONS_DRIFT")
+    initial = _r0_run_read_bytes_v2(root, "INCOMPLETE.json", check=check)
+    expected = _r0_run_initial_v2(selection_receipt_sha256=observations.selection_receipt_sha256,
+        source_head=observations.source_head, provenance_sha256=observations.provenance_sha256,
+        codec_profile_sha256=observations.codec_profile_sha256, protocol_seed=observations.plan.protocol_seed,
+        corpus_sha256=identity.corpus_digest(observations.plan.protocol_seed, len(observations.plan.boards),
+            tuple(board.game_index for board in observations.plan.boards)).hex())
+    _need(initial == _canonical(expected), "R0_RUN_V2_INITIAL_MARKER_BINDING")
+    _need(by_path["INCOMPLETE.json"] == evidence.R0RunFileV2("INCOMPLETE.json", len(initial),
+        sha256(initial).hexdigest()), "R0_RUN_V2_INITIAL_MARKER_DRIFT")
+    _r0_run_not_failed_v2(root)
+    check()
+    return files
+
+
+def _r0_run_completion_v2(manifest, manifest_bytes):
+    return records.CompletionReceipt(sha256(manifest_bytes).hexdigest(), manifest.corpus_sha256,
+        manifest.provenance_sha256, identity.PROTOCOL_SHA256, (), records.CompletionState.COMPLETED)
+
+
+def _validate_run_manifest_v2(root, receipt, *, completed, check=lambda: None):
+    """Independent disk validation; no current Git, runtime or profile capture."""
+    _need(type(completed) is bool, "R0_RUN_V2_VALIDATION_PHASE")
+    root = _r0_run_root_v2(root, existing=True)
+    _r0_run_not_failed_v2(root)
+    _need(type(receipt) is AcceptedSelectionReceipt, "ACCEPTED_RECEIPT_REQUIRED")
+    AcceptedSelectionReceipt.__post_init__(receipt)
+    if not completed:
+        try:
+            (root / "COMPLETE.json").lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise HarnessError("R0_RUN_V2_PREMATURE_COMPLETION")
+    else:
+        _r0_run_normal_v2(root / "COMPLETE.json", directory=False)
+    data = _r0_run_read_bytes_v2(root, "manifest.json", check=check)
+    value = evidence.decode_r0_run_manifest_v2(data)
+    _need((value.selection_receipt_sha256, value.selection_receipt_byte_length, value.selection_source_head)
+          == (sha256(receipt.canonical_bytes).hexdigest(), len(receipt.canonical_bytes), receipt.selection_source_head),
+          "R0_RUN_V2_SELECTION_BINDING")
+    if completed:
+        _need(store.read_completion_receipt(root) == _r0_run_completion_v2(value, data),
+              "R0_RUN_V2_COMPLETION_BINDING")
+    observations_bytes = _r0_run_read_bytes_v2(root, "r0a-observations-v2.json", check=check)
+    _need(value.observations_file == evidence.R0RunFileV2("r0a-observations-v2.json",
+        len(observations_bytes), sha256(observations_bytes).hexdigest()), "R0_RUN_V2_OBSERVATIONS_FILE")
+    observations = evidence.decode_r0a_observations_v2(observations_bytes,
+        expected_profile_sha256=value.codec_profile_sha256, expected_provenance_sha256=value.provenance_sha256,
+        expected_source_head=value.source_head, expected_selection_receipt_sha256=value.selection_receipt_sha256,
+        expected_plan=value.plan, expected_runtime=value.provenance.runtime)
+    _need(observations.protocol == value.protocol and observations.amendment == value.amendment
+          and tuple((v.concurrency, v.run_id) for v in observations.concurrencies) == value.concurrency_runs,
+          "R0_RUN_V2_OBSERVATIONS_AUTHORITY")
+    files = _r0_run_inventory_v2(root, observations,
+        published=("manifest.json", "COMPLETE.json") if completed else ("manifest.json",), check=check)
+    _need(files == value.inventory_before_manifest_receipt, "R0_RUN_V2_ARCHIVE_DRIFT")
+    _r0_run_not_failed_v2(root)
+    check()
+    return value
+
+
+def validate_existing_run_v2(root, receipt):
+    """Authenticate recorded R0-A evidence after source changes; never admit it."""
+    return _validate_run_manifest_v2(root, receipt, completed=True)
+
+
+def launch_r0a_v2(receipt_path, root, envelopes, *, authorization=None, progress=None):
+    """Fresh V2 R0-A only with separate explicit execution authorization."""
+    _authorize(authorization, ActualRunAuthorization.R0_A_V2)
+    _need(type(envelopes) is tuple and len(envelopes) == 3, "R0_RUN_V2_ENVELOPES")
+    for envelope in envelopes:
+        operational._envelope(envelope)
+    _need(tuple(v.concurrency for v in envelopes) == (1, 2, 4), "R0_RUN_V2_CONCURRENCY_ORDER")
+    _need(progress is None or callable(progress), "R0_RUN_V2_PROGRESS_CALLBACK")
+    receipt = load_selection_receipt(receipt_path)
+    provenance = capture_run_provenance_v2(receipt)
+    profile = _capture_qualified_codec_profile()
+    physical.require_qualified_profile(profile)
+    plan = readiness.build_r0a_plan(bytes.fromhex(identity.PROTOCOL_SHA256))
+    recorded = evidence.R0RunProvenanceV2(provenance.selection_source_head, provenance.r0_harness_source_head,
+        provenance.sources, provenance.working_files, provenance.runtime, provenance.executable,
+        provenance.dont_write_bytecode)
+    provenance_hash = evidence.provenance_digest_v2(recorded.selection_source_head, recorded.r0_harness_source_head,
+        recorded.sources, recorded.working_files, recorded.runtime, recorded.executable, recorded.dont_write_bytecode)
+    corpus = identity.corpus_digest(plan.protocol_seed, len(plan.ordered_indices), plan.ordered_indices).hex()
+    initial = _r0_run_initial_v2(selection_receipt_sha256=SELECTION_RECEIPT_SHA256,
+        source_head=provenance.r0_harness_source_head, provenance_sha256=provenance_hash,
+        codec_profile_sha256=profile.sha256.hex(), protocol_seed=plan.protocol_seed, corpus_sha256=corpus)
+    root = _fresh_ignored_root(_r0_run_root_v2(root, existing=False))
+    cancel = threading.Event()
+
+    def check():
+        _need(not cancel.is_set(), "CANCELLED")
+
+    def live_recheck():
+        check()
+        _recheck_provenance_v2(receipt, provenance)
+        _need(_capture_qualified_codec_profile() == profile, "R0_RUN_V2_PROFILE_CHANGED")
+        check()
+
+    root.mkdir(parents=True, exist_ok=False)
+    try:
+        _exclusive_bytes(root / "INCOMPLETE.json", _canonical(initial))
+        live_recheck()  # O1: auditable attempt, immediately before materialization.
+        boards = _materialize_r0a_boards_v2(plan, check=check)
+        attempt = uuid.uuid4().hex
+        work = tuple(tuple(operational.R0Work(position, board, plan.protocol_seed,
+            "R0-" + attempt + "-c" + str(envelope.concurrency), provenance.runtime)
+            for position, board in enumerate(boards)) for envelope in envelopes)
+        for values, envelope in zip(work, envelopes):
+            _r0a_collector_inputs_v2(values, envelope, profile, cancel, progress)
+        live_recheck()  # O2: complete validated identities, before the seven 1V gates.
+        observed = _assemble_r0a_observations_v2(receipt, provenance, plan, work, envelopes, profile,
+            root, root / "r0a-observations-v2.json", live_recheck=live_recheck, cancel=cancel, progress=progress)
+        _need(type(observed) is _R0AObservationsFileV2, "R0_RUN_V2_ASSEMBLY_RESULT")
+        _R0AObservationsFileV2.__post_init__(observed)
+        live_recheck()  # O3: no inventory until the complete detached 1V boundary.
+        files = _r0_run_inventory_v2(root, observed.observations, check=check)
+        manifest = evidence.R0RunManifestV2(evidence.R0_RUN_V2, "R0_A",
+            "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE",
+            "COMPLETE_FOR_INDEPENDENT_REVIEW_NOT_ENVELOPE_ADMISSION", SELECTION_RECEIPT_SHA256,
+            SELECTION_RECEIPT_BYTES, SELECTION_SOURCE_HEAD, provenance.r0_harness_source_head,
+            provenance_hash, recorded, observed.observations.protocol, readiness.AmendmentProvenance(),
+            profile.sha256.hex(), evidence.R0APlanEvidenceV2(plan.protocol_seed, boards), corpus,
+            tuple((envelope.concurrency, values[0].run_id) for envelope, values in zip(envelopes, work)),
+            evidence.R0RunFileV2(observed.relative_path, observed.byte_length, observed.sha256), files,
+            evidence.R0_RUN_V2_FORBIDDEN_ACTIONS)
+        encoded = evidence.encode_r0_run_manifest_v2(manifest)
+        check()
+        _exclusive_bytes(root / "manifest.json", encoded)
+        persisted = _r0_run_read_bytes_v2(root, "manifest.json", check=check)
+        decoded = evidence.decode_r0_run_manifest_v2(persisted)
+        _need(persisted == encoded and decoded == manifest, "R0_RUN_V2_MANIFEST_READBACK")
+        validated = _validate_run_manifest_v2(root, receipt, completed=False, check=check)
+        _need(validated == decoded, "R0_RUN_V2_MANIFEST_VALIDATION")
+        live_recheck()  # O4: final live gate; COMPLETE is the last success publication.
+        completion = _r0_run_completion_v2(validated, persisted)
+        store.write_completion_receipt(root, completion)
+        _need(store.read_completion_receipt(root) == completion, "R0_RUN_V2_COMPLETION_READBACK")
+        return validated
+    except BaseException:
+        try:
+            cancel.set()
+        except BaseException:
+            pass
+        _fail_run_v2(root)
+        raise

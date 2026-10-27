@@ -9482,5 +9482,804 @@ class R0AObservationsAssemblyV2Tests(unittest.TestCase):
                 self.assertNotIn("_assemble_r0a_observations_v2", inspect.getsource(owner))
         source = inspect.getsource(h._assemble_r0a_observations_v2)
         self.assertNotIn("R0_RUN_V2", source)
-        self.assertFalse(hasattr(h, "launch_r0a_v2"))
-        self.assertFalse(hasattr(h, "validate_existing_run_v2"))
+        self.assertNotIn("launch_r0a_v2", source)
+        self.assertNotIn("validate_existing_run_v2", source)
+
+
+class _Slice1WFixture:
+    """Real metadata publication with supplied full-shape inventory, never real boards."""
+
+    ATTEMPT = "0123456789abcdef0123456789abcdef"
+
+    def __init__(self, directory, observations, observations_bytes, case_files):
+        from tests.test_program_k_e2_r0_evidence import _r0_run_provenance_fixture_v2
+        self.directory = Path(directory)
+        (self.directory / "results").mkdir()
+        self.root = self.directory / "results" / "run"
+        self.receipt = h.AcceptedSelectionReceipt(str(self.directory / "absent-receipt.json"),
+                                                  _accepted_receipt_bytes())
+        supplied = _r0_run_provenance_fixture_v2(observations.runtime)
+        self.provenance = h.RunProvenance(supplied.selection_source_head, supplied.r0_harness_source_head,
+            supplied.sources, supplied.working_files, supplied.runtime, supplied.executable,
+            supplied.dont_write_bytecode)
+        self.observations, self.observations_bytes, self.case_files = observations, observations_bytes, case_files
+        self.profile = physical.decode_profile(observations.codec_profile_bytes)
+        self.plan = readiness.build_r0a_plan(bytes.fromhex(identity.PROTOCOL_SHA256))
+        self.envelopes = tuple(c.envelope for c in observations.concurrencies)
+        self.events, self.generated, self.emitted, self.works = [], [], [], None
+        self.cancel = None
+        self.created_events = []
+        self.gates = self.captures = 0
+        self.fail_gate = self.fail_profile = None
+        self.source_failure = RuntimeError("slice1w source drift")
+        self.generated_failure = None
+        self.ignored = True
+
+    def receipt_read(self, path):
+        self.events.append("receipt")
+        return self.receipt
+
+    def provenance_capture(self, receipt):
+        self.events.append("provenance")
+        return self.provenance
+
+    def source_recheck(self, receipt, provenance):
+        self.gates += 1
+        self.events.append("gate" + str(self.gates))
+        if self.gates == self.fail_gate:
+            raise self.source_failure
+        return provenance
+
+    def profile_capture(self):
+        self.captures += 1
+        self.events.append("profile" + str(self.captures))
+        if self.captures == self.fail_profile:
+            node = json.loads(self.profile.canonical_bytes)
+            node["writer_sources"][0]["sha256"] = "f" * 64
+            return physical.decode_profile(physical._json(node))
+        return self.profile
+
+    def git(self, *arguments, **kwargs):
+        if arguments[:1] != ("check-ignore",):
+            raise AssertionError("Slice 1W fixture must not inspect live Git")
+        return b"ignored\n" if self.ignored else b""
+
+    def generate(self, spec, index):
+        import benchmark_board
+        self.events.append("board")
+        self.generated.append((spec, index))
+        if self.generated_failure is not None:
+            raise self.generated_failure
+        board = self.observations.plan.boards[self.plan.ordered_indices.index(index)]
+        return benchmark_board.BenchmarkBoard(index, index, frozenset({(29, 15)}), board.fingerprint)
+
+    def assemble(self, receipt, provenance, plan, work_by_concurrency, envelopes, profile,
+                 anchor, output_path, *, live_recheck, cancel, progress):
+        self.events.append("assembly")
+        self.cancel, self.works = cancel, work_by_concurrency
+        live_recheck()  # Accepted 1V gate 1.
+        for work, original in zip(work_by_concurrency, self.observations.concurrencies):
+            if work[0].run_id != original.run_id:
+                raise AssertionError("Supplied fake 1V template is bound to the patched invocation UUID")
+            value = original
+            for component in value.components:
+                for fact in component.progress:
+                    event = (value.concurrency, operational.R0Component(component.component), fact)
+                    if progress is not None:
+                        self.emitted.append(event)
+                        progress(*event)
+            live_recheck()  # Accepted 1V gates 2, 3, 4.
+        # 1V has its own exhaustive codec/readback tests. This fake reuses one
+        # immutable, independently decoded supplied template; all production 1W
+        # manifest and observations readbacks below remain real and unpatched.
+        data = self.observations_bytes
+        live_recheck()  # Accepted 1V gate 5.
+        h._exclusive_bytes(output_path, data)
+        if Path(output_path).read_bytes() != data:
+            raise AssertionError("Fake 1V observations publication changed")
+        decoded = self.observations
+        live_recheck()  # Accepted 1V gate 6.
+        result = object.__new__(h._R0AObservationsFileV2)
+        for name, item in (("observations", decoded), ("relative_path", "r0a-observations-v2.json"),
+                           ("byte_length", len(data)), ("sha256", h.sha256(data).hexdigest())):
+            object.__setattr__(result, name, item)
+        live_recheck()  # Accepted 1V gate 7.
+        self.events.append("assembly_complete")
+        return result
+
+    def inventory(self, root, observations, *, published=(), check=lambda: None):
+        self.events.append("inventory")
+        before = (self.gates, self.captures)
+        for _ in range(5):
+            check()
+        if before != (self.gates, self.captures):
+            raise AssertionError("Inventory check recaptured expensive live authority")
+        files = list(self.case_files)
+        for name in ("INCOMPLETE.json", "r0a-observations-v2.json"):
+            data = (Path(root) / name).read_bytes()
+            files.append(h.evidence.R0RunFileV2(name, len(data), h.sha256(data).hexdigest()))
+        return tuple(sorted(files, key=lambda value: value.path))
+
+    @_evidence_contextmanager
+    def patched(self):
+        import benchmark_board
+        event_factory = threading.Event
+        def event():
+            value = event_factory()
+            self.created_events.append(value)
+            return value
+        with _EvidenceExitStack() as stack:
+            for owner, name, replacement in (
+                (h, "load_selection_receipt", self.receipt_read),
+                (h, "capture_run_provenance_v2", self.provenance_capture),
+                (h, "_recheck_provenance_v2", self.source_recheck),
+                (h, "_capture_qualified_codec_profile", self.profile_capture),
+                (h.qualification, "_git", self.git),
+                (benchmark_board, "generate_board", self.generate),
+                (h, "_assemble_r0a_observations_v2", self.assemble),
+                (h, "_r0_run_inventory_v2", self.inventory)):
+                stack.enter_context(patch.object(owner, name, new=replacement))
+            stack.enter_context(patch.object(h.threading, "Event", new=event))
+            stack.enter_context(patch.object(h.uuid, "uuid4", return_value=h.uuid.UUID(hex=self.ATTEMPT)))
+            stack.enter_context(patch.object(h.qualification, "_ROOT", self.directory))
+            yield self
+
+    def launch(self, **changes):
+        arguments = dict(receipt_path=self.receipt.path, root=self.root, envelopes=self.envelopes,
+            authorization=h.ActualRunAuthorization.R0_A_V2)
+        arguments.update(changes)
+        return h.launch_r0a_v2(**arguments)
+
+
+class R0RunLauncherV2Tests(unittest.TestCase):
+    """Slice 1W public lifecycle; every benchmark generator and worker is replaced."""
+
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_program_k_e2_r0_evidence import _r0_run_observations_fixture_v2
+        if not hasattr(R0RunLauncherV2Tests, "_supplied_cache"):
+            value = _r0_run_observations_fixture_v2()
+            value = replace(value, concurrencies=tuple(replace(concurrency,
+                run_id="R0-" + _Slice1WFixture.ATTEMPT + "-c" + str(concurrency.concurrency))
+                for concurrency in value.concurrencies))
+            data = h.evidence.encode_r0a_observations_v2(value)
+            value = h.evidence.decode_r0a_observations_v2(data)
+            files = tuple(sorted((h.evidence.R0RunFileV2(
+                case.archive.relative_directory + "/" + seal.name + ".pkf", seal.byte_length, seal.sha256)
+                for concurrency in value.concurrencies for component in concurrency.components
+                for unit in component.units for case in ((unit.target,) if unit.setup is None else
+                                                         (unit.setup, unit.target))
+                for seal in case.archive.streams), key=lambda fact: fact.path))
+            R0RunLauncherV2Tests._supplied_cache = value, data, files
+        cls.supplied, cls.supplied_bytes, cls.case_files = R0RunLauncherV2Tests._supplied_cache
+
+    @_evidence_contextmanager
+    def fixture(self):
+        with tempfile.TemporaryDirectory(prefix="slice1w-launch-") as directory:
+            fixture = _Slice1WFixture(directory, self.supplied, self.supplied_bytes, self.case_files)
+            with fixture.patched():
+                yield fixture
+
+    def test_distinct_authorization_rejects_before_any_side_effect_and_cross_isolates_v1(self):
+        import benchmark_board
+        from enum import Enum
+        class Foreign(Enum):
+            R0_A_V2 = "AUTHORIZE_ACTUAL_PROGRAM_K_E2_R0_A_V2"
+        values = (None, h.ActualRunAuthorization.R0_A_V2.value, h.ActualRunAuthorization.R0_A,
+                  h.ActualRunAuthorization.R0_B, Foreign.R0_A_V2, object())
+        with _EvidenceExitStack() as stack:
+            mocks = [stack.enter_context(patch.object(owner, name, side_effect=AssertionError(name)))
+                for owner, name in ((h, "load_selection_receipt"), (h, "capture_run_provenance_v2"),
+                    (h, "_capture_qualified_codec_profile"), (h, "_fresh_ignored_root"),
+                    (h, "_assemble_r0a_observations_v2"), (benchmark_board, "generate_board"),
+                    (Path, "mkdir"))]
+            for value in values:
+                with self.subTest(value=value), self.assertRaises(h.HarnessError):
+                    h.launch_r0a_v2("absent", "absent", (), authorization=value)
+            with self.assertRaises(h.HarnessError):
+                h.launch_r0a("absent", "absent", (), authorization=h.ActualRunAuthorization.R0_A_V2)
+            for mock in mocks:
+                mock.assert_not_called()
+
+    def test_static_inputs_and_initial_capture_fail_before_root_or_boards(self):
+        with self.fixture() as f:
+            for changes in ({"envelopes": list(f.envelopes)}, {"envelopes": f.envelopes[:2]},
+                    {"envelopes": f.envelopes[::-1]}, {"envelopes": (object(),) * 3},
+                    {"progress": object()}):
+                with self.subTest(changes=changes), self.assertRaises((ValueError, TypeError)):
+                    f.launch(**changes)
+                self.assertFalse(f.root.exists())
+                self.assertEqual(f.generated, [])
+            for owner in ("load_selection_receipt", "capture_run_provenance_v2", "_capture_qualified_codec_profile"):
+                for reason in (("receipt",) if owner == "load_selection_receipt" else
+                               ("dirty_worktree", "dirty_index", "untracked", "wrong_head", "runtime", "environment")
+                               if owner == "capture_run_provenance_v2" else ("profile",)):
+                    failure = RuntimeError(reason)
+                    with self.subTest(owner=owner, reason=reason), patch.object(h, owner, side_effect=failure), \
+                            self.assertRaises(RuntimeError) as caught:
+                        f.launch()
+                    self.assertIs(caught.exception, failure)
+                    self.assertFalse(f.root.exists())
+                    self.assertEqual(f.generated, [])
+            node = json.loads(f.profile.canonical_bytes)
+            node["status"] = "UNQUALIFIED_SLICE_1A"
+            unqualified = physical.decode_profile(physical._json(node))
+            with patch.object(h, "_capture_qualified_codec_profile", return_value=unqualified), \
+                    self.assertRaises(ValueError):
+                f.launch()
+            self.assertFalse(f.root.exists())
+
+    def test_materializer_uses_64_literal_generations_and_rejects_invalid_results_and_spec(self):
+        import benchmark_board
+        with self.fixture() as f:
+            boards = h._materialize_r0a_boards_v2(f.plan)
+            self.assertEqual(len(f.generated), 64)
+            self.assertEqual(tuple(index for _, index in f.generated), f.plan.ordered_indices)
+            self.assertTrue(all(spec is benchmark_board.EXPERT_GENERAL_V1 for spec, _ in f.generated))
+            self.assertEqual(boards, f.observations.plan.boards)
+            self.assertTrue(all(not hasattr(board, "mine_positions") for board in boards))
+            literal = benchmark_board.BenchmarkBoard(f.plan.ordered_indices[0], f.plan.ordered_indices[0],
+                                                     frozenset(), "a" * 64)
+            class SubstitutedBoard(benchmark_board.BenchmarkBoard):
+                pass
+            invalid = (object(), replace(literal, game_index=literal.game_index + 1),
+                       replace(literal, seed=literal.seed + 1), SubstitutedBoard(literal.game_index,
+                           literal.seed, literal.mine_positions, literal.board_fingerprint))
+            for result in invalid:
+                with self.subTest(result=result), patch.object(benchmark_board, "generate_board", return_value=result), \
+                        self.assertRaises(ValueError):
+                    h._materialize_r0a_boards_v2(f.plan)
+            malformed = replace(literal)
+            object.__setattr__(malformed, "board_fingerprint", "A" * 64)
+            with patch.object(benchmark_board, "generate_board", return_value=malformed), self.assertRaises(ValueError):
+                h._materialize_r0a_boards_v2(f.plan)
+            for field, value in (("width", 31), ("height", 17), ("num_mines", 98),
+                                  ("benchmark_set_id", "wrong"), ("first_click_x", 1)):
+                with self.subTest(field=field), patch.object(benchmark_board, "EXPERT_GENERAL_V1",
+                        replace(benchmark_board.EXPERT_GENERAL_V1, **{field: value})), \
+                        patch.object(benchmark_board, "generate_board", side_effect=AssertionError("invalid spec generated")), \
+                        self.assertRaises(ValueError):
+                    h._materialize_r0a_boards_v2(f.plan)
+
+    def test_success_work_identity_eleven_live_gates_progress_and_completion_last(self):
+        import io
+        from contextlib import redirect_stdout
+        with self.fixture() as f:
+            original_write, original_read = h.store.write_completion_receipt, h.store.read_completion_receipt
+            original_validate = h._validate_run_manifest_v2
+            received = []
+            def validate(*args, **kwargs):
+                self.assertFalse((f.root / "COMPLETE.json").exists())
+                value = original_validate(*args, **kwargs)
+                f.events.append("prevalidated")
+                return value
+            def write(root, completion):
+                self.assertEqual(f.gates, 11)
+                self.assertEqual(f.events[-2:], ["gate11", "profile12"])
+                self.assertIn("prevalidated", f.events)
+                self.assertFalse((f.root / "COMPLETE.json").exists())
+                self.assertEqual(completion.streams, ())
+                original_write(root, completion)
+                f.events.append("completion_write")
+            def read(root):
+                value = original_read(root)
+                f.events.append("completion_read")
+                return value
+            stdout = io.StringIO()
+            with patch.object(h, "_validate_run_manifest_v2", new=validate), \
+                    patch.object(h.store, "write_completion_receipt", new=write), \
+                    patch.object(h.store, "read_completion_receipt", new=read), redirect_stdout(stdout):
+                result = f.launch(progress=lambda *event: received.append(event))
+            self.assertIs(type(result), h.evidence.R0RunManifestV2)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual((f.gates, f.captures), (11, 12))
+            self.assertEqual(f.events[-2:], ["completion_write", "completion_read"])
+            self.assertEqual(len(f.generated), 64)
+            self.assertEqual(len(f.works), 3)
+            self.assertEqual(len({work[0].run_id for work in f.works}), 3)
+            self.assertEqual(len(f.created_events), 1)
+            self.assertIs(f.cancel, f.created_events[0])
+            self.assertFalse(f.cancel.is_set())
+            self.assertEqual({work[0].run_id.rsplit("-c", 1)[0] for work in f.works},
+                             {"R0-" + _Slice1WFixture.ATTEMPT})
+            for work in f.works:
+                self.assertEqual(tuple(item.position for item in work), tuple(range(64)))
+                self.assertTrue(all(item.runtime is f.provenance.runtime and item.protocol_seed == f.plan.protocol_seed
+                                    and item.run_id == work[0].run_id for item in work))
+                self.assertTrue(all(item.board is f.works[0][position].board for position, item in enumerate(work)))
+            self.assertEqual(len(received), 1152)
+            self.assertEqual(received, f.emitted)
+            self.assertTrue(all(actual[2] is emitted[2] for actual, emitted in zip(received, f.emitted)))
+            self.assertEqual(f.events.index("gate1") + 1, f.events.index("profile2"))
+            self.assertLess(f.events.index("profile2"), f.events.index("board"))
+            self.assertLess(max(i for i, value in enumerate(f.events) if value == "board"), f.events.index("gate2"))
+            self.assertLess(f.events.index("assembly_complete"), f.events.index("gate10"))
+            self.assertLess(f.events.index("profile11"), f.events.index("inventory"))
+            initial = h._json_bytes((f.root / "INCOMPLETE.json").read_bytes())
+            provenance_hash = h.evidence.provenance_digest_v2(f.provenance.selection_source_head,
+                f.provenance.r0_harness_source_head, f.provenance.sources, f.provenance.working_files,
+                f.provenance.runtime, f.provenance.executable, f.provenance.dont_write_bytecode)
+            corpus_hash = identity.corpus_digest(f.plan.protocol_seed, 64, f.plan.ordered_indices).hex()
+            self.assertEqual(initial, {"schema": h.evidence.R0_RUN_V2, "mode": "R0_A",
+                "state": "INCOMPLETE_AT_CREATION", "classification": "OPERATIONAL_NON_EFFECTIVENESS_R0_EVIDENCE",
+                "selection_receipt_sha256": h.sha256(f.receipt.canonical_bytes).hexdigest(),
+                "source_head": f.provenance.r0_harness_source_head, "provenance_sha256": provenance_hash,
+                "codec_profile_sha256": f.profile.sha256.hex(), "protocol_sha256": identity.PROTOCOL_SHA256,
+                "amendment_sha256": readiness.AMENDMENT_SHA256,
+                "amendment_byte_length": readiness.AMENDMENT_BYTE_LENGTH,
+                "protocol_seed": f.plan.protocol_seed.hex(), "corpus_sha256": corpus_hash})
+            completion = original_read(f.root)
+            self.assertEqual(completion, records.CompletionReceipt(
+                h.sha256((f.root / "manifest.json").read_bytes()).hexdigest(), corpus_hash, provenance_hash,
+                identity.PROTOCOL_SHA256, (), records.CompletionState.COMPLETED))
+            self.assertFalse((f.root / "FAILED.json").exists())
+
+    def test_drift_at_every_source_gate_and_each_outer_profile_gate_stops_work(self):
+        for gate in range(1, 12):
+            with self.subTest(source_gate=gate), self.fixture() as f:
+                f.fail_gate = gate
+                with self.assertRaises(RuntimeError) as caught:
+                    f.launch()
+                self.assertIs(caught.exception, f.source_failure)
+                self.assertEqual(f.gates, gate)
+                self.assertTrue((f.root / "FAILED.json").is_file())
+                self.assertFalse((f.root / "COMPLETE.json").exists())
+                self.assertEqual(len(f.created_events), 1)
+                self.assertTrue(f.created_events[0].is_set())
+                if gate == 1:
+                    self.assertEqual(f.generated, [])
+                if f.cancel is not None:
+                    self.assertTrue(f.cancel.is_set())
+        for gate in (1, 2, 3, 10, 11):
+            with self.subTest(profile_gate=gate), self.fixture() as f:
+                f.fail_profile = gate + 1
+                with self.assertRaises(ValueError):
+                    f.launch()
+                self.assertEqual(f.gates, gate)
+                self.assertEqual(f.captures, gate + 1)
+                self.assertTrue((f.root / "FAILED.json").exists())
+                self.assertFalse((f.root / "COMPLETE.json").exists())
+                self.assertEqual(len(f.created_events), 1)
+                self.assertTrue(f.created_events[0].is_set())
+
+    def test_progress_exception_preserves_original_cancels_and_prevents_manifest(self):
+        with self.fixture() as f:
+            failure = KeyboardInterrupt("operator display failed")
+            calls = []
+            def progress(*event):
+                calls.append(event)
+                raise failure
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                f.launch(progress=progress)
+            self.assertIs(caught.exception, failure)
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(f.cancel.is_set())
+            self.assertTrue((f.root / "FAILED.json").exists())
+            self.assertFalse((f.root / "manifest.json").exists())
+            self.assertFalse((f.root / "COMPLETE.json").exists())
+
+    def test_root_initial_marker_and_board_failure_preserve_bytes_without_reuse(self):
+        with self.fixture() as f:
+            f.ignored = False
+            with self.assertRaises(ValueError):
+                f.launch()
+            self.assertFalse(f.root.exists())
+            f.ignored = True
+            with self.assertRaises(ValueError):
+                f.launch(root=f.directory / "outside-results")
+            failure = RuntimeError("literal generator failed")
+            f.generated_failure = failure
+            with self.assertRaises(RuntimeError) as caught:
+                f.launch()
+            self.assertIs(caught.exception, failure)
+            before = {p.name: p.read_bytes() for p in f.root.iterdir()}
+            self.assertEqual(set(before), {"INCOMPLETE.json", "FAILED.json"})
+            self.assertEqual(h._json_bytes(before["FAILED.json"]),
+                {"schema": h.evidence.R0_RUN_V2, "mode": "R0_A", "state": "FAILED_OR_INCOMPLETE"})
+            with self.assertRaises(ValueError):
+                f.launch()
+            self.assertEqual({p.name: p.read_bytes() for p in f.root.iterdir()}, before)
+        for kind in ("create", "partial", "fsync", "readback"):
+            with self.subTest(kind=kind), self.fixture() as f:
+                original = h._exclusive_bytes
+                failure = OSError("initial " + kind)
+                def exclusive(path, data):
+                    if Path(path).name == "INCOMPLETE.json":
+                        if kind == "fsync":
+                            with patch.object(h.os, "fsync", side_effect=failure):
+                                return original(path, data)
+                        if kind in ("partial", "readback"):
+                            Path(path).write_bytes(data[:17] if kind == "partial" else data)
+                        raise failure
+                    return original(path, data)
+                with patch.object(h, "_exclusive_bytes", new=exclusive), self.assertRaises(OSError) as caught:
+                    f.launch()
+                self.assertIs(caught.exception, failure)
+                self.assertTrue((f.root / "FAILED.json").exists())
+                self.assertEqual(f.generated, [])
+
+    def test_manifest_failures_preserve_prefix_and_do_not_publish_completion(self):
+        for kind in ("encode", "create", "partial", "fsync", "reread", "decode", "validation"):
+            with self.subTest(kind=kind), self.fixture() as f, _EvidenceExitStack() as stack:
+                failure = RuntimeError("manifest " + kind)
+                if kind == "encode":
+                    stack.enter_context(patch.object(h.evidence, "encode_r0_run_manifest_v2", side_effect=failure))
+                elif kind == "decode":
+                    stack.enter_context(patch.object(h.evidence, "decode_r0_run_manifest_v2", side_effect=failure))
+                elif kind == "validation":
+                    stack.enter_context(patch.object(h, "_validate_run_manifest_v2", side_effect=failure))
+                elif kind == "reread":
+                    original_read = h._r0_run_read_bytes_v2
+                    def read(root, name, **kwargs):
+                        if name == "manifest.json":
+                            raise failure
+                        return original_read(root, name, **kwargs)
+                    stack.enter_context(patch.object(h, "_r0_run_read_bytes_v2", new=read))
+                else:
+                    original = h._exclusive_bytes
+                    def exclusive(path, data):
+                        if Path(path).name == "manifest.json":
+                            if kind == "fsync":
+                                with patch.object(h.os, "fsync", side_effect=failure):
+                                    return original(path, data)
+                            if kind == "partial":
+                                Path(path).write_bytes(data[:17])
+                            raise failure
+                        return original(path, data)
+                    stack.enter_context(patch.object(h, "_exclusive_bytes", new=exclusive))
+                with self.assertRaises(RuntimeError) as caught:
+                    f.launch()
+                self.assertIs(caught.exception, failure)
+                self.assertTrue(f.cancel.is_set())
+                self.assertTrue((f.root / "FAILED.json").exists())
+                self.assertTrue((f.root / "r0a-observations-v2.json").exists())
+                self.assertFalse((f.root / "COMPLETE.json").exists())
+                if kind == "partial":
+                    self.assertEqual((f.root / "manifest.json").stat().st_size, 17)
+
+    def test_completion_failure_and_failed_double_failure_preserve_original(self):
+        for kind in ("create", "short", "fsync", "readback", "double_failure"):
+            with self.subTest(kind=kind), self.fixture() as f, _EvidenceExitStack() as stack:
+                failure = RuntimeError("completion " + kind)
+                if kind == "create":
+                    stack.enter_context(patch.object(h.store, "write_completion_receipt", side_effect=failure))
+                elif kind == "short":
+                    def short(stream, data):
+                        stream.write(data[:17])
+                        raise failure
+                    stack.enter_context(patch.object(h.store, "_write_complete", new=short))
+                elif kind == "fsync":
+                    original_write = h.store.write_completion_receipt
+                    def write(root, receipt):
+                        with patch.object(h.store.os, "fsync", side_effect=failure):
+                            original_write(root, receipt)
+                    stack.enter_context(patch.object(h.store, "write_completion_receipt", new=write))
+                else:
+                    stack.enter_context(patch.object(h.store, "read_completion_receipt", side_effect=failure))
+                if kind == "double_failure":
+                    original_exclusive = h._exclusive_bytes
+                    def exclusive(path, data):
+                        if Path(path).name == "FAILED.json":
+                            raise KeyboardInterrupt("failure marker also unavailable")
+                        return original_exclusive(path, data)
+                    stack.enter_context(patch.object(h, "_exclusive_bytes", new=exclusive))
+                with self.assertRaises((RuntimeError, h.store.StoreError)) as caught:
+                    f.launch()
+                self.assertTrue(caught.exception is failure or caught.exception.__cause__ is failure)
+                self.assertTrue(f.cancel.is_set())
+                self.assertEqual((f.root / "FAILED.json").exists(), kind != "double_failure")
+                if kind in ("short", "fsync", "readback", "double_failure"):
+                    self.assertTrue((f.root / "COMPLETE.json").exists())
+                if kind == "short":
+                    self.assertEqual((f.root / "COMPLETE.json").stat().st_size, 17)
+
+
+class R0RunValidationV2Tests(unittest.TestCase):
+    """Recorded authority and bounded physical-layout tests, with no live launch work."""
+
+    setUpClass = classmethod(R0RunLauncherV2Tests.setUpClass.__func__)
+    fixture = R0RunLauncherV2Tests.fixture
+
+    def test_historical_validation_has_no_live_authority_or_receipt_path_requirement(self):
+        import benchmark_board
+        import io
+        from contextlib import redirect_stdout
+        with self.fixture() as f, _EvidenceExitStack() as stack:
+            for owner, names in ((h, ("launch_r0b", "_fact_node", "_fact_read", "_finish_run",
+                                      "_validate_run_manifest", "_close_v2_experiment_archive")),
+                    (readiness, ("target_counts", "search_synthetic_corpus", "derive_r0b_sizing_plan",
+                                 "select_operating_candidate", "project_execution", "project_archive", "project_memory")),
+                    (h.analysis, ("_shared_bootstrap", "analyze_effectiveness"))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("scope: " + name)))
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                launched = f.launch()
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertFalse(Path(f.receipt.path).exists())
+            before = {p.name: p.read_bytes() for p in f.root.iterdir()}
+            for owner, names in ((h, ("load_selection_receipt", "capture_run_provenance_v2", "_recheck_provenance_v2",
+                                     "_capture_qualified_codec_profile", "_runtime_identity")),
+                                (h.qualification, ("_git", "capture_sources_v2")),
+                                (benchmark_board, ("generate_board",)),
+                                (operational, ("_supervise_r0_operation_v2",))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("live owner: " + name)))
+            decoded = h.validate_existing_run_v2(f.root, f.receipt)
+            self.assertEqual(decoded, launched)
+            self.assertIsNot(decoded, launched)
+            self.assertEqual({p.name: p.read_bytes() for p in f.root.iterdir()}, before)
+            with self.assertRaises((ValueError, TypeError)):
+                h.validate_existing_run_v2(f.root, object())
+
+    def test_disk_manifest_tampering_resealed_completion_cannot_change_authority(self):
+        with self.fixture() as f:
+            f.launch()
+            manifest_path = f.root / "manifest.json"
+            completion_path = f.root / "COMPLETE.json"
+            original = manifest_path.read_bytes()
+            original_completion = completion_path.read_bytes()
+            completion = h.store.read_completion_receipt(f.root)
+            def changed_record(value, **changes):
+                return records.encode(replace(records.decode(value.encode("ascii")), **changes)).decode("ascii")
+            mutations = (
+                ("schema", lambda n: n.update(schema="program-k-e2-r0-run/v1")),
+                ("mode", lambda n: n.update(mode="R0_B")),
+                ("classification", lambda n: n.update(classification="EFFECTIVENESS_EVIDENCE")),
+                ("status", lambda n: n.update(status="FINAL_ENVELOPE_ADMITTED")),
+                ("selection", lambda n: n.update(selection_receipt_sha256="0" * 64)),
+                ("selection_size", lambda n: n.update(selection_receipt_byte_length=7363)),
+                ("selection_head", lambda n: n.update(selection_source_head="0" * 40)),
+                ("source", lambda n: n.update(source_head="0" * 40)),
+                ("provenance_digest", lambda n: n.update(provenance_sha256="0" * 64)),
+                ("provenance_executable", lambda n: n["provenance"].update(executable="different.exe")),
+                ("runtime", lambda n: n["provenance"].update(runtime=changed_record(
+                    n["provenance"]["runtime"], python_version="different"))),
+                ("protocol", lambda n: n.update(protocol=changed_record(n["protocol"], sha256="0" * 64))),
+                ("profile", lambda n: n.update(codec_profile_sha256="0" * 64)),
+                ("plan_seed", lambda n: n["plan"].update(protocol_seed="0" * 64)),
+                ("board_metadata", lambda n: n["plan"]["boards"].__setitem__(0,
+                    changed_record(n["plan"]["boards"][0], generator_identity="supplied"))),
+                ("corpus", lambda n: n.update(corpus_sha256="0" * 64)),
+                ("run_id", lambda n: n["concurrency_runs"][0].__setitem__(1, "R0-other-c1")),
+                ("observations", lambda n: n["observations_file"].update(sha256="0" * 64)),
+                ("inventory", lambda n: n["inventory_before_manifest_receipt"][2].update(sha256="0" * 64)),
+                ("forbidden", lambda n: n["forbidden_actions"].update(actual_e2=True)),
+                ("unknown", lambda n: n.update(admission="PASS")),
+            ) + tuple(("amendment_" + field, lambda n, field=field, bad=bad: n["amendment"].update({field: bad}))
+                for field, bad in (("sha256", "0" * 64), ("byte_length", 1), ("external_receipt", "changed"),
+                                   ("protocol_sha256", "0" * 64), ("protocol_blob", "0" * 40),
+                                   ("protocol_commit", "0" * 40)))
+            for name, mutate in mutations:
+                with self.subTest(mutation=name):
+                    node = json.loads(original)
+                    mutate(node)
+                    data = h._canonical(node)
+                    manifest_path.write_bytes(data)
+                    completion_path.write_bytes(records.encode(replace(completion,
+                        manifest_sha256=h.sha256(data).hexdigest())) + b"\n")
+                    with self.assertRaises(ValueError):
+                        h.validate_existing_run_v2(f.root, f.receipt)
+                    manifest_path.write_bytes(original)
+                    completion_path.write_bytes(original_completion)
+            for name in ("INCOMPLETE.json", "r0a-observations-v2.json"):
+                with self.subTest(file=name):
+                    path = f.root / name
+                    raw = path.read_bytes()
+                    path.write_bytes(raw + b" ")
+                    with self.assertRaises(ValueError):
+                        h.validate_existing_run_v2(f.root, f.receipt)
+                    path.write_bytes(raw)
+
+    def test_completion_binding_rejects_each_field_and_failed_dominates_every_entry_shape(self):
+        import stat
+        with self.fixture() as f:
+            f.launch()
+            path = f.root / "COMPLETE.json"
+            raw = path.read_bytes()
+            completion = h.store.read_completion_receipt(f.root)
+            for field, value in (("manifest_sha256", "0" * 64), ("corpus_sha256", "0" * 64),
+                    ("source_sha256", "0" * 64), ("protocol_sha256", "0" * 64),
+                    ("streams", (records.StreamDigest("boards", "0" * 64, 0, 0),)),
+                    ("state", records.CompletionState.FAILED), ("state", records.CompletionState.INCOMPLETE)):
+                with self.subTest(field=field):
+                    path.write_bytes(records.encode(replace(completion, **{field: value})) + b"\n")
+                    with self.assertRaises(ValueError):
+                        h.validate_existing_run_v2(f.root, f.receipt)
+            path.write_bytes(raw)
+            failed = f.root / "FAILED.json"
+            for kind in ("malformed", "directory", "dangling"):
+                with self.subTest(kind=kind):
+                    if kind == "malformed":
+                        failed.write_bytes(b"not json")
+                        with self.assertRaisesRegex(ValueError, "FAILED|INCOMPLETE"):
+                            h.validate_existing_run_v2(f.root, f.receipt)
+                        failed.unlink()
+                    elif kind == "directory":
+                        failed.mkdir()
+                        with self.assertRaisesRegex(ValueError, "FAILED|INCOMPLETE"):
+                            h.validate_existing_run_v2(f.root, f.receipt)
+                        failed.rmdir()
+                    else:
+                        original_lstat = Path.lstat
+                        def lstat(current):
+                            return os.stat_result((stat.S_IFLNK | 0o777, 0, 0, 1, 0, 0, 0, 0, 0, 0)) \
+                                if current == failed else original_lstat(current)
+                        with patch.object(Path, "lstat", new=lstat), \
+                                self.assertRaisesRegex(ValueError, "FAILED|INCOMPLETE"):
+                            h.validate_existing_run_v2(f.root, f.receipt)
+
+    def test_precompletion_core_requires_absent_completion_and_rereads_manifest(self):
+        with self.fixture() as f:
+            expected = f.launch()
+            with self.assertRaises(ValueError):
+                h._validate_run_manifest_v2(f.root, f.receipt, completed=False)
+            (f.root / "COMPLETE.json").unlink()
+            decoded = h._validate_run_manifest_v2(f.root, f.receipt, completed=False)
+            self.assertEqual(decoded, expected)
+            self.assertIsNot(decoded, expected)
+            (f.root / "manifest.json").write_bytes(b"{}\n")
+            with self.assertRaises(ValueError):
+                h._validate_run_manifest_v2(f.root, f.receipt, completed=False)
+
+    def test_lexical_root_preflight_rejects_non_directory_symlink_junction_reparse(self):
+        import stat
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory(prefix="slice1w-path-") as directory:
+            root = Path(directory)
+            normal = root / "parent"
+            normal.mkdir()
+            target = normal / "future"
+            self.assertEqual(h._r0_run_root_v2(target, existing=False), target.absolute())
+            file = root / "file"
+            file.write_bytes(b"not a directory")
+            with self.assertRaises(ValueError):
+                h._r0_run_root_v2(file / "child", existing=False)
+            original = Path.lstat
+            for kind in ("symlink", "junction", "reparse"):
+                def lstat(path):
+                    if path == normal:
+                        return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777 if kind == "symlink" else stat.S_IFDIR | 0o777,
+                            st_file_attributes=0 if kind == "symlink" else getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+                    return original(path)
+                with self.subTest(kind=kind), patch.object(Path, "lstat", new=lstat), self.assertRaises(ValueError):
+                    h._r0_run_root_v2(target, existing=False)
+
+    def test_small_physical_layout_and_hashing_detect_missing_extra_empty_directory_and_reparse(self):
+        import stat
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory(prefix="slice1w-layout-") as directory:
+            root = Path(directory)
+            stream = root / "calibration" / "c1" / "P" / "00" / "target" / "boards.pkf"
+            stream.parent.mkdir(parents=True)
+            stream.write_bytes(b"literal rf02 sentinel")
+            names = (stream.relative_to(root).as_posix(),)
+            h._r0_run_layout_v2(root, names)
+            original_inventory = h._inventory(root)
+            stream.write_bytes(b"literal rf02 changed!")
+            changed_inventory = h._inventory(root)
+            self.assertNotEqual(original_inventory[0].sha256, changed_inventory[0].sha256)
+            stream.unlink()
+            with self.assertRaises(ValueError):
+                h._r0_run_layout_v2(root, names)
+            stream.write_bytes(b"")
+            h._r0_run_layout_v2(root, names)  # Empty streams are still mandatory files.
+            stream.unlink()
+            with self.assertRaises(ValueError):
+                h._r0_run_layout_v2(root, names)
+            stream.write_bytes(b"")
+            for kind in ("file", "directory"):
+                extra = root / "extra"
+                if kind == "file":
+                    extra.write_bytes(b"extra")
+                else:
+                    extra.mkdir()
+                with self.subTest(kind=kind), self.assertRaises(ValueError):
+                    h._r0_run_layout_v2(root, names)
+                extra.unlink() if kind == "file" else extra.rmdir()
+            original_lstat = Path.lstat
+            def lstat(path):
+                return SimpleNamespace(st_mode=stat.S_IFREG | 0o600,
+                    st_file_attributes=getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)) \
+                    if path == stream else original_lstat(path)
+            with patch.object(Path, "lstat", new=lstat), self.assertRaises(ValueError):
+                h._r0_run_layout_v2(root, names)
+
+    @_evidence_contextmanager
+    def inventory_fixture(self, observations=None):
+        original = h._r0_run_inventory_v2
+        with self.fixture() as f:
+            observations = self.supplied if observations is None else observations
+            f.root.mkdir()
+            corpus = identity.corpus_digest(observations.plan.protocol_seed, 64,
+                tuple(board.game_index for board in observations.plan.boards)).hex()
+            initial = h._r0_run_initial_v2(selection_receipt_sha256=observations.selection_receipt_sha256,
+                source_head=observations.source_head, provenance_sha256=observations.provenance_sha256,
+                codec_profile_sha256=observations.codec_profile_sha256,
+                protocol_seed=observations.plan.protocol_seed, corpus_sha256=corpus)
+            (f.root / "INCOMPLETE.json").write_bytes(h._canonical(initial))
+            (f.root / "r0a-observations-v2.json").write_bytes(h.evidence.encode_r0a_observations_v2(observations))
+            case_files = tuple(h.FileFact(case.archive.relative_directory + "/" + seal.name + ".pkf",
+                seal.byte_length, seal.sha256) for c in observations.concurrencies for component in c.components
+                for unit in component.units for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target))
+                for seal in case.archive.streams)
+            files = list(case_files)
+            for name in ("INCOMPLETE.json", "r0a-observations-v2.json"):
+                data = (f.root / name).read_bytes()
+                files.append(h.FileFact(name, len(data), h.sha256(data).hexdigest()))
+            files = tuple(sorted(files, key=lambda value: value.path))
+            with patch.object(h, "_r0_run_layout_v2", return_value=f.root) as layout:
+                yield f, observations, files, original, layout
+
+    def test_full_shape_inventory_reconciles_every_case_and_rejects_hash_length_paths_and_empty_stream_loss(self):
+        with self.inventory_fixture() as (f, observations, files, validate, layout):
+            with patch.object(h, "_inventory", return_value=files):
+                actual = validate(f.root, observations)
+            self.assertEqual(len(actual), 105602)
+            self.assertEqual(tuple((v.path, v.byte_length, v.sha256) for v in actual),
+                             tuple((v.path, v.byte_length, v.sha256) for v in files))
+            layout.assert_called()
+            self.assertEqual(layout.call_args.args, (f.root, tuple(value.path for value in files)))
+            directories = {"/".join(value.path.split("/")[:depth]) for value in files
+                           for depth in range(1, len(value.path.split("/")))}
+            self.assertEqual(len(directories), 3094)
+            index = next(i for i, value in enumerate(files) if value.path.endswith("/boards.pkf"))
+            changes = (
+                ("missing", files[:index] + files[index + 1:]),
+                ("length", files[:index] + (replace(files[index], byte_length=files[index].byte_length + 1),) + files[index + 1:]),
+                ("hash", files[:index] + (replace(files[index], sha256="0" * 64),) + files[index + 1:]),
+                ("extra", tuple(sorted(files + (h.FileFact("extra.pkf", 0, "0" * 64),), key=lambda v: v.path))),
+            )
+            for kind, candidate in changes:
+                with self.subTest(kind=kind), patch.object(h, "_inventory", return_value=candidate), self.assertRaises(ValueError):
+                    validate(f.root, observations)
+            first_c, first_component = observations.concurrencies[0], observations.concurrencies[0].components[0]
+            unit = first_component.units[0]
+            for path in ("calibration/c1/P/00/setup", "calibration/c1/WRONG/00/target", "calibration/c1/P/64/target",
+                         "calibration/c2/P/00/target"):
+                changed_case = replace(unit.target, archive=replace(unit.target.archive, relative_directory=path))
+                component = replace(first_component, units=(replace(unit, target=changed_case),) + first_component.units[1:])
+                concurrency = replace(first_c, components=(component,) + first_c.components[1:])
+                if path == "calibration/c2/P/00/target":
+                    # Duplicate claims are already rejected by the observations owner.
+                    with self.assertRaises(ValueError):
+                        replace(observations, concurrencies=(concurrency,) + observations.concurrencies[1:])
+                    continue
+                changed = replace(observations, concurrencies=(concurrency,) + observations.concurrencies[1:])
+                with self.subTest(path=path), patch.object(h, "_inventory", return_value=files), self.assertRaises(ValueError):
+                    validate(f.root, changed)
+            initial_path = f.root / "INCOMPLETE.json"
+            initial = h._json_bytes(initial_path.read_bytes())
+            initial["source_head"] = "0" * 40
+            initial_path.write_bytes(h._canonical(initial))
+            with patch.object(h, "_inventory", return_value=files), self.assertRaises(ValueError):
+                validate(f.root, observations)
+
+    def test_outer_inventory_has_no_new_global_archive_cap(self):
+        concurrencies = []
+        for concurrency in self.supplied.concurrencies:
+            components = []
+            for component in concurrency.components:
+                units = []
+                def larger(case):
+                    return replace(case, archive=replace(case.archive, streams=tuple(
+                        replace(seal, byte_length=200000) for seal in case.archive.streams)))
+                for unit in component.units:
+                    units.append(replace(unit, target=larger(unit.target),
+                                         setup=None if unit.setup is None else larger(unit.setup)))
+                components.append(replace(component, units=tuple(units)))
+            concurrencies.append(replace(concurrency, components=tuple(components),
+                envelope=replace(concurrency.envelope, archive_cap_bytes=identity.MAX_ARCHIVE_BYTES)))
+        observations = replace(self.supplied, concurrencies=tuple(concurrencies))
+        with self.inventory_fixture(observations) as (f, value, files, validate, _):
+            self.assertGreater(sum(file.byte_length for file in files), identity.MAX_ARCHIVE_BYTES)
+            for concurrency in value.concurrencies:
+                for component in concurrency.components:
+                    self.assertLess(sum(seal.byte_length for unit in component.units
+                        for case in ((unit.target,) if unit.setup is None else (unit.setup, unit.target))
+                        for seal in case.archive.streams), concurrency.envelope.archive_cap_bytes)
+            with patch.object(h, "_inventory", return_value=files), \
+                    patch.object(h, "_close_v2_experiment_archive", side_effect=AssertionError("synthetic cap")), \
+                    patch.object(h, "account_experiment_archive", side_effect=AssertionError("synthetic accounting")):
+                result = validate(f.root, value)
+            self.assertEqual(len(result), 105602)
