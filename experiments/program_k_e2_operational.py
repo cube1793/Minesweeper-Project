@@ -239,6 +239,12 @@ def _worker_main_v2(work, kind, first_bytes, envelope, connection, barrier, code
                         v2=True, codec_profile_sha256=codec_profile_sha256)
 
 
+def _worker_main_v2_r0(work, kind, first_bytes, envelope, connection, barrier, codec_profile_sha256):
+    """Explicit WB02 plus R0 telemetry, using the accepted worker lifecycle."""
+    return _worker_core(work, kind, first_bytes, envelope, connection, barrier,
+                        r0_observe=True, v2=True, codec_profile_sha256=codec_profile_sha256)
+
+
 def _transport_profile(value):
     _need(type(value) is bytes and len(value) == 32, "WB02_PROFILE_IDENTITY_REQUIRED")
     return value
@@ -532,6 +538,51 @@ class _R0Observation:
             previous = end
 
 
+@dataclass(frozen=True, slots=True)
+class _R0V2OperationResult:
+    """Local WB02/R0 observations, never a durable readback authority."""
+
+    receipt: UnitReceipt
+    wire: bytes | None
+    codec_profile_sha256: bytes
+    samples: tuple
+    observation: object
+    logical_bytes: int
+    physical_frame_bytes: int
+    legacy_bundle_bytes: int
+    wb02_wire_bytes: int
+
+    def __post_init__(self):
+        _need(type(self.receipt) is UnitReceipt, "R0_V2_RECEIPT_TYPE")
+        UnitReceipt.__post_init__(self.receipt)
+        _transport_profile(self.codec_profile_sha256)
+        _need(type(self.samples) is tuple, "R0_V2_SAMPLES_TYPE")
+        for sample in self.samples:
+            _need(type(sample) is records.ResourceSampleRecord, "INVALID_MEMORY_SAMPLE")
+            records.ResourceSampleRecord.__post_init__(sample)
+        _need(self.observation is None or type(self.observation) is _R0Observation,
+              "R0_V2_OBSERVATION_TYPE")
+        if self.observation is not None:
+            _R0Observation.__post_init__(self.observation)
+        sizes = (self.logical_bytes, self.physical_frame_bytes, self.legacy_bundle_bytes, self.wb02_wire_bytes)
+        for size in sizes:
+            _integer(size, 0, execution.physical.MAX_PAYLOAD_BYTES)
+        if self.receipt.status is records.AuditStatus.PASS:
+            _need(self.receipt.reason == "ADMITTED" and self.receipt.exit_code == 0
+                  and type(self.receipt.exit_code) is int, "R0_V2_ADMITTED_RECEIPT_REQUIRED")
+            _need(all(size > 0 for size in sizes), "R0_V2_POSITIVE_SIZE_FACTS_REQUIRED")
+            _need(type(self.wire) is bytes and bool(self.wire)
+                  and self.wb02_wire_bytes == len(self.wire), "R0_V2_IMMUTABLE_WIRE_REQUIRED")
+            _need(self.observation is not None and bool(self.samples)
+                  and self.observation.resources_complete and self.observation.cleanup_complete
+                  and self.observation.watchdogs_complete, "R0_V2_COMPLETE_OBSERVATION_REQUIRED")
+        else:
+            _need(self.wire is None and sizes == (0, 0, 0, 0), "R0_V2_FAILED_WIRE_FORBIDDEN")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0 V2 results are local observations, not serializable trust objects.")
+
+
 def _missing(work, kind, reason):
     return _OperationResult(UnitReceipt(work.position, kind, records.AuditStatus.INCOMPLETE,
                                        reason, 0, None), None, ())
@@ -715,6 +766,21 @@ def _supervise_operation_v2(work, kind, first_bytes, envelope, ledger, cancel,
         v2=True, codec_profile_sha256=codec_profile_sha256)
 
 
+def _supervise_r0_operation_v2(work, kind, first_bytes, envelope, ledger, cancel,
+                              job_started_ns, launcher_started_ns, codec_profile_sha256):
+    """Use the production worker and shared supervisor for WB02 R0 telemetry."""
+    _transport_profile(codec_profile_sha256)
+    _envelope(envelope)
+    _need(type(work) is execution.BoardWork and type(kind) is execution.WorkerKind,
+          "WB02_WORK_KIND_BINDING")
+    execution.BoardWork.__post_init__(work)
+    _need(first_bytes is None if kind is execution.WorkerKind.PRIMARY else type(first_bytes) is bytes,
+          "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
+    return _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
+        job_started_ns, launcher_started_ns, r0_observe=True,
+        v2=True, codec_profile_sha256=codec_profile_sha256)
+
+
 def _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
                               job_started_ns, launcher_started_ns, *, worker_target=None, r0_observe=False,
                               v2=False, codec_profile_sha256=None):
@@ -726,7 +792,8 @@ def _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
     barrier = context.Event()
     _need(type(r0_observe) is bool and (not r0_observe or worker_target is None), "R0_PRODUCTION_WORKER_REQUIRED")
     args = (work, kind, first_bytes, envelope, child, barrier)
-    target = (_worker_main_v2 if v2 else _worker_main) if worker_target is None else worker_target
+    target = ((_worker_main_v2_r0 if r0_observe else _worker_main_v2) if v2 else
+              _worker_main) if worker_target is None else worker_target
     process = context.Process(target=target, args=args + (codec_profile_sha256,) if v2 else
                               args + (True,) if r0_observe else args)
     inbox, reader_stop = Queue(maxsize=2), threading.Event()
@@ -1059,6 +1126,9 @@ def _supervise_operation_core(work, kind, first_bytes, envelope, ledger, cancel,
         # the diagnosed receipt (including FAIL precedence), not partial bytes.
         if reason is not None or status is not records.AuditStatus.PASS:
             immutable_wire, size_facts = None, (0, 0, 0, 0)
+        if r0_observe:
+            return _R0V2OperationResult(receipt, immutable_wire, codec_profile_sha256,
+                                       samples, observation, *size_facts)
         return _V2OperationResult(receipt, immutable_wire, codec_profile_sha256, samples, None, *size_facts)
     return _OperationResult(receipt, bundle, samples, observation)
 
@@ -1188,8 +1258,15 @@ class _V2EvidenceSink:
             raise
 
     def admit(self, work, result, *, prior_primary_wire=None):
+        return self._admit_impl(work, result, prior_primary_wire=prior_primary_wire)
+
+    def _admit_impl(self, work, result, *, prior_primary_wire=None, r0_transaction=None):
+        """One admission boundary; R0 observes it without adding validation."""
         self._writable()
         self._result(work, result)
+        if r0_transaction is not None:
+            _need(type(r0_transaction) is _R0V2CaseAdmission, "R0_V2_ADMISSION_TRANSACTION")
+            r0_transaction.check(self)
         receipt = result.receipt
         if receipt.kind is execution.WorkerKind.PRIMARY:
             _need(prior_primary_wire is None, "PRIMARY_PRIOR_BINDING")
@@ -1198,6 +1275,8 @@ class _V2EvidenceSink:
                   "WB02_IMMUTABLE_PRIMARY_PRIOR_REQUIRED")
         experiment = ()
         if result.wire is not None:
+            if r0_transaction is not None:
+                admission_started = time.perf_counter_ns()
             context = _fresh_wb02_context(result.wire, work, receipt.kind,
                 self.profile_sha256, self.envelope, prior_primary_wire=prior_primary_wire)
             _need(type(context) is _WB02Context and context.work == work
@@ -1210,6 +1289,8 @@ class _V2EvidenceSink:
             _need((result.logical_bytes, result.physical_frame_bytes, result.legacy_bundle_bytes,
                    result.wb02_wire_bytes) == (context.logical_bytes, context.physical_frame_bytes,
                    context.legacy_bundle_bytes, context.wb02_wire_bytes), "V2_COORDINATOR_SIZE_BINDING")
+            if r0_transaction is not None:
+                r0_transaction.observe(admission_started, time.perf_counter_ns())
             experiment = tuple((row.stream_name, row.key, row.logical_bytes, row.frame_bytes)
                                for row in context.rows)
         resources = tuple(self._support_frame("resources", (self.resource_ordinal + index,), sample)
@@ -1239,6 +1320,8 @@ class _V2EvidenceSink:
         for name, key, _, _ in complete:
             _need(name in last and (last[name] is None or key > last[name]), "V2_SINK_KEY_ORDER")
             last[name] = key
+        if r0_transaction is not None:
+            r0_transaction.reserve(sum(len(frame) for _, _, _, frame in complete))
         previous = self.durable_units, self.durable_primary_boards
         try:
             for name, key, logical, frame in pending:
@@ -1760,6 +1843,7 @@ class _R0MemoryMonitor:
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.coordinator = self.combined = 0
+        self.memory_sample_count = 0
         self.reason = None
         self.setup = None
         self.thread = threading.Thread(target=self.run, daemon=True, name="program-k-r0-memory")
@@ -1768,6 +1852,7 @@ class _R0MemoryMonitor:
         with self.lock:
             try:
                 value, breached = self.ledger.sample("r0-coordinator", 0, "R0", 0)
+                self.memory_sample_count += 1
                 self.coordinator = max(self.coordinator, value.coordinator_bytes)
                 self.combined = max(self.combined, value.combined_bytes)
                 if self.setup is not None:
@@ -1819,6 +1904,242 @@ class _R0MemoryMonitor:
             raise OperationalAbort("MEMORY_MONITOR_REAP_INCOMPLETE")
         if exc[0] is None and self.reason is not None:
             raise OperationalAbort(self.reason)
+
+
+def _r0_case_path_v2(concurrency, component, position, phase):
+    """Canonical case claim only; no selection, capture or filesystem access."""
+    _need(type(concurrency) is int and concurrency in (1, 2, 4), "R0_V2_CONCURRENCY")
+    _need(type(component) is R0Component, "R0_V2_COMPONENT")
+    _integer(position, 0, 63)
+    _need(type(phase) is str and phase in ("setup", "target"), "R0_V2_CASE_PHASE")
+    _need(phase != "setup" or component in _R0_SETUP_ROUTES, "R0_V2_SETUP_ROUTE")
+    return "calibration/c" + str(concurrency) + "/" + component.value + "/" + format(position, "02d") + "/" + phase
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _R0V2ArchiveReservation:
+    case_identity: tuple
+    byte_length: int
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0 archive reservations are process-local identities.")
+
+
+class _R0V2ComponentArchiveBudget:
+    """One caller-owned standalone component budget; one sequential pending case.
+
+    Commit accounts physical expenditure, not independent readback or admission.
+    An aborted reservation remains visible and cannot be refunded or reused.
+    """
+
+    __slots__ = ("_component", "_envelope", "_cap_bytes", "_committed_bytes", "_pending", "_aborted", "_cases")
+
+    def __init__(self, component, envelope):
+        _need(type(component) is R0Component, "R0_V2_COMPONENT")
+        self._component, self._envelope = component, _envelope(envelope)
+        self._cap_bytes = envelope.archive_cap_bytes
+        self._committed_bytes = 0
+        self._pending = None
+        self._aborted = False
+        self._cases = set()
+
+    @property
+    def component(self):
+        return self._component
+
+    @property
+    def envelope(self):
+        return self._envelope
+
+    @property
+    def cap_bytes(self):
+        return self._cap_bytes
+
+    @property
+    def committed_bytes(self):
+        return self._committed_bytes
+
+    @property
+    def pending(self):
+        return self._pending
+
+    @property
+    def aborted(self):
+        return self._aborted
+
+    def _active(self):
+        _need(not self._aborted, "R0_V2_BUDGET_ABORTED")
+        _envelope(self._envelope)
+        _need(self._cap_bytes == self._envelope.archive_cap_bytes, "R0_V2_BUDGET_CAP_BINDING")
+
+    def reserve(self, case_identity, exact_append_bytes):
+        self._active()
+        _need(type(case_identity) is tuple and len(case_identity) == 2, "R0_V2_CASE_IDENTITY")
+        _r0_case_path_v2(self._envelope.concurrency, self._component, *case_identity)
+        _integer(exact_append_bytes, 1)
+        _need(self._pending is None, "R0_V2_RESERVATION_PENDING")
+        _need(case_identity not in self._cases, "R0_V2_DUPLICATE_CASE")
+        _need(self._committed_bytes + exact_append_bytes <= self._cap_bytes, "R0_V2_COMPONENT_ARCHIVE_CAP")
+        reservation = _R0V2ArchiveReservation(case_identity, exact_append_bytes)
+        self._cases.add(case_identity)
+        self._pending = reservation
+        return reservation
+
+    def commit(self, reservation, sealed_bytes):
+        self._active()
+        _need(type(reservation) is _R0V2ArchiveReservation and reservation is self._pending,
+              "R0_V2_RESERVATION_IDENTITY")
+        _integer(sealed_bytes, 1)
+        _need(sealed_bytes == reservation.byte_length, "R0_V2_SEALED_BYTE_RECONCILIATION")
+        _need(self._committed_bytes + sealed_bytes <= self._cap_bytes, "R0_V2_COMPONENT_ARCHIVE_CAP")
+        self._committed_bytes += sealed_bytes
+        self._pending = None
+
+    def abort(self):
+        self._aborted = True
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0 component archive budgets are process-local owners.")
+
+
+class _R0V2CaseAdmission:
+    """Private sink observation/reservation state; never a WB02 context."""
+
+    __slots__ = ("budget", "case_identity", "parent_admission_interval", "reservation")
+
+    def __init__(self, budget, case_identity):
+        _need(type(budget) is _R0V2ComponentArchiveBudget, "R0_V2_BUDGET_TYPE")
+        self.budget, self.case_identity = budget, case_identity
+        self.parent_admission_interval = self.reservation = None
+
+    def check(self, sink):
+        self.budget._active()
+        _need(sink.envelope == self.budget.envelope, "R0_V2_BUDGET_ENVELOPE")
+        _need((sink.byte_length, sink.event_ordinal, sink.resource_ordinal,
+               sink.durable_units, sink.durable_primary_boards) == (0, 0, 0, 0, 0), "R0_V2_FRESH_CASE_SINK")
+        _need(self.parent_admission_interval is None and self.reservation is None, "R0_V2_CASE_ADMISSION_REUSE")
+
+    def observe(self, started, finished):
+        _integer(started)
+        _integer(finished)
+        _need(started <= finished and self.parent_admission_interval is None, "R0_V2_ADMISSION_INTERVAL")
+        self.parent_admission_interval = (started, finished)
+
+    def reserve(self, byte_length):
+        _need(self.parent_admission_interval is not None and self.reservation is None,
+              "R0_V2_VALIDATION_BEFORE_RESERVATION")
+        self.reservation = self.budget.reserve(self.case_identity, byte_length)
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0 admission state is invocation-local.")
+
+
+@dataclass(frozen=True, slots=True)
+class _R0V2SealedCase:
+    """Detached writer/transport claims ONLY; no independent disk authentication."""
+
+    work: execution.BoardWork
+    component: R0Component
+    phase: str
+    relative_directory: str
+    receipt: UnitReceipt
+    streams: tuple
+    codec_profile_sha256: bytes
+    samples: tuple
+    observation: _R0Observation
+    logical_bytes: int
+    physical_frame_bytes: int
+    legacy_bundle_bytes: int
+    wb02_wire_bytes: int
+    parent_admission_interval: tuple
+    physical_case_bytes: int
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("R0 sealed-case claims are local handoff facts, not authenticated evidence.")
+
+
+def _seal_r0_case_v2(anchor, work, result, envelope, profile, budget, *, phase, prior_primary_wire=None):
+    """Seal one supplied successful case; never read it back or publish R0 facts.
+
+    The caller creates the anchor and owns a budget for ONE standalone component.
+    Fresh directories and exclusive writers preserve failed attempts in place.
+    """
+    _need(type(budget) is _R0V2ComponentArchiveBudget, "R0_V2_BUDGET_TYPE")
+    sink = None
+    try:
+        budget._active()
+        envelope = _envelope(envelope)
+        _need(envelope == budget.envelope and budget.pending is None, "R0_V2_BUDGET_ENVELOPE_OR_PENDING")
+        _need(type(work) is execution.BoardWork, "R0_V2_BOARD_WORK")
+        execution.BoardWork.__post_init__(work)
+        _need(type(result) is _R0V2OperationResult, "R0_V2_RESULT_TYPE")
+        _R0V2OperationResult.__post_init__(result)
+        _need(result.receipt.status is records.AuditStatus.PASS and result.wire is not None,
+              "R0_V2_SUCCESSFUL_CASE_REQUIRED")
+        _need(type(profile) is execution.physical.CodecProfile, "R0_V2_QUALIFIED_PROFILE")
+        execution.physical.require_qualified_profile(profile)
+        _need(profile.sha256 == result.codec_profile_sha256, "R0_V2_PROFILE_BINDING")
+        relative = _r0_case_path_v2(envelope.concurrency, budget.component, work.position, phase)
+        target_kind = {R0Component.PRIMARY: execution.WorkerKind.PRIMARY,
+            R0Component.ORACLE_B: execution.WorkerKind.PRIMARY,
+            R0Component.K_CONTROL: execution.WorkerKind.K_CONTROL,
+            R0Component.DETERMINISM: execution.WorkerKind.DETERMINISM,
+            R0Component.ORACLE_K_BIND: execution.WorkerKind.K_CONTROL,
+            R0Component.ORACLE_D_REPEAT: execution.WorkerKind.DETERMINISM}[budget.component]
+        kind = execution.WorkerKind.PRIMARY if phase == "setup" else target_kind
+        _need(result.receipt.position == work.position and result.receipt.kind is kind, "R0_V2_CASE_WORK_BINDING")
+        _need((work.oracle_b_selected, work.determinism_selected, work.k_control_selected) == (
+            budget.component in (R0Component.ORACLE_B, R0Component.ORACLE_K_BIND, R0Component.ORACLE_D_REPEAT),
+            budget.component in (R0Component.DETERMINISM, R0Component.ORACLE_D_REPEAT),
+            budget.component in (R0Component.K_CONTROL, R0Component.ORACLE_K_BIND)), "R0_V2_COMPONENT_WORK_FLAGS")
+        _need(prior_primary_wire is None if kind is execution.WorkerKind.PRIMARY else type(prior_primary_wire) is bytes,
+              "R0_V2_IMMUTABLE_PRIMARY_PRIOR")
+        _need(all(sample.unit_id == _unit_id(work.position, kind) for sample in result.samples),
+              "R0_V2_RESOURCE_UNIT_BINDING")
+        root = Path(anchor)
+        _need(root.is_dir(), "R0_V2_EXISTING_ANCHOR_REQUIRED")
+        parts = relative.split("/")
+        directory = root
+        for part in parts[:-1]:
+            directory = directory / part
+            directory.mkdir(exist_ok=True)
+        directory = directory / parts[-1]
+        directory.mkdir()  # Never reuse even an empty failed case directory.
+        transaction = _R0V2CaseAdmission(budget, (work.position, phase))
+        # Project only immutable transport claims. No fresh validation occurs here.
+        transport = _V2OperationResult(result.receipt, result.wire, result.codec_profile_sha256,
+            result.samples, None, result.logical_bytes, result.physical_frame_bytes,
+            result.legacy_bundle_bytes, result.wb02_wire_bytes)
+        sink = _V2EvidenceSink(directory, envelope, profile)
+        receipt = sink._admit_impl(work, transport, prior_primary_wire=prior_primary_wire,
+                                   r0_transaction=transaction)
+        _need(receipt == result.receipt and transaction.reservation is not None, "R0_V2_CASE_ADMISSION_FAILED")
+        streams = sink.seal()
+        sink.close()
+        _need(not sink.poisoned and sink.sealed and sink.closed, "R0_V2_CASE_SEAL_INCOMPLETE")
+        _need(type(streams) is tuple and tuple(item.name for item in streams) == sink.names,
+              "R0_V2_CASE_SEAL_COVERAGE")
+        for item in streams:
+            _need(type(item) is records.StreamDigest, "R0_V2_CASE_SEAL_TYPE")
+            records.StreamDigest.__post_init__(item)
+        physical_bytes = sum(item.byte_length for item in streams)
+        _need(physical_bytes == sink.byte_length == transaction.reservation.byte_length,
+              "R0_V2_CASE_PHYSICAL_RECONCILIATION")
+        claims = _R0V2SealedCase(work, budget.component, phase, relative, receipt, streams,
+            profile.sha256, result.samples, result.observation, result.logical_bytes,
+            result.physical_frame_bytes, result.legacy_bundle_bytes, result.wb02_wire_bytes,
+            transaction.parent_admission_interval, physical_bytes)
+        budget.commit(transaction.reservation, physical_bytes)
+        return claims
+    except BaseException:
+        budget.abort()
+        if sink is not None:
+            sink.poisoned = True
+            try:
+                sink.close()
+            except BaseException:
+                pass  # Preserve the first failure, including cancellation.
+        raise
 
 
 def _persist_r0(root, operation, envelope, *, oracle_only=False, byte_budget=None):

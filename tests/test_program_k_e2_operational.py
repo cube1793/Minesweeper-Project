@@ -3411,5 +3411,863 @@ class V2SupportEventTests(unittest.TestCase):
                 self.assertFalse(list(Path(directory).rglob("*.pkf")))
 
 
+def _r0_v2_supplied_profile():
+    """Pure supplied facts: structurally qualified, not live qualification."""
+    from tests.test_program_k_e2_physical import _qualified_node, _json_bytes
+    return execution.physical.decode_profile(_json_bytes(_qualified_node()))
+
+
+def _r0_v2_fixture(component=op.R0Component.K_CONTROL):
+    """Adapt existing literal records to one exact R0 component's flags."""
+    original, bundles = _wb02_context_fixture()
+    work = op._r0_work(original, component)
+    adapted = []
+    for bundle in bundles:
+        streams = []
+        for name, values in bundle.streams:
+            if bundle.kind is execution.WorkerKind.PRIMARY and name == "control_maintenance" \
+                    and not (work.k_control_selected or work.determinism_selected):
+                continue
+            if name in ("oracle_b_coverage", "repeat_oracle_b_coverage"):
+                values = tuple(records.encode(replace(records.decode(data), selected=work.oracle_b_selected))
+                               for data in values)
+            streams.append((name, values))
+        adapted.append(replace(bundle, streams=tuple(streams)))
+    return work, tuple(adapted)
+
+
+def _r0_v2_result(work, bundle, profile, *, prior_intervals=()):
+    wire = execution.encode_bundle_v2(bundle, profile.sha256)
+    view = execution.decode_bundle_view_v2(wire, profile.sha256)
+    sample = records.ResourceSampleRecord(op._unit_id(work.position, bundle.kind),
+        records.ProcessRole.COMBINED, 100, 200, 300, "synthetic:r0-v2", 7,
+        records.MemoryMethod.PRIVATE_BYTES)
+    observation = op._R0Observation(100, 200, 300, 2, 5, 0, 1,
+        (0, 0, 0, ()), True, True, True, prior_intervals)
+    return op._R0V2OperationResult(op.UnitReceipt(work.position, bundle.kind,
+        records.AuditStatus.PASS, "ADMITTED", 7, 0), wire, profile.sha256,
+        (sample,), observation, view.logical_bytes, view.frame_bytes, view.legacy_bytes, view.wire_bytes)
+
+
+def _r0_v2_supervisor_literal_worker(production_target, arguments, mode):
+    """Spawn seam supplies literal execution only; production transport stays real."""
+    work, kind, prior, envelope, connection, barrier, profile = arguments
+    component = next(component for component in op.R0Component
+        if op._r0_work(work, component) == work)
+    fixture_work, bundles = _r0_v2_fixture(component)
+    assert work == fixture_work
+    bundle = bundles[op._kind_rank(kind)]
+    if mode in ("fail", "incomplete"):
+        bundle = replace(bundle, status=records.AuditStatus.FAIL if mode == "fail" else records.AuditStatus.INCOMPLETE,
+                         reason_codes=("PRIVATE_ASSERTION_FALSIFIED",))
+    method = {execution.WorkerKind.PRIMARY: "execute_primary", execution.WorkerKind.DETERMINISM: "execute_repeat",
+              execution.WorkerKind.K_CONTROL: "execute_k_control"}[kind]
+    def execute(*args, **kwargs):
+        if kind is not execution.WorkerKind.PRIMARY:
+            assert args[1] == bundles[0]
+        if "prior_binding_observer" in kwargs:
+            started = time.perf_counter_ns()
+            kwargs["prior_binding_observer"](execution.PriorBindingTimingFact(
+                work.position, kind, started, time.perf_counter_ns()))
+        _v2_fixture_events(kind, kwargs["observer"])
+        if "oracle_timing_observer" in kwargs:
+            kwargs["oracle_timing_observer"](execution.audit.OracleBTimingFact(
+                execution._arm(work, records.Arm.K_P0, repeat=kind is execution.WorkerKind.DETERMINISM),
+                0, 0, 0, ()))
+        return bundle
+    accepted_result = op._Channel.result
+    def send(channel, data, *, tags=(b"H", b"D", b"F")):
+        if mode == "bad_telemetry" and tags == (b"T", b"U", b"V"):
+            data = b"[]"
+        return accepted_result(channel, data, tags=tags)
+    with patch.object(execution, method, side_effect=execute), \
+            patch.object(execution, "decision_watchdog_targets", return_value=((), ())), \
+            patch.object(op._Channel, "result", new=send):
+        production_target(*arguments)
+
+
+class R0V2ResultTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = _r0_v2_supplied_profile()
+        cls.work, cls.bundles = _r0_v2_fixture()
+        cls.result = _r0_v2_result(cls.work, cls.bundles[0], cls.profile)
+
+    def test_exact_nine_fields_frozen_slots_and_no_serializable_authority(self):
+        value = self.result
+        self.assertEqual(tuple(item.name for item in fields(value)), (
+            "receipt", "wire", "codec_profile_sha256", "samples", "observation", "logical_bytes",
+            "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"))
+        self.assertFalse(hasattr(value, "__dict__"))
+        for item in fields(value):
+            with self.assertRaises(FrozenInstanceError):
+                setattr(value, item.name, None)
+        for name in ("bundle", "context", "view", "validated", "trusted", "qualified", "readback_complete"):
+            self.assertFalse(hasattr(value, name))
+        with self.assertRaises(TypeError):
+            pickle.dumps(value)
+        with self.assertRaises(ValueError):
+            execution.decode_bundle_v2(value, self.profile.sha256)
+
+    def test_admitted_wire_and_all_three_completion_flags_are_required(self):
+        for field, replacement in (("wire", None), ("wire", bytearray(self.result.wire)),
+                ("wire", memoryview(self.result.wire)), ("observation", None), ("samples", ()),
+                ("receipt", replace(self.result.receipt, reason="CASE_TIMEOUT")),
+                ("receipt", replace(self.result.receipt, exit_code=1)),
+                ("wb02_wire_bytes", len(self.result.wire) + 1)):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(self.result, **{field: replacement})
+        for flag in ("resources_complete", "cleanup_complete", "watchdogs_complete"):
+            with self.subTest(flag=flag), self.assertRaises(ValueError):
+                replace(self.result, observation=replace(self.result.observation, **{flag: False}))
+
+    def test_exact_scalar_and_nested_types_reject_impostors(self):
+        class Bytes(bytes):
+            pass
+        class Observation(op._R0Observation):
+            pass
+        observer = Observation(*(getattr(self.result.observation, item.name)
+                                 for item in fields(self.result.observation)))
+        for field, value in (("wire", Bytes(self.result.wire)), ("samples", list(self.result.samples)),
+                ("samples", (SimpleNamespace(),)), ("observation", observer),
+                ("codec_profile_sha256", Bytes(self.profile.sha256)),
+                ("codec_profile_sha256", bytearray(self.profile.sha256)),
+                ("codec_profile_sha256", b"x" * 31), ("receipt", SimpleNamespace())):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                replace(self.result, **{field: value})
+        for field in ("logical_bytes", "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"):
+            for value in (True, 0, -1, 1.0, execution.physical.MAX_PAYLOAD_BYTES + 1):
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    replace(self.result, **{field: value})
+
+    def test_failed_and_incomplete_keep_only_diagnostics_and_zero_payload_axes(self):
+        for status in (records.AuditStatus.FAIL, records.AuditStatus.INCOMPLETE):
+            value = replace(self.result, receipt=replace(self.result.receipt,
+                status=status, reason="CASE_TIMEOUT"), wire=None,
+                logical_bytes=0, physical_frame_bytes=0, legacy_bundle_bytes=0, wb02_wire_bytes=0)
+            self.assertIs(value.observation, self.result.observation)
+            self.assertIsNone(replace(value, observation=None).observation)
+            for field in ("logical_bytes", "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"):
+                with self.subTest(status=status, field=field), self.assertRaises(ValueError):
+                    replace(value, **{field: 1})
+            with self.assertRaises(ValueError):
+                replace(value, wire=self.result.wire)
+
+    def test_result_does_not_invoke_capture_semantic_validation_or_persistence(self):
+        with ExitStack() as stack:
+            for owner, names in ((execution, ("decode_bundle_v2", "decode_bundle_view_v2",
+                    "revalidate_bundle", "encode_bundle_v2")),
+                    (op, ("_fresh_wb02_context", "_supervise_operation_core")),
+                    (execution.physical, ("capture_profile", "capture_qualified_profile")),
+                    (store, ("FramedStreamWriter", "FramedStreamPullReader"))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("Result did work")))
+            self.assertEqual(replace(self.result), self.result)
+
+    def test_historical_result_observation_rules_remain_distinct(self):
+        values = {item.name: getattr(self.result, item.name) for item in fields(self.result)}
+        with self.assertRaises(ValueError):
+            op._V2OperationResult(**values)
+        values["observation"] = None
+        ordinary = op._V2OperationResult(**values)
+        self.assertIsNone(ordinary.observation)
+        with self.assertRaises(ValueError):
+            op._R0V2OperationResult(**values)
+
+
+class R0V2TransportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = _r0_v2_supplied_profile()
+        cls.work, cls.bundles = _r0_v2_fixture()
+        cls.envelope = _envelope(max_ipc_frame_bytes=128)
+        cls.primary_wire = execution.encode_bundle_v2(cls.bundles[0], cls.profile.sha256)
+
+    def test_worker_wrapper_selects_both_flags_without_changing_arguments(self):
+        args = (self.work, execution.WorkerKind.PRIMARY, None, self.envelope, object(), object())
+        sentinel = object()
+        with patch.object(op, "_worker_core", return_value=sentinel) as core:
+            self.assertIs(op._worker_main_v2_r0(*args, self.profile.sha256), sentinel)
+        core.assert_called_once_with(*args, r0_observe=True, v2=True,
+                                     codec_profile_sha256=self.profile.sha256)
+
+    def test_parent_wrapper_selects_both_flags_and_has_no_injected_worker_target(self):
+        self.assertNotIn("worker_target", inspect.signature(op._supervise_r0_operation_v2).parameters)
+        args = (self.work, execution.WorkerKind.K_CONTROL, self.primary_wire, self.envelope,
+                object(), threading.Event(), 11, 13)
+        sentinel = object()
+        with patch.object(op, "_supervise_operation_core", return_value=sentinel) as core, \
+                patch.object(op, "_fresh_wb02_context", side_effect=AssertionError("Third validation boundary")):
+            self.assertIs(op._supervise_r0_operation_v2(*args, self.profile.sha256), sentinel)
+        core.assert_called_once_with(*args, r0_observe=True, v2=True,
+                                     codec_profile_sha256=self.profile.sha256)
+
+    def test_parent_rejects_mutable_prior_wrong_kind_and_profile_before_supervision(self):
+        args = (self.envelope, object(), threading.Event(), 11, 13)
+        for kind, prior, profile in ((execution.WorkerKind.PRIMARY, self.primary_wire, self.profile.sha256),
+                (execution.WorkerKind.K_CONTROL, None, self.profile.sha256),
+                (execution.WorkerKind.K_CONTROL, bytearray(self.primary_wire), self.profile.sha256),
+                (execution.WorkerKind.PRIMARY, None, b"x" * 31),
+                ("PRIMARY", None, self.profile.sha256)):
+            with self.subTest(kind=kind, prior=type(prior)), \
+                    patch.object(op, "_supervise_operation_core", side_effect=AssertionError("Invalid spawn")), \
+                    self.assertRaises(ValueError):
+                op._supervise_r0_operation_v2(self.work, kind, prior, *args, profile)
+
+    def _worker(self, kind, *, corrupt_prior=False):
+        index = op._kind_rank(kind)
+        prior = None if index == 0 else self.primary_wire
+        if corrupt_prior:
+            prior = prior[:-1]
+        frames = []
+        connection = SimpleNamespace(send_bytes=frames.append, recv_bytes=lambda _: b"+", close=lambda: None)
+        barrier = SimpleNamespace(wait=lambda: None)
+        method = {execution.WorkerKind.PRIMARY: "execute_primary", execution.WorkerKind.K_CONTROL: "execute_k_control"}[kind]
+        def execute(*args, **kwargs):
+            if index:
+                self.assertEqual(args[1], self.bundles[0])
+            _v2_fixture_events(kind, kwargs["observer"])
+            return self.bundles[index]
+        with patch.object(execution, method, side_effect=execute) as target, \
+                patch.object(execution, "decision_watchdog_targets", return_value=((), ())), \
+                patch.object(op, "_fresh_wb02_context", side_effect=AssertionError("Worker used parent authority")), \
+                patch.object(execution, "decode_bundle", side_effect=AssertionError("Worker used V1 prior")):
+            op._worker_main_v2_r0(self.work, kind, prior, self.envelope,
+                                  connection, barrier, self.profile.sha256)
+        return frames, target.call_count
+
+    def test_r0_worker_sends_measured_arm_telemetry_before_exact_wb02(self):
+        for kind in (execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL):
+            with self.subTest(kind=kind):
+                frames, calls = self._worker(kind)
+                self.assertEqual(calls, 1)
+                tags = [frame[:1] for frame in frames]
+                self.assertEqual(tags.count(b"T"), 1)
+                self.assertEqual(tags.count(b"V"), 1)
+                self.assertLess(tags.index(b"V"), tags.index(b"H"))
+                self.assertEqual(tags[-1], b"F")
+                wire = b"".join(frame[1:] for frame in frames if frame[:1] == b"D")
+                self.assertEqual(execution.decode_bundle_v2(wire, self.profile.sha256),
+                                 self.bundles[op._kind_rank(kind)])
+                telemetry = json.loads(b"".join(frame[1:] for frame in frames if frame[:1] == b"U"))
+                self.assertEqual(telemetry[:4], [0, 0, 0, []])
+                self.assertEqual(len(telemetry), 5)
+                self.assertIs(type(telemetry[4]), int)
+                self.assertGreater(telemetry[4], 0)
+
+    def test_corrupt_prior_has_no_successful_telemetry_or_wb02(self):
+        frames, calls = self._worker(execution.WorkerKind.K_CONTROL, corrupt_prior=True)
+        self.assertEqual(calls, 0)
+        self.assertFalse(any(frame[:1] in (b"T", b"H", b"D", b"F") for frame in frames))
+        self.assertEqual(frames[-1], b"XWORKER_SEMANTIC_ERROR")
+
+    def test_historical_wrappers_never_set_new_combined_mode(self):
+        args = (self.work, execution.WorkerKind.PRIMARY, None, self.envelope, object(), object())
+        with patch.object(op, "_worker_core") as core:
+            op._worker_main(*args, True)
+            self.assertNotIn("v2", core.call_args.kwargs)
+            op._worker_main_v2(*args, self.profile.sha256)
+            self.assertNotIn("r0_observe", core.call_args.kwargs)
+        args = (self.work, execution.WorkerKind.PRIMARY, None, self.envelope,
+                object(), threading.Event(), 11, 13)
+        with patch.object(op, "_supervise_operation_core") as core:
+            op._supervise_operation(*args, r0_observe=True)
+            self.assertNotIn("v2", core.call_args.kwargs)
+            op._supervise_operation_v2(*args, self.profile.sha256)
+            self.assertNotIn("r0_observe", core.call_args.kwargs)
+
+
+class R0V2SupervisorCoreTests(unittest.TestCase):
+    """One supplied literal unit per spawn; no engine, solver or R0 collector."""
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = _r0_v2_supplied_profile()
+        cls.envelope = _envelope(max_decision_wall_ms=1000, max_arm_wall_ms=5000,
+            max_case_wall_ms=15000, max_job_wall_ms=30000, max_launcher_wall_ms=45000,
+            max_ipc_frame_bytes=512)
+
+    def run_core(self, component, *, mode="pass", close_failure=False, seal=False):
+        work, bundles = _r0_v2_fixture(component)
+        index = (0 if component in (op.R0Component.PRIMARY, op.R0Component.ORACLE_B)
+                 else 2 if component in (op.R0Component.K_CONTROL, op.R0Component.ORACLE_K_BIND) else 1)
+        kind = bundles[index].kind
+        prior = None if index == 0 else execution.encode_bundle_v2(bundles[0], self.profile.sha256)
+        context = op.multiprocessing.get_context("spawn")
+        api, selected, pids, boundaries = _FakeJobAPI(), [], [], []
+        if close_failure:
+            api.CloseHandle = lambda _: 0
+        ledger = op._MemoryLedger(self.envelope)
+        def process(*, target, args):
+            self.assertIs(target, op._worker_main_v2_r0)
+            self.assertEqual(args[:4], (work, kind, prior, self.envelope))
+            self.assertEqual(args[-1], self.profile.sha256)
+            selected.append(target)
+            return context.Process(target=_r0_v2_supervisor_literal_worker, args=(target, args, mode))
+        def attach(pid, cap):
+            pids.append(pid)
+            self.assertEqual(cap, self.envelope.worker_memory_cap_bytes)
+            return api, object(), lambda: 512
+        accepted = op._fresh_wb02_context
+        def fresh(*args, **kwargs):
+            boundaries.append((args, kwargs))
+            return accepted(*args, **kwargs)
+        proxy = SimpleNamespace(Pipe=context.Pipe, Event=context.Event, Process=process)
+        started = time.monotonic_ns()
+        with patch.object(op.multiprocessing, "get_context", return_value=proxy), \
+                patch.object(op.harness, "_attach_memory_job", side_effect=attach), \
+                patch.object(op.harness, "_coordinator_private_bytes", return_value=200), \
+                patch.object(op, "_fresh_wb02_context", side_effect=fresh), \
+                patch.object(execution, "decode_bundle", side_effect=AssertionError("Parent used V1 transport")), \
+                patch.object(execution, "encode_bundle_v2", side_effect=AssertionError("Parent re-encoded WB02")), \
+                patch.object(execution.physical, "capture_profile", side_effect=AssertionError("Profile capture")), \
+                patch.object(execution.physical, "capture_qualified_profile", side_effect=AssertionError("Profile capture")):
+            result = op._supervise_r0_operation_v2(work, kind, prior, self.envelope, ledger,
+                threading.Event(), started, started, self.profile.sha256)
+            if seal:
+                self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+                with tempfile.TemporaryDirectory() as directory:
+                    budget = op._R0V2ComponentArchiveBudget(component, self.envelope)
+                    claims = op._seal_r0_case_v2(directory, work, result, self.envelope, self.profile,
+                        budget, phase="target", prior_primary_wire=prior)
+                    self.assertEqual(claims.receipt, result.receipt)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(len(pids), 1)
+        self.assertFalse(ledger.values)
+        self.assertFalse(any(child.pid in pids for child in op.multiprocessing.active_children()))
+        self.assertFalse(any(thread.name == "program-k-e2-ipc-reader" and thread.is_alive()
+                             for thread in threading.enumerate()))
+        if not close_failure:
+            self.assertEqual(api.closed, 1)
+        return result, boundaries
+
+    def test_real_core_selects_r0_v2_target_and_preserves_telemetry_resources_and_cleanup(self):
+        for component in (op.R0Component.ORACLE_B, op.R0Component.ORACLE_K_BIND, op.R0Component.ORACLE_D_REPEAT):
+            with self.subTest(component=component):
+                result, boundaries = self.run_core(component)
+                self.assertIs(type(result), op._R0V2OperationResult)
+                self.assertIs(result.receipt.status, records.AuditStatus.PASS, result.receipt)
+                self.assertIs(type(result.wire), bytes)
+                self.assertEqual(result.wb02_wire_bytes, len(result.wire))
+                self.assertTrue(all(value > 0 for value in (result.logical_bytes,
+                    result.physical_frame_bytes, result.legacy_bundle_bytes, result.wb02_wire_bytes)))
+                self.assertTrue(1 <= len(result.samples) <= 3)
+                observation = result.observation
+                self.assertEqual(observation.oracle, (0, 0, 0, ()))
+                self.assertGreater(observation.arm_wall, 0)
+                self.assertEqual(observation.physical_inputs, 1)
+                self.assertEqual(observation.worker_memory, 512)
+                self.assertEqual(observation.coordinator_memory, 200)
+                self.assertEqual(observation.combined_memory, 712)
+                self.assertTrue(observation.resources_complete and observation.cleanup_complete
+                                and observation.watchdogs_complete)
+                self.assertEqual(bool(observation.prior_binding_intervals),
+                                 component is not op.R0Component.ORACLE_B)
+                top = [call for call in boundaries if "prior_primary_wire" in call[1]]
+                self.assertEqual(len(top), 1)
+                self.assertIs(top[0][0][0], result.wire)
+
+    def test_core_and_sink_are_two_fresh_top_level_boundaries_without_third_validation(self):
+        result, calls = self.run_core(op.R0Component.ORACLE_K_BIND, seal=True)
+        top = [call for call in calls if "prior_primary_wire" in call[1]]
+        self.assertEqual(len(top), 2)
+        self.assertTrue(all(call[0][0] is result.wire for call in top))
+        self.assertEqual([call[0][2] for call in calls], [execution.WorkerKind.K_CONTROL,
+            execution.WorkerKind.PRIMARY, execution.WorkerKind.K_CONTROL, execution.WorkerKind.PRIMARY])
+
+    def test_core_failed_incomplete_and_bad_telemetry_never_return_downstream_wire(self):
+        for mode, status in (("fail", records.AuditStatus.FAIL),
+                             ("incomplete", records.AuditStatus.INCOMPLETE),
+                             ("bad_telemetry", records.AuditStatus.FAIL)):
+            with self.subTest(mode=mode):
+                result, _ = self.run_core(op.R0Component.PRIMARY, mode=mode)
+                self.assertIs(type(result), op._R0V2OperationResult)
+                self.assertIs(result.receipt.status, status, result.receipt)
+                self.assertIsNone(result.wire)
+                self.assertEqual((result.logical_bytes, result.physical_frame_bytes,
+                    result.legacy_bundle_bytes, result.wb02_wire_bytes), (0, 0, 0, 0))
+                self.assertIs(type(result.observation), op._R0Observation)
+
+    def test_core_cleanup_failure_retains_failure_status_and_discards_wire(self):
+        for mode, status in (("pass", records.AuditStatus.INCOMPLETE), ("fail", records.AuditStatus.FAIL)):
+            with self.subTest(mode=mode):
+                result, _ = self.run_core(op.R0Component.PRIMARY, mode=mode, close_failure=True)
+                self.assertIs(result.receipt.status, status, result.receipt)
+                self.assertFalse(result.observation.cleanup_complete)
+                self.assertIsNone(result.wire)
+                self.assertEqual((result.logical_bytes, result.physical_frame_bytes,
+                    result.legacy_bundle_bytes, result.wb02_wire_bytes), (0, 0, 0, 0))
+
+
+class R0V2BudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.envelope = _envelope()
+        self.budget = op._R0V2ComponentArchiveBudget(op.R0Component.K_CONTROL, self.envelope)
+
+    def test_exact_cap_reservation_commits_only_exact_physical_bytes(self):
+        self.assertEqual(self.budget.cap_bytes, self.envelope.archive_cap_bytes)
+        self.assertEqual(self.budget.committed_bytes, 0)
+        token = self.budget.reserve((0, "setup"), self.budget.cap_bytes)
+        self.assertIs(self.budget.pending, token)
+        self.assertEqual((token.case_identity, token.byte_length), ((0, "setup"), self.budget.cap_bytes))
+        self.budget.commit(token, token.byte_length)
+        self.assertEqual(self.budget.committed_bytes, self.budget.cap_bytes)
+        self.assertIsNone(self.budget.pending)
+        with self.assertRaises(ValueError):
+            self.budget.reserve((0, "target"), 1)
+
+    def test_pending_and_completed_case_identities_cannot_be_reused(self):
+        token = self.budget.reserve((0, "setup"), 12)
+        with self.assertRaises(ValueError):
+            self.budget.reserve((0, "target"), 13)
+        self.assertIs(self.budget.pending, token)
+        self.budget.commit(token, 12)
+        with self.assertRaises(ValueError):
+            self.budget.reserve((0, "setup"), 12)
+        with self.assertRaises(ValueError):
+            self.budget.commit(token, 12)
+        second = self.budget.reserve((0, "target"), 13)
+        self.budget.commit(second, 13)
+        self.assertEqual(self.budget.committed_bytes, 25)
+
+    def test_foreign_forged_and_mismatched_commit_never_consume_reservation(self):
+        token = self.budget.reserve((0, "setup"), 12)
+        other = op._R0V2ComponentArchiveBudget(op.R0Component.K_CONTROL, self.envelope)
+        foreign = other.reserve((0, "setup"), 12)
+        for candidate, size in ((foreign, 12), (replace(token), 12), (object(), 12),
+                                (token, 11), (token, 13), (token, True)):
+            with self.subTest(candidate=type(candidate), size=size), self.assertRaises(ValueError):
+                self.budget.commit(candidate, size)
+            self.assertIs(self.budget.pending, token)
+            self.assertEqual(self.budget.committed_bytes, 0)
+        self.budget.commit(token, 12)
+
+    def test_abort_preserves_spent_and_reserved_bytes_and_is_terminal(self):
+        first = self.budget.reserve((0, "setup"), 12)
+        self.budget.commit(first, 12)
+        pending = self.budget.reserve((0, "target"), 13)
+        self.budget.abort()
+        self.budget.abort()
+        self.assertTrue(self.budget.aborted)
+        self.assertEqual(self.budget.committed_bytes, 12)
+        self.assertIs(self.budget.pending, pending)
+        with self.assertRaises(ValueError):
+            self.budget.commit(pending, 13)
+        with self.assertRaises(ValueError):
+            self.budget.reserve((1, "target"), 1)
+        for name in ("refund", "reset", "resume", "release"):
+            self.assertFalse(hasattr(self.budget, name))
+
+    def test_budget_domain_excludes_bool_noncanonical_case_and_invalid_component(self):
+        for identity, amount in (((True, "target"), 1), ((64, "target"), 1),
+                ((-1, "target"), 1), ((0, "TARGET"), 1), ([0, "target"], 1),
+                ((0, "target"), True), ((0, "target"), 0), ((0, "target"), -1),
+                ((0, "target"), 1.0), ((0, "target"), self.budget.cap_bytes + 1)):
+            with self.subTest(identity=identity, amount=amount), self.assertRaises(ValueError):
+                self.budget.reserve(identity, amount)
+            self.assertIsNone(self.budget.pending)
+        for component in ("K", None, True):
+            with self.assertRaises(ValueError):
+                op._R0V2ComponentArchiveBudget(component, self.envelope)
+        for component in (op.R0Component.PRIMARY, op.R0Component.ORACLE_B):
+            with self.assertRaises(ValueError):
+                op._R0V2ComponentArchiveBudget(component, self.envelope).reserve((0, "setup"), 1)
+
+    def test_budget_and_tokens_are_process_local_and_primitive_is_io_free(self):
+        with patch.object(Path, "open", side_effect=AssertionError("Budget I/O")), \
+                patch.object(Path, "mkdir", side_effect=AssertionError("Budget persistence")), \
+                patch.object(op, "_fresh_wb02_context", side_effect=AssertionError("Budget validation")):
+            token = self.budget.reserve((63, "target"), 12)
+            for value in (self.budget, token):
+                with self.assertRaises(TypeError):
+                    pickle.dumps(value)
+            self.budget.commit(token, 12)
+
+    def test_canonical_path_covers_exact_routes_concurrency_and_two_digit_positions(self):
+        with patch.object(Path, "open", side_effect=AssertionError("Path claim I/O")), \
+                patch.object(Path, "mkdir", side_effect=AssertionError("Path claim persistence")):
+            for concurrency in (1, 2, 4):
+                for component in op.R0Component:
+                    for position in (0, 9, 10, 63):
+                        self.assertEqual(op._r0_case_path_v2(concurrency, component, position, "target"),
+                            "calibration/c" + str(concurrency) + "/" + component.value + "/"
+                            + format(position, "02d") + "/target")
+            for component in (op.R0Component.K_CONTROL, op.R0Component.DETERMINISM,
+                              op.R0Component.ORACLE_K_BIND, op.R0Component.ORACLE_D_REPEAT):
+                self.assertTrue(op._r0_case_path_v2(1, component, 0, "setup").endswith("/00/setup"))
+
+    def test_path_rejects_noncanonical_values_and_unavailable_setup_routes(self):
+        for concurrency, component, position, phase in ((True, op.R0Component.PRIMARY, 0, "target"),
+                (3, op.R0Component.PRIMARY, 0, "target"), (1, "P", 0, "target"),
+                (1, op.R0Component.PRIMARY, True, "target"), (1, op.R0Component.PRIMARY, 64, "target"),
+                (1, op.R0Component.PRIMARY, 0, "../target"), (1, op.R0Component.PRIMARY, 0, "setup"),
+                (1, op.R0Component.ORACLE_B, 0, "setup")):
+            with self.subTest(values=(concurrency, component, position, phase)), self.assertRaises(ValueError):
+                op._r0_case_path_v2(concurrency, component, position, phase)
+
+
+class R0V2SealingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.profile = _r0_v2_supplied_profile()
+        cls.envelope = _envelope()
+
+    def fixture(self, component=op.R0Component.PRIMARY, phase="target"):
+        work, bundles = _r0_v2_fixture(component)
+        index = 0 if phase == "setup" or component in (op.R0Component.PRIMARY, op.R0Component.ORACLE_B) \
+            else 2 if component in (op.R0Component.K_CONTROL, op.R0Component.ORACLE_K_BIND) else 1
+        result = _r0_v2_result(work, bundles[index], self.profile)
+        prior = None if index == 0 else execution.encode_bundle_v2(bundles[0], self.profile.sha256)
+        return work, result, prior
+
+    def expected_files(self, result):
+        expected = {name: b"" for name in tuple(execution.STREAM_NAMES) + ("operations", "resources")}
+        for row in execution.decode_bundle_view_v2(result.wire, self.profile.sha256).rows:
+            expected[row.stream_name] += row.frame_bytes
+        for index, sample in enumerate(result.samples):
+            expected["resources"] += execution.physical.encode_frame(records.encode(sample), (index,),
+                execution.physical.context_for("resources", self.profile.sha256))
+        terminal = records.OperationEventRecord(records.Phase.EXECUTION,
+            op._unit_id(result.receipt.position, result.receipt.kind) + ":ADMITTED",
+            records.EventKind.END, 0, 0, records.OperationStatus.COMPLETED)
+        events = (terminal,)
+        if result.receipt.kind is execution.WorkerKind.PRIMARY:
+            events += (records.OperationEventRecord(records.Phase.EXECUTION,
+                "durable_primary_count:1", records.EventKind.PROGRESS, 0, 1, records.OperationStatus.RUNNING),)
+        for index, event in enumerate(events):
+            expected["operations"] += execution.physical.encode_frame(records.encode(event), (index,),
+                execution.physical.context_for("operations", self.profile.sha256))
+        return expected
+
+    def seal(self, directory, component=op.R0Component.PRIMARY, phase="target", *, budget=None,
+             work=None, result=None, prior=None):
+        fixture_work, fixture_result, fixture_prior = self.fixture(component, phase)
+        work = fixture_work if work is None else work
+        result = fixture_result if result is None else result
+        prior = fixture_prior if prior is None else prior
+        if budget is None:
+            budget = op._R0V2ComponentArchiveBudget(component, self.envelope)
+        with patch.object(op.time, "monotonic_ns", return_value=100):
+            claims = op._seal_r0_case_v2(directory, work, result, self.envelope,
+                self.profile, budget, phase=phase, prior_primary_wire=prior)
+        return claims, budget
+
+    def test_all_six_target_routes_and_four_setup_routes_seal_exact_55_streams(self):
+        cases = [(component, "target") for component in op.R0Component]
+        cases += [(component, "setup") for component in (op.R0Component.K_CONTROL,
+            op.R0Component.DETERMINISM, op.R0Component.ORACLE_K_BIND, op.R0Component.ORACLE_D_REPEAT)]
+        for component, phase in cases:
+            with self.subTest(component=component, phase=phase), tempfile.TemporaryDirectory() as directory:
+                work, result, prior = self.fixture(component, phase)
+                expected = self.expected_files(result)
+                claims, budget = self.seal(directory, component, phase)
+                root = Path(directory) / claims.relative_directory
+                self.assertEqual(tuple(item.name for item in claims.streams), tuple(expected))
+                self.assertEqual(len(claims.streams), 55)
+                self.assertEqual({item.name for item in root.iterdir()}, {name + ".pkf" for name in expected})
+                for item in claims.streams:
+                    data = (root / (item.name + ".pkf")).read_bytes()
+                    self.assertEqual(data, expected[item.name])
+                    self.assertEqual((item.sha256, item.byte_length), (sha256(data).hexdigest(), len(data)))
+                self.assertEqual(claims.physical_case_bytes, sum(map(len, expected.values())))
+                self.assertEqual(budget.committed_bytes, claims.physical_case_bytes)
+                self.assertIsNone(budget.pending)
+                self.assertFalse(budget.aborted)
+                self.assertEqual((claims.work, claims.receipt, claims.observation),
+                                 (work, result.receipt, result.observation))
+
+    def test_claims_are_frozen_detached_and_do_not_claim_readback_or_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            claims, _ = self.seal(directory)
+        self.assertEqual(tuple(item.name for item in fields(claims)), (
+            "work", "component", "phase", "relative_directory", "receipt", "streams",
+            "codec_profile_sha256", "samples", "observation", "logical_bytes", "physical_frame_bytes",
+            "legacy_bundle_bytes", "wb02_wire_bytes", "parent_admission_interval", "physical_case_bytes"))
+        self.assertFalse(hasattr(claims, "__dict__"))
+        for name in ("wire", "bundle", "context", "readback_complete", "validated", "qualified", "guard", "handles"):
+            self.assertFalse(hasattr(claims, name))
+        for item in fields(claims):
+            with self.assertRaises(FrozenInstanceError):
+                setattr(claims, item.name, None)
+        with self.assertRaises(TypeError):
+            pickle.dumps(claims)
+
+    def test_setup_and_target_share_one_component_budget_and_never_refund(self):
+        budget = op._R0V2ComponentArchiveBudget(op.R0Component.K_CONTROL, self.envelope)
+        with tempfile.TemporaryDirectory() as directory:
+            setup, _ = self.seal(directory, op.R0Component.K_CONTROL, "setup", budget=budget)
+            target, _ = self.seal(directory, op.R0Component.K_CONTROL, "target", budget=budget)
+        self.assertEqual(budget.committed_bytes, setup.physical_case_bytes + target.physical_case_bytes)
+        self.assertIsNone(budget.pending)
+        budget.abort()
+        self.assertEqual(budget.committed_bytes, setup.physical_case_bytes + target.physical_case_bytes)
+
+    def test_exact_remaining_cap_passes_one_byte_less_rejects_before_append(self):
+        work, result, prior = self.fixture()
+        exact = sum(map(len, self.expected_files(result).values()))
+        for shortage in (0, 1):
+            budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+            previously_spent = budget.cap_bytes - exact + shortage
+            token = budget.reserve((63, "target"), previously_spent)
+            budget.commit(token, previously_spent)
+            with self.subTest(shortage=shortage), tempfile.TemporaryDirectory() as directory:
+                if shortage:
+                    with patch.object(store.FramedStreamWriter, "append_frame",
+                            side_effect=AssertionError("Budget rejection appended")) as append, self.assertRaises(ValueError):
+                        self.seal(directory, budget=budget)
+                    append.assert_not_called()
+                    self.assertTrue(budget.aborted)
+                    self.assertEqual(budget.committed_bytes, previously_spent)
+                    self.assertTrue(all(path.stat().st_size == 0 for path in Path(directory).rglob("*.pkf")))
+                else:
+                    claims, _ = self.seal(directory, budget=budget)
+                    self.assertEqual(claims.physical_case_bytes, exact)
+                    self.assertEqual(budget.committed_bytes, budget.cap_bytes)
+
+    def test_component_cap_accounts_resources_terminal_and_primary_progress(self):
+        work, result, _ = self.fixture()
+        expected = self.expected_files(result)
+        total = sum(map(len, expected.values()))
+        experiment = sum(len(expected[name]) for name in execution.STREAM_NAMES)
+        self.assertEqual(experiment, result.physical_frame_bytes)
+        self.assertGreater(total, experiment)
+        budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+        token = budget.reserve((63, "target"), budget.cap_bytes - experiment)
+        budget.commit(token, token.byte_length)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(store.FramedStreamWriter, "append_frame",
+                    side_effect=AssertionError("Support bytes escaped budget")), self.assertRaises(ValueError):
+            self.seal(directory, budget=budget)
+        self.assertTrue(budget.aborted)
+
+    def test_fresh_admission_occurs_once_and_interval_ends_before_plan_and_writes(self):
+        component = op.R0Component.K_CONTROL
+        work, result, prior = self.fixture(component)
+        calls, timeline = [], []
+        real_fresh, real_observe = op._fresh_wb02_context, op._R0V2CaseAdmission.observe
+        real_support, real_reserve = op._V2EvidenceSink._support_frame, op._R0V2CaseAdmission.reserve
+        real_append = store.FramedStreamWriter.append_frame
+        def fresh(*args, **kwargs):
+            calls.append(args)
+            timeline.append("fresh:" + args[2].value)
+            return real_fresh(*args, **kwargs)
+        def observe(transaction, started, finished):
+            timeline.append("observed")
+            return real_observe(transaction, started, finished)
+        def support(*args, **kwargs):
+            self.assertIn("observed", timeline)
+            timeline.append("support")
+            return real_support(*args, **kwargs)
+        def reserve(transaction, size):
+            self.assertIn("support", timeline)
+            timeline.append("reserved")
+            return real_reserve(transaction, size)
+        def append(writer, *args):
+            self.assertIn("reserved", timeline)
+            timeline.append("append")
+            return real_append(writer, *args)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(op, "_fresh_wb02_context", side_effect=fresh), \
+                patch.object(op._R0V2CaseAdmission, "observe", new=observe), \
+                patch.object(op._V2EvidenceSink, "_support_frame", new=support), \
+                patch.object(op._R0V2CaseAdmission, "reserve", new=reserve), \
+                patch.object(store.FramedStreamWriter, "append_frame", new=append):
+            claims, _ = self.seal(directory, component)
+        self.assertEqual([call[2] for call in calls],
+                         [execution.WorkerKind.K_CONTROL, execution.WorkerKind.PRIMARY])
+        self.assertEqual(claims.parent_admission_interval, tuple(sorted(claims.parent_admission_interval)))
+        self.assertEqual(timeline.count("observed"), 1)
+        self.assertEqual(timeline.count("reserved"), 1)
+
+    def test_missing_anchor_and_existing_case_are_fail_closed_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing"
+            with self.assertRaises(ValueError):
+                self.seal(missing)
+            self.assertFalse(missing.exists())
+            case = Path(directory) / op._r0_case_path_v2(2, op.R0Component.PRIMARY, 0, "target")
+            case.mkdir(parents=True)
+            marker = case / "existing.bin"
+            marker.write_bytes(b"preserve exactly")
+            budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+            with self.assertRaises((ValueError, OSError)):
+                self.seal(directory, budget=budget)
+            self.assertTrue(budget.aborted)
+            self.assertEqual(marker.read_bytes(), b"preserve exactly")
+            self.assertEqual(list(case.iterdir()), [marker])
+
+    def test_append_failure_keeps_partial_files_pending_debit_and_poisoned_sink(self):
+        budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+        accepted, writers = store.FramedStreamWriter.append_frame, []
+        failure = RuntimeError("literal partial write")
+        def append(writer, *args):
+            writers.append(writer)
+            if len(writers) == 2:
+                raise failure
+            return accepted(writer, *args)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(store.FramedStreamWriter, "append_frame", new=append):
+            with self.assertRaises(RuntimeError) as caught:
+                self.seal(directory, budget=budget)
+            self.assertIs(caught.exception, failure)
+            self.assertTrue(budget.aborted)
+            self.assertIsNotNone(budget.pending)
+            self.assertEqual(budget.committed_bytes, 0)
+            self.assertGreater(sum(path.stat().st_size for path in Path(directory).rglob("*.pkf")), 0)
+            self.assertTrue(all(writer._closed for writer in writers))
+            with self.assertRaises(ValueError):
+                self.seal(directory, budget=budget)
+
+    def test_seal_failure_and_cancellation_never_commit_or_publish_case_claims(self):
+        for failure in (OSError("literal seal failure"), KeyboardInterrupt("literal cancellation")):
+            budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+            accepted, writers = store.FramedStreamWriter.seal, []
+            def seal(writer):
+                writers.append(writer)
+                if len(writers) == 2:
+                    raise failure
+                return accepted(writer)
+            with self.subTest(failure=type(failure)), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(store.FramedStreamWriter, "seal", new=seal):
+                with self.assertRaises(type(failure)) as caught:
+                    self.seal(directory, budget=budget)
+                self.assertIs(caught.exception, failure)
+                self.assertTrue(budget.aborted)
+                self.assertIsNotNone(budget.pending)
+                self.assertEqual(budget.committed_bytes, 0)
+                self.assertEqual(len(list(Path(directory).rglob("*.pkf"))), 55)
+                self.assertTrue(all(writer._closed for writer in writers))
+
+    def test_checkpoint_progress_and_close_failure_keep_reservation_and_abort(self):
+        for stage in ("checkpoint", "progress", "close"):
+            budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+            failure = OSError("literal " + stage + " failure")
+            accepted_checkpoint = store.FramedStreamWriter.checkpoint
+            accepted_append = store.FramedStreamWriter.append_frame
+            accepted_close = op._V2EvidenceSink.close
+            sinks = []
+            def checkpoint(writer):
+                if writer.stream_name == "boards":
+                    raise failure
+                return accepted_checkpoint(writer)
+            def append(writer, key, logical, frame):
+                if writer.stream_name == "operations" and key == (1,):
+                    raise failure
+                return accepted_append(writer, key, logical, frame)
+            def close(sink):
+                sinks.append(sink)
+                accepted_close(sink)
+                raise failure
+            owner, name, replacement = ((store.FramedStreamWriter, "checkpoint", checkpoint)
+                if stage == "checkpoint" else (store.FramedStreamWriter, "append_frame", append)
+                if stage == "progress" else (op._V2EvidenceSink, "close", close))
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(owner, name, new=replacement):
+                with self.assertRaises(OSError) as caught:
+                    self.seal(directory, budget=budget)
+                self.assertIs(caught.exception, failure)
+                self.assertTrue(budget.aborted)
+                self.assertIsNotNone(budget.pending)
+                self.assertEqual(budget.committed_bytes, 0)
+                self.assertEqual(len(list(Path(directory).rglob("*.pkf"))), 55)
+                self.assertGreater(sum(path.stat().st_size for path in Path(directory).rglob("*.pkf")), 0)
+                if sinks:
+                    self.assertTrue(all(writer._closed for sink in sinks for writer in sink.writers.values()))
+
+    def test_identity_drift_rejects_before_append_and_aborts_component(self):
+        work, result, prior = self.fixture()
+        wrong_unit = replace(result, samples=(replace(result.samples[0], unit_id="different"),))
+        wrong_profile = replace(result, codec_profile_sha256=b"x" * 32)
+        wrong_size = replace(result, logical_bytes=result.logical_bytes + 1)
+        for candidate_work, candidate_result in ((replace(work, oracle_b_selected=True), result),
+                (work, wrong_unit), (work, wrong_profile), (work, wrong_size)):
+            budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+            with self.subTest(result=candidate_result is result), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(store.FramedStreamWriter, "append_frame",
+                        side_effect=AssertionError("Rejected identity appended")), self.assertRaises(ValueError):
+                self.seal(directory, budget=budget, work=candidate_work, result=candidate_result)
+            self.assertTrue(budget.aborted)
+            self.assertEqual(budget.committed_bytes, 0)
+
+    def test_sealing_does_not_readback_capture_launch_or_construct_slice1r_evidence(self):
+        from experiments import program_k_e2_r0_evidence as evidence
+        from experiments import program_k_e2_r0_harness as r0_harness
+        from experiments import program_k_e2_qualification as qualification
+        from experiments import program_k_e2_analysis as analysis
+        work, result, prior = self.fixture()
+        budget = op._R0V2ComponentArchiveBudget(op.R0Component.PRIMARY, self.envelope)
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            for owner, names in ((store, ("FramedStreamPullReader", "scan_framed_stream", "scan_stream")),
+                    (op, ("readback_streams", "measure_r0_component", "_supervise_r0_operation_v2")),
+                    (execution.physical, ("capture_profile", "capture_qualified_profile")),
+                    (execution, ("_materialize_board", "make_work_plan")),
+                    (r0_harness, ("launch_r0a", "launch_r0b", "_begin_run", "capture_run_provenance",
+                                  "capture_run_provenance_v2", "_capture_qualified_codec_profile")),
+                    (qualification, ("capture_sources", "capture_sources_v2")),
+                    (analysis, ("_shared_bootstrap", "analyze_effectiveness"))):
+                for name in names:
+                    stack.enter_context(patch.object(owner, name, side_effect=AssertionError("Sealing exceeded scope")))
+            for name in ("R0ACaseEvidenceV2", "R0AComponentEvidenceV2", "R0AConcurrencyEvidenceV2", "R0AObservationsV2"):
+                stack.enter_context(patch.object(evidence, name, side_effect=AssertionError("Published R0 evidence")))
+            claims = op._seal_r0_case_v2(directory, work, result, self.envelope,
+                self.profile, budget, phase="target", prior_primary_wire=prior)
+            self.assertEqual(len(claims.streams), 55)
+            self.assertFalse(list(Path(directory).rglob("*.json")))
+            self.assertFalse(list(Path(directory).rglob("*.jsonl")))
+
+    def test_historical_coordinator_and_r0_remain_independent_of_all_new_owners(self):
+        with ExitStack() as stack:
+            for name in ("_R0V2OperationResult", "_worker_main_v2_r0", "_supervise_r0_operation_v2",
+                         "_R0V2ComponentArchiveBudget", "_seal_r0_case_v2", "_r0_case_path_v2"):
+                stack.enter_context(patch.object(op, name, side_effect=AssertionError("Historical V1 activated R0 V2")))
+            with tempfile.TemporaryDirectory() as directory:
+                result = StreamingCoordinatorTests().run_plan(_plan(), directory)
+                self.assertIs(result.status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).rglob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+            with tempfile.TemporaryDirectory() as directory:
+                result = R0ComponentTests().run_component(directory, op.R0Component.PRIMARY)
+                self.assertIs(result.units[0].status, records.AuditStatus.PASS)
+                self.assertTrue(list(Path(directory).rglob("*.jsonl")))
+                self.assertFalse(list(Path(directory).rglob("*.pkf")))
+
+
+class R0V2MonitorTests(unittest.TestCase):
+    def test_global_count_includes_all_successful_samples_without_setup_resets(self):
+        monitor = op._R0MemoryMonitor(op._MemoryLedger(_envelope()), threading.Event(), _envelope())
+        self.assertEqual(monitor.memory_sample_count, 0)
+        with patch.object(op.harness, "_coordinator_private_bytes", side_effect=(10, 100, 40, 900, 50)) as sampled:
+            monitor.sample()
+            monitor.begin_setup()
+            monitor.sample()
+            monitor.sample()
+            first = monitor.end_setup()
+            monitor.sample()
+            monitor.begin_setup()
+            monitor.sample()
+            second = monitor.end_setup()
+        self.assertEqual((monitor.memory_sample_count, first[-1], second[-1]), (5, 2, 1))
+        self.assertEqual((first[2], second[2], monitor.coordinator), (100, 50, 900))
+        self.assertEqual(sampled.call_count, 5)
+
+    def test_returned_breach_counts_but_raised_sampling_failure_does_not(self):
+        monitor = op._R0MemoryMonitor(op._MemoryLedger(_envelope()), threading.Event(), _envelope())
+        with patch.object(op.harness, "_coordinator_private_bytes", side_effect=(100_000_001, OSError("literal"))):
+            monitor.sample()
+            self.assertEqual(monitor.memory_sample_count, 1)
+            self.assertEqual(monitor.reason, "MEMORY_CAP")
+            monitor.sample()
+        self.assertEqual(monitor.memory_sample_count, 1)
+        self.assertEqual(monitor.coordinator, 100_000_001)
+        self.assertTrue(monitor.cancel.is_set())
+
+    def test_counter_uses_existing_sample_cadence_and_no_extra_boundary_reads(self):
+        monitor = op._R0MemoryMonitor(op._MemoryLedger(_envelope()), threading.Event(), _envelope())
+        with patch.object(monitor.ledger, "sample", side_effect=OSError("never sampled")) as sample:
+            monitor.begin_setup()
+            snapshot = monitor.end_setup()
+        sample.assert_not_called()
+        self.assertEqual((monitor.memory_sample_count, snapshot[-1]), (0, 0))
+
+
 if __name__ == "__main__":
     unittest.main()
