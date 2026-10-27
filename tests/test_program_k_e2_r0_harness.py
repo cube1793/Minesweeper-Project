@@ -7348,3 +7348,715 @@ class V2LiveProvenanceBridgeTests(unittest.TestCase):
             R0BLauncherAssemblyTests.setUpClass()
             fixture_test = R0BLauncherAssemblyTests()
             fixture_test.test_public_r0b_connects_frozen_inputs_finalization_reaped_monitor_and_final_source_check()
+
+
+@_evidence_contextmanager
+def _slice1t_sealed_fixture(component, phase="target", *, envelope=None, rich=False, samples=None,
+                           with_runtime=True, observation=None):
+    """Genuine 1S files from supplied tiny literals, never a calibration collector."""
+    from tests.test_program_k_e2_operational import (
+        _envelope, _r0_v2_result, _r0_v2_supplied_profile,
+        R0V2CurrentDecisionTimingTests)
+    profile = _r0_v2_supplied_profile()
+    envelope = _envelope(readback_wall_ms=10000, max_payload_bytes=1_000_000,
+        archive_cap_bytes=5_000_000, max_physical_inputs=30) if envelope is None else envelope
+    if rich:
+        R0V2CurrentDecisionTimingTests.setUpClass()
+        work, bundles = R0V2CurrentDecisionTimingTests().fixture(component)
+    else:
+        from tests.test_program_k_e2_execution import _literal_context, _literal_work
+        literal = _literal_work(width=1, mines=frozenset())
+        with _literal_context(literal, mines=frozenset()):
+            primary = execution.execute_primary(literal)
+            repeated = execution.execute_repeat(literal, primary)
+            kcontrol = execution.execute_k_control(literal, primary)
+        work = operational._r0_work(literal, component)
+        bundles = (primary, repeated, kcontrol)
+    runtime = records.RuntimeIdentity("Slice1TFixturePython", "0", "fixture-os",
+        "fixture-platform", "fixture-arch", None) if with_runtime else None
+    work = replace(work, runtime=runtime)
+    adapted = []
+    for bundle in bundles:
+        values = dict(bundle.streams)
+        if bundle.kind is execution.WorkerKind.PRIMARY and not (work.k_control_selected or work.determinism_selected):
+            values.pop("control_maintenance", None)
+        for name in ("oracle_b_coverage", "repeat_oracle_b_coverage"):
+            if name in values:
+                values[name] = tuple(records.encode(replace(records.decode(row),
+                    selected=work.oracle_b_selected)) for row in values[name])
+        if not work.oracle_b_selected:
+            for name in ("oracle_b_audits", "repeat_oracle_b_audits"):
+                if name in values:
+                    values[name] = ()
+        if runtime is not None:
+            values["runtime"] = (records.encode(runtime),)
+        adapted.append(replace(bundle, streams=tuple((name, values[name])
+            for name in execution.STREAM_NAMES if name in values)))
+    bundles = tuple(adapted)
+    index = {operational.R0Component.PRIMARY: 0, operational.R0Component.ORACLE_B: 0,
+        operational.R0Component.K_CONTROL: 2, operational.R0Component.ORACLE_K_BIND: 2,
+        operational.R0Component.DETERMINISM: 1, operational.R0Component.ORACLE_D_REPEAT: 1}[component]
+    with tempfile.TemporaryDirectory(prefix="slice1t-literal-") as directory:
+        anchor = Path(directory)
+        budget = operational._R0V2ComponentArchiveBudget(component, envelope)
+        def seal(bundle, case_phase):
+            result = _r0_v2_result(work, bundle, profile,
+                prior_intervals=() if bundle.kind is execution.WorkerKind.PRIMARY else ((10, 12),))
+            if rich:
+                primary = bundle.kind is execution.WorkerKind.PRIMARY
+                kcontrol = bundle.kind is execution.WorkerKind.K_CONTROL
+                streams = dict(bundle.streams)
+                prefix = "" if primary else "repeat_"
+                probes = 2 * sum(records.decode(row).action_ordinal > 0
+                    for row in streams[prefix + "kp0_decisions"]) if work.oracle_b_selected and not kcontrol else 0
+                calls = sum(records.decode(row).status is not records.AuditStatus.INCOMPLETE
+                    for row in streams[prefix + "oracle_b_audits"]) if work.oracle_b_selected and not kcontrol else 0
+                inputs = len(streams["kcontrol_maintenance"]) if kcontrol else max(
+                    len(streams[prefix + role + "_physical_inputs"]) for role in ("control", "kp0"))
+                result = replace(result, receipt=replace(result.receipt, elapsed_ns=1000),
+                    observation=replace(result.observation, decision_wall=200 if primary else 70 if kcontrol else 50,
+                        arm_wall=300 if primary else 100, shadow_wall=30 if kcontrol else 0, physical_inputs=inputs,
+                        oracle=(probes, calls, 0, ((10, 10),) * probes)))
+            if samples is not None:
+                result = replace(result, samples=tuple(replace(sample,
+                    unit_id=operational._unit_id(work.position, bundle.kind)) for sample in samples))
+            if observation is not None:
+                result = replace(result, observation=observation)
+            prior_wire = None if bundle.kind is execution.WorkerKind.PRIMARY else execution.encode_bundle_v2(
+                bundles[0], profile.sha256)
+            view = execution.decode_bundle_view_v2(result.wire, profile.sha256)
+            claim = operational._seal_r0_case_v2(anchor, work, result, envelope, profile, budget,
+                phase=case_phase, prior_primary_wire=prior_wire)
+            return claim, view
+        setup = None
+        if index:
+            setup, _ = seal(bundles[0], "setup")
+        if phase == "setup":
+            claim, bundle = setup, bundles[0]
+            wire = execution.encode_bundle_v2(bundle, profile.sha256)
+            view = execution.decode_bundle_view_v2(wire, profile.sha256)
+        else:
+            bundle = bundles[index]
+            claim, view = seal(bundle, "target")
+        yield dict(anchor=anchor, claim=claim, setup=setup, work=work, bundle=bundle,
+            view=view, component=component, phase=phase, profile=profile, envelope=envelope)
+
+
+@_evidence_contextmanager
+def _slice1t_readonly_guards():
+    with _EvidenceExitStack() as stack:
+        for owner, names in (
+                (execution, ("encode_bundle_v2", "decode_bundle", "decode_bundle_v2",
+                    "decode_bundle_view_v2", "_materialize_board", "execute_primary", "execute_repeat",
+                    "execute_k_control")),
+                (operational, ("_fresh_wb02_context", "_supervise_operation_core", "_persist_r0",
+                    "measure_r0_component", "_seal_r0_case_v2")),
+                (physical, ("capture_profile", "capture_qualified_profile")),
+                (h, ("capture_run_provenance", "capture_run_provenance_v2", "launch_r0a", "launch_r0b",
+                    "_materialize_synthetic_v2", "_readback_synthetic_v2", "_readback_v2_plan")),
+                (h.store, ("FramedStreamWriter", "StreamWriter")),
+                (h.analysis, ("analyze_effectiveness",))):
+            for name in names:
+                stack.enter_context(patch.object(owner, name,
+                    side_effect=AssertionError("Slice 1T independent readback activated " + name)))
+        yield
+
+
+class R0ACaseReadbackV2Tests(unittest.TestCase):
+    """Independent one-case disk authority, including complete negative boundaries."""
+
+    def read(self, fixture, *, claim=None, prior="automatic", **changes):
+        claim = fixture["claim"] if claim is None else claim
+        with _slice1t_readonly_guards(), patch.object(
+                operational.harness, "_coordinator_private_bytes", return_value=100):
+            if prior == "automatic":
+                prior = None
+                if fixture["phase"] == "target" and fixture["setup"] is not None:
+                    if "authenticated_setup" not in fixture:
+                        fixture["authenticated_setup"] = h._readback_r0a_case_v2(fixture["anchor"],
+                            fixture["setup"], fixture["work"], fixture["component"], "setup",
+                            fixture["profile"], fixture["envelope"])
+                    prior = fixture["authenticated_setup"]
+            arguments = dict(anchor=fixture["anchor"], sealed_case=claim, expected_work=fixture["work"],
+                expected_component=fixture["component"], expected_phase=fixture["phase"],
+                profile=fixture["profile"], envelope=fixture["envelope"], prior_primary=prior)
+            arguments.update(changes)
+            return h._readback_r0a_case_v2(**arguments)
+
+    @staticmethod
+    def snapshot(root):
+        return tuple(sorted((str(path.relative_to(root)), path.read_bytes(), path.stat().st_mtime_ns)
+                            for path in root.rglob("*") if path.is_file()))
+
+    def rejects(self, fixture, *, before_seals=False, **kwargs):
+        before = self.snapshot(fixture["anchor"])
+        with _EvidenceExitStack() as stack:
+            if before_seals:
+                stack.enter_context(patch.object(h.store.FramedStreamPullReader, "close",
+                    side_effect=AssertionError("Semantic failure was masked by writer-seal comparison")))
+            with self.assertRaises((ValueError, OSError)):
+                self.read(fixture, **kwargs)
+        self.assertEqual(self.snapshot(fixture["anchor"]), before)
+
+    @staticmethod
+    def rows(fixture, name):
+        values = []
+        root = fixture["anchor"] / fixture["claim"].relative_directory
+        h.store.scan_framed_stream(root, name, physical.context_for(name, fixture["profile"].sha256),
+            visit=lambda key, record, logical, length: values.append((key, record)))
+        return values
+
+    @staticmethod
+    def rewrite(fixture, name, rows):
+        root = fixture["anchor"] / fixture["claim"].relative_directory
+        context = physical.context_for(name, fixture["profile"].sha256)
+        (root / (name + ".pkf")).write_bytes(b"".join(
+            physical.encode_frame(records.encode(record), key, context) for key, record in rows))
+
+    @staticmethod
+    def forged_carrier(carrier, **changes):
+        # Test-only corruption, never a production constructor or authority path.
+        clone = object.__new__(type(carrier))
+        for field in fields(carrier):
+            object.__setattr__(clone, field.name, changes.get(field.name, getattr(carrier, field.name)))
+        return clone
+
+    def test_all_six_targets_and_four_setups_authenticate_exact_disk_facts(self):
+        routes = tuple((component, "target") for component in operational.R0Component) + tuple(
+            (component, "setup") for component in (operational.R0Component.K_CONTROL,
+                operational.R0Component.DETERMINISM, operational.R0Component.ORACLE_K_BIND,
+                operational.R0Component.ORACLE_D_REPEAT))
+        families = {operational.R0Component.PRIMARY: "primary", operational.R0Component.K_CONTROL: "k_control",
+            operational.R0Component.DETERMINISM: "determinism", operational.R0Component.ORACLE_B: "oracle_primary",
+            operational.R0Component.ORACLE_D_REPEAT: "oracle_repeat", operational.R0Component.ORACLE_K_BIND: None}
+        for component, phase in routes:
+            with self.subTest(component=component, phase=phase), _slice1t_sealed_fixture(component, phase, rich=True) as fixture:
+                claim, view = fixture["claim"], fixture["view"]
+                before = self.snapshot(fixture["anchor"])
+                observed = self.read(fixture)
+                self.assertIs(type(observed), h._R0AReadbackCaseV2)
+                case = observed.evidence
+                self.assertIs(type(case), h.evidence.R0ACaseEvidenceV2)
+                self.assertTrue(case.readback_complete)
+                self.assertEqual(case.family, "reference" if phase == "setup" else families[component])
+                self.assertEqual(case.archive.relative_directory, claim.relative_directory)
+                self.assertEqual(case.archive.streams, claim.streams)
+                self.assertEqual(len(case.archive.streams), 55)
+                self.assertEqual(tuple(s.name for s in case.archive.streams),
+                                 execution.STREAM_NAMES + ("operations", "resources"))
+                self.assertEqual(sum(s.byte_length for s in case.archive.streams), claim.physical_case_bytes)
+                self.assertEqual((case.payload.logical_sum_bytes, case.payload.physical_frame_bytes,
+                    case.payload.legacy_bundle_bytes, case.payload.wb02_wire_bytes),
+                    (claim.logical_bytes, claim.physical_frame_bytes, claim.legacy_bundle_bytes, claim.wb02_wire_bytes))
+                execution.revalidate_bundle(observed.bundle, fixture["work"], claim.receipt.kind,
+                                            max_payload_bytes=fixture["envelope"].max_payload_bytes)
+                self.assertEqual(observed.bundle, fixture["bundle"])
+                self.assertIs(type(observed.work.runtime), records.RuntimeIdentity)
+                self.assertEqual(dict(observed.bundle.streams)["runtime"], (records.encode(observed.work.runtime),))
+                self.assertEqual((observed.work, observed.component, observed.phase, observed.codec_profile_sha256),
+                    (fixture["work"], component, phase, fixture["profile"].sha256))
+                def owned(name):
+                    if phase == "setup":
+                        return name == "control_maintenance"
+                    if component is operational.R0Component.PRIMARY:
+                        return name not in ("control_maintenance", "oracle_b_audits")
+                    if component is operational.R0Component.K_CONTROL:
+                        return True
+                    if component is operational.R0Component.DETERMINISM:
+                        return name != "repeat_oracle_b_audits"
+                    if component is operational.R0Component.ORACLE_B:
+                        return name == "oracle_b_audits"
+                    if component is operational.R0Component.ORACLE_D_REPEAT:
+                        return name == "repeat_oracle_b_audits"
+                    return False
+                selected = tuple(row for row in view.rows if owned(row.stream_name))
+                self.assertEqual(case.owned_bytes, h.evidence.R0AByteCountV2(
+                    sum(len(row.frame_bytes) for row in selected), sum(len(row.logical_bytes) for row in selected),
+                    len(selected)))
+                if phase == "target" and component in (operational.R0Component.ORACLE_B,
+                                                         operational.R0Component.ORACLE_D_REPEAT):
+                    self.assertGreater(len(selected), 0)
+                if component in (operational.R0Component.PRIMARY, operational.R0Component.DETERMINISM) and phase == "target":
+                    coverage = "oracle_b_coverage" if component is operational.R0Component.PRIMARY else "repeat_oracle_b_coverage"
+                    self.assertTrue(any(row.stream_name == coverage for row in selected))
+                if component in (operational.R0Component.K_CONTROL, operational.R0Component.DETERMINISM):
+                    self.assertTrue(any(row.stream_name == "control_maintenance" for row in selected))
+                if component is operational.R0Component.DETERMINISM and phase == "target":
+                    self.assertTrue(any(row.stream_name == "repeat_control_maintenance" for row in selected))
+                    self.assertTrue(any(row.stream_name == "control_arms" for row in selected))
+                self.assertFalse(any(row.stream_name in ("operations", "resources") for row in selected))
+                self.assertEqual(self.snapshot(fixture["anchor"]), before)
+
+    def test_zero_oracle_keeps_route_family_positive_payload_and_complete_archive(self):
+        for component, family in ((operational.R0Component.ORACLE_B, "oracle_primary"),
+                                  (operational.R0Component.ORACLE_D_REPEAT, "oracle_repeat")):
+            with self.subTest(component=component), _slice1t_sealed_fixture(component) as fixture:
+                observed = self.read(fixture).evidence
+                self.assertEqual(observed.family, family)
+                self.assertEqual(observed.owned_bytes, h.evidence.R0AByteCountV2(0, 0, 0))
+                self.assertTrue(observed.readback_complete)
+                self.assertTrue(all(getattr(observed.payload, field.name) > 0 for field in fields(observed.payload)))
+                self.assertEqual(len(observed.archive.streams), 55)
+                self.assertGreater(sum(item.byte_length for item in observed.archive.streams), 0)
+
+    def test_private_carrier_is_exact_frozen_slotted_nonserializable_and_not_directly_constructible(self):
+        import pickle
+        with _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+            value = self.read(fixture)
+            self.assertFalse(hasattr(value, "__dict__"))
+            self.assertEqual(tuple(field.name for field in fields(value)),
+                ("evidence", "bundle", "work", "component", "phase", "codec_profile_sha256"))
+            for field in fields(value):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(value, field.name, None)
+            for name in ("wire", "context", "view", "token"):
+                self.assertFalse(hasattr(value, name))
+            with self.assertRaises(TypeError):
+                pickle.dumps(value)
+            with self.assertRaises(TypeError):
+                h._R0AReadbackCaseV2(*(getattr(value, f.name) for f in fields(value)))
+
+    def test_runtime_none_is_rejected_before_inventory_readers_reconstruction_or_evidence(self):
+        for component, phase in ((operational.R0Component.PRIMARY, "target"),
+                                  (operational.R0Component.K_CONTROL, "setup")):
+            with self.subTest(component=component), _slice1t_sealed_fixture(
+                    component, phase, with_runtime=False) as fixture:
+                self.assertIsNone(fixture["work"].runtime)
+                self.assertNotIn("runtime", dict(fixture["bundle"].streams))
+                self.assertIs(type(fixture["claim"]), operational._R0V2SealedCase)
+                before = self.snapshot(fixture["anchor"])
+                with patch.object(h, "_r0a_case_inventory_v2", side_effect=AssertionError("Runtime preflight did inventory")) as inventory, \
+                        patch.object(h.store, "FramedStreamPullReader", side_effect=AssertionError("Runtime preflight opened reader")) as reader, \
+                        patch.object(h.qualification, "_reconstruct", side_effect=AssertionError("Runtime preflight reconstructed")) as reconstruct, \
+                        patch.object(h.evidence, "R0ACaseEvidenceV2", side_effect=AssertionError("Runtime preflight published")) as evidence:
+                    with self.assertRaisesRegex(ValueError, "RUNTIME"):
+                        self.read(fixture)
+                self.assertEqual((inventory.call_count, reader.call_count, reconstruct.call_count, evidence.call_count),
+                                 (0, 0, 0, 0))
+                self.assertEqual(self.snapshot(fixture["anchor"]), before)
+
+    def test_runtime_stream_requires_exact_expected_record_count_identity_and_key(self):
+        for mutation in ("missing", "changed", "duplicate", "position", "rank", "index", "family"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                rows = self.rows(fixture, "runtime")
+                self.assertEqual(rows, [((fixture["work"].position, 0, 0), fixture["work"].runtime)])
+                key, runtime = rows[0]
+                if mutation == "missing":
+                    rows = []
+                elif mutation == "changed":
+                    rows = [(key, replace(runtime, python_version="tampered-runtime"))]
+                elif mutation == "duplicate":
+                    rows.append(((key[0], key[1], 1), runtime))
+                elif mutation in ("position", "rank", "index"):
+                    axis = ("position", "rank", "index").index(mutation)
+                    rows = [(tuple(value + 1 if i == axis else value for i, value in enumerate(key)), runtime)]
+                if mutation == "family":
+                    with patch.object(physical, "_logical"):
+                        data = physical.encode_frame(records.encode(fixture["work"].board), key,
+                            physical.context_for("runtime", fixture["profile"].sha256))
+                    (fixture["anchor"] / fixture["claim"].relative_directory / "runtime.pkf").write_bytes(data)
+                else:
+                    self.rewrite(fixture, "runtime", rows)
+                self.rejects(fixture, before_seals=True)
+
+    def test_expected_work_component_phase_profile_and_path_are_not_writer_authority(self):
+        mutations = ("work", "component", "phase", "relative_directory", "codec_profile_sha256", "receipt_position",
+                     "receipt_kind", "receipt_status", "receipt_reason", "receipt_exit_code", "receipt_elapsed_ns")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                claim = fixture["claim"]
+                changes = {"work": replace(claim.work, run_id="wrong"), "component": operational.R0Component.ORACLE_B,
+                    "phase": "setup", "relative_directory": "calibration/c1/P/01/target", "codec_profile_sha256": b"x" * 32}
+                receipt = dict(position=1, kind=execution.WorkerKind.DETERMINISM, status=records.AuditStatus.FAIL,
+                               reason="WRONG", exit_code=1, elapsed_ns=0)
+                changed = replace(claim, **{mutation: changes[mutation]}) if mutation in changes else replace(
+                    claim, receipt=replace(claim.receipt, **{mutation[8:]: receipt[mutation[8:]]}))
+                self.rejects(fixture, claim=changed)
+        for mutation in ("flags", "work", "component", "phase", "concurrency", "anchor"):
+            with self.subTest(expected=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                changes = {"flags": dict(expected_work=replace(fixture["work"], oracle_b_selected=True)),
+                    "work": dict(expected_work=replace(fixture["work"], run_id="wrong")),
+                    "component": dict(expected_component=operational.R0Component.ORACLE_B),
+                    "phase": dict(expected_phase="setup"),
+                    "concurrency": dict(envelope=replace(fixture["envelope"], concurrency=4)),
+                    "anchor": dict(anchor=fixture["anchor"] / "missing")}[mutation]
+                self.rejects(fixture, **changes)
+
+    def test_every_nonprimary_target_requires_authenticated_matching_setup(self):
+        for component in (operational.R0Component.K_CONTROL, operational.R0Component.DETERMINISM,
+                          operational.R0Component.ORACLE_K_BIND, operational.R0Component.ORACLE_D_REPEAT):
+            for mutation in ("missing", "raw", "position", "work", "runtime", "runtime_row", "component", "phase", "profile", "kind", "family", "complete", "path"):
+                with self.subTest(component=component, mutation=mutation), _slice1t_sealed_fixture(component) as fixture:
+                    setup_fixture = dict(fixture, claim=fixture["setup"], phase="setup")
+                    prior = self.read(setup_fixture)
+                    case = prior.evidence
+                    variants = {
+                        "missing": None, "raw": prior.bundle,
+                        "position": self.forged_carrier(prior, work=replace(prior.work, position=1)),
+                        "work": self.forged_carrier(prior, work=replace(prior.work, run_id="wrong")),
+                        "runtime": self.forged_carrier(prior, work=replace(prior.work,
+                            runtime=replace(prior.work.runtime, python_version="different"))),
+                        "runtime_row": self.forged_carrier(prior, bundle=replace(prior.bundle, streams=tuple(
+                            (name, (records.encode(replace(prior.work.runtime, python_version="different")),)
+                             if name == "runtime" else rows) for name, rows in prior.bundle.streams))),
+                        "component": self.forged_carrier(prior, component=operational.R0Component.PRIMARY),
+                        "phase": self.forged_carrier(prior, phase="target"),
+                        "profile": self.forged_carrier(prior, codec_profile_sha256=b"x" * 32),
+                        "kind": self.forged_carrier(prior, evidence=replace(case,
+                            receipt=replace(case.receipt, kind=execution.WorkerKind.K_CONTROL))),
+                        "family": self.forged_carrier(prior, evidence=replace(case, family="primary")),
+                        "complete": self.forged_carrier(prior,
+                            evidence=self.forged_carrier(case, readback_complete=False)),
+                        "path": self.forged_carrier(prior, evidence=replace(case,
+                            archive=replace(case.archive, relative_directory="calibration/c4/K/63/setup"))),
+                    }
+                    self.rejects(fixture, prior=variants[mutation])
+
+    def test_primary_and_setup_reject_any_prior(self):
+        for component, phase in ((operational.R0Component.PRIMARY, "target"),
+                                  (operational.R0Component.K_CONTROL, "setup")):
+            with self.subTest(component=component), _slice1t_sealed_fixture(component, phase) as fixture:
+                self.rejects(fixture, prior=fixture["bundle"])
+
+    def test_closed_ownership_excludes_support_and_keeps_each_nonempty_policy_boundary(self):
+        sizes = {name: (100 + i, 200 + i, 1) for i, name in enumerate(execution.STREAM_NAMES)}
+        sizes.update(operations=(10_000, 20_000, 30), resources=(40_000, 50_000, 60))
+        names = set(execution.STREAM_NAMES)
+        expected = (
+            (operational.R0Component.PRIMARY, "target", "primary", names - {"control_maintenance", "oracle_b_audits"}),
+            (operational.R0Component.K_CONTROL, "target", "k_control", names),
+            (operational.R0Component.DETERMINISM, "target", "determinism", names - {"repeat_oracle_b_audits"}),
+            (operational.R0Component.ORACLE_B, "target", "oracle_primary", {"oracle_b_audits"}),
+            (operational.R0Component.ORACLE_D_REPEAT, "target", "oracle_repeat", {"repeat_oracle_b_audits"}),
+            (operational.R0Component.ORACLE_K_BIND, "target", None, set()),
+        ) + tuple((component, "setup", "reference", {"control_maintenance"}) for component in (
+            operational.R0Component.K_CONTROL, operational.R0Component.DETERMINISM,
+            operational.R0Component.ORACLE_K_BIND, operational.R0Component.ORACLE_D_REPEAT))
+        for component, phase, family, owned in expected:
+            with self.subTest(component=component, phase=phase):
+                actual_family, actual = h._r0a_case_owned_v2(component, phase, sizes)
+                self.assertEqual(actual_family, family)
+                self.assertEqual(actual, h.evidence.R0AByteCountV2(*(sum(sizes[name][i] for name in owned)
+                                                                  for i in range(3))))
+
+    def test_prior_logical_maintenance_control_and_projection_headers_remain_authoritative(self):
+        for component, mutation in ((operational.R0Component.K_CONTROL, "maintenance"),
+                (operational.R0Component.DETERMINISM, "maintenance"),
+                (operational.R0Component.DETERMINISM, "control"),
+                (operational.R0Component.DETERMINISM, "kp0"),
+                (operational.R0Component.DETERMINISM, "header")):
+            with self.subTest(component=component, mutation=mutation), _slice1t_sealed_fixture(component) as fixture:
+                prior = self.read(dict(fixture, claim=fixture["setup"], phase="setup"))
+                bundle = prior.bundle
+                if mutation == "header":
+                    first = replace(bundle.projection_headers[0], comparable_compute_ns=1)
+                    bundle = replace(bundle, projection_headers=(first,) + bundle.projection_headers[1:])
+                else:
+                    name = "control_maintenance" if mutation == "maintenance" else mutation + "_decisions"
+                    bundle = replace(bundle, streams=tuple((n, () if n == name else rows) for n, rows in bundle.streams))
+                self.rejects(fixture, prior=self.forged_carrier(prior, bundle=bundle))
+
+    def test_inventory_rejects_missing_extra_nested_and_renamed_files_without_mutation(self):
+        for mutation in ("missing_case", "missing_stream", "extra_pkf", "extra_file", "jsonl", "nested", "renamed"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                root = fixture["anchor"] / fixture["claim"].relative_directory
+                if mutation == "missing_case":
+                    root.rename(root.with_name("missing-target"))
+                elif mutation == "missing_stream":
+                    (root / "runtime.pkf").unlink()
+                elif mutation == "nested":
+                    (root / "nested").mkdir()
+                elif mutation == "renamed":
+                    (root / "runtime.pkf").rename(root / "renamed.pkf")
+                else:
+                    (root / {"extra_pkf": "extra.pkf", "extra_file": "metadata.json", "jsonl": "boards.jsonl"}[mutation]).write_bytes(b"intrusion")
+                self.rejects(fixture)
+
+    def test_nonregular_and_detectable_reparse_shapes_reject(self):
+        import stat
+        from types import SimpleNamespace
+        for mutation in ("stream_directory", "stream_reparse", "ancestor_reparse"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                root = fixture["anchor"] / fixture["claim"].relative_directory
+                if mutation == "stream_directory":
+                    (root / "runtime.pkf").unlink()
+                    (root / "runtime.pkf").mkdir()
+                    self.rejects(fixture)
+                else:
+                    original = Path.lstat
+                    selected = root / "boards.pkf" if mutation == "stream_reparse" else root.parent
+                    def lstat(path, *args, **kwargs):
+                        info = original(path, *args, **kwargs)
+                        if path == selected:
+                            return SimpleNamespace(st_mode=info.st_mode,
+                                st_file_attributes=getattr(info, "st_file_attributes", 0) | stat.FILE_ATTRIBUTE_REPARSE_POINT)
+                        return info
+                    with patch.object(Path, "lstat", new=lstat), self.assertRaises(ValueError):
+                        self.read(fixture)
+
+    def test_rf02_truncation_corruption_and_trailing_bytes_reject(self):
+        for mutation in ("truncated", "corrupt", "valid_extra", "invalid_extra"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                path = fixture["anchor"] / fixture["claim"].relative_directory / "boards.pkf"
+                data = path.read_bytes()
+                changed = data[:-1] if mutation == "truncated" else data[:-1] + bytes((data[-1] ^ 1,)) if mutation == "corrupt" else data + (data if mutation == "valid_extra" else b"bad")
+                path.write_bytes(changed)
+                self.rejects(fixture, before_seals=True)
+
+    def test_experiment_keys_record_family_and_missing_extra_rows_reject(self):
+        for mutation in ("position", "rank", "index", "duplicate", "missing", "family"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                rows = self.rows(fixture, "boards")
+                key, record = rows[0]
+                if mutation in ("position", "rank", "index"):
+                    axis = ("position", "rank", "index").index(mutation)
+                    rows = [(tuple(value + 1 if i == axis else value for i, value in enumerate(key)), record)]
+                elif mutation == "duplicate":
+                    rows += rows
+                elif mutation == "missing":
+                    rows = []
+                if mutation == "family":
+                    # Valid CRC under boards context, but the logical family is deliberately wrong.
+                    context = physical.context_for("boards", fixture["profile"].sha256)
+                    logical = records.encode(fixture["claim"].samples[0])
+                    with patch.object(physical, "_logical"):
+                        encoded = physical.encode_frame(logical, key, context)
+                    (fixture["anchor"] / fixture["claim"].relative_directory / "boards.pkf").write_bytes(encoded)
+                else:
+                    self.rewrite(fixture, "boards", rows)
+                self.rejects(fixture, before_seals=True)
+
+    def test_writer_digest_order_and_total_claims_are_checked_against_actual_disk(self):
+        for mutation in ("sha256", "byte_length", "record_count", "name", "order", "physical_case_bytes"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                claim = fixture["claim"]
+                if mutation == "physical_case_bytes":
+                    claim = replace(claim, physical_case_bytes=claim.physical_case_bytes + 1)
+                elif mutation == "order":
+                    claim = replace(claim, streams=claim.streams[::-1])
+                else:
+                    first = claim.streams[0]
+                    value = "0" * 64 if mutation == "sha256" else "wrong" if mutation == "name" else getattr(first, mutation) + 1
+                    claim = replace(claim, streams=(replace(first, **{mutation: value}),) + claim.streams[1:])
+                self.rejects(fixture, claim=claim)
+
+    def test_operations_exact_terminal_progress_and_elapsed_contract(self):
+        mutations = ("unit_id", "phase", "event_kind", "status", "ordinal", "key", "missing_progress", "extra", "elapsed")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                rows = self.rows(fixture, "operations")
+                key, value = rows[0]
+                changes = {"unit_id": "wrong", "phase": records.Phase.READBACK, "event_kind": records.EventKind.START,
+                    "status": records.OperationStatus.RUNNING, "ordinal": 3}
+                if mutation in changes:
+                    rows[0] = (key, replace(value, **{mutation: changes[mutation]}))
+                elif mutation == "key":
+                    rows[0] = ((2,), value)
+                elif mutation == "missing_progress":
+                    rows = rows[:1]
+                elif mutation == "extra":
+                    rows.append(((2,), replace(value, ordinal=2)))
+                else:
+                    rows[0] = (key, replace(value, elapsed_ns=rows[1][1].elapsed_ns + 1))
+                self.rewrite(fixture, "operations", rows)
+                self.rejects(fixture, before_seals=True)
+
+    def test_resources_exact_samples_identity_role_method_key_and_count(self):
+        for mutation in ("unit_id", "role", "method", "missing", "extra", "key", "sample_claim"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                rows = self.rows(fixture, "resources")
+                key, sample = rows[0]
+                if mutation == "sample_claim":
+                    self.rejects(fixture, before_seals=True,
+                        claim=replace(fixture["claim"], samples=(replace(sample, timestamp="different"),)))
+                    continue
+                if mutation == "missing":
+                    rows = []
+                elif mutation == "extra":
+                    rows.append(((1,), sample))
+                elif mutation == "key":
+                    rows = [((1,), sample)]
+                else:
+                    changes = {"unit_id": dict(unit_id="wrong"), "role": dict(process_role=records.ProcessRole.WORKER),
+                               "method": dict(method=records.MemoryMethod.RSS)}[mutation]
+                    rows = [(key, replace(sample, **changes))]
+                self.rewrite(fixture, "resources", rows)
+                self.rejects(fixture, before_seals=True)
+
+    def test_each_payload_axis_is_independently_reconstructed(self):
+        for axis in ("logical_bytes", "physical_frame_bytes", "legacy_bundle_bytes", "wb02_wire_bytes"):
+            with self.subTest(axis=axis), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                claim = fixture["claim"]
+                self.rejects(fixture, before_seals=True,
+                    claim=replace(claim, **{axis: getattr(claim, axis) + 1}))
+
+    def test_durable_worker_sum_is_not_individual_live_worker_peak(self):
+        from tests.test_program_k_e2_operational import _envelope
+        envelope = _envelope(concurrency=2, worker_memory_cap_bytes=500,
+            coordinator_memory_cap_bytes=1000, memory_cap_bytes=2000, readback_wall_ms=10000)
+        sample = records.ResourceSampleRecord("placeholder", records.ProcessRole.COMBINED,
+            700, 200, 900, "shared-ledger", 7, records.MemoryMethod.PRIVATE_BYTES)
+        observation = operational._R0Observation(100, 250, 950, 2, 5, 0, 1,
+            (0, 0, 0, ()), True, True, True, ())
+        with _slice1t_sealed_fixture(operational.R0Component.PRIMARY, envelope=envelope,
+                samples=(sample,), observation=observation) as fixture:
+            observed = self.read(fixture).evidence
+            self.assertEqual(observed.observation.worker_memory, 100)
+            self.assertGreater(fixture["claim"].samples[0].worker_bytes, envelope.worker_memory_cap_bytes)
+            self.assertLess(fixture["claim"].samples[0].coordinator_bytes, observed.observation.coordinator_memory)
+            self.assertLess(fixture["claim"].samples[0].combined_bytes, observed.observation.combined_memory)
+            self.assertTrue(observed.readback_complete)
+
+    def test_c1_repeat_telemetry_converts_every_field_without_recomputing_copied_spans(self):
+        for component in (operational.R0Component.DETERMINISM, operational.R0Component.ORACLE_D_REPEAT):
+            with self.subTest(component=component), _slice1t_sealed_fixture(component, rich=True) as fixture:
+                returned = self.read(fixture)
+                telemetry, live = returned.evidence.observation, fixture["claim"].observation
+                values = dict(returned.bundle.streams)
+                copied = max(records.decode(row).duration_ns for row in values["control_decision_spans"])
+                current = max(records.decode(row).duration_ns for row in values["repeat_control_decision_spans"])
+                self.assertEqual((copied, current, telemetry.arm_wall, telemetry.decision_wall), (200, 50, 100, 50))
+                self.assertGreater(copied, telemetry.arm_wall)
+                for name in ("worker_memory", "coordinator_memory", "combined_memory", "decision_wall", "arm_wall",
+                             "shadow_wall", "physical_inputs", "resources_complete", "cleanup_complete", "watchdogs_complete"):
+                    self.assertEqual(getattr(telemetry, name), getattr(live, name))
+                self.assertEqual((telemetry.oracle.probes, telemetry.oracle.calls, telemetry.oracle.wall_ns,
+                    tuple((i.started_ns, i.finished_ns) for i in telemetry.oracle.intervals)), live.oracle)
+                self.assertEqual(tuple((i.started_ns, i.finished_ns) for i in telemetry.prior_binding_intervals),
+                                 live.prior_binding_intervals)
+
+    def test_invalid_live_telemetry_is_not_clamped_or_replaced_with_durable_samples(self):
+        for mutation in ("decision_scope", "completion", "worker_cap", "coordinator_cap", "combined_cap",
+                         "physical_inputs", "coordinator_below_sample", "combined_below_sample"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                observation = fixture["claim"].observation
+                changes = {"decision_scope": dict(decision_wall=observation.arm_wall + 1),
+                    "completion": dict(cleanup_complete=False),
+                    "worker_cap": dict(worker_memory=fixture["envelope"].worker_memory_cap_bytes + 1,
+                        combined_memory=fixture["envelope"].worker_memory_cap_bytes + 201),
+                    "coordinator_cap": dict(coordinator_memory=fixture["envelope"].coordinator_memory_cap_bytes + 1,
+                        combined_memory=fixture["envelope"].coordinator_memory_cap_bytes + 101),
+                    "combined_cap": dict(combined_memory=fixture["envelope"].memory_cap_bytes + 1),
+                    "physical_inputs": dict(physical_inputs=2),
+                    "coordinator_below_sample": dict(coordinator_memory=199),
+                    "combined_below_sample": dict(combined_memory=299)}[mutation]
+                self.rejects(fixture, claim=replace(fixture["claim"], observation=replace(observation, **changes)))
+
+    def test_all_readers_open_before_decode_and_only_eof_close_produces_digests(self):
+        reader_type = h.store.FramedStreamPullReader
+        original_init, original_pull, original_close = reader_type.__init__, reader_type.pull, reader_type.close
+        opened, eof, closed = [], set(), []
+        def initialize(reader, *args, **kwargs):
+            original_init(reader, *args, **kwargs)
+            opened.append(reader)
+        def pull(reader):
+            self.assertEqual(len(opened), 55)
+            row = original_pull(reader)
+            if row is None:
+                eof.add(id(reader))
+            return row
+        def close(reader):
+            self.assertTrue(reader._eof)
+            result = original_close(reader)
+            self.assertIs(type(result), records.StreamDigest)
+            closed.append(reader)
+            return result
+        with _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture, \
+                patch.object(reader_type, "__init__", new=initialize), \
+                patch.object(reader_type, "pull", new=pull), patch.object(reader_type, "close", new=close):
+            self.read(fixture)
+        self.assertEqual(len(opened), 55)
+        self.assertEqual(len(closed), 55)
+        self.assertTrue(all(reader.completed_digest is not None for reader in opened))
+
+    def test_outer_semantic_prior_support_and_close_failures_invalidate_every_opened_reader(self):
+        reader_type = h.store.FramedStreamPullReader
+        original_init, original_close = reader_type.__init__, reader_type.close
+        for mutation in ("semantic", "prior", "support", "premature_close", "close_failure",
+                         "base_exception", "open_failure", "telemetry", "evidence"):
+            component = operational.R0Component.DETERMINISM if mutation == "prior" else operational.R0Component.PRIMARY
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(component) as fixture:
+                prior = None
+                if fixture["setup"] is not None:
+                    prior = self.read(dict(fixture, claim=fixture["setup"], phase="setup"))
+                if mutation == "support":
+                    self.rewrite(fixture, "operations", [])
+                elif mutation == "telemetry":
+                    fixture["claim"] = replace(fixture["claim"],
+                        observation=replace(fixture["claim"].observation, decision_wall=6))
+                opened, closed = [], []
+                def initialize(reader, *args, **kwargs):
+                    if mutation == "open_failure" and len(opened) == 10:
+                        raise OSError("literal reader open failure")
+                    original_init(reader, *args, **kwargs)
+                    opened.append(reader)
+                def close(reader):
+                    closed.append(reader)
+                    if mutation == "premature_close":
+                        reader._eof = False
+                    if mutation == "close_failure" and len(closed) == 2:
+                        raise OSError("literal read-only close failure")
+                    return original_close(reader)
+                before = self.snapshot(fixture["anchor"])
+                with _EvidenceExitStack() as stack:
+                    stack.enter_context(patch.object(reader_type, "__init__", new=initialize))
+                    stack.enter_context(patch.object(reader_type, "close", new=close))
+                    if mutation in ("semantic", "base_exception"):
+                        stack.enter_context(patch.object(h.qualification, "_reconstruct",
+                            side_effect=KeyboardInterrupt("literal cancellation") if mutation == "base_exception" else ValueError("semantic failure")))
+                    elif mutation == "prior":
+                        stack.enter_context(patch.object(h.qualification, "_prior_bundle_v2", side_effect=ValueError("prior failure")))
+                    elif mutation == "evidence":
+                        stack.enter_context(patch.object(h.evidence, "R0ACaseEvidenceV2",
+                            side_effect=ValueError("late evidence construction failure")))
+                    with self.assertRaises(KeyboardInterrupt if mutation == "base_exception" else (ValueError, OSError)):
+                        self.read(fixture, prior=prior)
+                self.assertEqual(len(opened), 10 if mutation == "open_failure" else 55)
+                if mutation in ("telemetry", "evidence"):
+                    self.assertEqual(len(closed), 55)
+                self.assertTrue(all(reader._closed and reader._poisoned and reader.completed_digest is None for reader in opened))
+                self.assertEqual(self.snapshot(fixture["anchor"]), before)
+
+    def test_readback_monitor_cancellation_timeout_and_both_memory_caps_fail_closed(self):
+        from types import SimpleNamespace
+        reader_type = h.store.FramedStreamPullReader
+        original_init, original_pull = reader_type.__init__, reader_type.pull
+        for mutation in ("cancel", "wall", "coordinator", "combined"):
+            with self.subTest(mutation=mutation), _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+                opened, pulled = [], [False]
+                def initialize(reader, *args, **kwargs):
+                    original_init(reader, *args, **kwargs)
+                    opened.append(reader)
+                def pull(reader):
+                    result = original_pull(reader)
+                    pulled[0] = True
+                    return result
+                def clock():
+                    return fixture["envelope"].readback_wall_ms * 1_000_000 if mutation == "wall" and pulled[0] else 0
+                def memory():
+                    if not pulled[0]:
+                        return 100
+                    cap = fixture["envelope"].coordinator_memory_cap_bytes if mutation == "coordinator" else fixture["envelope"].memory_cap_bytes
+                    return cap + 1 if mutation in ("coordinator", "combined") else 100
+                before = self.snapshot(fixture["anchor"])
+                with _slice1t_readonly_guards(), patch.object(reader_type, "__init__", new=initialize), \
+                        patch.object(reader_type, "pull", new=pull), patch.object(h.time, "monotonic_ns", side_effect=clock), \
+                        patch.object(operational.harness, "_coordinator_private_bytes", side_effect=memory), self.assertRaises(ValueError):
+                    h._readback_r0a_case_v2(fixture["anchor"], fixture["claim"], fixture["work"],
+                        fixture["component"], fixture["phase"], fixture["profile"], fixture["envelope"],
+                        cancel=SimpleNamespace(is_set=lambda: mutation == "cancel" and pulled[0]))
+                self.assertEqual(len(opened), 55)
+                self.assertTrue(all(reader._closed and reader._poisoned and reader.completed_digest is None for reader in opened))
+                self.assertEqual(self.snapshot(fixture["anchor"]), before)
+
+    def test_existing_v1_synthetic_and_non_r0_v2_owners_do_not_reference_new_boundary(self):
+        owners = (h._readback_v2_plan, h._readback_synthetic_v2, h._v2_readback_unit,
+            h._v2_readback_prior, h._v2_readback_support, h.launch_r0a, h.launch_r0b,
+            operational.measure_r0_component, operational._persist_r0, operational._seal_r0_case_v2,
+            operational._workflow_v2, operational._supervise_operation_v2, operational._supervise_r0_operation_v2)
+        for owner in owners:
+            with self.subTest(owner=owner.__name__):
+                self.assertNotIn("_readback_r0a_case_v2", inspect.getsource(owner))
+        with patch.object(h, "_readback_r0a_case_v2", side_effect=AssertionError("Implicit readback")), \
+                _slice1t_sealed_fixture(operational.R0Component.PRIMARY) as fixture:
+            self.assertIs(type(fixture["claim"]), operational._R0V2SealedCase)

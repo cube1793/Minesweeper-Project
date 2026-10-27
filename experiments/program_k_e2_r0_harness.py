@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import stat
 import struct
 import sys
 import threading
@@ -2875,6 +2876,340 @@ def _readback_v2_plan(root, source_plan, targets, profile, envelope, unit_counts
             minimum, ledger.capacity, final_excess, ledger.capacity - final_excess, operations, primaries,
             sample_max, peak, len(facts), reservation, metadata_sha256, context_bytes,
             profile.sha256.hex(), targets)
+    except BaseException:
+        for reader in readers.values():
+            try:
+                reader.invalidate()
+            except BaseException:
+                pass
+        raise
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class _R0AReadbackCaseV2:
+    """Private disk-authenticated premise; construction belongs to readback only."""
+    evidence: evidence.R0ACaseEvidenceV2
+    bundle: execution.WorkerBundle
+    work: execution.BoardWork
+    component: operational.R0Component
+    phase: str
+    codec_profile_sha256: bytes
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("R0-A premises are created only by successful independent readback.")
+
+    def __post_init__(self):
+        _need(type(self.evidence) is evidence.R0ACaseEvidenceV2, "R0A_READBACK_CASE_EVIDENCE")
+        evidence.R0ACaseEvidenceV2.__post_init__(self.evidence)
+        _need(type(self.bundle) is execution.WorkerBundle and type(self.work) is execution.BoardWork,
+              "R0A_READBACK_CASE_TYPES")
+        execution.WorkerBundle.__post_init__(self.bundle)
+        execution.BoardWork.__post_init__(self.work)
+        _need(type(self.work.runtime) is records.RuntimeIdentity, "R0A_READBACK_CASE_RUNTIME")
+        records.RuntimeIdentity.__post_init__(self.work.runtime)
+        _need(type(self.component) is operational.R0Component
+              and type(self.phase) is str and self.phase in ("setup", "target"), "R0A_READBACK_CASE_ROUTE")
+        _need(type(self.codec_profile_sha256) is bytes and len(self.codec_profile_sha256) == 32,
+              "R0A_READBACK_CASE_PROFILE")
+        _need((self.bundle.work_position, self.bundle.board, self.bundle.arm_order, self.bundle.kind) ==
+              (self.work.position, records.encode(self.work.board), self.work.arm_order, self.evidence.receipt.kind)
+              and self.evidence.receipt.position == self.work.position
+              and dict(self.bundle.streams).get("runtime") == (records.encode(self.work.runtime),)
+              and self.bundle.status is records.AuditStatus.PASS, "R0A_READBACK_CASE_BINDING")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("Authenticated R0-A cases are private process-local premises.")
+
+
+def _r0a_case_identity_v2(work, component, phase, envelope):
+    """Expected route authority comes from the caller, never the sealed claims."""
+    _need(type(work) is execution.BoardWork, "R0A_EXPECTED_BOARD_WORK")
+    execution.BoardWork.__post_init__(work)
+    _need(type(work.runtime) is records.RuntimeIdentity, "R0A_EXPECTED_RUNTIME_REQUIRED")
+    records.RuntimeIdentity.__post_init__(work.runtime)
+    relative = operational._r0_case_path_v2(envelope.concurrency, component, work.position, phase)
+    _need((work.oracle_b_selected, work.determinism_selected, work.k_control_selected) == (
+        component in (operational.R0Component.ORACLE_B, operational.R0Component.ORACLE_K_BIND,
+                      operational.R0Component.ORACLE_D_REPEAT),
+        component in (operational.R0Component.DETERMINISM, operational.R0Component.ORACLE_D_REPEAT),
+        component in (operational.R0Component.K_CONTROL, operational.R0Component.ORACLE_K_BIND)),
+        "R0A_EXPECTED_COMPONENT_FLAGS")
+    kinds = {operational.R0Component.PRIMARY: execution.WorkerKind.PRIMARY,
+        operational.R0Component.ORACLE_B: execution.WorkerKind.PRIMARY,
+        operational.R0Component.K_CONTROL: execution.WorkerKind.K_CONTROL,
+        operational.R0Component.DETERMINISM: execution.WorkerKind.DETERMINISM,
+        operational.R0Component.ORACLE_K_BIND: execution.WorkerKind.K_CONTROL,
+        operational.R0Component.ORACLE_D_REPEAT: execution.WorkerKind.DETERMINISM}
+    return (execution.WorkerKind.PRIMARY if phase == "setup" else kinds[component]), relative
+
+
+def _r0a_case_inventory_v2(anchor, relative, names):
+    """Normal filesystem shape only; no hostile concurrent namespace guarantee."""
+    def normal(path, directory):
+        info = path.lstat()
+        expected = stat.S_ISDIR if directory else stat.S_ISREG
+        _need(expected(info.st_mode)
+              and not (getattr(info, "st_file_attributes", 0)
+                       & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)), "R0A_READBACK_PATH_SHAPE")
+        junction = getattr(path, "is_junction", None)
+        _need(junction is None or not junction(), "R0A_READBACK_JUNCTION")
+    root = Path(anchor).absolute()
+    for path in reversed((root,) + tuple(root.parents)):
+        normal(path, True)
+    for part in relative.split("/"):
+        root = root / part
+        normal(root, True)
+    entries = tuple(root.iterdir())
+    _need(len(entries) == len(names) == 55
+          and {path.name for path in entries} == {name + ".pkf" for name in names}, "R0A_READBACK_FILE_SET")
+    for path in entries:
+        normal(path, False)
+    return root
+
+
+def _r0a_case_rows_v2(readers, work, kind, profile, envelope, monitor):
+    values, sizes, logical, physical_bytes = {}, {}, 0, 0
+    rank = operational._kind_rank(kind)
+    for name in execution.STREAM_NAMES:
+        data, frame_bytes = [], 0
+        reader = readers[name]
+        while True:
+            monitor.check()
+            key = reader.peek_key()
+            if key is None:
+                break
+            _need(key == (work.position, rank, len(data)), "R0A_READBACK_EXPERIMENT_KEY")
+            row = reader.pull()
+            _need(row is not None and row.key == key and type(row.record) is execution._family(name),
+                  "R0A_READBACK_RECORD_FAMILY")
+            logical += len(row.logical_bytes)
+            physical_bytes += row.frame_length
+            _need(logical <= envelope.max_payload_bytes and physical_bytes <= envelope.max_payload_bytes,
+                  "R0A_READBACK_PAYLOAD_CAP")
+            frame_bytes += row.frame_length
+            data.append(row.logical_bytes)
+            del row
+            monitor.check()
+        values[name] = tuple(data)
+        sizes[name] = (frame_bytes, sum(map(len, data)), len(data))
+    monitor.check()
+    bundle = qualification._reconstruct(work, kind, values, qualification.load_timing_table(), envelope)
+    monitor.check()
+    legacy = execution.legacy_bundle_size(bundle)
+    groups = tuple((name, sizes[name][2], sizes[name][1], sizes[name][0]) for name, _ in bundle.streams)
+    _, _, wire = execution._wb02_layout(bundle, profile.sha256, logical, legacy, groups, physical_bytes)
+    payload = evidence.R0APayloadAxesV2(logical, legacy, wire, physical_bytes)
+    _need(legacy <= envelope.max_payload_bytes and wire <= envelope.max_payload_bytes,
+          "R0A_READBACK_RECONSTRUCTED_PAYLOAD_CAP")
+    monitor.check()
+    return bundle, payload, sizes
+
+
+def _r0a_case_prior_v2(prior, work, component, kind, profile, envelope):
+    if kind is execution.WorkerKind.PRIMARY:
+        _need(prior is None, "R0A_PRIMARY_HAS_PRIOR")
+        return
+    _need(type(prior) is _R0AReadbackCaseV2, "R0A_AUTHENTICATED_PRIMARY_REQUIRED")
+    _R0AReadbackCaseV2.__post_init__(prior)
+    relative = operational._r0_case_path_v2(envelope.concurrency, component, work.position, "setup")
+    _need(prior.work == work and type(prior.work.runtime) is records.RuntimeIdentity
+          and prior.work.runtime == work.runtime and prior.component is component and prior.phase == "setup"
+          and prior.codec_profile_sha256 == profile.sha256
+          and prior.evidence.receipt.kind is execution.WorkerKind.PRIMARY
+          and prior.bundle.kind is execution.WorkerKind.PRIMARY
+          and prior.evidence.family == "reference" and prior.evidence.readback_complete is True
+          and prior.evidence.archive.relative_directory == relative, "R0A_PRIMARY_PREMISE_BINDING")
+
+
+def _r0a_case_support_v2(readers, sealed_case, work, kind, envelope, monitor):
+    events = readers["operations"]
+    unit_id = operational._unit_id(work.position, kind)
+    expected = [(unit_id + ":ADMITTED", records.EventKind.END, records.OperationStatus.COMPLETED)]
+    if kind is execution.WorkerKind.PRIMARY:
+        expected.append(("durable_primary_count:1", records.EventKind.PROGRESS, records.OperationStatus.RUNNING))
+    elapsed = -1
+    for ordinal, (name, event_kind, status) in enumerate(expected):
+        monitor.check()
+        row = events.pull()
+        _need(row is not None and row.key == (ordinal,) and type(row.record) is records.OperationEventRecord,
+              "R0A_OPERATION_KEY_OR_TYPE")
+        event = row.record
+        records.OperationEventRecord.__post_init__(event)
+        _need((event.phase, event.unit_id, event.event_kind, event.ordinal, event.status) ==
+              (records.Phase.EXECUTION, name, event_kind, ordinal, status)
+              and event.elapsed_ns >= elapsed, "R0A_OPERATION_STRUCTURE")
+        elapsed = event.elapsed_ns
+        monitor.check()
+    _need(events.peek_key() is None, "R0A_EXTRA_OPERATION")
+    samples, elapsed = readers["resources"], -1
+    for ordinal, expected_sample in enumerate(sealed_case.samples):
+        monitor.check()
+        row = samples.pull()
+        _need(row is not None and row.key == (ordinal,) and type(row.record) is records.ResourceSampleRecord,
+              "R0A_RESOURCE_KEY_OR_TYPE")
+        sample = row.record
+        records.ResourceSampleRecord.__post_init__(sample)
+        _need(sample == expected_sample and sample.unit_id == unit_id
+              and sample.process_role is records.ProcessRole.COMBINED
+              and sample.method is records.MemoryMethod.PRIVATE_BYTES
+              and sample.coordinator_bytes <= envelope.coordinator_memory_cap_bytes
+              and sample.combined_bytes <= envelope.memory_cap_bytes
+              and sample.elapsed_ns >= elapsed, "R0A_RESOURCE_BINDING_OR_CAP")
+        # worker_bytes sums all active Jobs; it is not this Job's individual peak.
+        elapsed = sample.elapsed_ns
+        monitor.check()
+    _need(samples.peek_key() is None, "R0A_EXTRA_RESOURCE")
+
+
+def _r0a_case_owned_v2(component, phase, sizes):
+    """Closed R0-A ownership, excluding both durable support streams."""
+    if phase == "setup":
+        family, names = "reference", ("control_maintenance",)
+    elif component is operational.R0Component.PRIMARY:
+        family = "primary"
+        names = tuple(name for name in execution.STREAM_NAMES if name not in ("control_maintenance", "oracle_b_audits"))
+    elif component is operational.R0Component.K_CONTROL:
+        family, names = "k_control", execution.STREAM_NAMES
+    elif component is operational.R0Component.DETERMINISM:
+        family = "determinism"
+        names = tuple(name for name in execution.STREAM_NAMES if name != "repeat_oracle_b_audits")
+    elif component is operational.R0Component.ORACLE_B:
+        family, names = "oracle_primary", ("oracle_b_audits",)
+    elif component is operational.R0Component.ORACLE_D_REPEAT:
+        family, names = "oracle_repeat", ("repeat_oracle_b_audits",)
+    else:
+        _need(component is operational.R0Component.ORACLE_K_BIND, "R0A_OWNERSHIP_COMPONENT")
+        family, names = None, ()
+    return family, evidence.R0AByteCountV2(*(sum(sizes[name][axis] for name in names) for axis in range(3)))
+
+
+def _r0a_case_telemetry_v2(observation, bundle, work, kind, envelope, receipt):
+    """Preserve live measurements; disk binds counts, never remeasures wall/peaks."""
+    _need(type(observation) is operational._R0Observation, "R0A_LIVE_OBSERVATION_TYPE")
+    operational._R0Observation.__post_init__(observation)
+    probes, calls, wall, intervals = observation.oracle
+    streams = dict(bundle.streams)
+    physical_names = {execution.WorkerKind.PRIMARY: ("control_physical_inputs", "kp0_physical_inputs"),
+        execution.WorkerKind.DETERMINISM: ("repeat_control_physical_inputs", "repeat_kp0_physical_inputs"),
+        execution.WorkerKind.K_CONTROL: ("kcontrol_maintenance",)}[kind]
+    _need(observation.physical_inputs == max(len(streams[name]) for name in physical_names),
+          "R0A_PHYSICAL_INPUT_COUNT_BINDING")
+    if work.oracle_b_selected and kind is not execution.WorkerKind.K_CONTROL:
+        prefix = "repeat_" if kind is execution.WorkerKind.DETERMINISM else ""
+        decisions = tuple(records.decode(row) for row in streams[prefix + "kp0_decisions"])
+        audits = tuple(records.decode(row) for row in streams[prefix + "oracle_b_audits"])
+        _need(probes == 2 * sum(row.action_ordinal > 0 for row in decisions)
+              and calls == sum(row.status is not records.AuditStatus.INCOMPLETE for row in audits),
+              "R0A_ORACLE_COUNT_BINDING")
+    else:
+        _need(observation.oracle == (0, 0, 0, ()), "R0A_UNEXPECTED_ORACLE_TELEMETRY")
+    _need(observation.worker_memory <= envelope.worker_memory_cap_bytes
+          and observation.coordinator_memory <= envelope.coordinator_memory_cap_bytes
+          and observation.combined_memory <= envelope.memory_cap_bytes
+          and observation.decision_wall < envelope.max_decision_wall_ms * 1_000_000
+          and observation.arm_wall < envelope.max_arm_wall_ms * 1_000_000
+          and observation.shadow_wall <= envelope.shadow_timeout_ms * 1_000_000
+          and observation.physical_inputs <= envelope.max_physical_inputs
+          and receipt.elapsed_ns < envelope.max_case_wall_ms * 1_000_000, "R0A_LIVE_OBSERVATION_CAP")
+    return evidence.R0ATelemetryV2(observation.worker_memory, observation.coordinator_memory,
+        observation.combined_memory, observation.decision_wall, observation.arm_wall,
+        observation.shadow_wall, observation.physical_inputs,
+        evidence.R0AOracleTelemetryV2(probes, calls, wall, tuple(evidence.R0AIntervalV2(*i) for i in intervals)),
+        observation.resources_complete, observation.cleanup_complete, observation.watchdogs_complete,
+        tuple(evidence.R0AIntervalV2(*i) for i in observation.prior_binding_intervals))
+
+
+def _readback_r0a_case_v2(anchor, sealed_case, expected_work, expected_component, expected_phase,
+                         profile, envelope, *, prior_primary=None, cancel=None):
+    """Authenticate one runtime-bound sealed case; no collector, launcher or writer."""
+    readers = {}
+    try:
+        envelope = operational._envelope(envelope)
+        physical.require_qualified_profile(profile)
+        monitor = _V2ReadbackMonitor(envelope, cancel)
+        monitor.check()
+        kind, relative = _r0a_case_identity_v2(expected_work, expected_component, expected_phase, envelope)
+        _need(type(sealed_case) is operational._R0V2SealedCase, "R0A_SEALED_CLAIMS_TYPE")
+        _need(type(sealed_case.work) is execution.BoardWork and sealed_case.work == expected_work
+              and type(sealed_case.work.runtime) is records.RuntimeIdentity
+              and sealed_case.work.runtime == expected_work.runtime
+              and type(sealed_case.component) is operational.R0Component and sealed_case.component is expected_component
+              and type(sealed_case.phase) is str and sealed_case.phase == expected_phase
+              and type(sealed_case.relative_directory) is str and sealed_case.relative_directory == relative
+              and type(sealed_case.codec_profile_sha256) is bytes and sealed_case.codec_profile_sha256 == profile.sha256,
+              "R0A_SEALED_EXPECTED_BINDING")
+        execution.BoardWork.__post_init__(sealed_case.work)
+        receipt = sealed_case.receipt
+        _need(type(receipt) is operational.UnitReceipt, "R0A_LIVE_RECEIPT_TYPE")
+        operational.UnitReceipt.__post_init__(receipt)
+        _need(receipt.position == expected_work.position and receipt.kind is kind
+              and receipt.status is records.AuditStatus.PASS and receipt.reason == "ADMITTED"
+              and type(receipt.exit_code) is int and receipt.exit_code == 0 and receipt.elapsed_ns > 0,
+              "R0A_ADMITTED_RECEIPT_REQUIRED")
+        names = execution.STREAM_NAMES + ("operations", "resources")
+        _need(type(sealed_case.streams) is tuple and len(sealed_case.streams) == len(names), "R0A_WRITER_SEAL_COVERAGE")
+        for name, seal in zip(names, sealed_case.streams):
+            _need(type(seal) is records.StreamDigest, "R0A_WRITER_SEAL_TYPE")
+            records.StreamDigest.__post_init__(seal)
+            _need(seal.name == name, "R0A_WRITER_SEAL_ORDER")
+        _integer(sealed_case.physical_case_bytes, 1)
+        _need(sealed_case.physical_case_bytes <= envelope.archive_cap_bytes, "R0A_CASE_ARCHIVE_CAP")
+        for size in (sealed_case.logical_bytes, sealed_case.physical_frame_bytes,
+                     sealed_case.legacy_bundle_bytes, sealed_case.wb02_wire_bytes):
+            _integer(size, 1)
+            _need(size <= envelope.max_payload_bytes, "R0A_TRANSPORT_CLAIM_CAP")
+        _need(type(sealed_case.samples) is tuple and 1 <= len(sealed_case.samples) <= 3, "R0A_RESOURCE_CLAIM_COUNT")
+        for sample in sealed_case.samples:
+            _need(type(sample) is records.ResourceSampleRecord, "R0A_RESOURCE_CLAIM_TYPE")
+            records.ResourceSampleRecord.__post_init__(sample)
+        interval = sealed_case.parent_admission_interval
+        _need(type(interval) is tuple and len(interval) == 2, "R0A_PARENT_ADMISSION_INTERVAL")
+        for endpoint in interval:
+            _integer(endpoint)
+        _need(interval[0] <= interval[1], "R0A_PARENT_ADMISSION_INTERVAL")
+        _r0a_case_prior_v2(prior_primary, expected_work, expected_component, kind, profile, envelope)
+        root = _r0a_case_inventory_v2(anchor, relative, names)
+        monitor.check()
+        for name in names:
+            monitor.check()
+            readers[name] = store.FramedStreamPullReader(root, name, physical.context_for(name, profile.sha256),
+                                                         max_payload_bytes=envelope.max_payload_bytes)
+        bundle, payload, sizes = _r0a_case_rows_v2(readers, expected_work, kind, profile, envelope, monitor)
+        if kind is not execution.WorkerKind.PRIMARY:
+            qualification._prior_bundle_v2(bundle, prior_primary.bundle, kind)
+        monitor.check()
+        _r0a_case_support_v2(readers, sealed_case, expected_work, kind, envelope, monitor)
+        _need((payload.logical_sum_bytes, payload.physical_frame_bytes, payload.legacy_bundle_bytes, payload.wb02_wire_bytes) ==
+              (sealed_case.logical_bytes, sealed_case.physical_frame_bytes, sealed_case.legacy_bundle_bytes,
+               sealed_case.wb02_wire_bytes), "R0A_TRANSPORT_AXES_MISMATCH")
+        family, owned = _r0a_case_owned_v2(expected_component, expected_phase, sizes)
+        seals = []
+        for name, expected in zip(names, sealed_case.streams):
+            monitor.check()
+            _need(readers[name].peek_key() is None, "R0A_STREAM_EOF_REQUIRED")
+            observed = readers[name].close()
+            _need(type(observed) is records.StreamDigest and observed == expected, "R0A_WRITER_SEAL_MISMATCH")
+            seals.append(observed)
+        seals = tuple(seals)
+        _need(seals == sealed_case.streams
+              and sum(seal.byte_length for seal in seals) == sealed_case.physical_case_bytes
+              and sum(seal.byte_length for seal in seals[:len(execution.STREAM_NAMES)]) == payload.physical_frame_bytes,
+              "R0A_CASE_PHYSICAL_RECONCILIATION")
+        observation = _r0a_case_telemetry_v2(sealed_case.observation, bundle, expected_work, kind, envelope, receipt)
+        _need(all(sample.coordinator_bytes <= observation.coordinator_memory
+                  and sample.combined_bytes <= observation.combined_memory for sample in sealed_case.samples),
+              "R0A_LIVE_PEAK_BELOW_DURABLE_SAMPLE")
+        monitor.check()
+        case = evidence.R0ACaseEvidenceV2(receipt, observation, payload,
+            evidence.R0AArchiveEvidenceV2(relative, seals), family, owned, True)
+        authenticated = object.__new__(_R0AReadbackCaseV2)
+        for name, value in (("evidence", case), ("bundle", bundle), ("work", expected_work),
+                            ("component", expected_component), ("phase", expected_phase),
+                            ("codec_profile_sha256", profile.sha256)):
+            object.__setattr__(authenticated, name, value)
+        _R0AReadbackCaseV2.__post_init__(authenticated)
+        monitor.check()
+        return authenticated
     except BaseException:
         for reader in readers.values():
             try:
