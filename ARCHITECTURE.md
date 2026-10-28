@@ -385,16 +385,16 @@ Remediation engineering investigation is **CLOSED / ACCEPTED**. The exact
 [remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
 and its [acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
 are frozen at documentation commit `83c9f0c` with **FINAL DESIGN ACCEPTED —
-BLOCKER 0 / REQUIRED 0; design phase CLOSED**. The design is an accepted future
-implementation contract, not a statement that current production source already
-implements the remediation.
+BLOCKER 0 / REQUIRED 0; design phase CLOSED**. Remediation implementation
+**1A–1W is 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED** in the experimental
+V2 path. Program K production integration remains **NOT STARTED**.
 
 Accepted V1.3.1 design boundaries:
 
 | Boundary | Accepted responsibility |
 | --- | --- |
 | Logical evidence | Existing canonical `records.encode()` bytes, semantic digests and required evidence content remain unchanged |
-| Physical representation | Planned `PKE2RF02` record frames and `PKE2WB02` worker bundle; raw DEFLATE profile is qualified explicitly rather than changing logical schemas |
+| Physical representation | `PKE2RF02` record frames and `PKE2WB02` worker bundle; raw DEFLATE profile is qualified explicitly rather than changing logical schemas |
 | Size calibration | Physical and logical maxima produce independent 3/2 floors; the logical floor qualifies workload only and never grants archive credit |
 | P/K/D/O sizing | Two-component constructor separates repetitive logical volume from deterministic entropy used to control physical size; positive physical floors retain the inclusive `T_P .. T_P+4096` procedural window |
 | Reference sizing | Truthful 30×16 zero-mine scaffold with the complete 479-entry constraint catalog; artificial `Z` is forbidden; reference has no +4096 window and uses the bounded minimum eligible candidate |
@@ -403,14 +403,24 @@ Accepted V1.3.1 design boundaries:
 | Compatibility | Historical V1 evidence/decoding stays unchanged; V1/V2/profile/basis mixing must fail closed |
 | Qualification gate | Before large qualification, the exact large truthful reference must run the bounded encode/decode/validation/K-D-binding wall and peak-RSS diagnostic |
 
-`RF02`, `WB02`, the two-component constructors and `B_proc` are therefore
-**accepted planned architecture**, not yet live runtime architecture. Current
-source facts continue to come from committed code/tests. The immediate next work
-unit is separately authorized **Remediation Slice 1A — RF02 / WB02 / codec /
-qualified-profile primitives**. A later accepted implementation and qualification
-must be committed before a separately authorized fresh R0-A can recalibrate the
-new source/profile. Real R0-B and Actual E2 remain separately gated after that.
-No design acceptance auto-chains execution.
+`RF02`, `WB02`, the two-component constructors, `B_proc` and the V2 R0-A run
+lifecycle exist in the accepted experimental implementation. Current source/tests
+remain the implementation authority. **FRESH R0-A FINAL PREFLIGHT — PASS** at
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`, with **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**,
+makes that source **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**.
+The qualified V2 codec profile is distinct from frozen Model C; exact identities
+and accepted USER-host evidence are in [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md).
+
+**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
+**ChatGPT final documentation CONTENT review: PASS; USER commit/push authorized.**
+If publication is pending, USER completes the remaining commit/push steps.
+**CURRENT NEXT after committed/pushed publication:** narrow post-documentation
+authority re-anchor → separate Fresh R0-A execution authorization → only then
+execution. A later documentation-only
+HEAD does not replace the qualified technical source above. R0-B and Actual E2
+remain **NOT RUN / NOT AUTHORIZED**; complete R0 adjudication is **NOT DONE**,
+final N/concurrency are **NOT SELECTED**, and the final E2 Operating Envelope is
+**NOT SELECTED / NOT FROZEN**. Preflight eligibility grants no execution authority.
 
 ### Replay
 
@@ -820,7 +830,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. E2 I1–I8와 기존 R0 harness는 accepted implementation lineage이며 historical Real R0-A는 accepted/closed다. Old source/representation의 execution-wall 및 R0-B archive static blocks는 historical evidence로 보존한다. Remediation investigation은 CLOSED / ACCEPTED, V1.3.1 design은 FINAL DESIGN ACCEPTED / exact-byte frozen이나 remediation implementation은 아직 NOT STARTED다. 현재 next는 별도 승인되는 Slice 1A(RF02/WB02/codec/profile primitives)이며 fresh R0-A, R0-B, Actual E2는 미승인이다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. E2 I1–I8와 기존 R0 harness는 accepted implementation lineage이며 historical Real R0-A는 accepted/closed다. Old source/representation의 execution-wall 및 R0-B archive static blocks는 historical evidence로 보존한다. Remediation investigation은 CLOSED / ACCEPTED, V1.3.1 design은 FINAL DESIGN ACCEPTED / exact-byte frozen이며 1A–1W 구현은 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED다. `48f6ebc`에서 Fresh R0-A Final Preflight PASS를 수용했다. 문서 CONTENT review는 PASS이고 미완료 USER commit/push는 승인된 상태다. 게시 완료 후 CURRENT NEXT는 authority re-anchor → 별도 Fresh R0-A 실행 승인 → 그 이후에만 실행이다. Fresh R0-A, R0-B, Actual E2는 아직 미실행·미승인이다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -836,13 +846,14 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K의 remediation engineering investigation과 V1.3.1 설계는 각각
-CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED 상태지만 실제 remediation source는 아직
-구현되지 않았다. 따라서 현재 확장 방향의 첫 항목은 accepted design을 작은 work
-unit으로 구현·검증하는 것이며, 즉시 다음은 별도 승인되는 Slice 1A
-(RF02 / WB02 / codec / qualified-profile primitives)다. 이후에도 bounded large-reference
-performance diagnostic, qualification, committed source, fresh R0-A와 재판정이 선행되어야
-Real R0-B나 Actual E2를 고려할 수 있다. Historical static blocks는 그때까지 old
-source/representation의 accepted evidence로 남는다.
+CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED이며 1A–1W 구현과 Fresh R0-A Final
+Preflight는 위 technical source에서 완료·수용됐다. 문서 CONTENT review는 PASS이고
+USER commit/push는 승인되었으며, 미게시 상태라면 USER가 남은 게시 절차를 완료한다.
+게시 완료 후 CURRENT NEXT는 narrow authority re-anchor → 별도 Fresh R0-A 실행 승인 →
+그 이후에만 실행이다. 아직 Fresh R0-A 측정값이 없으며, fresh R0-A와 admission /
+constructibility 재판정이 선행되어야 별도 R0-B 승인을 고려할 수 있다. Actual E2는
+complete R0 adjudication과 final Operating Envelope 동결 후 별도 승인이 필요하다.
+Historical static blocks는 계속 old source/representation의 accepted evidence로 보존한다.
 
 Nearest exact-minimum-risk guessing using movement cost는 별도 backlog 후보일 뿐 Program K
 정책에 포함되지 않는다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제

@@ -3,7 +3,7 @@
 > Project: Minesweeper graduation project  
 > ChatGPT Project: `졸업프로젝트`  
 > Purpose: Durable recovery state for a new chat or context-loss event.
-> Updated: 2026-10-26 (Asia/Seoul)
+> Updated: 2026-10-28 (Asia/Seoul)
 
 ---
 
@@ -13,9 +13,9 @@ When current state or implementation facts are disputed:
 
 1. current Git source
 2. current tests
-3. executable verification
-4. frozen specifications / final adjudications / current closeouts / this handoff
-5. README / ARCHITECTURE / documentation index
+3. executable verification / accepted Final Preflight evidence
+4. frozen specifications / final adjudications / accepted closeouts
+5. current recovery/navigation documentation, starting with this handoff
 6. prior AI interpretation or memory
 
 Agreement between AIs is not proof.
@@ -41,8 +41,9 @@ Required execution environment for Program-K qualification/rehearsal work:
 
 Live Git / current implementation authority:
 
-- At entry to this authority freeze, live `main` and locally known
-  `origin/main` both resolve to `be1fa9d74d3fb6c4efba91df02741cb98699551f`;
+- At the accepted Final Preflight boundary and before this documentation refresh,
+  live `main` and locally known `origin/main` both resolve to
+  `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`;
   ahead/behind `0/0`, clean worktree/index,
   no nonignored untracked files, and `git diff --check` PASS.
 - The historical source/documentation baseline used by the accepted Real R0-A
@@ -54,11 +55,104 @@ Live Git / current implementation authority:
   `e6593f7a99af2f0dd941eda7ee53a5164c79a2bd`
   — `fix: retain R0 setup containment observations`.
 - **R0 harness implementation: COMPLETE / ACCEPTED / COMMITTED / PUSHED.**
-  **Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED.**
+  **Historical Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED.**
   The accepted evidence and static follow-on blocks are recorded in §7.1.
-- Recheck live Git before future work. This authority freeze adds the exact design
-  and its acceptance receipt and updates only the three navigation/current-state
-  docs. The user owns staging, commit and push; return to ChatGPT before commit.
+- Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
+  **FRESH R0-A FINAL PREFLIGHT — PASS**, at the exact technical source above.
+  **Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED**; no Fresh R0-A measurement
+  exists. Eligibility and the recovery checkpoint are recorded below.
+- Recheck live Git before future work. **ChatGPT final documentation CONTENT
+  review: PASS.** This five-file documentation-only candidate is **authorized for
+  USER commit/push**. If publication is incomplete, USER completes the remaining
+  commit/push steps; live Git establishes whether publication has occurred.
+  After committed/pushed publication, CURRENT NEXT is the narrow
+  post-documentation authority re-anchor, then separate Fresh R0-A execution
+  authorization, then only after that authorization Fresh R0-A execution.
+  A later documentation-only HEAD does not replace the qualified technical source
+  identity `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`.
+
+### Post-1W / pre-Fresh-R0A recovery checkpoint
+
+Accepted technical source:
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
+— `feat: add Program K V2 R0-A run lifecycle`.
+
+The accepted 23-slice implementation chain is present in Git through this source:
+
+| Slice | Accepted implementation commit |
+| --- | --- |
+| 1A | `223442f955b610ff3ffdf4c2f150364b2ade4cff` |
+| 1B | `22e9f7a1345d575cccf9ba6266c5a8d22560a464` |
+| 1C | `a9f4d686d709aa436fc29789c5fd5a2c86e765b3` |
+| 1D | `ebf44e7aef3953ce5361c393ac76ef7b9f8f3267` |
+| 1E | `172f7aea6d088377665e5746791d9a76256d46f7` |
+| 1F | `a2a4712748fd1250a911bb490c2e4816d1aa7a61` |
+| 1G | `e003c556ae91c9f76408cbe8d6942c5fb0b94d1a` |
+| 1H | `a3f64ff86c0390c4514be4b76fa9eb6dff851c4c` |
+| 1I | `16230a09300880c97cfb29e0084f980ea8865a39` |
+| 1J | `a296dc7cf3f66edf60567f2f09e29121e713b5d6` |
+| 1K | `a68e3e98e888e2083ab7ef00d17c161cf21e4c7f` |
+| 1L | `29618e26eba6248090de44575b8451bfd6915166` |
+| 1M | `43f1baf939815a38750fe7b141132f857b2fde22` |
+| 1N | `aa1a89b3600b3f8ace01ad2db1b7bcb90719307a` |
+| 1O | `7c40230c8223cc47dbac96392b6b0a2cb9da0234` |
+| 1P | `ff0a19b9f96309b5fa18045e337c007130a9b9ef` |
+| 1Q | `2883a891838c96f1f8d8767a61312851998ffa2e` |
+| 1R | `97c07fedc8de125a19ff9bf38171735c5b71065e` |
+| 1S | `787f597bd8f47b88a1a3446c5ffa4d60cf10f22d` |
+| 1T | `210fb40925c7687159d4b43d5746b967287dfcea` |
+| 1U | `14ab5660da0a270ed9e5ffef9b16b8fb398ce3ea` |
+| 1V | `f3b53c0e8bad8439691b1e4be0ad9a67c0c5d43d` |
+| 1W | `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9` |
+
+**Slices 1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED.**
+**PROGRAM K REMEDIATION SLICE 1W — FINAL ACCEPTANCE PASS**;
+**BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
+
+The following records the accepted USER-host Final Preflight evidence supplied
+for this refresh; no preflight, regression or experiment was rerun here:
+
+- **FRESH R0-A FINAL PREFLIGHT — PASS**;
+  **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**.
+- Fresh focused E2 regression: **Ran 1513 tests in 2070.996s — OK**;
+  passed `1513`, failures/errors/skips `0/0/0`, process exit `0`.
+  Post-test Git remained clean and synchronized at the technical source above.
+- Approved Python: `C:\venvs\minesweeper\Scripts\python.exe` with `-B`;
+  CPython `3.12.10`, `64-bit AMD64`, `Windows-11-10.0.26200-SP0`;
+  `PYTHONDONTWRITEBYTECODE=1`, `sys.dont_write_bytecode=True`.
+- V2 source closure: **42 source identities / 42 working-file identities**.
+- Live qualified V2 codec profile: `qualified = true`, canonical byte length
+  **8,555**, SHA-256
+  `92fcf41858e2fc961b69a2f9f8fbb09d55591c52d595a343470af55463281193`.
+  This is distinct from the frozen Model C physical profile below.
+
+The exact technical source is **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION
+AUTHORIZATION**. This is eligibility only: **Fresh R0-A has NOT RUN and is NOT YET
+EXECUTION-AUTHORIZED; no Fresh R0-A measurement exists**. Documentation CONTENT
+review is **PASS** and USER commit/push is authorized. If the refresh is still
+uncommitted or unpushed, USER publication is the only remaining documentation step.
+**CURRENT NEXT after committed/pushed publication:** narrow post-documentation
+authority re-anchor → separate Fresh R0-A execution authorization → only then
+Fresh R0-A execution. Do not treat a later
+documentation-only HEAD as a replacement qualification or execution identity.
+
+Frozen authority identities remain separate from the live V2 codec profile:
+
+| Authority | Bytes | SHA-256 |
+| --- | ---: | --- |
+| E2 Effectiveness Protocol | 57,841 | `10b1055a6e1bcab8e03ab504755c9c9d655d5457800318396afb6e31497ba2fa` |
+| R0 Attribution Amendment v1 | 58,052 | `5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf` |
+| Frozen Model C physical profile | 6,059 | `52e140e9fc4b760c64ba3c214c503b5ef6ee1e390e7b2162cc647d47a26b292b` |
+| Accepted selection receipt (§7.1) | 7,364 | `72ea48582d3eb2c4eff82172b58fe88460a8a3747eee910efe5fc8a2deb6337c` |
+
+The accepted V1.3.1 design working-file identity is **29,284 bytes**, SHA-256
+`48322762e2b7e883ddd0baa0114d3a7286dad790d8db9ce4ed7b67c5122bc878`.
+Its LF-normalized Git blob is **28,475 bytes**, SHA-256
+`4cc90077861b9caa3fa0147ebcc8c2539f96bc9834bfbec73d72785a3ef4ac30`.
+CRLF-to-LF normalization exactly explains the difference; no semantic drift
+occurred. Keep these byte representations distinct and preserve the frozen files.
+
+### Earlier accepted implementation lineage
 
 Accepted Program K E2 implementation lineage:
 
@@ -76,10 +170,11 @@ Accepted Program K E2 implementation lineage:
 **I1–I8 = 8/8 COMPLETE / ACCEPTED.** I0 remains accepted architecture
 mapping/boundary discovery and is excluded from the eight-slice denominator.
 The later amendment-conformance implementation, setup-containment repair and R0
-harness are also accepted. R0-A evidence is accepted and closed; R0-B is
+harness are also accepted. Historical R0-A evidence is accepted and closed; R0-B is
 NOT RUN / NOT AUTHORIZED. Complete R0 adjudication and the final E2 Operating
-Envelope remain outstanding, with two confirmed static follow-on feasibility
-blocks. Neither implementation nor R0-A acceptance authorizes Actual E2.
+Envelope remain outstanding. The two confirmed static follow-on feasibility
+blocks remain historical findings for the old source/representation. Neither
+implementation nor historical R0-A acceptance authorizes Actual E2.
 
 The frozen/accepted R0 Attribution Amendment v1 identity is:
 
@@ -270,23 +365,28 @@ selection, setup-containment repair (`e6593f7`) and R0 harness (`7e7f847`) are
 complete/accepted. The harness is committed/pushed; see the exact authorities,
 receipt and qualification history in §7.1.
 
-**Real R0-A is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; do not
+**Historical Real R0-A is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; do not
 rerun it merely for reassurance.** Its post-run integrity review and the separate
 read-only follow-on static feasibility review are complete. Execution-wall
-admission and R0-B minimum whole-archive feasibility are **STATICALLY BLOCKED**.
+admission under the old source and R0-B minimum whole-archive feasibility under
+the old representation remain **STATICALLY BLOCKED; historical proof preserved**.
 
 Remediation engineering investigation is **CLOSED / ACCEPTED**. The
 [remediation design V1.3.1](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
 is **FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**;
 [acceptance receipt](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md):
 **BLOCKER 0 / REQUIRED 0 at the design boundary; design phase CLOSED**.
-Remediation implementation is **NOT STARTED**.
-**CURRENT NEXT: separately authorized Remediation Slice 1A — RF02 / WB02 / codec /
-qualified-profile primitives.** Slice 1A requires separate explicit implementation
-authorization. Fresh R0-A is **NOT AUTHORIZED / NOT RUN**. The design provides a
-credible remediation path only; fresh committed implementation and fresh R0 evidence
-are still required. Historical R0-A evidence and both static blocks remain evidence
-for the old source/representation; design acceptance does not resolve them operationally.
+Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
+**FRESH R0-A FINAL PREFLIGHT — PASS** at technical source
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`; **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**.
+That source is **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**.
+**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
+**CURRENT NEXT after committed/pushed publication: narrow post-documentation
+authority re-anchor → separate Fresh R0-A execution authorization → only then
+Fresh R0-A execution.** Documentation CONTENT review is PASS; if publication is
+pending, USER completes the authorized commit/push first. See §2 for the accepted evidence.
+Historical R0-A and both static blocks remain evidence for the old
+source/representation; fresh operational evidence is still required.
 Real R0-B is **NOT RUN / NOT AUTHORIZED**; no executed R0-B
 failure is claimed. Complete R0 adjudication is **NOT DONE**. No final N/concurrency
 or E2 Operating Envelope is selected/frozen. Actual E2 is **NOT RUN / NOT
@@ -900,7 +1000,7 @@ Recovery-level harness capabilities:
 R0 evidence itself grants no Actual-E2 or final-envelope authority and is not
 Program K effectiveness evidence.
 
-#### Real R0-A — COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED
+#### Historical Real R0-A — COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED
 
 The single separately authorized initial calibration run is accepted. R0-A work
 and its post-run integrity review are **CLOSED / COMPLETE**. Do not rerun R0-A or
@@ -945,7 +1045,7 @@ The wrapper elapsed is the whole R0-A operator session, not any single component
 wall or measured/projected Actual-E2 runtime. R0-A component job/launcher caps and
 the frozen Actual-E2 admission ceiling have different scopes.
 
-#### Follow-on static feasibility review — COMPLETE / TWO CONFIRMED BLOCKS
+#### Historical follow-on static feasibility review — COMPLETE / TWO CONFIRMED BLOCKS
 
 The separate source/arithmetic review reused accepted R0-A evidence and the exact
 receipt at the same source HEAD. It performed no R0-A rerun, R0-B, Actual E2,
@@ -1023,25 +1123,29 @@ untested. No final N, concurrency or envelope can be approved from these finding
 
 #### Exact current state / current next and conditional future path
 
-| Item | Current authority-freeze state, 2026-10-26 |
+| Item | Current post-1W / pre-Fresh-R0A state, 2026-10-28 |
 | --- | --- |
 | Stage-3 Extended milestones 1–9 | CLOSED |
 | Milestone 10 / Program K | ACTIVE |
 | E2 I1–I8 | COMPLETE / ACCEPTED |
 | R0 preparation lineage | Amendment conformance / counts / selection / setup repair ACCEPTED |
 | R0 harness implementation | COMPLETE / ACCEPTED / COMMITTED / PUSHED |
-| Real R0-A execution / integrity | COMPLETE / PASS |
-| Real R0-A evidence / work | ACCEPTED / CLOSED; DO NOT RERUN merely for reassurance |
-| R0-A post-run integrity review | COMPLETE |
-| R0 follow-on static feasibility review | COMPLETE |
+| Historical Real R0-A execution / integrity | COMPLETE / PASS |
+| Historical Real R0-A evidence / work | ACCEPTED / CLOSED; DO NOT RERUN merely for reassurance |
+| Historical R0-A post-run integrity review | COMPLETE |
+| Historical R0 follow-on static feasibility review | COMPLETE |
 | Historical execution-wall admission / old source | STATICALLY BLOCKED; historical proof preserved |
 | Historical R0-B minimum archive / old representation | STATICALLY BLOCKED; historical proof preserved |
 | Remediation engineering investigation | CLOSED / ACCEPTED |
 | Remediation design V1.3.1 | FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES |
 | Design boundary | BLOCKER 0 / REQUIRED 0; design phase CLOSED |
-| Remediation implementation | NOT STARTED |
-| Next implementation work unit | Remediation Slice 1A; separate explicit authorization required |
-| Fresh R0-A | NOT AUTHORIZED / NOT RUN |
+| Remediation implementation 1A–1W | 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED |
+| Slice 1W final acceptance | PASS; BLOCKER 0 / REQUIRED 0 / OPTIONAL 0 |
+| Fresh R0-A Final Preflight | PASS at technical source `48f6ebc`; BLOCKER 0 / REQUIRED 0 / OPTIONAL 1 |
+| Exact qualified technical source | ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION; full identity in §2 |
+| Documentation CONTENT review / publication | PASS; USER commit/push authorized; if publication is pending, USER completes the remaining steps |
+| Current next after committed/pushed publication | Narrow post-documentation authority re-anchor → separate Fresh R0-A execution authorization → only then execution |
+| Fresh R0-A | NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists |
 | Real R0-B | NOT RUN / NOT AUTHORIZED; no executed failure claimed |
 | Complete R0 adjudication | NOT DONE |
 | Final N / final concurrency | NOT SELECTED / NOT SELECTED |
@@ -1056,14 +1160,25 @@ untested. No final N, concurrency or envelope can be approved from these finding
 | Program K final closeout | NOT DONE |
 | Stage-3 Extended | ACTIVE |
 
-**CURRENT NEXT: PROGRAM K REMEDIATION SLICE 1A — RF02 / WB02 / codec /
-qualified-profile primitives, only after separate explicit implementation authorization.**
+**CURRENT NEXT after committed/pushed publication: narrow post-documentation
+authority re-anchor before separate Fresh R0-A execution authorization.**
 The [exact V1.3.1 design](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
 and [live acceptance receipt](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
 record final design acceptance and the execution boundary. The design retains its
 historical pre-re-audit wording; the receipt records the subsequent closure re-audit
-PASS and ChatGPT/user final acceptance. Remediation implementation is **NOT STARTED**.
-Return to ChatGPT for authority-freeze adjudication before commit; do not start Slice 1A yet.
+PASS and ChatGPT/user final design acceptance. Its implementation-not-started
+wording describes that historical design boundary; the accepted implementation
+and Final Preflight checkpoint is now §2. Preserve the receipt's exact bytes.
+
+Documentation CONTENT review is **PASS**; this candidate is **authorized for USER
+commit/push**. If it is still uncommitted or unpushed, USER completes the remaining
+publication steps. Once committed/pushed:
+
+1. Perform a narrow post-documentation authority re-anchor, retaining `48f6ebc`
+   as the qualified technical source and identifying the later documentation HEAD
+   separately; this re-anchor has not yet been performed.
+2. Obtain separate Fresh R0-A execution authorization.
+3. Only then execute Fresh R0-A.
 
 Historical scope of the now **CLOSED / ACCEPTED** engineering investigation:
 
@@ -1083,12 +1198,11 @@ Historical scope of the now **CLOSED / ACCEPTED** engineering investigation:
   change requires separate adjudication; no such change is accepted here.
 
 The historical R0-A evidence and both static blocks above remain unchanged for the
-old source/representation. The accepted design provides a credible remediation path
-only; fresh committed implementation and fresh R0 evidence are still required.
-Separately authorized implementation/qualification must include the mandatory bounded
-large-reference performance diagnostic before large qualification, followed by
-committed qualified source and separately authorized fresh R0-A. Fresh admission/
-constructibility review must precede any separate R0-B authorization. Complete R0
+old source/representation. Remediation implementation and Final Preflight are
+accepted at the technical source in §2, but fresh R0 evidence does not yet exist.
+The preflight PASS establishes eligibility only. After the sequence above,
+Fresh R0-A and fresh admission/constructibility review must precede any separate
+R0-B authorization. Complete R0
 adjudication must precede final N/concurrency/envelope selection and freeze.
 Actual E2 still needs separate authorization; E3 remains conditional
 on its frozen trigger. Gate P, production integration, native K visual acceptance,
@@ -1117,7 +1231,8 @@ Do not:
 - rerun P-8/E0/E1/R3/F1 merely for reassurance;
 - access ZiNi holdout `2,010,000 .. 2,010,099`;
 - recount accepted real target counts or re-search the selected synthetic corpus;
-- rerun accepted/closed R0-A or any unit merely for reassurance;
+- rerun historical accepted/closed R0-A or any unit merely for reassurance;
+- execute Fresh R0-A without the separate authorization following the sequence above;
 - delete, relabel or repair the retained `INCOMPLETE_AT_CREATION` marker;
 - launch R0-B while its static blockers remain unresolved/unadjudicated or
   without separate explicit authorization;
@@ -1199,8 +1314,9 @@ At a new chat or after context loss:
 1. verify live Git branch / HEAD / locally available `origin/main` relationship /
    ahead-behind / worktree / index / `git diff --check`; never reset to a
    remembered SHA blindly;
-2. read this `docs/CURRENT_HANDOFF.md`, then
-   [Stage-3 Extended README](stage3-extended/README.md), then the
+2. read this `docs/CURRENT_HANDOFF.md` as the durable current recovery authority;
+   then read the [Stage-3 Extended README](stage3-extended/README.md) for the
+   current roadmap/index. Continue with the
    [frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
    and the
    [frozen R0 Attribution Amendment v1](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md),
@@ -1216,7 +1332,7 @@ At a new chat or after context loss:
 5. authenticate the exact accepted selection receipt in §7.1. Use its existing
    N=10000 counts and ordinal-5 synthetic selection without recount/re-search;
    keep its historical selection HEAD separate from the current harness HEAD;
-6. recover the retained R0-A root and exact evidence identities in §7.1:
+6. recover the retained historical R0-A root and exact evidence identities in §7.1:
    **COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**. Reuse the accepted
    integrity review; do not rerun the workload or repair its historical creation
    marker. The evidence is operational non-effectiveness evidence only;
@@ -1225,11 +1341,19 @@ At a new chat or after context loss:
    exceeds 16 GiB even before overhead. No R0-B execution failure is claimed;
 8. recover **V1.3.1 FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES** and
    **BLOCKER 0 / REQUIRED 0** at the design boundary. Engineering investigation
-   and design are closed; remediation implementation is **NOT STARTED**.
-   **CURRENT NEXT is separately authorized Remediation Slice 1A — RF02 / WB02 /
-   codec / qualified-profile primitives.** Fresh R0-A is **NOT AUTHORIZED / NOT RUN**.
-   Preserve the two historical proofs for the old source/representation; fresh
-   committed implementation and fresh R0 evidence are still required;
+   and design are closed. Recover the accepted **1A–1W: 23/23 COMPLETE / ACCEPTED /
+   COMMITTED / PUSHED** chain and **FRESH R0-A FINAL PREFLIGHT — PASS** at
+   `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9` from §2, including the USER-host
+   1513-test result and the separate V2 codec / frozen Model C identities.
+   This source is eligible for separate execution authorization only.
+   **Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
+   Documentation CONTENT review is **PASS**; USER commit/push is authorized.
+   Check live Git: if publication is pending, USER completes it first.
+   **CURRENT NEXT after committed/pushed publication:** narrow post-documentation
+   authority re-anchor → separate Fresh R0-A execution authorization → only then
+   execution. A later documentation
+   HEAD does not replace the qualified technical source. Preserve both historical
+   proofs for the old source/representation;
 9. R0-B remains NOT RUN / NOT AUTHORIZED, complete R0 adjudication is NOT DONE,
    and no final N/concurrency or E2 Operating Envelope is selected/frozen.
    Actual E2 remains NOT RUN / NOT AUTHORIZED; E2 PASS/FAIL/DEFER is NONE;

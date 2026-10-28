@@ -9,7 +9,7 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 - [Project README](../README.md): 실행 방법, 주요 기능과 프로젝트 개요.
 - [Architecture](../ARCHITECTURE.md): Engine/UI/Replay/analysis/worker 책임 경계.
 - [Building](../BUILDING.md): Windows PyInstaller 빌드와 package 검증 절차.
-- [Stage-3 Extended index](stage3-extended/README.md): Extended roadmap와 각 milestone 상태.
+- [Stage-3 Extended index](stage3-extended/README.md): 현재 Extended roadmap/index와 closeout 안내. 현재 상태 복구는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 우선한다.
 
 ## Stage 1 / Stage 2 / Pre-Stage3 — CLOSED
 
@@ -63,7 +63,7 @@ Start from:
 - [Program K E2 Effectiveness Protocol — FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
 - [Program K E2 R0 Attribution Amendment v1 — CONTENT-FROZEN / ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
 - [Program K remediation design V1.3.1 — exact frozen bytes](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
-- [Program K V1.3.1 acceptance receipt — live authority / FINAL DESIGN ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
+- [Program K V1.3.1 acceptance receipt — design-boundary authority / FINAL DESIGN ACCEPTED](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
 - [Stage-3 Extension Backlog](../STAGE3_EXTENSION_BACKLOG.md): candidate ideas only;
   not an implementation priority list.
 
@@ -90,7 +90,7 @@ Closed milestones / durable closeouts:
 
 Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
 Capability + Selective Physical Materialization** remains **ACTIVE**.
-Current state as of **2026-10-26 (Asia/Seoul): PRE-ACTUAL-E2 — REMEDIATION DESIGN V1.3.1 ACCEPTED**.
+Current state as of **2026-10-28 (Asia/Seoul): PRE-ACTUAL-E2 — REMEDIATION 1A–1W COMPLETE / FRESH R0-A FINAL PREFLIGHT PASS**.
 Program K is the whole research program; E2 is its effectiveness experiment;
 Gate P is later production/integration qualification after E2/any required E3.
 
@@ -115,15 +115,17 @@ Accepted historical full-source qualification: **4117/4117 PASS**
 (`4111 MAIN + 6 ISOLATED`). Exact identities, receipts and qualification history
 are in the [current handoff](CURRENT_HANDOFF.md).
 
-The verified baseline before this authority freeze is
-`be1fa9d74d3fb6c4efba91df02741cb98699551f`: `main` / local `origin/main`
-aligned, ahead/behind **0/0**, clean index/worktree. Historical R0-A run/review
+The accepted Final Preflight technical source, also verified before this refresh, is
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`: `main` / local `origin/main`
+aligned, ahead/behind **0/0**, clean index/worktree. A later documentation-only
+HEAD does not replace this qualified technical source. Historical R0-A run/review
 source remains `c0bc270bce1996797f9ecec80e79ea8998d3205d`.
 
-**Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED — NO RERUN.**
+**Historical Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED — NO RERUN.**
 Its accepted evidence is **OPERATIONAL NON-EFFECTIVENESS** evidence. Subsequent
 read-only static review confirmed both the **execution-wall admission blocker**
-and the **R0-B whole-archive capacity blocker**; exact evidence, calculations and
+and the **R0-B whole-archive capacity blocker** for the old source/representation;
+both remain **STATICALLY BLOCKED; historical proof preserved**. Exact evidence, calculations and
 authority are recorded in the [current handoff](CURRENT_HANDOFF.md) and
 [Extended README](stage3-extended/README.md).
 
@@ -140,23 +142,29 @@ V1.3.1: **FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**;
 **BLOCKER 0 / REQUIRED 0 at the design boundary; design phase CLOSED**.
 The acceptance receipt records the subsequent audit/final acceptance while the
 exact design retains its historical pre-re-audit wording.
-Remediation implementation: **NOT STARTED**. **Fresh R0-A: NOT AUTHORIZED / NOT RUN**.
+Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
+**FRESH R0-A FINAL PREFLIGHT — PASS** at the exact technical source above;
+**BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**. The accepted USER-host focused E2 regression
+was **1513/1513 PASS**, failures/errors/skips **0/0/0**, process exit **0**.
+That source is **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**.
+**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
 
-**NEXT:** separately authorized **Remediation Slice 1A — RF02 / WB02 / codec /
-qualified-profile primitives**; separate explicit implementation authorization is
-required. The design provides a credible remediation path only. Preserve accepted
-historical R0-A evidence and both static blocks for the old source/representation;
-design acceptance does not resolve them operationally. Fresh committed implementation
-and fresh R0 evidence are still required. Return to ChatGPT for authority-freeze
-adjudication before commit; do not start Slice 1A yet.
+**ChatGPT final documentation CONTENT review: PASS; USER commit/push authorized.**
+If publication is pending, USER completes the remaining commit/push steps.
+**CURRENT NEXT after committed/pushed publication:** narrow post-documentation
+authority re-anchor → separate Fresh R0-A execution authorization → only then
+Fresh R0-A execution. Preserve historical R0-A evidence
+and both old-source/old-representation static blocks; fresh operational evidence
+is still required. Exact implementation, runtime/profile and accepted preflight
+identities are in [CURRENT_HANDOFF §2](CURRENT_HANDOFF.md#2-repository--environment).
 
 Recovery order:
 [CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
-[Extended README](stage3-extended/README.md) →
+[Extended README](stage3-extended/README.md) (current roadmap/index) →
 [frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
 [frozen R0 Attribution Amendment](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) →
 [exact V1.3.1 design](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) /
-[live acceptance receipt](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) →
+[design acceptance receipt](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) →
 current source/tests for disputed implementation facts.
 Do not repeat E2-D0/protocol/amendment audits, E0/E1 execution, official 100k,
 E/L, accepted P-8/R3/F1 or closed Viewer/Timeline/Polish work merely for recovery.

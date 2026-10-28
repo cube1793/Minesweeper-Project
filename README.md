@@ -178,12 +178,23 @@ R0-B minimum whole-archive의 두 static block은 **역사적 old-source/old-rep
 **BLOCKER 0 / REQUIRED 0; design phase CLOSED**를 기록합니다. Authority-freeze commit은
 `83c9f0c` (`docs: freeze accepted Program K remediation design`)입니다.
 
-Remediation implementation은 아직 **NOT STARTED**입니다. 현재 다음 work unit은 별도
-명시적 승인이 필요한 **Remediation Slice 1A — RF02 / WB02 / codec / qualified-profile
-primitives**입니다. Fresh R0-A, Real R0-B, Actual E2는 모두 **NOT AUTHORIZED / NOT RUN**이며
+Remediation **1A–1W는 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**입니다.
+정확한 technical source `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`에서
+**FRESH R0-A FINAL PREFLIGHT — PASS (BLOCKER 0 / REQUIRED 0 / OPTIONAL 1)**를
+수용했습니다. 이 source는 **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**이며,
+**Fresh R0-A는 NOT RUN / NOT YET EXECUTION-AUTHORIZED**입니다. Fresh R0-A 측정값은 없습니다.
+
+**ChatGPT final documentation CONTENT review는 PASS이며 USER commit/push가 승인되었습니다.**
+아직 미커밋 또는 미푸시 상태라면 USER가 남은 문서 게시 절차를 완료합니다.
+**Commit/push 완료 후 CURRENT NEXT는 narrow post-documentation authority re-anchor →
+별도 Fresh R0-A execution authorization → 그 이후에만 실행**입니다.
+이후 documentation-only HEAD는 위 qualified technical source
+identity를 대체하지 않습니다. Real R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**이며,
+final N/concurrency와 E2 Operating Envelope는 아직 선택·동결되지 않았습니다.
 Program K effectiveness는 **NOT ESTABLISHED**입니다. 자세한 현재 상태와 recovery order는
-[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Stage-3 Extended index](docs/stage3-extended/README.md)를
-우선합니다.
+[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 우선합니다.
+[Stage-3 Extended index](docs/stage3-extended/README.md)는 현재 Extended roadmap/index를
+제공합니다.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
