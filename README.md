@@ -169,7 +169,7 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
 accepted Real R0-A는 원래 source/representation에 대해 COMPLETE / INTEGRITY PASS /
 EVIDENCE ACCEPTED / CLOSED입니다. 그 R0-A에서 도출된 execution-wall admission과
 R0-B minimum whole-archive의 두 static block은 **역사적 old-source/old-representation
-증거로 그대로 보존**되며, 아직 operationally resolved로 재해석하지 않습니다.
+증거로 그대로 보존**합니다. 아래 Fresh V2 결과와 구분해야 합니다.
 
 후속 remediation engineering investigation은 CLOSED / ACCEPTED입니다.
 [Program K remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)은
@@ -181,15 +181,30 @@ R0-B minimum whole-archive의 두 static block은 **역사적 old-source/old-rep
 Remediation **1A–1W는 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**입니다.
 정확한 technical source `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`에서
 **FRESH R0-A FINAL PREFLIGHT — PASS (BLOCKER 0 / REQUIRED 0 / OPTIONAL 1)**를
-수용했습니다. 이 source는 **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**이며,
-**Fresh R0-A는 NOT RUN / NOT YET EXECUTION-AUTHORIZED**입니다. Fresh R0-A 측정값은 없습니다.
+수용했습니다. 이번 refresh의 read-only preflight에서 확인한 refresh 이전 문서 HEAD /
+로컬에 알려진 `origin/main`은 `a7abce49f4f98d2db02695943c299f86a212344d`였으며,
+qualified technical anchor와 구분합니다.
 
-**ChatGPT final documentation CONTENT review는 PASS이며 USER commit/push가 승인되었습니다.**
-아직 미커밋 또는 미푸시 상태라면 USER가 남은 문서 게시 절차를 완료합니다.
-**Commit/push 완료 후 CURRENT NEXT는 narrow post-documentation authority re-anchor →
-별도 Fresh R0-A execution authorization → 그 이후에만 실행**입니다.
-이후 documentation-only HEAD는 위 qualified technical source
-identity를 대체하지 않습니다. Real R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**이며,
+**2026-10-31 현재 Fresh R0-A V2 Attempt #2는 실행 성공(exit 0), validator PASS,
+INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**입니다. 전체 remediation은
+**PARTIAL SUCCESS**입니다. Physical attributable minimum은 74,047,481,628 B에서
+15,385,281,356 B로 약 **79.22% 감소**해 historical static whole-archive blocker를
+해소했지만, realized R0-B constructibility는 **NOT YET ESTABLISHED**입니다.
+반면 비교 가능한 **18/18 route wall이 퇴화**했습니다. c4 K+D는
+22,959.2643101 s이며, N=1000에서 현재 P/O만으로도 48,874.331425675 s로
+43,200 s ceiling을 넘습니다. K+D <= 5,400 s나 historical V1 parity만으로는
+충분하지 않습니다. RF02/WB02/qualified codec/dual sizing의 성공은 보존합니다.
+
+External timing-profile-v1은 **PREPARED / NOT EXECUTED**이며 독립 pre-execution
+review는 **FIX REQUIRED BEFORE EXECUTION**입니다. 다음 순서는 B1 + R1–R3의
+최소 external 수정 → 새 byte/SHA pins → 독립 delta review → 별도 승인된
+production-import-free Windows Job dry check입니다. 그 성공 후에만 Phase 1 K/D
+승인을 검토하며, Phase 2 P/O는 별도 근거와 hash-bound 승인이 필요합니다.
+**현재 두 profiling phase 모두 NOT AUTHORIZED이며 측정값은 없습니다.**
+이번 문서 refresh는 실행 권한을 부여하지 않습니다. 별도로 승인된 docs-only commit/push는
+qualified technical anchor를 변경하지 않으며 timing profiling, R0-B, Actual E2 또는
+그 밖의 어떤 실험도 승인하지 않습니다.
+Real R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**이며,
 final N/concurrency와 E2 Operating Envelope는 아직 선택·동결되지 않았습니다.
 Program K effectiveness는 **NOT ESTABLISHED**입니다. 자세한 현재 상태와 recovery order는
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 우선합니다.

@@ -407,20 +407,48 @@ Accepted V1.3.1 design boundaries:
 lifecycle exist in the accepted experimental implementation. Current source/tests
 remain the implementation authority. **FRESH R0-A FINAL PREFLIGHT — PASS** at
 `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`, with **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**,
-makes that source **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**.
+remains accepted qualification history. At this refresh's read-only preflight,
+the pre-refresh documentation HEAD / locally known `origin/main` was
+`a7abce49f4f98d2db02695943c299f86a212344d`; that docs-only commit
+does not replace qualified technical anchor `48f6ebc...`.
 The qualified V2 codec profile is distinct from frozen Model C; exact identities
 and accepted USER-host evidence are in [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md).
 
-**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
-**ChatGPT final documentation CONTENT review: PASS; USER commit/push authorized.**
-If publication is pending, USER completes the remaining commit/push steps.
-**CURRENT NEXT after committed/pushed publication:** narrow post-documentation
-authority re-anchor → separate Fresh R0-A execution authorization → only then
-execution. A later documentation-only
-HEAD does not replace the qualified technical source above. R0-B and Actual E2
+**Fresh R0-A V2 Attempt #2: execution COMPLETE / exit 0 / validator PASS /
+INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** as operational calibration evidence,
+with recorded source HEAD `a7abce49...`. Overall remediation is **PARTIAL SUCCESS**.
+The physical attributable minimum fell from **74,047,481,628 B** to
+**15,385,281,356 B** (approximately **79.22%**); full fixed reservation fits under
+**17,179,869,184 B**, leaving **B_proc = 1,526,152,372 B**. The demonstrated
+historical static whole-archive blocker is **RESOLVED**. Realized R0-B
+constructibility remains **NOT YET ESTABLISHED**.
+
+Timing worsened on all **18/18 comparable routes**. Fresh c4 K+D is
+**22,959.2643101 s**; its necessary projection is **183,674.1144808 s** against
+**43,200 s**. At N=1000, current c4 P/O alone already gives **48,874.331425675 s**
+with K=D=0; full P+K+D+O-primary B1000 is **232,548.445906475 s**. K+D <=5,400 s
+is only an early necessary screen, and historical V1 parity is insufficient.
+Any future B1000 pass needs explicit headroom for Oracle intersections/postprocess.
+Preserve **RF02/WB02/qualified codec/dual sizing** unless later evidence forces otherwise.
+
+External timing-profile-v1 is **PREPARED / NOT EXECUTED**, diagnostic only, not
+R0/admission evidence. Independent review is **FIX REQUIRED BEFORE EXECUTION**:
+**B1** venv redirector versus actual-driver Job containment; **R1** control-file
+replace/read race; **R2** output-size TOCTOU; **R3** budget-unaware adaptive repeats.
+Both phases are **NOT AUTHORIZED**, and no profiling measurement exists.
+The intended next sequence is minimal external B1 + R1–R3 corrections, re-pinning,
+independent exact-byte delta review and, if authorized, a production-import-free
+Windows Job isolation dry check before considering Phase 1 K/D authorization.
+Phase 2 P/O needs separate evidence-supported hash-bound authorization. Profiling
+adjudication precedes production timing work; bounded performance qualification
+must precede any credible, separately authorized new Fresh R0-A. This documentation
+refresh grants **no execution authority**. A separately approved docs-only
+commit/push does not change the qualified technical anchor or authorize timing
+profiling, R0-B, Actual E2, or any other experiment.
+R0-B and Actual E2
 remain **NOT RUN / NOT AUTHORIZED**; complete R0 adjudication is **NOT DONE**,
 final N/concurrency are **NOT SELECTED**, and the final E2 Operating Envelope is
-**NOT SELECTED / NOT FROZEN**. Preflight eligibility grants no execution authority.
+**NOT SELECTED / NOT FROZEN**. Accepted calibration evidence grants no execution authority.
 
 ### Replay
 
@@ -830,7 +858,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. E2 I1–I8와 기존 R0 harness는 accepted implementation lineage이며 historical Real R0-A는 accepted/closed다. Old source/representation의 execution-wall 및 R0-B archive static blocks는 historical evidence로 보존한다. Remediation investigation은 CLOSED / ACCEPTED, V1.3.1 design은 FINAL DESIGN ACCEPTED / exact-byte frozen이며 1A–1W 구현은 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED다. `48f6ebc`에서 Fresh R0-A Final Preflight PASS를 수용했다. 문서 CONTENT review는 PASS이고 미완료 USER commit/push는 승인된 상태다. 게시 완료 후 CURRENT NEXT는 authority re-anchor → 별도 Fresh R0-A 실행 승인 → 그 이후에만 실행이다. Fresh R0-A, R0-B, Actual E2는 아직 미실행·미승인이다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. Historical R0-A와 Fresh R0-A V2 Attempt #2는 각각 accepted/closed다. V1.3.1은 exact-byte frozen이며 1A–1W 구현은 accepted다. Fresh remediation은 PARTIAL SUCCESS: static storage blocker는 해소됐지만 18/18 route timing은 퇴화했고 realized R0-B constructibility는 미입증이다. External profiling은 PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE EXECUTION이며 B1 + R1–R3 수정·재검토·별도 승인 dry check가 선행되어야 한다. 두 profiling phase, R0-B, Actual E2는 NOT AUTHORIZED다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -846,12 +874,15 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K의 remediation engineering investigation과 V1.3.1 설계는 각각
-CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED이며 1A–1W 구현과 Fresh R0-A Final
-Preflight는 위 technical source에서 완료·수용됐다. 문서 CONTENT review는 PASS이고
-USER commit/push는 승인되었으며, 미게시 상태라면 USER가 남은 게시 절차를 완료한다.
-게시 완료 후 CURRENT NEXT는 narrow authority re-anchor → 별도 Fresh R0-A 실행 승인 →
-그 이후에만 실행이다. 아직 Fresh R0-A 측정값이 없으며, fresh R0-A와 admission /
-constructibility 재판정이 선행되어야 별도 R0-B 승인을 고려할 수 있다. Actual E2는
+CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED이며 1A–1W 구현은 수용됐다.
+Fresh R0-A V2 Attempt #2 evidence도 accepted/closed이지만 timing admission은 실패한다.
+다음은 B1 + R1–R3 external-artifact 수정, 재핀, 독립 delta review와 별도 승인된
+production-import-free Job dry check이며, 성공 후에만 Phase 1 승인을 검토한다.
+Phase 2는 별도 근거·승인이 필요하고 자동 진행하지 않는다. Profiling 최종 판정 후에만
+production timing remediation을 검토한다. 구현 후 bounded performance qualification이
+credible admission path를 보여야 새 Fresh R0-A를 고려하며, 큰 실험을 재실행해
+개선 여부부터 알아보지 않는다. Fresh admission prerequisites가 통과한 후에만
+별도 R0-B 승인을 고려한다. Actual E2는
 complete R0 adjudication과 final Operating Envelope 동결 후 별도 승인이 필요하다.
 Historical static blocks는 계속 old source/representation의 accepted evidence로 보존한다.
 

@@ -6,11 +6,12 @@ Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen bas
 ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
 **Stage-3 Extended는 ACTIVE**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
 
-Current state: **2026-10-28 (Asia/Seoul), PRE-ACTUAL-E2 — REMEDIATION 1A–1W COMPLETE / FRESH R0-A FINAL PREFLIGHT PASS**.
-At the accepted Final Preflight boundary and before this documentation refresh,
-`main` / locally known `origin/main` both resolved to the qualified technical source
-`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`; ahead/behind **0/0**, clean index/worktree.
-A later documentation-only HEAD does not replace this technical qualification identity.
+Current state: **2026-10-31 (Asia/Seoul), PRE-ACTUAL-E2 — FRESH R0-A V2 ACCEPTED / REMEDIATION PARTIAL SUCCESS / TIMING PROFILING FIX REQUIRED BEFORE EXECUTION**.
+At this refresh's read-only preflight, `main` / locally known `origin/main` both
+resolved to pre-refresh documentation HEAD `a7abce49f4f98d2db02695943c299f86a212344d`;
+ahead/behind **0/0**, clean index/worktree. Qualified technical anchor remains
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`; the intervening change is docs-only.
+Fresh Attempt #2 records `a7abce49...` with the same technical closure.
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) is the primary durable current-state authority;
 this document is the current Stage-3 Extended roadmap/index.
 Historical R0-A run/review source remains `c0bc270bce1996797f9ecec80e79ea8998d3205d`.
@@ -79,16 +80,23 @@ Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
 **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**. Accepted USER-host focused E2 regression:
 **1513/1513 PASS**, failures/errors/skips **0/0/0**, process exit **0**.
 These are accepted preflight results, not checks rerun for this documentation refresh.
-That source is **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**.
-**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
+**Fresh R0-A V2 Attempt #2: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**
+as operational calibration evidence. Overall remediation is **PARTIAL SUCCESS**:
+the historical static whole-archive blocker is resolved by the Fresh representation,
+but all 18 comparable route walls regressed and realized R0-B constructibility is
+not yet established. Current c4 P/O-only B1000 already exceeds the launcher ceiling.
+Historical evidence/proofs remain unchanged for their original source/representation.
 
-**ChatGPT final documentation CONTENT review: PASS; USER commit/push authorized.**
-If publication is pending, USER completes the remaining commit/push steps.
-**CURRENT NEXT after committed/pushed publication:** narrow post-documentation
-authority re-anchor → separate Fresh R0-A execution authorization → only then
-Fresh R0-A execution. Historical R0-A evidence
-and both static blocks remain unchanged for the old source/representation;
-fresh operational evidence is still required.
+External timing-profile-v1: **PREPARED / NOT EXECUTED**; independent review
+**FIX REQUIRED BEFORE EXECUTION**, mandatory **B1 + R1–R3**. Both phases are
+**NOT AUTHORIZED**, with no profiling measurement. Intended next work is minimal
+external corrections → new pins → independent delta review → separately authorized
+production-import-free Job isolation dry check, before considering Phase 1 approval.
+Phase 2 P/O needs a separate evidence-supported hash-bound gate; see the
+[current Program K boundary](#current-program-k-boundary) below. This documentation
+refresh grants **no execution authority**. A separately approved docs-only
+commit/push does not change the qualified technical anchor or authorize timing
+profiling, R0-B, Actual E2, or any other experiment.
 Real R0-B is
 **NOT RUN / NOT AUTHORIZED**; this is not a failed R0-B run. Complete R0
 adjudication is **NOT DONE**. Final N/concurrency are **NOT SELECTED**, and the
@@ -248,13 +256,15 @@ results retain their original identity and meaning.
     Remediation investigation is **CLOSED / ACCEPTED**; V1.3.1 is **FINAL DESIGN
     ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Remediation **1A–1W is 23/23
     COMPLETE / ACCEPTED / COMMITTED / PUSHED**. **Fresh R0-A Final Preflight PASS**
-    at technical source `48f6ebc` establishes eligibility for separate execution
-    authorization only; exact identity and accepted evidence are recorded above.
-    Documentation CONTENT review is **PASS**; pending USER commit/push is authorized.
-    **CURRENT NEXT after committed/pushed publication:** narrow authority re-anchor →
-    separate Fresh R0-A execution authorization → only then execution.
-    **Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED;
-    no measurement exists.** R0-B and Actual E2 remain **NOT RUN / NOT AUTHORIZED**.
+    at technical source `48f6ebc` remains accepted history. **Fresh V2 Attempt #2
+    is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**, with documentation/
+    run source HEAD `a7abce49...`. Remediation is **PARTIAL SUCCESS**: static storage
+    blocker resolved, timing worsened. External profiling is **PREPARED / NOT
+    EXECUTED / FIX REQUIRED BEFORE EXECUTION**; B1 + R1–R3 correction, re-pinning,
+    independent delta review and a separately authorized import-free Job dry check
+    precede Phase 1 authorization consideration. Both profiling phases are
+    **NOT AUTHORIZED**; Phase 2 never starts automatically. R0-B and Actual E2
+    remain **NOT RUN / NOT AUTHORIZED**.
     Final N/concurrency are **NOT SELECTED**; the final E2 Operating Envelope is
     **NOT SELECTED / NOT FROZEN**. No milestone 11+ is frozen.
 
@@ -379,7 +389,7 @@ the production guard.
 
 #### Accepted Real R0-A — complete / integrity pass / closed
 
-The single separately authorized initial calibration run is **COMPLETE / INTEGRITY
+The historical separately authorized initial calibration run is **COMPLETE / INTEGRITY
 PASS / EVIDENCE ACCEPTED / CLOSED**. Its post-run integrity review and static
 follow-on review are **COMPLETE**. Preserve the accepted run; **do not rerun R0-A**.
 
@@ -513,14 +523,75 @@ does not establish realized payload fit after schema framing/padding, and does n
 establish cumulative archive feasibility. Do not sum all six families as one unit
 or add R again to K/D: their attributable target families already own their copies.
 
-The accepted harness uses one cumulative evidence sink for all **10,512** logical
+That historical harness used one cumulative evidence sink for all **10,512** logical
 workers (10,000 primary + 256 K + 256 D). Final archive accounting requires both
 `archive_bytes >= family minimum totals + realized fixed bytes` and
-`archive_bytes <= 17,179,869,184`. The public R0-B boundary currently checks minimum
-composite payload fit before creating a result root, but does not perform this
+`archive_bytes <= 17,179,869,184`. Its public R0-B boundary checked minimum
+composite payload fit before creating a result root, but did not perform this
 minimum-total-archive preflight there; cumulative persistence/final accounting
-still fail closed. These facts were established by source-only/read-only static
+still failed closed. These historical facts were established by source-only/read-only static
 inspection and arithmetic, without materialization or a launcher invocation.
+
+#### Fresh R0-A V2 Attempt #2 — accepted evidence / partial remediation success
+
+Root: [`results/program-k-e2-fresh-r0a-v2-48f6ebc-attempt2/`](../../results/program-k-e2-fresh-r0a-v2-48f6ebc-attempt2/).
+Recorded source HEAD is `a7abce49...`; qualified technical anchor remains
+`48f6ebc...`. Accepted execution completed successfully with **Python exit 0**;
+post-run `validate_existing_run_v2` **PASS**, **INTEGRITY PASS / EVIDENCE ACCEPTED**.
+Fresh R0-A is **CLOSED as operational calibration evidence**: **18/18 components,
+64/64 units each, 1,920/1,920 cases**, no FAILED marker, accepted
+provenance/source/profile/corpus/inventory. Preserve the creation marker.
+The whole operator elapsed was **49h 56m 6.9099925s**, versus historical
+**23h 44m 42.7777545s**; neither is an Actual-E2 runtime or a single route wall.
+These are accepted records, not executions or validator checks rerun by this refresh.
+
+| Fresh result | Accepted finding |
+| --- | --- |
+| Overall remediation | **PARTIAL SUCCESS** |
+| Execution / evidence integrity | **SUCCESS / ACCEPTED / CLOSED** |
+| Comparable route walls | **18/18 regressed; execution-wall blocker worsened** |
+| c4 K64+D64 | **22,959.2643101 s**, against necessary early target **<=5,400 s** |
+| c4 K+D projected lower bound | **183,674.1144808 s**, above **43,200 s** ceiling |
+| N=1000 current c4 P/O-only bound, K=D=0 | **48,874.331425675 s**, already above ceiling |
+| N=1000 full c4 P+K+D+O-primary bound | **232,548.445906475 s** |
+| Physical attributable minimum | **74,047,481,628 B historical → 15,385,281,356 B Fresh; approximately 79.22% reduction** |
+| Full fixed reservation | **15,385,281,356 + 268,435,456 = 15,653,716,812 B <= 17,179,869,184 B** |
+| B_proc | **1,526,152,372 B** |
+| Demonstrated historical static whole-archive blocker | **RESOLVED** for Fresh representation |
+| Realized R0-B constructibility | **NOT YET ESTABLISHED** |
+
+The necessary screen is
+`B1000(c) = 2*(P64(c)*1000/64 + K64(c)*256/64 + D64(c)*256/64 + O64_primary(c)*128/64)`.
+O_K_BIND, O_D_REPEAT and postprocess are nonnegative: B1000 above the ceiling
+rules out that c. Passing still needs explicit, evidence-supported headroom for
+those omitted projected costs. K+D <=5,400 s and historical V1 parity are not
+sufficient. Preserve RF02/WB02/qualified codec/dual sizing unless later evidence
+forces otherwise; the static sizing improvement does not prove a realized archive.
+
+Codex Fresh adjudication and independent Claude Code audit agree on valid evidence,
+resolved static storage blocker, worse timing, and keeping R0-B unrun. Repeated
+same-boundary WB02/canonical/legacy validation, coordinator/admission/readback work,
+and CPU-heavy/serial validation with weak concurrency benefit are source-supported
+profiling hypotheses, not established unprofiled causes. Exact identities and
+audit locations are in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
+
+#### Timing profiling — prepared, execution blocked
+
+External package:
+`C:\Users\User\.codex\visualizations\2026\10\30\01a18cf8-cb06-7f51-baab-bc05c6fcc53d\program-k-timing-profile-v1`.
+**PREPARED / NOT EXECUTED**, bounded diagnostic only, **not R0/admission evidence**.
+Independent Claude pre-execution verdict: **B. FIX REQUIRED BEFORE EXECUTION**.
+
+- **B1:** approved venv Python is a Windows redirector/launcher; current Job
+  `ActiveProcessLimit=1` and assignment cannot guarantee containment of the actual
+  base-Python driver. Correct before any execution.
+- **R1:** `control.json` replace/read race.
+- **R2:** `output_size` TOCTOU on disappearing pending files.
+- **R3:** adaptive extension does not respect remaining phase/global budget.
+
+Only B1 + R1–R3 form the mandatory correction set; optional hardening is separate.
+**Phase 1 K/D: NOT AUTHORIZED. Phase 2 P/O: NOT AUTHORIZED. No profiling
+measurement exists; Phase 2 never starts automatically.**
 
 #### Current execution boundary / accepted remediation design
 
@@ -534,28 +605,31 @@ wording describes its historical design boundary; the current implementation is
 **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**. Preserve the frozen bytes.
 
 **FRESH R0-A FINAL PREFLIGHT — PASS**, **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**,
-qualifies the exact technical source
+qualified the exact technical source
 `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9` as
-**ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**. The accepted USER-host
+**ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION** at that historical boundary. The accepted USER-host
 focused E2 regression was **1513/1513 PASS**, failures/errors/skips **0/0/0**.
 The exact source chain, runtime/profile identities and accepted preflight evidence
 are recorded in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
-**Fresh R0-A: NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.**
+Fresh Attempt #2 is now accepted and closed, with the partial-success findings
+above. This documentation refresh grants **no execution authority**. A separately
+approved docs-only commit/push does not change the qualified technical anchor or
+authorize timing profiling, R0-B, Actual E2, or any other experiment.
+External-artifact correction and a dry check require separate approval.
 
-**ChatGPT final documentation CONTENT review: PASS.** This documentation-only
-candidate is **authorized for USER commit/push**. If it is still uncommitted or
-unpushed, USER completes the remaining publication steps; publication is determined
-from live Git, not assumed here.
-
-**CURRENT NEXT after committed/pushed publication:**
-
-1. Narrow post-documentation authority re-anchor, retaining `48f6ebc` as the
-   qualified technical source and recording any later documentation-only HEAD
-   separately. This re-anchor has not yet been performed.
-2. Separate Fresh R0-A execution authorization.
-3. Only then Fresh R0-A execution.
-
-Preflight eligibility grants no execution authority.
+**Intended next sequence:** minimal external **B1 + R1–R3 only** corrections →
+recompute bytes/SHA pins → independent exact-byte delta review → separately
+authorized **production-import-free Windows Job isolation dry check**. Only after
+successful review/dry check consider Phase 1 authorization, then bounded K/D
+profiling and independent stop/go. If optimistic K+D fails 5,400 s at every
+allowed c, stop NO-GO without P/O. Phase 2 P/O requires justified Phase 1 evidence
+and its own approved hash-bound gate. Final profiling adjudication precedes any
+production timing-remediation design/implementation. After implementation,
+bounded performance qualification must show a credible admission path before
+any separately authorized new Fresh R0-A. R0-B remains later, separately
+authorized after Fresh admission prerequisites pass. See the full 13-step
+sequence in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
+**Do not rerun a large experiment merely to discover whether a timing change helped.**
 
 Historical scope of the now **CLOSED / ACCEPTED** engineering investigation:
 candidate investigation areas are K/D setup/reference preparation, encoding/IPC,
@@ -568,9 +642,9 @@ These were investigation targets, not established causes or approved implementat
 Do not begin by loosening caps, safety factors, subsets, the candidate-N ladder,
 attribution, policy or thresholds. Any contract change requires separate explicit
 adjudication. The accepted R0-A evidence and both static blocks above remain
-historical evidence for the old source/representation. Remediation implementation
-and Final Preflight are accepted at the technical source above; fresh R0 evidence
-is still required to establish operational resolution. This documentation refresh
+historical evidence for the old source/representation. Fresh V2 resolves the
+demonstrated static storage blocker but worsens timing; realized constructibility
+remains unestablished. This documentation refresh
 does not establish effectiveness or authorize execution.
 
 | Boundary | Current status |
@@ -585,10 +659,14 @@ does not establish effectiveness or authorize execution.
 | Design boundary | **BLOCKER 0 / REQUIRED 0; design phase CLOSED** |
 | Remediation implementation 1A–1W | **23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED** |
 | Fresh R0-A Final Preflight | **PASS at technical source `48f6ebc`; BLOCKER 0 / REQUIRED 0 / OPTIONAL 1** |
-| Exact qualified technical source | **ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION**; full identity above |
-| Documentation CONTENT review / publication | **PASS; USER commit/push authorized; if publication is pending, USER completes the remaining steps** |
-| Current next after committed/pushed publication | **Narrow post-documentation authority re-anchor → separate Fresh R0-A execution authorization → only then execution** |
-| Fresh R0-A | **NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists** |
+| Qualified technical anchor / pre-refresh documentation HEAD | **`48f6ebc...` / `a7abce49...`; distinct identities recorded at this refresh's read-only preflight** |
+| Fresh R0-A V2 Attempt #2 | **COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** |
+| Remediation result | **PARTIAL SUCCESS: static storage blocker resolved; timing regressed** |
+| Realized R0-B constructibility | **NOT YET ESTABLISHED** |
+| Timing-profile design / artifacts | **PREPARED / NOT EXECUTED** |
+| Independent pre-execution review | **FIX REQUIRED BEFORE EXECUTION; B1 + R1–R3** |
+| Phase 1 / Phase 2 | **NOT AUTHORIZED / NOT AUTHORIZED; no measurements** |
+| This refresh | **No execution authority; separately approved docs-only publication does not change the qualified technical anchor or authorize any experiment** |
 | Real R0-B | **NOT RUN / NOT AUTHORIZED; no R0-B failure claimed** |
 | Complete R0 adjudication | **NOT DONE** |
 | Final N / final concurrency | **NOT SELECTED** |
@@ -601,8 +679,8 @@ does not establish effectiveness or authorize execution.
 | Program K final closeout | **NOT DONE** |
 | Stage-3 Extended / milestone 10 | **ACTIVE; milestones 1–9 remain CLOSED** |
 
-After publication and the re-anchor/authorization sequence above, Fresh R0-A and
-fresh admission/constructibility review must precede any separate R0-B authorization.
+After the bounded diagnostic/remediation/qualification sequence above, any new
+Fresh R0-A and its admission/constructibility review precede separate R0-B authorization.
 Complete R0 adjudication must precede final N/concurrency/envelope selection and
 freeze. Actual E2 still requires separate authorization. Any E3 required by the frozen trigger,
 Gate P, production integration, K trace/native-user acceptance, Program K closeout
@@ -762,12 +840,12 @@ is **CONTENT-FROZEN / ACCEPTED**. Conformance, selection, setup repair and the
 R0 harness at `7e7f847` are accepted. Historical Real R0-A is COMPLETE / INTEGRITY PASS /
 EVIDENCE ACCEPTED / CLOSED. Remediation investigation/design are CLOSED / ACCEPTED;
 V1.3.1 is frozen by exact tracked bytes, and remediation 1A–1W is 23/23 COMPLETE /
-ACCEPTED / COMMITTED / PUSHED. Fresh R0-A Final Preflight PASS at technical source
-`48f6ebc` establishes eligibility only. Documentation CONTENT review is PASS;
-pending USER commit/push is authorized. After committed/pushed publication, CURRENT
-NEXT is the authority re-anchor → separate execution authorization → only then
-Fresh R0-A execution, as detailed in the [current Program K boundary](#current-program-k-boundary).
-Fresh R0-A is NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists.
+ACCEPTED / COMMITTED / PUSHED. Qualified technical anchor is `48f6ebc`; Fresh V2
+Attempt #2 records documentation/source HEAD `a7abce49...` and is accepted/closed.
+Remediation is **PARTIAL SUCCESS**: static storage blocker resolved, timing worse.
+Timing-profile artifacts are **PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE
+EXECUTION**; both phases are NOT AUTHORIZED. The [current Program K boundary](#current-program-k-boundary)
+records B1 + R1–R3 corrections and the separate review/dry-check/authorization sequence.
 R0-B and Actual E2 remain NOT RUN / NOT AUTHORIZED; effectiveness is NOT ESTABLISHED.
 The historical polish acceptance is unchanged.
 
@@ -1115,12 +1193,12 @@ R0 Attribution Amendment v1 is **CONTENT-FROZEN / ACCEPTED**. Conformance,
 selection, setup repair and R0 harness `7e7f847` are accepted. Historical Real R0-A is COMPLETE /
 INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun. Remediation investigation/design
 are CLOSED / ACCEPTED; V1.3.1 is frozen by exact tracked bytes, and remediation
-1A–1W is 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED. Fresh R0-A Final Preflight
-PASS at technical source `48f6ebc` establishes eligibility only. Documentation
-CONTENT review is PASS; pending USER commit/push is authorized. After committed/pushed
-publication, CURRENT NEXT is the authority re-anchor → separate execution
-authorization → only then Fresh R0-A execution. Fresh R0-A is
-NOT RUN / NOT YET EXECUTION-AUTHORIZED; no measurement exists. R0-B and Actual E2
+1A–1W is 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED. Fresh R0-A V2 Attempt #2
+is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED, with **PARTIAL SUCCESS**:
+the static storage blocker is resolved but timing regressed. External timing-profile
+artifacts are **PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE EXECUTION**;
+Phase 1 and Phase 2 remain NOT AUTHORIZED. Follow the correction/review/dry-check
+sequence in the [current Program K boundary](#current-program-k-boundary). R0-B and Actual E2
 are NOT RUN / NOT AUTHORIZED; complete R0 adjudication is NOT DONE, final N/concurrency
 are NOT SELECTED and the final E2 Operating Envelope is NOT SELECTED / NOT FROZEN.
 Effectiveness is NOT ESTABLISHED.
