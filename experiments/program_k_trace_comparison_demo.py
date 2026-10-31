@@ -40,7 +40,7 @@ def main(argv=None):
 
     app = QApplication.instance() or QApplication([sys.argv[0]])
     window = ProgramKComparisonWindow(pairs)
-    window.show()
+    window.showMaximized()
     return app.exec_()
 
 

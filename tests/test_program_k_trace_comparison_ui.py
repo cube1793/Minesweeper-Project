@@ -69,6 +69,21 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 0)
         load.assert_not_called()
 
+    @unittest.skipIf(ui is None, "PyQt5 unavailable")
+    def test_launcher_opens_maximized_without_changing_window_geometry_contract(self):
+        admitted = (literal_pair(),)
+        with patch.object(demo, "load_demo_pairs", return_value=admitted) as load, \
+                patch.object(demo, "configure_qt_plugin_path"), \
+                patch("PyQt5.QtWidgets.QApplication") as app_type, \
+                patch.object(ui, "ProgramKComparisonWindow") as window_type, redirect_stdout(io.StringIO()):
+            app_type.instance.return_value.exec_.return_value = 0
+            self.assertEqual(demo.main([]), 0)
+            load.assert_called_once_with(ARTIFACT, profile_path=PROFILE)
+            window_type.assert_called_once_with(admitted)
+            window_type.return_value.showMaximized.assert_called_once_with()
+            window_type.return_value.show.assert_not_called()
+            app_type.instance.return_value.exec_.assert_called_once_with()
+
     def test_ui_has_no_parser_loader_answer_lookup_or_execution_dependency(self):
         source = (ROOT / "experiments/program_k_trace_comparison_ui.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -87,6 +102,7 @@ class DemoTests(unittest.TestCase):
             "experiments/program_k_trace_comparison.py": "7df2ff741a9a41fac62afc98f5b500ccb03889b9e61d45c546b52e9823cb6388",
             "experiments/program_k_trace_viewer.py": "1ed58f418d2f557e3908dfd370a72181357af1d1fc90164a8d30c2db75d038b3",
             "experiments/program_k_trace_demo.py": "c062ed098ec675a4d90b7916ab1bf8325587e9f3d5d788dd361fbcc1337729c3",
+            "experiments/program_k_trace_comparison_demo.py": "67113bf21e8819aed0daa801a15c0515336f3fc37e9861b7c8d0c1be0d20b972",
             "tests/test_program_k_trace_adapter.py": "e03511fd512f92f56f20f831ac36bc6d2a084ee1f55d3f80cdf1edc9a7b6a81c",
             "tests/test_program_k_control_trace_adapter.py": "1793cfbd27cfb651e860af7b7549a6ed5932a4c8fee9a105919a56730a22601b",
             "tests/test_program_k_trace_comparison.py": "88d608452c4fb4480a6b4599f0d776e371943a1f65691ea96d26682cf436b87a",
@@ -123,7 +139,7 @@ class PortableWindowTests(unittest.TestCase):
                 tuple((key, label.text()) for key, label in panel.detail_labels.items()))
 
     def start(self, panel, mode=ui.INDEX_MODE if ui else "Index"):
-        panel.mode_combo.setCurrentText(mode)
+        panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
         panel.on_play_pause()
 
     def tick(self, side, ns):
@@ -234,7 +250,7 @@ class PortableWindowTests(unittest.TestCase):
         for i, panel in enumerate(self.panels):
             for speed_index, speed in enumerate(ui.SUPPORTED_SPEEDS):
                 panel.on_first()
-                panel.mode_combo.setCurrentText(ui.MODEL_C_MODE)
+                panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(ui.MODEL_C_MODE))
                 panel.speed_combo.setCurrentIndex(speed_index)
                 duration = Fraction(panel.player.pending_action.modeled_action_us * 1000, speed)
                 self.assertEqual(duration.denominator, 1)
@@ -249,7 +265,7 @@ class PortableWindowTests(unittest.TestCase):
         for i, panel in enumerate(self.panels):
             for mode in (ui.INDEX_MODE, ui.MODEL_C_MODE):
                 panel.on_first()
-                panel.mode_combo.setCurrentText(mode)
+                panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
                 duration = panel.playback.pending_duration_us * 1000
                 panel.on_play_pause()
                 self.tick(i, duration // 2)
@@ -266,7 +282,7 @@ class PortableWindowTests(unittest.TestCase):
         for i, panel in enumerate(self.panels):
             for mode in (ui.INDEX_MODE, ui.MODEL_C_MODE):
                 panel.on_first()
-                panel.mode_combo.setCurrentText(mode)
+                panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
                 duration = (600000 if mode == ui.INDEX_MODE else sum(a.modeled_action_us for a in panel.player.presentation.actions[:3]))
                 panel.on_play_pause()
                 self.tick(i, duration * 1000)
@@ -281,7 +297,7 @@ class PortableWindowTests(unittest.TestCase):
                 frame = panel.player.current_frame
                 route = panel.board.overlay.targets
                 detail = panel.detail_labels["cumulative_modeled_us"].text()
-                panel.mode_combo.setCurrentText(mode)
+                panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
                 duration = panel.playback.pending_duration_us * 1000
                 panel.on_play_pause()
                 self.tick(i, duration // 2)
@@ -314,7 +330,7 @@ class PortableWindowTests(unittest.TestCase):
         for i, panel in enumerate(self.panels):
             before = self.snapshot(self.panels[1 - i])
             panel.interval_spin.setValue(5000)
-            panel.mode_combo.setCurrentText(ui.MODEL_C_MODE)
+            panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(ui.MODEL_C_MODE))
             panel.speed_combo.setCurrentIndex(5)
             self.assertEqual((panel.playback.index_interval_ms, panel.playback.model_speed), (5000, 8))
             self.assertEqual(self.snapshot(self.panels[1 - i]), before)
@@ -322,7 +338,7 @@ class PortableWindowTests(unittest.TestCase):
     def test_simultaneous_different_modes_rates_one_paused_and_terminal(self):
         a, b = self.panels
         a.interval_spin.setValue(100)
-        b.mode_combo.setCurrentText(ui.MODEL_C_MODE)
+        b.mode_combo.setCurrentIndex(b.mode_combo.findData(ui.MODEL_C_MODE))
         b.speed_combo.setCurrentIndex(0)
         a.on_play_pause()
         b.on_play_pause()
@@ -420,8 +436,8 @@ class PortableWindowTests(unittest.TestCase):
                 self.assertEqual(panel.detail_labels["cumulative_modeled_us"].text(), f"{frame.cumulative_modeled_us:,} µs")
                 if i:
                     a = panel.player.presentation.actions[i - 1]
-                    for key, value in (("action", a.action), ("target", str(a.target)), ("cursor_before", str(a.cursor_before)),
-                                       ("modeled_action_us", f"{a.modeled_action_us:,} µs"), ("status_after", a.status_after)):
+                    for key, value in (("action", ui.ACTION_TEXT[a.action]), ("target", str(a.target)), ("cursor_before", str(a.cursor_before)),
+                                       ("modeled_action_us", f"{a.modeled_action_us:,} µs"), ("status_after", ui.STATUS_TEXT[a.status_after])):
                         self.assertEqual(panel.detail_labels[key].text(), value)
 
     def test_navigation_does_no_file_access_and_board_click_executes_nothing(self):
@@ -438,12 +454,148 @@ class PortableWindowTests(unittest.TestCase):
 
     def test_no_comparative_judgment_labels_and_exact_difference_heading(self):
         w = self.window
-        self.assertEqual(w.difference_heading.text(), "Recorded difference for this preserved case — K-P0 minus CONTROL")
+        self.assertEqual(w.difference_heading.text(), "이 사례의 기록상 차이 (개선 방식 − 기존 방식)")
+        self.assertIn("음수는 개선 방식의 기록값이 기존 방식보다 작다는 뜻입니다.", w.difference_note.text())
+        self.assertNotIn("Δ", w.difference_heading.text() + w.difference_label.text())
         text = " ".join(label.text() for label in (w.difference_heading, w.difference_label, w.difference_note)).lower()
-        for word in ("improvement", "speedup", "saved", "faster", "better", "superior", "efficiency gain", "optimal"):
+        for word in ("improvement", "speedup", "saved", "faster", "better", "superior", "efficiency gain", "optimal",
+                     "향상", "우월", "더 빠름", "절약", "효율", "더 빠른 알고리즘", "우수한 방식", "최적화 성공"):
             self.assertNotIn(word, text)
-        self.assertIn(pairs.LIMITATION, w.limitation_label.text())
-        self.assertIn(self.admitted[0].identity.board_fingerprint, w.fingerprint_label.text())
+        self.assertEqual(w.limitation_label.text(), "저장된 연구 사례를 보여주는 화면이며, 통계적 성능 검증 결과는 아닙니다.")
+        self.assertIn(self.admitted[0].identity.board_fingerprint, w.identity_label.toolTip())
+        self.assertEqual(w.current_pair.difference.direction, "K-P0 minus CONTROL")
+        self.assertIn(w.current_pair.difference.direction, w.difference_heading.toolTip())
+        self.assertEqual(w.difference_heading.toolTip(), w.difference_heading.accessibleDescription())
+
+    def test_korean_title_panel_headings_navigation_and_detail_captions(self):
+        self.assertEqual(self.window.windowTitle(), "지뢰찾기 알고리즘 비교 — 기존 방식 vs 개선 방식 (Program K)")
+        self.assertNotIn("K-P0", self.window.windowTitle())
+        self.assertEqual(self.panels[0].title(), "기존 방식")
+        self.assertEqual(self.panels[1].title(), "개선 방식 (Program K)")
+        for panel in self.panels:
+            self.assertEqual([button.text() for button in (panel.first_button, panel.previous_button,
+                             panel.play_button, panel.next_button, panel.last_button)], ["처음", "이전", "재생", "다음", "끝"])
+            self.assertEqual(panel.route_checkbox.text(), "완료 이동 경로 표시")
+            self.assertEqual(panel.mode_combo.accessibleName(), panel.variant + " 재생 기준")
+            self.assertEqual(panel.interval_spin.accessibleName(), panel.variant + " 입력 간격")
+            self.assertEqual(panel.speed_combo.accessibleName(), panel.variant + " Model C 배속")
+            labels = {label.text() for label in panel.findChildren(QLabel)}
+            for caption in ("재생 기준", "입력 간격", "배속", "순번:", "동작:", "대상 좌표:", "이전 커서:",
+                            "동작 Model C 시간:", "누적 Model C 시간:", "실행 후 상태:"):
+                self.assertIn(caption, labels)
+            self.start(panel)
+            self.assertEqual(panel.play_button.text(), "일시정지")
+            panel.on_play_pause()
+            self.assertEqual(panel.play_button.text(), "재생")
+        self.assertEqual(self.panels[1].knowledge_checkbox.text(), "확정한 지뢰 표시 (초록 ◇)")
+        self.assertIn("동작 분류:", {label.text() for label in self.panels[1].findChildren(QLabel)})
+
+    def test_action_status_localization_does_not_change_archived_values(self):
+        statuses = {"PLAYING": "진행 중", "WON": "승리", "LOST": "패배"}
+        actions = {"OPEN": "열기 (OPEN)", "FLAG": "깃발 (FLAG)", "CHORD": "동시 열기 (CHORD)"}
+        for panel in self.panels:
+            presentation = panel.player.presentation
+            recorded = (presentation.actions, presentation.frames)
+            for index, frame in enumerate(presentation.frames):
+                panel.seek(index)
+                self.assertIs(panel.player.current_frame, frame)
+                self.assertIn(f"상태: {statuses[frame.status]}", panel.status_label.text())
+                if index:
+                    action = presentation.actions[index - 1]
+                    self.assertIs(panel.player.current_action, action)
+                    self.assertEqual(panel.detail_labels["action"].text(), actions[action.action])
+                    self.assertEqual(panel.detail_labels["status_after"].text(), statuses[action.status_after])
+            self.assertEqual((presentation.actions, presentation.frames), recorded)
+            self.assertTrue(all(a.action in actions and a.status_after in statuses for a in presentation.actions))
+
+    def test_translated_modes_use_original_item_data_and_independent_controller_tokens(self):
+        self.assertEqual((ui.INDEX_MODE, ui.MODEL_C_MODE), ("Index", "Model C Time"))
+        for index, panel in enumerate(self.panels):
+            before = self.snapshot(self.panels[1 - index])
+            self.assertEqual([(panel.mode_combo.itemText(i), panel.mode_combo.itemData(i)) for i in range(2)],
+                             [("입력 순서", "Index"), ("Model C 시간", "Model C Time")])
+            for caption, mode in (("Model C 시간", "Model C Time"), ("입력 순서", "Index")):
+                panel.mode_combo.setCurrentText(caption)
+                self.assertEqual(panel.playback.mode, mode)
+                self.assertEqual(panel.mode_combo.currentData(), mode)
+                panel.refresh()
+                self.assertEqual(panel.mode_combo.currentText(), caption)
+                self.assertEqual(self.snapshot(self.panels[1 - index]), before)
+
+    def test_provenance_is_concise_but_full_identity_remains_accessible(self):
+        w, identity = self.window, self.admitted[0].identity
+        self.assertEqual(w.identity_label.text(), "같은 지뢰 배치에서 기존 방식과 개선 방식의 기록을 비교합니다. 좌우 기록은 각각 독립적으로 재생할 수 있습니다.")
+        for widget in (w.identity_label, w.pair_selector):
+            for field in ("연구 기록 상세 정보", f"내부 기록 ID: {identity.case_id}", "승인 E1", identity.run_id,
+                          identity.board_fingerprint, str(identity.first_click),
+                          f"반복 {identity.repetition}", f"CONTROL 기록 {identity.control_schedule_index}",
+                          f"K-P0 기록 {identity.kp0_schedule_index}"):
+                self.assertIn(field, widget.toolTip())
+                self.assertIn(field, widget.accessibleDescription())
+        visible_text = " ".join(label.text() for label in w.findChildren(QLabel)) + w.pair_selector.currentText()
+        self.assertNotIn(identity.run_id, visible_text)
+        self.assertNotIn(identity.board_fingerprint, visible_text)
+        self.assertIn("같은 지뢰 배치", w.identity_label.text())
+        self.assertTrue(w.identity_label.isVisible())
+        self.assertTrue(w.limitation_label.isVisible())
+
+    def test_main_surface_uses_audience_names_without_losing_variant_identity(self):
+        w = self.window
+        self.assertEqual((self.panels[0].variant, self.panels[1].variant), ("CONTROL", "K-P0"))
+        for panel in self.panels:
+            self.assertIn(panel.variant, panel.toolTip())
+            self.assertEqual(panel.toolTip(), panel.accessibleDescription())
+            self.assertIn("동시 열기(CHORD)", panel.summary_label.toolTip())
+            self.assertIn("깃발 수가 숫자와 같을 때", panel.summary_label.toolTip())
+        self.assertIn("Stage-3 V1", self.panels[0].toolTip())
+        self.assertIn("통계적 효과 입증을 뜻하지 않습니다", self.panels[1].toolTip())
+        prominent = " ".join([w.windowTitle(), w.pair_selector.currentText(),
+                             *(panel.title() for panel in self.panels),
+                             *(label.text() for label in (w.identity_label, w.limitation_label,
+                               w.difference_heading, w.difference_label, w.difference_note, w.legend_label)),
+                             *(panel.summary_label.text() for panel in self.panels)])
+        for token in ("K-P0", "CONTROL", "E1", "Stage-3 V1", "S-LIFECYCLE", "S-REPLAN", "S-LOSS", "X-0",
+                      "OPEN", "FLAG", "CHORD", "K logical known mine"):
+            self.assertNotIn(token, prominent)
+        for claim in ("더 빠른 알고리즘", "우수한 방식", "성능 향상", "효율 개선", "최적화 성공", "속도 향상", "절약"):
+            self.assertNotIn(claim, prominent)
+
+    def test_program_k_explanation_describes_unflagged_known_mines_without_new_layer(self):
+        control, kp0 = self.panels
+        self.assertIsNone(control.knowledge_checkbox)
+        self.assertFalse(hasattr(control.board, "knowledge_overlay"))
+        tooltip = kp0.knowledge_checkbox.toolTip()
+        self.assertIn("Program K는 확정한 지뢰를 반드시 즉시 깃발로 표시하지 않고", tooltip)
+        self.assertIn("필요할 때까지 논리적으로 기억할 수 있습니다", tooltip)
+        self.assertIn("초록 ◇ = Program K가 지뢰로 확정했지만 아직 깃발을 놓지 않은 칸", tooltip)
+        self.assertEqual(kp0.knowledge_checkbox.accessibleDescription(), tooltip)
+        self.assertNotIn("P0", tooltip)
+        self.assertIn("초록 ◇ = 개선 방식이 지뢰로 확정했지만 아직 깃발을 놓지 않은 칸", self.window.legend_label.text())
+        self.assertIn("빨간 깃발 = 실제 깃발", self.window.legend_label.text())
+        kp0.seek(2)
+        self.assertEqual(kp0.board.knowledge_overlay.hidden_mines, kp0.player.current_frame.hidden_logical_mines)
+        self.assertEqual(control.player.current_index, 0)
+
+    def test_model_c_explanation_distinguishes_modeled_real_and_cpu_time(self):
+        label = self.window.model_c_label
+        self.assertTrue(label.isVisible())
+        self.assertIn("마우스 이동·입력의 모델 시간", label.text())
+        self.assertIn("마우스 이동과 입력을 모델링한 시간", label.toolTip())
+        self.assertIn("실제 경과 시간이나 CPU 계산 시간이 아닙니다", label.toolTip())
+        self.assertIn("마이크로초", label.toolTip())
+        self.assertEqual(label.accessibleDescription(), label.toolTip())
+
+    def test_only_one_compact_bottom_legend_with_precise_cursor_tooltip(self):
+        w = self.window
+        self.assertIs(w.layout().itemAt(w.layout().count() - 1).widget(), w.legend_label)
+        self.assertIsNotNone(w.layout().itemAt(w.layout().count() - 2).layout())  # panels directly above
+        for text in ("초록 ◇", "빨간 깃발", "파란 원", "주황 테두리", "보라 선"):
+            self.assertIn(text, w.legend_label.text())
+        self.assertNotIn("Model C", w.legend_label.text())
+        self.assertNotIn("\n", w.legend_label.text())
+        for text in ("완료한 입력의 대상 좌표만", "표시용 합성", "실제 마우스 궤적 기록이 아닙니다", "다음 입력 대상"):
+            self.assertIn(text, w.legend_label.toolTip())
+        self.assertEqual(w.legend_label.accessibleDescription(), w.legend_label.toolTip())
 
     def test_clock_failure_is_local_and_close_does_not_sample_either_clock(self):
         for panel in self.panels:
@@ -488,6 +640,30 @@ class AcceptedWindowTests(PortableWindowTests):
                 self.assertEqual(panel.playback.progress, 0)
             self.assertEqual(self.panels[1].board.knowledge_overlay.hidden_mines, frozenset())
 
+    def test_audience_case_labels_preserve_all_four_exact_pair_identities(self):
+        expected = (("S-LIFECYCLE", "기본 예제 · 4×1 / 지뢰 1"),
+                    ("S-REPLAN", "복합 동작 예제 · 6×4 / 지뢰 5"),
+                    ("S-LOSS", "패배 예제 · 5×1 / 지뢰 2"),
+                    ("X-0", "상급 보드 예제 · 30×16 / 지뢰 99"))
+        selector = self.window.pair_selector
+        for i, ((case_id, caption), pair) in enumerate(zip(expected, self.admitted)):
+            self.assertEqual(selector.itemText(i), caption)
+            self.assertEqual(selector.itemData(i), case_id)
+            for internal_id, _ in expected:
+                self.assertNotIn(internal_id, caption)
+            self.window.select_pair(i)
+            self.assertIs(self.window.current_pair, pair)
+            self.assertIs(self.panels[0].player.presentation, pair.control)
+            self.assertIs(self.panels[1].player.presentation, pair.kp0)
+            for detail in (selector.itemData(i, Qt.ToolTipRole), selector.itemData(i, Qt.AccessibleDescriptionRole),
+                           selector.toolTip(), selector.accessibleDescription(),
+                           self.window.identity_label.toolTip(), self.window.identity_label.accessibleDescription()):
+                for value in (f"내부 기록 ID: {case_id}", "승인 E1", pair.identity.run_id, pair.identity.board_fingerprint,
+                              f"반복 {pair.identity.repetition}", f"최초 열기 {pair.identity.first_click}",
+                              f"CONTROL 기록 {pair.identity.control_schedule_index}", f"K-P0 기록 {pair.identity.kp0_schedule_index}"):
+                    self.assertIn(value, detail)
+            self.assertEqual(pair.difference.direction, "K-P0 minus CONTROL")
+
     def test_exact_accepted_summaries_and_signed_differences(self):
         expected = ((4, 3, -1, 1, -1, -1, -71406), (15, 14, -1, 3, -3, -1, -86720),
                     (3, 2, -1, 0, -1, 0, None), (227, 180, -47, 33, -51, -29, -8400666))
@@ -495,18 +671,43 @@ class AcceptedWindowTests(PortableWindowTests):
             self.window.select_pair(i)
             for panel, facts in ((self.panels[0], p.control_facts), (self.panels[1], p.kp0_facts)):
                 text = panel.summary_label.text()
-                for text_value in (facts.outcome, f"Inputs {facts.total_inputs}", f"OPEN {facts.open_inputs}",
-                                   f"FLAG {facts.flag_inputs}", f"CHORD {facts.chord_inputs}", f"{facts.model_c_total_us:,} µs"):
+                for text_value in (ui.STATUS_TEXT[facts.outcome], f"입력 {facts.total_inputs}", f"열기 {facts.open_inputs}",
+                                   f"깃발 {facts.flag_inputs}", f"동시 열기 {facts.chord_inputs}", f"{facts.model_c_total_us:,} µs",
+                                   f"직접 깃발 {facts.explicit_physical_flags}", f"승리 시 자동 깃발 {facts.automatic_win_flags}"):
                     self.assertIn(text_value, text)
             self.assertEqual((p.control_facts.total_inputs, p.kp0_facts.total_inputs, p.difference.total_inputs,
                               p.difference.open_inputs, p.difference.flag_inputs, p.difference.chord_inputs,
                               p.difference.model_c_us), values)
-            for caption, value in zip(("Inputs", "OPEN", "FLAG", "CHORD"), values[2:6]):
-                self.assertIn(f"Δ {caption} " + (f"{value:+,}" if value else "0"), self.window.difference_label.text())
-            self.assertIn(p.identity.board_fingerprint, self.window.fingerprint_label.text())
+            for caption, value in zip(("입력 수 차이", "열기", "깃발", "동시 열기"), values[2:6]):
+                self.assertIn(f"{caption} " + (f"{value:+,}" if value else "0"), self.window.difference_label.text())
+            if values[-1] is not None:
+                self.assertIn(f"Model C 시간 차이: {values[-1]:+,} µs", self.window.difference_label.text())
+            self.assertIn(p.identity.board_fingerprint, self.window.identity_label.toolTip())
+            self.assertIn(p.identity.run_id, self.window.pair_selector.accessibleDescription())
         self.window.select_pair(2)
-        self.assertIn("Δ Model C N/A", self.window.difference_label.text())
-        self.assertEqual(self.window.difference_note.text(), ui.LOSS_TIME_NOTE)
+        self.assertIsNone(self.window.current_pair.difference.model_c_us)
+        self.assertIn("Model C 시간 차이: 비교하지 않음", self.window.difference_label.text())
+        self.assertNotIn("N/A", self.window.difference_label.text())
+        self.assertIn("양쪽 모두 패배한 사례이므로 승리 시간 비교에는 사용하지 않습니다.", self.window.difference_note.text())
+        self.assertIn("각 실행의 종료 시점 Model C 시간은 좌우에 별도로 표시합니다.", self.window.difference_note.text())
+        for panel in self.panels:
+            panel.on_last()
+            self.assertEqual(panel.player.current_frame.status, "LOST")
+            self.assertIn("상태: 패배", panel.status_label.text())
+            self.assertEqual(panel.detail_labels["status_after"].text(), "패배")
+
+    def test_expert_desktop_width_fits_and_restored_window_keeps_scroll_fallback(self):
+        self.window.select_pair(3)
+        self.window.resize(1920, 1000)
+        self.app.processEvents()
+        for panel in self.panels:
+            self.assertEqual((panel.board.width(), panel.board.height()), (840, 448))
+            self.assertEqual(panel.scroll_area.horizontalScrollBar().maximum(), 0)
+        self.window.resize(1400, 950)
+        self.app.processEvents()
+        for panel in self.panels:
+            self.assertGreater(panel.scroll_area.horizontalScrollBar().maximum(), 0)
+            self.assertEqual(panel.board.cells[0, 0].width(), 28)
 
     def test_all_accepted_public_frames_and_routes_equal_each_source(self):
         for i, p in enumerate(self.admitted):
@@ -601,7 +802,8 @@ class AcceptedWindowTests(PortableWindowTests):
                     panel.on_next()
                     panel.on_last()
                     panel.on_first()
-                    panel.mode_combo.setCurrentText(MODEL_C_MODE)
+                    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(MODEL_C_MODE))
+                    assert panel.playback.mode == MODEL_C_MODE
                     panel.on_play_pause()
                     app.processEvents()
                     panel.on_play_pause()
