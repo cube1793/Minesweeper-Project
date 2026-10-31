@@ -365,90 +365,87 @@ route at the committed prefix. Reference truth never enters planner/admissibilit
 or executed choice. The neutral helper creates no feature-to-feature UI dependency.
 
 
-### Stage-3 Extended: Program K / E2 remediation boundary — ACTIVE
+### Stage-3 Extended: Program K research / effectiveness boundary
 
-Milestone 10 **Program K: Logical Known-Mine Capability + Selective Physical
-Materialization** is the active Stage-3 Extended research milestone. Gate-R E0/E1
-qualification and Actual E1 are CLOSED / ACCEPTED, and E2 implementation slices
-I1–I8 plus the amended R0 harness are accepted historical/current implementation
-lineage. Program K effectiveness is still **NOT ESTABLISHED**.
+Program K의 bounded experimental 구현은 K-C capability의 논리 지뢰 집합 M과
+K-P0의 선택적 물리 FLAG·OPEN·CHORD 실행을 제공한다. Gate-R E0/E1과 Actual E1,
+E2 구현 I1–I8, R0 harness, remediation 1A–1W는 수용된 구현 이력이다.
+생산 통합은 **NOT STARTED**, Gate P는 **NOT PASSED / NOT AUTHORIZED**다.
 
-The accepted historical Real R0-A is operational non-effectiveness evidence for
-its original source/representation. Its integrity/work are CLOSED. The follow-on
-static review proved two blocks for that historical implementation: the frozen
-execution-admission projection exceeds the 12 h ceiling, and the old whole-archive
-representation exceeds the 16 GiB R0-B ceiling. These findings remain valid
-historical evidence; they are not an executed R0-B failure and are not
-retrospectively erased by a newer design.
+Remediation 기술 anchor는 `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`다.
+[정확한 V1.3.1 설계](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)와
+[acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)는
+frozen 상태를 유지한다. RF02/WB02, qualified codec, dual physical/logical sizing,
+B_proc와 독립 validation/readback 책임은 accepted experimental 구현에 남아 있다.
+Fresh R0-A V2 Attempt #2는 integrity PASS이며 static storage blocker를 해소했지만,
+18/18 comparable route wall은 퇴화했다. 전체 remediation은 PARTIAL SUCCESS이고
+realized R0-B constructibility는 미입증이다. 과거 old-source/representation의
+static proofs와 역사적 execution identity는 새 viewer HEAD로 대체하지 않는다.
 
-Remediation engineering investigation is **CLOSED / ACCEPTED**. The exact
-[remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)
-and its [acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
-are frozen at documentation commit `83c9f0c` with **FINAL DESIGN ACCEPTED —
-BLOCKER 0 / REQUIRED 0; design phase CLOSED**. Remediation implementation
-**1A–1W is 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED** in the experimental
-V2 path. Program K production integration remains **NOT STARTED**.
+Timing Phase-1 Attempt #2 execution/integrity와 measurement quality는 PASS,
+최종 과학적 판정은 **PHASE1_INCONCLUSIVE_TRANSFER**다. 현재 de-dup remediation-class
+profiling은 **STOP / DEFER — UNBOUNDED_RESEARCH_RISK**다. Phase 2는
+**NOT AUTHORIZED**, R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**,
+effectiveness는 **NOT ESTABLISHED**다. 이는 PHASE1_NO_GO 또는 E2 실패 판정이 아니다.
+구현 수용, timing diagnostic, 효과성, production qualification은 서로 다른 경계다.
 
-Accepted V1.3.1 design boundaries:
+### Program K read-only research visualization / comparison — CLOSED
 
-| Boundary | Accepted responsibility |
+별도 D0 authority의 D1–D5 구현·패키지·사용자 acceptance가 **FINAL PASS / CLOSED**다.
+최종 소스 `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`와 상세 증거는
+[연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
+기록한다. Stage-3 V1 및 기존 production Same-board architecture는 변경하지 않는다.
+
+| Research module | 현재 책임 |
 | --- | --- |
-| Logical evidence | Existing canonical `records.encode()` bytes, semantic digests and required evidence content remain unchanged |
-| Physical representation | `PKE2RF02` record frames and `PKE2WB02` worker bundle; raw DEFLATE profile is qualified explicitly rather than changing logical schemas |
-| Size calibration | Physical and logical maxima produce independent 3/2 floors; the logical floor qualifies workload only and never grants archive credit |
-| P/K/D/O sizing | Two-component constructor separates repetitive logical volume from deterministic entropy used to control physical size; positive physical floors retain the inclusive `T_P .. T_P+4096` procedural window |
-| Reference sizing | Truthful 30×16 zero-mine scaffold with the complete 479-entry constraint catalog; artificial `Z` is forbidden; reference has no +4096 window and uses the bounded minimum eligible candidate |
-| Procedural archive guard | Global `B_proc` reserves fixed allowance and limits realized attributable excess before the first durable write of a complete unit; final fixed/archive caps remain independent checks |
-| Validation/store | Worker, parent, coordinator and independent readback keep separate validation responsibility; immutable keys, durability-before-progress and poison/abort on partial failure remain |
-| Compatibility | Historical V1 evidence/decoding stays unchanged; V1/V2/profile/basis mixing must fail closed |
-| Qualification gate | Before large qualification, the exact large truthful reference must run the bounded encode/decode/validation/K-D-binding wall and peak-RSS diagnostic |
+| `experiments/program_k_trace_adapter.py` | `load_accepted_e1_traces()` / `project_accepted_e1_traces()`: accepted E1/COMPLETE/profile bytes와 역사적 source/audit를 인증해 immutable K-P0 frames/actions/provenance로 projection; stdlib only, K-P0-only admission |
+| `experiments/program_k_control_trace_adapter.py` | 별도 `ControlTracePresentation`: CONTROL의 archived V1/public-effect/cost audit와 physical stream admission; K 지식이나 fake K model을 만들지 않음 |
+| `experiments/program_k_trace_viewer.py` | `KTracePlayer`, `KTracePlayback`, public board와 committed logical-known-mine rendering; in-memory 탐색·표시만 수행 |
+| `experiments/program_k_trace_comparison.py` | `load_accepted_e1_pairs()` / `ProgramKComparisonPair`: exact same-board binding과 `RecordedDifference`; 공통 playhead 없음 |
+| `experiments/program_k_trace_comparison_ui.py` | CONTROL/K 패널의 독립 player/controller/timer/clock, Korean audience presentation; evidence I/O·gameplay 없음 |
+| `experiments/program_k_trace_demo.py` | accepted K 사례를 한 번 읽고 K-only viewer를 여는 standalone launcher |
+| `experiments/program_k_trace_comparison_demo.py` | 네 accepted pair를 한 번 읽고 비교 UI를 최대화해 여는 standalone exhibition launcher |
 
-`RF02`, `WB02`, the two-component constructors, `B_proc` and the V2 R0-A run
-lifecycle exist in the accepted experimental implementation. Current source/tests
-remain the implementation authority. **FRESH R0-A FINAL PREFLIGHT — PASS** at
-`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`, with **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**,
-remains accepted qualification history. At this refresh's read-only preflight,
-the pre-refresh documentation HEAD / locally known `origin/main` was
-`a7abce49f4f98d2db02695943c299f86a212344d`; that docs-only commit
-does not replace qualified technical anchor `48f6ebc...`.
-The qualified V2 codec profile is distinct from frozen Model C; exact identities
-and accepted USER-host evidence are in [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md).
+허용 의존 방향은 **research UI → research adapters/models**, 그리고 research
+presentation에서 의미가 일치하는 **stable production presentation helper**로 향한다.
+생산 모듈이 `experiments.program_k_*`를 import해서는 안 된다. CONTROL sibling은
+D1의 제한된 parsing/authentication helper를 재사용하지만 D1의 K-only 계약은 넓히지
+않는다. 기존 main menu/algorithm selector/worker와 연결하지 않는다.
 
-**Fresh R0-A V2 Attempt #2: execution COMPLETE / exit 0 / validator PASS /
-INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** as operational calibration evidence,
-with recorded source HEAD `a7abce49...`. Overall remediation is **PARTIAL SUCCESS**.
-The physical attributable minimum fell from **74,047,481,628 B** to
-**15,385,281,356 B** (approximately **79.22%**); full fixed reservation fits under
-**17,179,869,184 B**, leaving **B_proc = 1,526,152,372 B**. The demonstrated
-historical static whole-archive blocker is **RESOLVED**. Realized R0-B
-constructibility remains **NOT YET ESTABLISHED**.
+`KTracePlayback`은 `Stage3ModeledPlayback`의 물리 timing mechanics를 재사용하고,
+completed-route painter는 `visualization_reference_overlays.py`를 재사용한다.
+CONTROL은 별도 `ControlTracePlayer` / `_ControlBoard`를 사용해 K 용어·knowledge layer가
+섞이지 않도록 한다. K를 `Stage3Execution`이나 `Stage3RunResult`로 위장하지 않는다.
 
-Timing worsened on all **18/18 comparable routes**. Fresh c4 K+D is
-**22,959.2643101 s**; its necessary projection is **183,674.1144808 s** against
-**43,200 s**. At N=1000, current c4 P/O alone already gives **48,874.331425675 s**
-with K=D=0; full P+K+D+O-primary B1000 is **232,548.445906475 s**. K+D <=5,400 s
-is only an early necessary screen, and historical V1 parity is insufficient.
-Any future B1000 pass needs explicit headroom for Oracle intersections/postprocess.
-Preserve **RF02/WB02/qualified codec/dual sizing** unless later evidence forces otherwise.
+입력 authority는 accepted E1 bytes다. 로딩은 archived PASS 기록을 검증하되
+solver/evaluator를 다시 실행하지 않는다. 탐색은 immutable D1/CONTROL observation을
+직접 표시하므로 Engine reconstruction, hidden layout 대체, 파일 재읽기가 없다.
+Model C는 기록된 정수 비용과 합계를 사용하며 wall time·CPU time·human recorded time과
+다르다. Synthetic cursor는 cell-center 사이 표시용 이동이며 실제 mouse trajectory가 아니다.
 
-External timing-profile-v1 is **PREPARED / NOT EXECUTED**, diagnostic only, not
-R0/admission evidence. Independent review is **FIX REQUIRED BEFORE EXECUTION**:
-**B1** venv redirector versus actual-driver Job containment; **R1** control-file
-replace/read race; **R2** output-size TOCTOU; **R3** budget-unaware adaptive repeats.
-Both phases are **NOT AUTHORIZED**, and no profiling measurement exists.
-The intended next sequence is minimal external B1 + R1–R3 corrections, re-pinning,
-independent exact-byte delta review and, if authorized, a production-import-free
-Windows Job isolation dry check before considering Phase 1 K/D authorization.
-Phase 2 P/O needs separate evidence-supported hash-bound authorization. Profiling
-adjudication precedes production timing work; bounded performance qualification
-must precede any credible, separately authorized new Fresh R0-A. This documentation
-refresh grants **no execution authority**. A separately approved docs-only
-commit/push does not change the qualified technical anchor or authorize timing
-profiling, R0-B, Actual E2, or any other experiment.
-R0-B and Actual E2
-remain **NOT RUN / NOT AUTHORIZED**; complete R0 adjudication is **NOT DONE**,
-final N/concurrency are **NOT SELECTED**, and the final E2 Operating Envelope is
-**NOT SELECTED / NOT FROZEN**. Accepted calibration evidence grants no execution authority.
+논리 지뢰 표시 계약:
+
+- ordinary HIDDEN, logical-known but physically HIDDEN, physical FLAG를 구분한다.
+- frame 0의 M은 empty다. k > 0의 M은 정확히 k개 입력 후 D1 frame state이며
+  `actions[k-1].preinput_M`에 해당한다. `answer_reference`에서 지식을 추론하지 않는다.
+- 숨은 논리 지뢰에만 초록 diamond를 그린다. FLAG는 primary glyph이고 logical provenance는
+  secondary detail로 남는다. Explicit FLAG와 automatic WIN flag는 별도 상태다.
+- 자동 WIN FLAG나 terminal answer disclosure가 이전 K 지식을 만들지 않는다.
+  Hidden-answer/reference truth는 별개 개념이며 이 UI에는 answer toggle이 없다.
+- Partial motion 중 board/M/route/cumulative Model C는 committed frame에 고정되고
+  cursor/target만 움직인다. Layer는 public → logical marker → route → target → cursor다.
+
+비교는 repetition 1의 S-LIFECYCLE 6↔8, S-REPLAN 12↔14, S-LOSS 18↔20, X-0 24↔26이다.
+Registration/materialization, case/source, fingerprint와 exact terminal layout은 같고
+operation/result는 별개다. CONTROL은 frozen V1 실행, K-P0는 실제 K policy이며
+K-CONTROL shadow analysis는 포함하지 않는다. 좌우 clocks/playheads는 독립적이다.
+공통 action index·normalized progress·race clock·동기 semantic position은 없다.
+Pair 변경만 양쪽 partial motion을 버리고 frame 0으로 초기화한다.
+
+`RecordedDifference`는 K-P0 minus CONTROL의 사례별 산술 사실이다. S-LOSS의
+comparative `model_c_us`는 None이며 종료 비용은 좌우 별도로 표시한다. 효과성 지표로
+승격하지 않는다. Korean 표시 이름과 내부 action/status/mode/identity는 분리되고,
+기술 provenance는 tooltip/accessibility로 보존된다.
 
 ### Replay
 
@@ -844,6 +841,7 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 | Same-board transport / lifecycle | `test_same_board_execution_worker.py`, `test_same_board_execution_job.py`, `test_same_board_solver_transport.py`, `test_same_board_worker_dispatch.py` | board-only transport·token·parent validation·cancel/reap/cleanup·source/frozen dispatch |
 | Same-board playback / UI | `test_same_board_timed_playback.py`, `test_same_board_playback.py`, `test_same_board_comparison_ui.py`, `test_same_board_comparison_launcher.py`, `test_same_board_main_ui.py` | 독립 timing/index·partial pause/catch-up·public observation·Human overlay 분리·captured source·result reopen·main close |
 | Neutral reference overlays | `test_visualization_reference_overlays.py`, Same-board/Visualizer UI modules | immutable clues·HIDDEN mask·completed prefix·opacity/z-order·public glyph 보존·partial/toggle no-domain guards |
+| Program K research demo | `test_program_k_trace_adapter.py`, `test_program_k_control_trace_adapter.py`, `test_program_k_trace_comparison.py`, `test_program_k_trace_viewer.py`, `test_program_k_trace_comparison_ui.py` | pinned evidence·immutable projection·exact pairing·독립 clocks·committed M·no I/O/execution·R2 presentation |
 | Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
 | ZiNi worker | `test_zini_worker_dispatch.py` | Qt 없는 실제 source/dispatch subprocess, transport·stale token·실패 처리, 모의 process를 사용한 UI 정리 경계 |
 
@@ -858,7 +856,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
-- **Stage-3 후속 범위:** Milestones 1–9는 CLOSED이고 Milestone 10 Program K가 ACTIVE다. Historical R0-A와 Fresh R0-A V2 Attempt #2는 각각 accepted/closed다. V1.3.1은 exact-byte frozen이며 1A–1W 구현은 accepted다. Fresh remediation은 PARTIAL SUCCESS: static storage blocker는 해소됐지만 18/18 route timing은 퇴화했고 realized R0-B constructibility는 미입증이다. External profiling은 PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE EXECUTION이며 B1 + R1–R3 수정·재검토·별도 승인 dry check가 선행되어야 한다. 두 profiling phase, R0-B, Actual E2는 NOT AUTHORIZED다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 더 명확한 Foundation Run/결과 열기 라벨은 DEFER다. Viewer의 immutable frame/time seek는 이미 구현·수용됐고 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
+- **Stage-3 후속 범위:** Milestones 1–9와 Program K 연구 데모 D0–D5는 CLOSED다. Effectiveness는 NOT ESTABLISHED, Phase-1은 PHASE1_INCONCLUSIVE_TRANSFER이며 현재 de-dup timing path는 STOP / DEFER다. Extended 전체는 명시적 project-closeout 판정 전까지 ACTIVE다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 Foundation Run/결과 열기 라벨 개선은 DEFER이며 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
 - **Replay 비용:** 진입 시 통계 timeline을 전체 순회로 생성한다. Seek/previous는 처음부터 재구성하며 checkpoint가 없다.
 - **UI 책임 집중:** 파생 Live Counters, Replay 시간·slider·button, Live Auto 정책은 UI에 남아 있다. ZiNi subprocess/config lifecycle은 공유 `ZiniMetricJob`으로 분리되었고 각 UI는 표시/eligibility 정책을 소유한다.
 - **ZiNi 실행과 검증:** Counters는 evaluation 수만 제한하므로 실행 시간 상한은 없다. 실제 worker의 실패·취소와 운영체제별 GUI 동작은 자동 검증 범위를 더 넓혀야 한다. 결과의 해석 범위는 [ZiNi 결과](#zini-results)를 따른다.
@@ -873,18 +871,13 @@ Selected Exemplar Viewer, Visualization Usability Polish와 Fixed-Exemplar Human
 Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extended 자체는
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
-Program K의 remediation engineering investigation과 V1.3.1 설계는 각각
-CLOSED / ACCEPTED, FINAL DESIGN ACCEPTED이며 1A–1W 구현은 수용됐다.
-Fresh R0-A V2 Attempt #2 evidence도 accepted/closed이지만 timing admission은 실패한다.
-다음은 B1 + R1–R3 external-artifact 수정, 재핀, 독립 delta review와 별도 승인된
-production-import-free Job dry check이며, 성공 후에만 Phase 1 승인을 검토한다.
-Phase 2는 별도 근거·승인이 필요하고 자동 진행하지 않는다. Profiling 최종 판정 후에만
-production timing remediation을 검토한다. 구현 후 bounded performance qualification이
-credible admission path를 보여야 새 Fresh R0-A를 고려하며, 큰 실험을 재실행해
-개선 여부부터 알아보지 않는다. Fresh admission prerequisites가 통과한 후에만
-별도 R0-B 승인을 고려한다. Actual E2는
-complete R0 adjudication과 final Operating Envelope 동결 후 별도 승인이 필요하다.
-Historical static blocks는 계속 old source/representation의 accepted evidence로 보존한다.
+Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
+**다음 작업은 Stage-3 Extended project-closeout 명시적 판정 / Stage 4 전환 결정**이다.
+현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
+재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
+향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,
+별도 E2 승인 조건을 건너뛰지 않는다. 이 문서는 Extended 전역 종료나 Stage 4 실행을
+선언하지 않는다. 과거 static blocks는 원래 source/representation의 증거로 보존한다.
 
 Nearest exact-minimum-risk guessing using movement cost는 별도 backlog 후보일 뿐 Program K
 정책에 포함되지 않는다. Human Mouse Trace는 [수용된 계약](#human-mouse-trace)의 실제

@@ -88,114 +88,35 @@ Closed milestones / durable closeouts:
 
 ### Current Program-K state / next work
 
-Milestones **1–9 remain CLOSED**. Milestone **10 — Program K: Logical Known-Mine
-Capability + Selective Physical Materialization** remains **ACTIVE**.
-Current state as of **2026-10-31 (Asia/Seoul): PRE-ACTUAL-E2 — FRESH R0-A V2 ACCEPTED / REMEDIATION PARTIAL SUCCESS / TIMING PROFILING FIX REQUIRED BEFORE EXECUTION**.
-Program K is the whole research program; E2 is its effectiveness experiment;
-Gate P is later production/integration qualification after E2/any required E3.
+As of **2026-11-01 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separate
+Program K research visualization/comparison path **D0–D5 is FINAL ACCEPTANCE
+PASS / CLOSED**, including implemented D4 and final user packaged A–H PASS.
 
-Gate-R E0/E1 implementation qualification is **CLOSED / ACCEPTED**. Actual E1 is
-**E1_PASS / E1_QUALIFIED / ACCEPTED**, `progression_allowed = true`; the
-[E1 closeout](stage3-extended/STAGE3_PROGRAM_K_E1_CLOSEOUT.md) remains the
-historical evidence authority. Program K effectiveness is still **NOT ESTABLISHED**.
+- [Program K research-demo closeout](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md):
+  D0–D5, immutable K/CONTROL adapters, exact pairs, independent playback, final
+  R1/R2 Korean UI, final package identity, regression and user acceptance.
+- [Current handoff](CURRENT_HANDOFF.md): concise recovery record and current next.
+- [Extended Program K history](stage3-extended/README.md#current-program-k-boundary):
+  E0/E1, E2 I1–I8, R0/amendment/harness, historical static blocks and Fresh V2 results.
 
-The [E2 Effectiveness Protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md)
-remains **FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
+Final visualization/package source is `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`;
+`05920abeaec541a52fd22753dadec66f5cb98bca` is the earlier historical visualization
+anchor. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
+retains its own historical role. Accepted E1/R0 executions are not attributed to
+current viewer HEAD.
 
-Program K E2 implementation slices **I1–I8 are 8/8 COMPLETE / ACCEPTED**.
-The [R0 Attribution Amendment v1](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
-is **CONTENT-FROZEN / ACCEPTED**. Amendment conformance (`cdba3513`), the accepted
-N=10000 target counts/synthetic selection, and setup-containment repair (`e6593f7`)
-are complete/accepted.
+Scientific disposition: **PHASE1_INCONCLUSIVE_TRANSFER**. Phase-1 Attempt #2
+execution/integrity and measurement quality passed. Current de-dup remediation-class
+timing profiling is **STOP / DEFER — UNBOUNDED_RESEARCH_RISK**. Phase 2 is
+**NOT AUTHORIZED**; R0-B and Actual E2 are **NOT RUN / NOT AUTHORIZED**;
+Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
+failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
+Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**R0 harness implementation — FINAL ACCEPTANCE PASS / COMMITTED / PUSHED** at
-`7e7f847816fedb77cef67b576eab665afabfbfbf` (`7e7f847`),
-`feat: add Program K E2 R0 harness`; **BLOCKER 0 / REQUIRED 0 / OPTIONAL 0**.
-Accepted historical full-source qualification: **4117/4117 PASS**
-(`4111 MAIN + 6 ISOLATED`). Exact identities, receipts and qualification history
-are in the [current handoff](CURRENT_HANDOFF.md).
-
-This refresh's read-only preflight found `main` / locally known `origin/main`
-at pre-refresh documentation HEAD
-`a7abce49f4f98d2db02695943c299f86a212344d`, ahead/behind **0/0**, clean index/worktree.
-Qualified technical anchor remains `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`;
-the intervening commit changed only documentation. Fresh Attempt #2 records
-`a7abce49...` with the same technical closure. Historical R0-A run/review source
-remains `c0bc270bce1996797f9ecec80e79ea8998d3205d`.
-
-**Historical Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED — NO RERUN.**
-Its accepted evidence is **OPERATIONAL NON-EFFECTIVENESS** evidence. Subsequent
-read-only static review confirmed both the **execution-wall admission blocker**
-and the **R0-B whole-archive capacity blocker** for the old source/representation;
-both proofs remain preserved for that historical implementation. Exact evidence, calculations and
-authority are recorded in the [current handoff](CURRENT_HANDOFF.md) and
-[Extended README](stage3-extended/README.md).
-
-**Real R0-B: NOT RUN / NOT AUTHORIZED**; it has not failed an executed run.
-**Complete R0 adjudication: NOT DONE.** Final N/concurrency: **NOT SELECTED**;
-final Operating Envelope: **NOT SELECTED / NOT FROZEN**. E2 PASS/FAIL/DEFER: **NONE**.
-**Actual E2: NOT RUN / NOT AUTHORIZED. Program K effectiveness: NOT ESTABLISHED.**
-E3 is conditional/not triggered; Gate P, production integration and native K
-visual acceptance are not started. Program K final closeout is not done;
-Stage-3 Extended remains **ACTIVE**.
-
-Remediation engineering investigation: **CLOSED / ACCEPTED**. Remediation design
-V1.3.1: **FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**;
-**BLOCKER 0 / REQUIRED 0 at the design boundary; design phase CLOSED**.
-The acceptance receipt records the subsequent audit/final acceptance while the
-exact design retains its historical pre-re-audit wording.
-Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
-**FRESH R0-A FINAL PREFLIGHT — PASS** at the exact technical source above;
-**BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**. The accepted USER-host focused E2 regression
-was **1513/1513 PASS**, failures/errors/skips **0/0/0**, process exit **0**.
-These are accepted historical qualification results, not rerun by this refresh.
-
-**Fresh R0-A V2 Attempt #2: execution COMPLETE / exit 0 / validate_existing_run_v2
-PASS / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** as operational calibration
-evidence. Root: `results/program-k-e2-fresh-r0a-v2-48f6ebc-attempt2`;
-**18/18 components, 64/64 units each, 1,920/1,920 cases**, no FAILED marker.
-Overall remediation is **PARTIAL SUCCESS**: the historical static physical
-minimum fell from **74,047,481,628 B** to **15,385,281,356 B** (approximately
-**79.22%**), resolving that static whole-archive blocker. Full fixed reservation
-fits and **B_proc = 1,526,152,372 B**; realized R0-B constructibility remains
-**NOT YET ESTABLISHED**. Preserve RF02/WB02/qualified codec/dual sizing.
-
-All **18/18 comparable route walls regressed**. Fresh c4 K+D is
-**22,959.2643101 s** against the early necessary **5,400 s** screen. More strongly,
-at N=1000 current c4 P/O alone gives **48,874.331425675 s**, above the **43,200 s**
-ceiling even with K=D=0. Full c4 B1000 is **232,548.445906475 s**. A future B1000
-pass still requires explicit headroom for Oracle intersections/postprocess;
-historical V1 parity or K+D-only improvement is insufficient.
-
-External timing-profile-v1 design/artifacts: **PREPARED / NOT EXECUTED**.
-Independent pre-execution review: **B. FIX REQUIRED BEFORE EXECUTION**:
-**B1** venv redirector versus Job active-process containment;
-**R1** control-file replace/read race; **R2** output-size TOCTOU;
-**R3** adaptive repeats do not respect remaining phase/global budget.
-**Phase 1 and Phase 2 are NOT AUTHORIZED; no profiling measurement exists.**
-
-Intended next work is minimal external B1 + R1–R3 corrections, new byte/SHA pins,
-independent exact-byte delta review, then a separately authorized production-import-free
-Job isolation dry check. Only after successful review/dry check consider Phase 1
-K/D authorization; Phase 2 P/O needs its own evidence-supported hash-bound gate.
-Profiling is diagnostic, not R0 evidence. The complete sequence, including
-bounded post-implementation qualification before any credible new Fresh run,
-is in [CURRENT_HANDOFF](CURRENT_HANDOFF.md). Do not rerun a large experiment
-merely to discover whether a timing change helped. This documentation refresh
-grants **no execution authority**. A separately approved docs-only commit/push
-does not change the qualified technical anchor or authorize timing profiling,
-R0-B, Actual E2, or any other experiment.
-
-Recovery order:
-[CURRENT_HANDOFF](CURRENT_HANDOFF.md) →
-[Extended README](stage3-extended/README.md) (current roadmap/index) →
-[frozen E2 protocol](stage3-extended/STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
-[frozen R0 Attribution Amendment](stage3-extended/STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) →
-[exact V1.3.1 design](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) /
-[design acceptance receipt](stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) →
-current source/tests for disputed implementation facts.
-Do not repeat E2-D0/protocol/amendment audits, E0/E1 execution, official 100k,
-E/L, accepted P-8/R3/F1 or closed Viewer/Timeline/Polish work merely for recovery.
+**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
+transition.** Extended remains **ACTIVE pending that decision**, with effectiveness
+research deferred/unresolved. Future research reopening requires new evidence and
+separate authorization; no profiling/R0/E2 rerun is a documentation-recovery step.
 The ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
 
 ## Experiments

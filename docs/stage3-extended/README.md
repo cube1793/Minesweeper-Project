@@ -2,117 +2,44 @@
 
 ## Status
 
-Stage-3 V1은 **FINAL ADJUDICATION PASS — STAGE-3 V1 CLOSED**이며 frozen baseline이다.
-ZiNi Improvement도 **CLOSED / V1 RETAINED**이고 미개봉 최종 holdout은 그대로 유지한다.
-**Stage-3 Extended는 ACTIVE**다. 이 문서는 의존 관계에 따른 roadmap이며 고정 구현 일정이 아니다.
+Current state: **2026-11-01 (Asia/Seoul)**.
+**Stage-3 Extended: ACTIVE pending explicit project-closeout adjudication.**
+Stage-3 V1 remains CLOSED / FROZEN; ZiNi Improvement remains CLOSED / V1 RETAINED,
+with its final holdout unopened. This roadmap is not automatic execution authority.
 
-Current state: **2026-10-31 (Asia/Seoul), PRE-ACTUAL-E2 — FRESH R0-A V2 ACCEPTED / REMEDIATION PARTIAL SUCCESS / TIMING PROFILING FIX REQUIRED BEFORE EXECUTION**.
-At this refresh's read-only preflight, `main` / locally known `origin/main` both
-resolved to pre-refresh documentation HEAD `a7abce49f4f98d2db02695943c299f86a212344d`;
-ahead/behind **0/0**, clean index/worktree. Qualified technical anchor remains
-`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`; the intervening change is docs-only.
-Fresh Attempt #2 records `a7abce49...` with the same technical closure.
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) is the primary durable current-state authority;
-this document is the current Stage-3 Extended roadmap/index.
-Historical R0-A run/review source remains `c0bc270bce1996797f9ecec80e79ea8998d3205d`.
-Accepted technical harness ancestor:
-`7e7f847816fedb77cef67b576eab665afabfbfbf`
-— `feat: add Program K E2 R0 harness`; its direct parent is
-`e6593f7a99af2f0dd941eda7ee53a5164c79a2bd`.
+Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate dispositions:
 
-**Representative-board Demonstrations / Timeline Analytics — FINAL ACCEPTANCE
-PASS / CLOSED** (2026-10-17). **Slices 0–4 COMPLETE / ACCEPTED**, internal 3A/3B 포함;
-**BLOCKER 0 / REQUIRED 0**. Qualified source candidate는
-`4c488e033dd045f1c203ff500d824cfaffb7cc67`이며 이후 documentation-only commit과 구분한다.
-Focused/frozen **386 PASS**, full source **2184 PASS**, failures/errors/skips 모두 0.
-[최종 closeout](STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)과
-[수용 계약](STAGE3_TIMELINE_ANALYTICS_CONTRACT.md)을 보존한다.
-**Selected Exemplar Board-State Reconstruction / Human Interpretation Viewer —
-FINAL ACCEPTANCE PASS / CLOSED** (2026-10-18), **Slices 0–4 COMPLETE / ACCEPTED;
-BLOCKER 0 / REQUIRED 0**. Qualified source `ff6358ae62b6f343bda36069d7164bda9aebee74`.
-See the [final closeout](STAGE3_EXEMPLAR_BOARD_VIEWER_CLOSEOUT.md) and
-[final contract](STAGE3_EXEMPLAR_BOARD_VIEWER_CONTRACT.md).
-**Visualization Usability Polish — FINAL ACCEPTANCE PASS / CLOSED** (2026-10-18).
-Qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`; see the
-[closeout](STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
-**Fixed-Exemplar Human/Domain Interpretation — FINAL ACCEPTANCE PASS / CLOSED**
-(2026-10-19), **BLOCKER 0 / REQUIRED 0**; see the
-[closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
-Gameplay inspection is COMPLETE; additional gameplay required: NONE.
-Milestones **1–9 remain CLOSED**. Milestone **10** selected **Program K**; its
-[research specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md) and
-[Gate-R E0/E1 research protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md) are
-**FROZEN / ACCEPTED**. Gate-R E0/E1 implementation qualification is
-**CLOSED / ACCEPTED**; Actual E1 is **E1_PASS / E1_QUALIFIED / ACCEPTED** with
-`progression_allowed = true`; see the
-[E1 final closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md).
+| Path | Current state |
+| --- | --- |
+| Bounded K-C/K-P0 implementation, E0/E1, E2 I1–I8, R0 harness, remediation 1A–1W | Accepted implementation/history retained |
+| Scientific/effectiveness | **PHASE1_INCONCLUSIVE_TRANSFER; effectiveness NOT ESTABLISHED** |
+| Current de-dup remediation-class timing profiling | **STOP / DEFER — UNBOUNDED_RESEARCH_RISK** |
+| Phase 2 | **NOT AUTHORIZED** |
+| R0-B / Actual E2 | **NOT RUN / NOT AUTHORIZED** |
+| Research visualization/comparison D0–D5 | **FINAL ACCEPTANCE PASS / CLOSED; user packaged A–H PASS** |
+| Production integration / Gate P | **NOT STARTED / NOT PASSED** |
 
-The [E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) is
-**FROZEN / ACCEPTED — CONTENT FREEZE PASS / BLOCKER 0 / REQUIRED 0**.
-Program K E2 implementation slices **I1–I8 are 8/8 COMPLETE / ACCEPTED**; I0 is
-accepted architecture mapping/discovery and is excluded from that denominator.
+D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It is not a
+currently deferred demo proposal. Demo acceptance establishes no effectiveness or
+aggregate superiority. The scientific disposition is not PHASE1_NO_GO or an
+Actual E2 failure.
 
-The [R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
-is **CONTENT-FROZEN / ACCEPTED** at exactly **58,052 bytes**, SHA-256
-`5a833132c884b6cdbe822c8a7cc40f52342e03df6557b39025e91e34b6d7b6bf`;
-final independent exact-byte re-audit:
-**PASS — BLOCKER 0 / REQUIRED 0**.
+Final visualization/package source:
+**`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**, verified at this docs preflight as
+`main` == local `origin/main`, 0/0 and clean before edits.
+Final package root: `results/program-k-trace-demo-final-acceptance/20261031-230251/`.
+The earlier `05920abeaec541a52fd22753dadec66f5cb98bca` visualization package is
+historical. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
+and original E1/R0 execution identities remain distinct.
 
-Amendment conformance (`cdba3513`), exact N=10000 target counts/synthetic
-selection, and setup-containment repair (`e6593f7`) are complete/accepted.
-**R0 harness at `7e7f847`: FINAL ACCEPTANCE PASS / COMMITTED / PUSHED;
-BLOCKER 0 / REQUIRED 0 / OPTIONAL 0.**
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) is the concise recovery record.
+The [Program K research-demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
+records final source/package/data hashes, D0–D5 semantics, automated verification
+and the user's later packaged A–H acceptance. Generated D5 evidence retains its
+original PENDING USER timestamped state; it was not rewritten.
 
-**Historical Real R0-A: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun.**
-Its post-run integrity review and static follow-on review are complete. The
-accepted observations establish two independent static blocks: the frozen
-execution-admission projection exceeds 12 hours at every candidate N/concurrency,
-and the required synthetic R0-B family minima exceed the 16 GiB archive ceiling.
-Both remain **STATICALLY BLOCKED; historical proof preserved** for the old
-source/representation; they are not Program K effectiveness results.
-Remediation engineering investigation: **CLOSED / ACCEPTED**. The
-[exact remediation design V1.3.1](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) is
-**FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**; the
-[live acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)
-records **BLOCKER 0 / REQUIRED 0 at the design boundary; design phase CLOSED**.
-Remediation **1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**.
-**FRESH R0-A FINAL PREFLIGHT — PASS** at the exact technical source above;
-**BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**. Accepted USER-host focused E2 regression:
-**1513/1513 PASS**, failures/errors/skips **0/0/0**, process exit **0**.
-These are accepted preflight results, not checks rerun for this documentation refresh.
-**Fresh R0-A V2 Attempt #2: COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**
-as operational calibration evidence. Overall remediation is **PARTIAL SUCCESS**:
-the historical static whole-archive blocker is resolved by the Fresh representation,
-but all 18 comparable route walls regressed and realized R0-B constructibility is
-not yet established. Current c4 P/O-only B1000 already exceeds the launcher ceiling.
-Historical evidence/proofs remain unchanged for their original source/representation.
-
-External timing-profile-v1: **PREPARED / NOT EXECUTED**; independent review
-**FIX REQUIRED BEFORE EXECUTION**, mandatory **B1 + R1–R3**. Both phases are
-**NOT AUTHORIZED**, with no profiling measurement. Intended next work is minimal
-external corrections → new pins → independent delta review → separately authorized
-production-import-free Job isolation dry check, before considering Phase 1 approval.
-Phase 2 P/O needs a separate evidence-supported hash-bound gate; see the
-[current Program K boundary](#current-program-k-boundary) below. This documentation
-refresh grants **no execution authority**. A separately approved docs-only
-commit/push does not change the qualified technical anchor or authorize timing
-profiling, R0-B, Actual E2, or any other experiment.
-Real R0-B is
-**NOT RUN / NOT AUTHORIZED**; this is not a failed R0-B run. Complete R0
-adjudication is **NOT DONE**. Final N/concurrency are **NOT SELECTED**, and the
-final E2 Operating Envelope is **NOT SELECTED / NOT FROZEN**.
-Actual E2 is **NOT RUN / NOT AUTHORIZED**; effectiveness is **NOT ESTABLISHED**.
-E3 is conditional/not triggered; Gate P, production integration and native K visual
-acceptance are not started. Program K final closeout is not done; milestone 10
-research remains **ACTIVE**.
-
-첫 milestone **Execution / Playback / Visualizer Foundation**은
-**FINAL ADJUDICATION PASS / CLOSED (2026-10-14)**다.
-자동 검증과 실제 Windows worker/profile/startup, 사용자의 packaged interactive
-acceptance, 독립 Claude 감사 및 ChatGPT 최종 판정이 모두 PASS다.
-[최종 판정](STAGE3_VISUALIZER_FOUNDATION_FINAL_ADJUDICATION.md)에 종료 범위와 F-1/F-2 처분을 기록했다. [Slice 5 수용 기록](STAGE3_VISUALIZER_FOUNDATION_ACCEPTANCE.md)에
-수동 tester/date, 네 terminal path의 PID·job-directory cleanup 및 controls PASS를 기록했다.
-Foundation 판정은 해당 milestone만 닫으며 Stage-3 Extended 전체는 계속 active다.
+**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
+transition.** This decision has not been made by the documentation refresh.
 
 ## Foundation — closed / integrated
 
@@ -244,35 +171,28 @@ results retain their original identity and meaning.
    Stage-3 Visualizer; qualified implementation `31630dd6ffa2301c41534fca3b003838d865f313`.
 9. **CLOSED** — Fixed-Exemplar Human/Domain Interpretation;
    [final closeout](STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
-10. **ACTIVE — Program K: Logical Known-Mine Capability + Selective Physical Materialization** —
-    [frozen Program K specification](STAGE3_PROGRAM_K_RESEARCH_SPEC.md),
-    [frozen Gate-R E0/E1 protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md),
-    [accepted Actual E1 closeout](STAGE3_PROGRAM_K_E1_CLOSEOUT.md),
-    [frozen E2 Effectiveness Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md),
-    and [frozen R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md).
-    **I1–I8 = 8/8 COMPLETE / ACCEPTED.** Amendment conformance, target
-    counts/synthetic selection, setup repair and R0 harness are accepted.
-    **Historical Real R0-A is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun.**
-    Remediation investigation is **CLOSED / ACCEPTED**; V1.3.1 is **FINAL DESIGN
-    ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Remediation **1A–1W is 23/23
-    COMPLETE / ACCEPTED / COMMITTED / PUSHED**. **Fresh R0-A Final Preflight PASS**
-    at technical source `48f6ebc` remains accepted history. **Fresh V2 Attempt #2
-    is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**, with documentation/
-    run source HEAD `a7abce49...`. Remediation is **PARTIAL SUCCESS**: static storage
-    blocker resolved, timing worsened. External profiling is **PREPARED / NOT
-    EXECUTED / FIX REQUIRED BEFORE EXECUTION**; B1 + R1–R3 correction, re-pinning,
-    independent delta review and a separately authorized import-free Job dry check
-    precede Phase 1 authorization consideration. Both profiling phases are
-    **NOT AUTHORIZED**; Phase 2 never starts automatically. R0-B and Actual E2
-    remain **NOT RUN / NOT AUTHORIZED**.
-    Final N/concurrency are **NOT SELECTED**; the final E2 Operating Envelope is
-    **NOT SELECTED / NOT FROZEN**. No milestone 11+ is frozen.
+10. **Program K: Logical Known-Mine Capability + Selective Physical Materialization — split status.**
+    Scientific/effectiveness path: **PHASE1_INCONCLUSIVE_TRANSFER**, current timing
+    path **STOP / DEFER — UNBOUNDED_RESEARCH_RISK**, Phase 2 NOT AUTHORIZED,
+    R0-B/Actual E2 NOT RUN / NOT AUTHORIZED, effectiveness NOT ESTABLISHED.
+    Exhibition/demo subpath: **D0–D5 FINAL ACCEPTANCE PASS / CLOSED**, including
+    implemented D4 comparison and user A–H acceptance of the final package from
+    `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`.
+    [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
+    Gate P is not passed and production integration has not started.
+
+**CURRENT NEXT: explicit Extended project-closeout adjudication / Stage 4 transition.**
+No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
 ### Current Program K boundary
 
 Program K is the whole research program; E2 is its effectiveness experiment.
 Gate P is later production/integration qualification after E2/any triggered E3.
-The current position remains **PRE-ACTUAL-E2**.
+The current position remains **PRE-ACTUAL-E2**, with effectiveness research
+**DEFERRED / unresolved** and the separate D0–D5 exhibition path **CLOSED**.
+Phase-1 disposition is **PHASE1_INCONCLUSIVE_TRANSFER**, not PHASE1_NO_GO.
+The implementation and R0 evidence history below retain their original scope;
+they are not fresh executions or effectiveness qualification at the viewer HEAD.
 
 The bounded experimental Program K implementation and Gate-R history remain
 accepted. Full P-8 is **PASS / ACCEPTED**, Actual E0 is
@@ -572,144 +492,95 @@ Codex Fresh adjudication and independent Claude Code audit agree on valid eviden
 resolved static storage blocker, worse timing, and keeping R0-B unrun. Repeated
 same-boundary WB02/canonical/legacy validation, coordinator/admission/readback work,
 and CPU-heavy/serial validation with weak concurrency benefit are source-supported
-profiling hypotheses, not established unprofiled causes. Exact identities and
-audit locations are in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
+profiling hypotheses, not established unprofiled causes. Detailed historical audit
+locations remain in the pre-refresh `docs/CURRENT_HANDOFF.md` at `fb59d5fa...`;
+the [current handoff](../CURRENT_HANDOFF.md) separates those records from the
+later profiling disposition and final demo acceptance.
 
-#### Timing profiling — prepared, execution blocked
+#### Timing profiling — Phase 1 complete / inconclusive transfer
 
-External package:
-`C:\Users\User\.codex\visualizations\2026\10\30\01a18cf8-cb06-7f51-baab-bc05c6fcc53d\program-k-timing-profile-v1`.
-**PREPARED / NOT EXECUTED**, bounded diagnostic only, **not R0/admission evidence**.
-Independent Claude pre-execution verdict: **B. FIX REQUIRED BEFORE EXECUTION**.
+The historical pre-execution snapshot was **PREPARED / NOT EXECUTED**, with
+**FIX REQUIRED BEFORE EXECUTION** for B1 (actual-driver Job containment) and
+R1–R3 (control-file race, size TOCTOU and remaining-budget handling). That snapshot
+is superseded as current status; it is retained here only as preparation history.
 
-- **B1:** approved venv Python is a Windows redirector/launcher; current Job
-  `ActiveProcessLimit=1` and assignment cannot guarantee containment of the actual
-  base-Python driver. Correct before any execution.
-- **R1:** `control.json` replace/read race.
-- **R2:** `output_size` TOCTOU on disappearing pending files.
-- **R3:** adaptive extension does not respect remaining phase/global budget.
+Attempt #1 stopped on **MONITOR_GAP**, preserving partial decomposition rather
+than a completed measurement verdict. Monitor remediation/qualification passed.
+Attempt #2 then completed with **execution/integrity PASS** and **measurement
+quality PASS**. Final scientific disposition: **PHASE1_INCONCLUSIVE_TRANSFER**.
+Current de-dup remediation-class timing profiling: **STOP / DEFER**.
+Project-path reason: **UNBOUNDED_RESEARCH_RISK**. Phase 2: **NOT AUTHORIZED**.
 
-Only B1 + R1–R3 form the mandatory correction set; optional hardening is separate.
-**Phase 1 K/D: NOT AUTHORIZED. Phase 2 P/O: NOT AUTHORIZED. No profiling
-measurement exists; Phase 2 never starts automatically.**
+These diagnostic measurements are not R0/admission evidence, an Actual E2 result,
+or proof of Program K ineffectiveness. Raw records and the accepted adjudication
+are distinguished in the [demo closeout scientific boundary](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md#2-scientific-boundary).
+Do not resume profiling, R0-B or E2 merely for reassurance.
 
 #### Current execution boundary / accepted remediation design
 
-The [exact V1.3.1 design](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) is **FINAL DESIGN
-ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Its
-[acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) is the
-live authority for the subsequent closure re-audit PASS and ChatGPT/user final
-acceptance: **BLOCKER 0 / REQUIRED 0; design phase CLOSED**. The design's historical
-pre-re-audit wording remains unchanged. The receipt's implementation-not-started
-wording describes its historical design boundary; the current implementation is
-**1A–1W: 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**. Preserve the frozen bytes.
+The [exact V1.3.1 design](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) and its
+[acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) remain
+**FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**. Their historical
+pre-re-audit/implementation-not-started wording is not changed by this status refresh.
+Current remediation implementation is **1A–1W: 23/23 COMPLETE / ACCEPTED**.
 
-**FRESH R0-A FINAL PREFLIGHT — PASS**, **BLOCKER 0 / REQUIRED 0 / OPTIONAL 1**,
-qualified the exact technical source
-`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9` as
-**ELIGIBLE FOR SEPARATE FRESH R0-A EXECUTION AUTHORIZATION** at that historical boundary. The accepted USER-host
-focused E2 regression was **1513/1513 PASS**, failures/errors/skips **0/0/0**.
-The exact source chain, runtime/profile identities and accepted preflight evidence
-are recorded in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
-Fresh Attempt #2 is now accepted and closed, with the partial-success findings
-above. This documentation refresh grants **no execution authority**. A separately
-approved docs-only commit/push does not change the qualified technical anchor or
-authorize timing profiling, R0-B, Actual E2, or any other experiment.
-External-artifact correction and a dry check require separate approval.
-
-**Intended next sequence:** minimal external **B1 + R1–R3 only** corrections →
-recompute bytes/SHA pins → independent exact-byte delta review → separately
-authorized **production-import-free Windows Job isolation dry check**. Only after
-successful review/dry check consider Phase 1 authorization, then bounded K/D
-profiling and independent stop/go. If optimistic K+D fails 5,400 s at every
-allowed c, stop NO-GO without P/O. Phase 2 P/O requires justified Phase 1 evidence
-and its own approved hash-bound gate. Final profiling adjudication precedes any
-production timing-remediation design/implementation. After implementation,
-bounded performance qualification must show a credible admission path before
-any separately authorized new Fresh R0-A. R0-B remains later, separately
-authorized after Fresh admission prerequisites pass. See the full 13-step
-sequence in [CURRENT_HANDOFF](../CURRENT_HANDOFF.md).
-**Do not rerun a large experiment merely to discover whether a timing change helped.**
-
-Historical scope of the now **CLOSED / ACCEPTED** engineering investigation:
-candidate investigation areas are K/D setup/reference preparation, encoding/IPC,
-worker/coordinator validation, persistence/readback/cleanup and the observed weak
-or negative O_K_BIND scaling. For bytes, examine the approximately 3.745 MB primary
-maximum unit, required semantic content versus incidental representation, a compact
-semantically equivalent representation, and an early minimum-total-archive check.
-These were investigation targets, not established causes or approved implementations.
-
-Do not begin by loosening caps, safety factors, subsets, the candidate-N ladder,
-attribution, policy or thresholds. Any contract change requires separate explicit
-adjudication. The accepted R0-A evidence and both static blocks above remain
-historical evidence for the old source/representation. Fresh V2 resolves the
-demonstrated static storage blocker but worsens timing; realized constructibility
-remains unestablished. This documentation refresh
-does not establish effectiveness or authorize execution.
+Historical **FRESH R0-A FINAL PREFLIGHT — PASS** qualified technical source
+`48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`, with BLOCKER 0 / REQUIRED 0 / OPTIONAL 1
+and USER-host focused E2 regression 1513/1513 PASS (0 failures/errors/skips).
+Fresh Attempt #2 at recorded HEAD `a7abce49...` subsequently closed as accepted
+operational calibration evidence, with the partial-success findings above.
+These source identities and frozen evidence are not replaced by the final viewer
+source `fb59d5fa...`. Historical detailed preflight records remain in Git's
+pre-refresh handoff and the established acceptance/evidence roots.
 
 | Boundary | Current status |
 | --- | --- |
-| Historical Real R0-A execution / integrity / evidence | **COMPLETE / PASS / ACCEPTED; work CLOSED, no rerun** |
-| Historical R0-A post-run integrity review | **COMPLETE** |
-| Historical R0 follow-on static feasibility review | **COMPLETE** |
-| Historical execution-wall admission / old source | **STATICALLY BLOCKED; proof preserved** |
-| Historical R0-B minimum archive / old representation | **STATICALLY BLOCKED; proof preserved** |
-| Remediation engineering investigation | **CLOSED / ACCEPTED** |
-| Remediation design V1.3.1 | **FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES** |
-| Design boundary | **BLOCKER 0 / REQUIRED 0; design phase CLOSED** |
-| Remediation implementation 1A–1W | **23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED** |
-| Fresh R0-A Final Preflight | **PASS at technical source `48f6ebc`; BLOCKER 0 / REQUIRED 0 / OPTIONAL 1** |
-| Qualified technical anchor / pre-refresh documentation HEAD | **`48f6ebc...` / `a7abce49...`; distinct identities recorded at this refresh's read-only preflight** |
-| Fresh R0-A V2 Attempt #2 | **COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** |
-| Remediation result | **PARTIAL SUCCESS: static storage blocker resolved; timing regressed** |
+| Historical Real R0-A and Fresh V2 Attempt #2 | **COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED** |
+| Old-source execution-wall / old-representation archive proofs | **Historical static proofs preserved** |
+| Fresh remediation result | **PARTIAL SUCCESS: static storage blocker resolved; timing regressed** |
 | Realized R0-B constructibility | **NOT YET ESTABLISHED** |
-| Timing-profile design / artifacts | **PREPARED / NOT EXECUTED** |
-| Independent pre-execution review | **FIX REQUIRED BEFORE EXECUTION; B1 + R1–R3** |
-| Phase 1 / Phase 2 | **NOT AUTHORIZED / NOT AUTHORIZED; no measurements** |
-| This refresh | **No execution authority; separately approved docs-only publication does not change the qualified technical anchor or authorize any experiment** |
-| Real R0-B | **NOT RUN / NOT AUTHORIZED; no R0-B failure claimed** |
+| Phase-1 Attempt #2 | **Execution/integrity PASS; measurement quality PASS** |
+| Phase-1 scientific disposition | **PHASE1_INCONCLUSIVE_TRANSFER** |
+| Current de-dup timing path | **STOP / DEFER — UNBOUNDED_RESEARCH_RISK** |
+| Phase 2 | **NOT AUTHORIZED** |
+| R0-B | **NOT RUN / NOT AUTHORIZED** |
 | Complete R0 adjudication | **NOT DONE** |
-| Final N / final concurrency | **NOT SELECTED** |
-| Final E2 Operating Envelope | **NOT SELECTED / NOT FROZEN** |
-| Actual E2 | **NOT RUN / NOT AUTHORIZED** |
-| E2 PASS / FAIL / DEFER | **NONE** |
+| Final N/concurrency / E2 Operating Envelope | **NOT SELECTED / NOT FROZEN** |
+| Actual E2 | **NOT RUN / NOT AUTHORIZED; no E2 PASS/FAIL verdict** |
 | Program K effectiveness | **NOT ESTABLISHED** |
 | E3 | **CONDITIONAL ONLY / NOT TRIGGERED** |
-| Gate P / production integration / native K visual acceptance | **NOT STARTED** |
-| Program K final closeout | **NOT DONE** |
-| Stage-3 Extended / milestone 10 | **ACTIVE; milestones 1–9 remain CLOSED** |
+| Program K research visualization/comparison D0–D5 | **FINAL ACCEPTANCE PASS / CLOSED** |
+| Final native packaged user acceptance | **A–H PASS** |
+| Gate P / production integration | **NOT PASSED / NOT STARTED** |
+| Extended global closeout | **Pending explicit project adjudication; ACTIVE** |
 
-After the bounded diagnostic/remediation/qualification sequence above, any new
-Fresh R0-A and its admission/constructibility review precede separate R0-B authorization.
-Complete R0 adjudication must precede final N/concurrency/envelope selection and
-freeze. Actual E2 still requires separate authorization. Any E3 required by the frozen trigger,
-Gate P, production integration, K trace/native-user acceptance, Program K closeout
-and eventual Extended closeout remain conditional later work. This is not an
-automatic execution chain, an effectiveness PASS result, or a new frozen milestone.
+The former post-Gate-P visualization proposal is not the authority for the now
+completed demo. D0 separately authorized a standalone, read-only research viewer
+of preserved accepted E1 evidence. D1–D5 completed that scope without production
+selector/worker integration, K execution or an effectiveness claim. D4 uses exact
+CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL or
+Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
+records those boundaries and the user's package acceptance.
 
-Planned visual acceptance after Gate P/integration and before Program K closeout
-uses an actual completed K trace replay, not live streaming. Logical-known-mine
-state should be distinct from `HIDDEN` and physical `FLAG`; action target, route
-and synthetic cursor should remain distinguishable. Prefer normal native-user
-application flow for exhibition use. Optional later same-board Human / Stage-2 /
-V1 / K comparison can reuse the independent-playhead architecture. This scope
-has not been implemented/accepted as part of R0.
+**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
+transition.** Any later effectiveness reopening requires new evidence, bounded
+scope and separate authorization. Frozen R0 adjudication, final envelope selection
+and separate Actual E2/Gate-P gates cannot be bypassed. No timing-remediation or
+experiment chain is automatically authorized by this documentation refresh.
 
-R0 evidence itself cannot authorize Actual E2 or freeze the final envelope.
-The synthetic workload stays outside research/rehearsal/holdout domains; accepted
-target counts do not authorize opening the Actual-E2 corpus. Effectiveness is
-**NOT ESTABLISHED**. Stage-3 V1 / Model C stay **CLOSED / FROZEN**; the ZiNi final
-holdout `2,010,000 .. 2,010,099` remains forbidden/unopened.
+Stage-3 V1 / Model C remain CLOSED / FROZEN. The ZiNi final holdout
+`2,010,000 .. 2,010,099` remains forbidden/unopened. Do not loosen caps, safety
+factors, subsets, attribution, policies or thresholds, or rerun large experiments
+merely to find out whether a proposed change helps.
 
-Recovery order:
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) → this roadmap →
-[frozen E2 protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md) →
-[frozen R0 Attribution Amendment](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) →
-[exact V1.3.1 design](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md) /
-[design acceptance receipt](STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md) →
-current source/tests for disputed implementation facts.
-Do not repeat E2-D0, protocol/amendment audits, Gate-R/E0/E1 execution or closed
-evidence merely for recovery.
+Recovery: [CURRENT_HANDOFF](../CURRENT_HANDOFF.md) →
+[research-demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md) → current
+source/tests and named evidence → the applicable frozen
+[Research Spec](STAGE3_PROGRAM_K_RESEARCH_SPEC.md),
+[Gate-R Protocol](STAGE3_PROGRAM_K_GATE_R_PROTOCOL.md),
+[E2 Protocol](STAGE3_PROGRAM_K_E2_EFFECTIVENESS_PROTOCOL.md),
+[R0 Amendment](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md) and remediation
+design/acceptance. Do not repeat closed work merely for recovery.
 
 ## Fixed-Exemplar Human/Domain Interpretation — CLOSED
 
@@ -832,22 +703,12 @@ final review on 2026-10-18 and retains exact commands, attribution, preservation
   playback/clock, Engine, solver/planner, Model C or process lifecycle.
 
 At the 2026-10-18 polish closeout, fixed-exemplar interpretation was next.
-That interpretation is now CLOSED. Program K's research specification, Gate-R
-E0/E1 protocol and E2 Effectiveness Protocol remain FROZEN / ACCEPTED.
-E2 implementation is now **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
-[R0 Attribution Amendment v1](STAGE3_PROGRAM_K_E2_R0_ATTRIBUTION_AMENDMENT_v1.md)
-is **CONTENT-FROZEN / ACCEPTED**. Conformance, selection, setup repair and the
-R0 harness at `7e7f847` are accepted. Historical Real R0-A is COMPLETE / INTEGRITY PASS /
-EVIDENCE ACCEPTED / CLOSED. Remediation investigation/design are CLOSED / ACCEPTED;
-V1.3.1 is frozen by exact tracked bytes, and remediation 1A–1W is 23/23 COMPLETE /
-ACCEPTED / COMMITTED / PUSHED. Qualified technical anchor is `48f6ebc`; Fresh V2
-Attempt #2 records documentation/source HEAD `a7abce49...` and is accepted/closed.
-Remediation is **PARTIAL SUCCESS**: static storage blocker resolved, timing worse.
-Timing-profile artifacts are **PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE
-EXECUTION**; both phases are NOT AUTHORIZED. The [current Program K boundary](#current-program-k-boundary)
-records B1 + R1–R3 corrections and the separate review/dry-check/authorization sequence.
-R0-B and Actual E2 remain NOT RUN / NOT AUTHORIZED; effectiveness is NOT ESTABLISHED.
-The historical polish acceptance is unchanged.
+That interpretation is now CLOSED. The later Program K demo D0–D5 is also
+**FINAL ACCEPTANCE PASS / CLOSED**. Its research path remains
+**PHASE1_INCONCLUSIVE_TRANSFER**, with current de-dup timing profiling
+**STOP / DEFER — UNBOUNDED_RESEARCH_RISK**; effectiveness is **NOT ESTABLISHED**.
+The [current Program K boundary](#current-program-k-boundary) records the separate
+scientific and demo dispositions. The historical polish acceptance is unchanged.
 
 ## Representative-board Demonstrations / Timeline Analytics — CLOSED
 
@@ -1185,27 +1046,16 @@ exemplars and both report runs. No visual/manual substitution, official
 source/report/document reconciliation PASS; no GUI/package gate was required.
 The Viewer is now **FINAL ACCEPTANCE PASS / CLOSED**, as recorded above.
 Visualization Usability Polish and Fixed-Exemplar Human/Domain Interpretation
-are also CLOSED. Program K's research specification and Gate-R E0/E1 protocol are
-FROZEN / ACCEPTED; its bounded experimental implementation and Gate-R E0/E1
-qualification are accepted/closed. The E2 Effectiveness Protocol is FROZEN /
-ACCEPTED, E2 implementation is **I1–I8 = 8/8 COMPLETE / ACCEPTED**, and the
-R0 Attribution Amendment v1 is **CONTENT-FROZEN / ACCEPTED**. Conformance,
-selection, setup repair and R0 harness `7e7f847` are accepted. Historical Real R0-A is COMPLETE /
-INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED; no rerun. Remediation investigation/design
-are CLOSED / ACCEPTED; V1.3.1 is frozen by exact tracked bytes, and remediation
-1A–1W is 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED. Fresh R0-A V2 Attempt #2
-is COMPLETE / INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED, with **PARTIAL SUCCESS**:
-the static storage blocker is resolved but timing regressed. External timing-profile
-artifacts are **PREPARED / NOT EXECUTED / FIX REQUIRED BEFORE EXECUTION**;
-Phase 1 and Phase 2 remain NOT AUTHORIZED. Follow the correction/review/dry-check
-sequence in the [current Program K boundary](#current-program-k-boundary). R0-B and Actual E2
-are NOT RUN / NOT AUTHORIZED; complete R0 adjudication is NOT DONE, final N/concurrency
-are NOT SELECTED and the final E2 Operating Envelope is NOT SELECTED / NOT FROZEN.
-Effectiveness is NOT ESTABLISHED.
-Milestone 10 remains ACTIVE.
-The historical Same-board closeout
-did not implement the later playback/route/cursor maintenance;
-its dated record remains unchanged. No historical acceptance is reopened.
+are also CLOSED. Program K's later D0–D5 research-demo subpath is
+**FINAL ACCEPTANCE PASS / CLOSED**, while effectiveness research remains
+**DEFERRED / unresolved; NOT ESTABLISHED**. See the
+[current Program K boundary](#current-program-k-boundary) and
+[demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md) for the separate
+authorities. Next is explicit Stage-3 Extended project-closeout adjudication /
+Stage 4 transition, not an automatic research restart.
+The historical Same-board closeout did not implement the later playback/route/
+cursor maintenance; its dated record remains unchanged. No historical acceptance
+is reopened.
 
 Earlier closeouts retain their dated next-milestone statements as historical
 records; the roadmap above and [current handoff](../CURRENT_HANDOFF.md) describe
@@ -1223,8 +1073,10 @@ the current state.
 - Action-specific OPEN / FLAG / CHORD timing and physical CHORD variants.
 - CPS / burst / minimum inter-action constraints, anisotropy and human cognitive timing.
 - Built-in screen recording unless later justified.
-- Broader Program K selective flagging and richer / longer planning remain deferred;
-  accepted E0/E1 qualification does not authorize extensions or production Gate P.
+- Extensions beyond accepted K-C/K-P0, richer / longer planning and production K
+  integration remain deferred; the completed D0–D5 demo does not authorize them.
+- Reopening Program K effectiveness research requires new evidence and a separate
+  bounded decision; the current de-dup timing path remains STOP / DEFER.
 
 Revisit only with evidence and a separate specification/evaluation contract.
 In the Stage-3 Visualizer, incremental forward is implemented; arbitrary seeks

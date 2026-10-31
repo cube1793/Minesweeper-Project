@@ -163,53 +163,42 @@ Stage-3 Extended 전체는 **ACTIVE**입니다. 현재 roadmap은 다음과 같�
    [Closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md).
 9. **CLOSED** — Fixed-Exemplar Human / Domain Interpretation.
    [Closeout](docs/stage3-extended/STAGE3_FIXED_EXEMPLAR_INTERPRETATION_CLOSEOUT.md).
-10. **ACTIVE** — Program K: Logical Known-Mine Capability + Selective Physical Materialization.
+10. **분리 상태** — Program K: Logical Known-Mine Capability + Selective Physical Materialization.
+    연구 시각화·비교 D0–D5는 **FINAL ACCEPTANCE PASS / CLOSED**이며,
+    효과성 연구는 **DEFERRED / unresolved**입니다.
 
-현재 Program K는 **PRE-ACTUAL-E2**입니다. E2 구현 I1–I8은 8/8 COMPLETE / ACCEPTED이고,
-accepted Real R0-A는 원래 source/representation에 대해 COMPLETE / INTEGRITY PASS /
-EVIDENCE ACCEPTED / CLOSED입니다. 그 R0-A에서 도출된 execution-wall admission과
-R0-B minimum whole-archive의 두 static block은 **역사적 old-source/old-representation
-증거로 그대로 보존**합니다. 아래 Fresh V2 결과와 구분해야 합니다.
+Program K의 bounded experimental 구현, K-C 논리 지뢰 집합 M과 K-P0의 실제
+OPEN / FLAG / CHORD 실행은 보존됩니다. Gate-R E0/E1, E2 구현 I1–I8,
+R0 harness와 remediation 1A–1W는 수용된 구현 이력입니다.
+Fresh R0-A V2 Attempt #2는 integrity PASS이며 static storage blocker를 해소했지만,
+실행 시간은 퇴화했습니다. 후속 timing Phase-1 최종 판정은
+**PHASE1_INCONCLUSIVE_TRANSFER**입니다. 현재 de-dup remediation-class profiling은
+**STOP / DEFER — UNBOUNDED_RESEARCH_RISK**이며 Phase 2는 **NOT AUTHORIZED**입니다.
+R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**, 효과성은 **NOT ESTABLISHED**입니다.
 
-후속 remediation engineering investigation은 CLOSED / ACCEPTED입니다.
-[Program K remediation design V1.3.1](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1.md)은
-**FINAL DESIGN ACCEPTED / FROZEN BY EXACT TRACKED BYTES**이고,
-[acceptance receipt](docs/stage3-extended/STAGE3_PROGRAM_K_REMEDIATION_DESIGN_V1_3_1_ACCEPTANCE.md)는
-**BLOCKER 0 / REQUIRED 0; design phase CLOSED**를 기록합니다. Authority-freeze commit은
-`83c9f0c` (`docs: freeze accepted Program K remediation design`)입니다.
+별도로 승인된 연구 데모는 이미 저장된 accepted E1 기록을 재생합니다.
+K의 논리 지뢰/물리 깃발 구분과 **CONTROL ↔ K-P0 동일 보드 비교**가 구현·수용됐고,
+좌우 기록은 독립적으로 탐색·재생됩니다. 최종 소스는
+`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`, 최종 Windows onedir 패키지는
+`results/program-k-trace-demo-final-acceptance/20261031-230251/dist/ProgramKResearchComparison/`
+이며 사용자 packaged A–H acceptance도 **PASS**입니다.
+전시 데모 승인과 효과성 입증은 별개입니다. Production K integration은
+**NOT STARTED**, Gate P는 **NOT PASSED**이며 V1을 대체하지 않습니다.
 
-Remediation **1A–1W는 23/23 COMPLETE / ACCEPTED / COMMITTED / PUSHED**입니다.
-정확한 technical source `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`에서
-**FRESH R0-A FINAL PREFLIGHT — PASS (BLOCKER 0 / REQUIRED 0 / OPTIONAL 1)**를
-수용했습니다. 이번 refresh의 read-only preflight에서 확인한 refresh 이전 문서 HEAD /
-로컬에 알려진 `origin/main`은 `a7abce49f4f98d2db02695943c299f86a212344d`였으며,
-qualified technical anchor와 구분합니다.
+저장소 루트에서 source 데모를 열 수 있습니다. 정확한 accepted 로컬 E1 archive와
+Model-C profile이 필요하며, 아래 명령은 K를 다시 실행하지 않습니다.
 
-**2026-10-31 현재 Fresh R0-A V2 Attempt #2는 실행 성공(exit 0), validator PASS,
-INTEGRITY PASS / EVIDENCE ACCEPTED / CLOSED**입니다. 전체 remediation은
-**PARTIAL SUCCESS**입니다. Physical attributable minimum은 74,047,481,628 B에서
-15,385,281,356 B로 약 **79.22% 감소**해 historical static whole-archive blocker를
-해소했지만, realized R0-B constructibility는 **NOT YET ESTABLISHED**입니다.
-반면 비교 가능한 **18/18 route wall이 퇴화**했습니다. c4 K+D는
-22,959.2643101 s이며, N=1000에서 현재 P/O만으로도 48,874.331425675 s로
-43,200 s ceiling을 넘습니다. K+D <= 5,400 s나 historical V1 parity만으로는
-충분하지 않습니다. RF02/WB02/qualified codec/dual sizing의 성공은 보존합니다.
+```powershell
+python -B -m experiments.program_k_trace_demo
+python -B -m experiments.program_k_trace_comparison_demo
+```
 
-External timing-profile-v1은 **PREPARED / NOT EXECUTED**이며 독립 pre-execution
-review는 **FIX REQUIRED BEFORE EXECUTION**입니다. 다음 순서는 B1 + R1–R3의
-최소 external 수정 → 새 byte/SHA pins → 독립 delta review → 별도 승인된
-production-import-free Windows Job dry check입니다. 그 성공 후에만 Phase 1 K/D
-승인을 검토하며, Phase 2 P/O는 별도 근거와 hash-bound 승인이 필요합니다.
-**현재 두 profiling phase 모두 NOT AUTHORIZED이며 측정값은 없습니다.**
-이번 문서 refresh는 실행 권한을 부여하지 않습니다. 별도로 승인된 docs-only commit/push는
-qualified technical anchor를 변경하지 않으며 timing profiling, R0-B, Actual E2 또는
-그 밖의 어떤 실험도 승인하지 않습니다.
-Real R0-B와 Actual E2는 **NOT RUN / NOT AUTHORIZED**이며,
-final N/concurrency와 E2 Operating Envelope는 아직 선택·동결되지 않았습니다.
-Program K effectiveness는 **NOT ESTABLISHED**입니다. 자세한 현재 상태와 recovery order는
-[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 우선합니다.
-[Stage-3 Extended index](docs/stage3-extended/README.md)는 현재 Extended roadmap/index를
-제공합니다.
+세부 source/package/data identity와 검증·사용자 승인은
+[Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
+기록했습니다. **현재 다음 작업은 Stage-3 Extended project-closeout 명시적 판정 /
+Stage 4 전환 결정**입니다. Extended 전체는 그 판정 전까지 **ACTIVE**입니다.
+[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와
+[Extended roadmap](docs/stage3-extended/README.md)에서 현재 복구 상태를 확인하세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
