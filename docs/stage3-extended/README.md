@@ -24,9 +24,12 @@ currently deferred demo proposal. Demo acceptance establishes no effectiveness o
 aggregate superiority. The scientific disposition is not PHASE1_NO_GO or an
 Actual E2 failure.
 
-Final visualization/package source:
-**`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**, verified at this docs preflight as
-`main` == local `origin/main`, 0/0 and clean before edits.
+Final **D5** visualization/package source:
+**`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**. This is the historical package anchor,
+not the live HEAD of the later source exhibition. At the 2026-11-01 source closeout
+preflight, main == local origin/main == `6b26697b7986752966b67035ecf7e3ba73465f35`,
+0/0, with 13 untracked feature source/tests and no tracked/staged diff before doc edits.
+The implementation is not clean or identified by HEAD alone; recheck live Git later.
 Final package root: `results/program-k-trace-demo-final-acceptance/20261031-230251/`.
 The earlier `05920abeaec541a52fd22753dadec66f5cb98bca` visualization package is
 historical. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
@@ -38,8 +41,26 @@ records final source/package/data hashes, D0–D5 semantics, automated verificat
 and the user's later packaged A–H acceptance. Generated D5 evidence retains its
 original PENDING USER timestamped state; it was not rewritten.
 
-**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
-transition.** This decision has not been made by the documentation refresh.
+**CURRENT NEXT: user review and Git finalization of accepted source/documentation;
+the user selects the next work unit afterward.** Global Extended closure and Stage 4
+transition remain undecided. Historical NEXT statements do not authorize new work.
+
+## Post-D5 bounded source exhibition and pacing analysis
+
+- [HUMAN_PACING_JSON_V1 closeout](STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md): canonical
+  30-game JSON analysis COMPLETE / technical PASS; Claude independent arithmetic
+  PASS, no REQUIRED_FIXES. Pooled/game-equal/interval/rolling statistics remain
+  distinct. No physical action classification, cursor-speed analysis or Model C refit.
+- [RANDOM_EXPERT_EXHIBITION_V1 source closeout](STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md):
+  public corpus index0..99999, same-layout fresh-engine frozen V1→actual K-P0 runs,
+  immutable completed trace playback. RF-1~3 independent re-review PASS; later UI
+  common controls, absolute seek and custom pacing implemented. The user's
+  **2026-11-01 native source reacceptance** is recorded after the preserved PENDING reports.
+
+These are separate post-D5 units, not amendments to accepted E1/D5 evidence or
+new numbered research milestones. RF PASS does not cover an independent audit of
+the later UI. Source acceptance includes no new package/EXE, Main/Live integration,
+effectiveness verdict or Stage-3 Extended global closeout.
 
 ## Foundation — closed / integrated
 
@@ -181,7 +202,7 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT: explicit Extended project-closeout adjudication / Stage 4 transition.**
+**CURRENT NEXT: accepted source/documentation Git finalization by the user, then user-selected work.**
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
 ### Current Program K boundary
@@ -562,8 +583,8 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
-transition.** Any later effectiveness reopening requires new evidence, bounded
+**CURRENT NEXT: user Git finalization of accepted source/documentation, then user-selected work.**
+Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection
 and separate Actual E2/Gate-P gates cannot be bypassed. No timing-remediation or
 experiment chain is automatically authorized by this documentation refresh.
@@ -1051,8 +1072,9 @@ are also CLOSED. Program K's later D0–D5 research-demo subpath is
 **DEFERRED / unresolved; NOT ESTABLISHED**. See the
 [current Program K boundary](#current-program-k-boundary) and
 [demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md) for the separate
-authorities. Next is explicit Stage-3 Extended project-closeout adjudication /
-Stage 4 transition, not an automatic research restart.
+authorities. The later [new source exhibition](STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)
+has separate user native acceptance. Next is user Git finalization and selection of
+the next work unit; global Extended closure/Stage 4 transition remain undecided.
 The historical Same-board closeout did not implement the later playback/route/
 cursor maintenance; its dated record remains unchanged. No historical acceptance
 is reopened.
@@ -1071,7 +1093,8 @@ the current state.
 - Selectable algorithms/profiles and durable cross-version Stage3Execution transport.
 - Richer physical model / Model C successor or refit.
 - Action-specific OPEN / FLAG / CHORD timing and physical CHORD variants.
-- CPS / burst / minimum inter-action constraints, anisotropy and human cognitive timing.
+- Human physical CPS / burst / minimum inter-action constraints, anisotropy and
+  cognitive timing. The source exhibition's presentation-only CPS input is already implemented.
 - Built-in screen recording unless later justified.
 - Extensions beyond accepted K-C/K-P0, richer / longer planning and production K
   integration remain deferred; the completed D0–D5 demo does not authorize them.

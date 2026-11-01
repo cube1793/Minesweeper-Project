@@ -195,14 +195,52 @@ python -B -m experiments.program_k_trace_comparison_demo
 
 세부 source/package/data identity와 검증·사용자 승인은
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
-기록했습니다. **현재 다음 작업은 Stage-3 Extended project-closeout 명시적 판정 /
-Stage 4 전환 결정**입니다. Extended 전체는 그 판정 전까지 **ACTIVE**입니다.
+기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
+Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
+**현재는 수용된 source와 문서의 커밋 준비 단계이며, 이후 work unit은 사용자가 선정합니다.**
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와
 [Extended roadmap](docs/stage3-extended/README.md)에서 현재 복구 상태를 확인하세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
 수용된 fixed exemplars/report와 후속 연구의 해석 경계를 기록했습니다.
+
+## Random Expert Exhibition V1 — source / 사용자 native 수용
+
+**2026-11-01 사용자 native 재수용 기록.** 공개 `EXPERT_GENERAL_V1` corpus의
+index **0..99999**에서 새로 추첨하거나 지정한 Expert 30×16 / 99 보드 하나로
+frozen Stage-3 V1과 **actual K-P0(연구용)**를 실행합니다. 같은 layout의 fresh engine
+두 개를 사용해 child에서 V1→K 순서로 계산한 뒤 완료 trace를 독립 재생합니다.
+새 unseen/holdout 생성기나 production K가 아니며, 위 D5의 preserved-E1 재생과 별도입니다.
+
+승인된 기존 venv/PyQt5와 checkout의 인증 Model C profile을 사용합니다.
+일반 Windows native 터미널에서 실행합니다(`QT_QPA_PLATFORM=offscreen` 설정 없음).
+
+```powershell
+Set-Location -LiteralPath 'C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project'
+$env:PYTHONDONTWRITEBYTECODE='1'
+& 'C:\venvs\minesweeper\Scripts\python.exe' -B -m experiments.random_expert_exhibition
+```
+
+선택적으로 `--index 97`을 붙이면 창을 연 뒤 해당 index를 한 번 실제 실행합니다.
+
+- 새 추첨 / index 실행 / 계산 취소, 좌우 독립 처음·이전·재생·일시정지·다음·끝·seek.
+- **함께 재생 / 함께 일시정지 / 함께 처음으로**: 각 위치·속도를 유지해 명령합니다.
+  처음으로는 같은 보드의 두 frame 0으로 돌아가며 모드·속도 설정은 보존합니다.
+- slider 트랙 클릭은 클릭 위치로 직접 seek하며 손잡이 드래그·키보드도 지원합니다.
+- 기본 **250ms=4 CPS**, preset **200/500ms**, 수동 **20~10000ms / 0.1~50 CPS**.
+  ms/CPS는 연동되며 반올림 환산 표시는 `≈`로 구분합니다. Model C 배율 모드도 유지합니다.
+
+논리 M은 빈 다이아몬드, 물리 FLAG는 깃발로 구분합니다. board/M/완료 route/누적 비용은
+완료 frame에서만 바뀝니다. 두 index·진행률은 같은 보드 진척을 뜻하지 않습니다.
+관람 속도와 synthetic 직선 커서는 실제 인간 시간·mouse trace가 아니며 Model C를 바꾸지 않습니다.
+양쪽 WON이 아니면 Model C 승리 시간 차이는 N/A입니다.
+
+**source-only 수용**입니다. 새 package/EXE·Main/Live 통합·효과성 수용은 없습니다.
+RF lifecycle/transport 독립 재감사 PASS와 후속 UI의 사용자 수용을 구분합니다.
+[전시 기능 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)에
+단계별 검증·실행 identity·한계를, [Human pacing 분석 closeout](docs/stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)에
+관람 기준의 근거와 해석 한계를 기록했습니다. 커밋 전 snapshot과 현재 Git은 구분해 확인하세요.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 

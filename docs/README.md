@@ -5,7 +5,7 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Current project handoff](CURRENT_HANDOFF.md): 현재 milestone, 닫힌 기준선, 다음 필수 작업.
+- [Current project handoff](CURRENT_HANDOFF.md): 현재 source 수용, 닫힌 기준선, 커밋 준비와 다음 작업 선정 경계.
 - [Project README](../README.md): 실행 방법, 주요 기능과 프로젝트 개요.
 - [Architecture](../ARCHITECTURE.md): Engine/UI/Replay/analysis/worker 책임 경계.
 - [Building](../BUILDING.md): Windows PyInstaller 빌드와 package 검증 절차.
@@ -92,6 +92,14 @@ As of **2026-11-01 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separ
 Program K research visualization/comparison path **D0–D5 is FINAL ACCEPTANCE
 PASS / CLOSED**, including implemented D4 and final user packaged A–H PASS.
 
+Post-D5 bounded work is recorded separately:
+
+- [Human pacing JSON V1 closeout](stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md):
+  canonical 30-game arithmetic / independent Claude PASS; presentation reference only.
+- [Random Expert Exhibition V1 source closeout](stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md):
+  new public-corpus V1/K-P0 execution, RF-1~3 re-review PASS, UI feedback and the
+  user's subsequent **2026-11-01 native source reacceptance**. No new package or Main integration.
+
 - [Program K research-demo closeout](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md):
   D0–D5, immutable K/CONTROL adapters, exact pairs, independent playback, final
   R1/R2 Korean UI, final package identity, regression and user acceptance.
@@ -99,7 +107,7 @@ PASS / CLOSED**, including implemented D4 and final user packaged A–H PASS.
 - [Extended Program K history](stage3-extended/README.md#current-program-k-boundary):
   E0/E1, E2 I1–I8, R0/amendment/harness, historical static blocks and Fresh V2 results.
 
-Final visualization/package source is `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`;
+Final **D5** visualization/package source is `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`;
 `05920abeaec541a52fd22753dadec66f5cb98bca` is the earlier historical visualization
 anchor. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
 retains its own historical role. Accepted E1/R0 executions are not attributed to
@@ -113,10 +121,14 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT: explicit Stage-3 Extended project-closeout adjudication / Stage 4
-transition.** Extended remains **ACTIVE pending that decision**, with effectiveness
-research deferred/unresolved. Future research reopening requires new evidence and
-separate authorization; no profiling/R0/E2 rerun is a documentation-recovery step.
+**CURRENT NEXT: user review/staging/commit/push of accepted source and documentation;
+the user selects the next work unit afterward.** The 2026-11-01 precommit snapshot is
+main / `6b26697b7986752966b67035ecf7e3ba73465f35`, 13 untracked source/tests before
+these documentation edits; it is not a clean or HEAD-only implementation identity.
+Recheck live Git on recovery. Extended remains **ACTIVE**, with effectiveness
+research deferred/unresolved; global closure and Stage 4 transition are not decided.
+Future research reopening requires new evidence and separate authorization;
+no profiling/R0/E2 rerun is a documentation-recovery step.
 The ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
 
 ## Experiments

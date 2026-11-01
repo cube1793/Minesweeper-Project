@@ -447,6 +447,42 @@ comparative `model_c_us`는 None이며 종료 비용은 좌우 별도로 표시�
 승격하지 않는다. Korean 표시 이름과 내부 action/status/mode/identity는 분리되고,
 기술 provenance는 tooltip/accessibility로 보존된다.
 
+### Random Expert Exhibition V1 — accepted standalone source
+
+2026-11-01 UI 피드백 반영 후 사용자 native 재수용을 기록한 별도 source 앱이다.
+[전시 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)이
+검증·수용·실행 identity를 구분한다. D5 preserved-E1 viewer, Main/Live, production
+Same-board worker를 변경하지 않으며 새 package/EXE 또는 Gate-P 수용이 아니다.
+
+| 전용 모듈 (`experiments/random_expert_exhibition*`) | 책임 |
+| --- | --- |
+| entry / ui | standalone 최대화 창, 새 추첨·index·취소, 독립 패널과 공통 관람 명령 |
+| job / process / worker | Qt 밖 실제 pair 계산; 정수 token·private atomic transport·Windows Job Object 소유 tree·취소/timeout/reap/cleanup |
+| execution | 공개 EXPERT_GENERAL_V1 index0..99999에서 layout 한 번 생성; 두 fresh all-HIDDEN engine에 같은 layout/인증 Model C와 OPEN(0,0), cursor(0,0); frozen V1 capture → actual K-P0 순차 실행·검증·투영 |
+| model | native action/cost/effect를 검증한 immutable action과 N+1 public frames; source/algorithm/physical identity와 terminal summary |
+| playback | 완료 trace만 읽는 독립 clock/playhead; Fraction 관람 duration 또는 기존 Model C 배율; engine/solver/evidence I/O 없음 |
+
+layout은 설치·검증 전용이며 정책 입력이 아니다. V1 투영 뒤 불필요한 full evidence를 놓고
+K-P0를 실행한다. LOST는 정상 결과이며 오류/취소/timeout은 LOST로 변환하지 않는다.
+parent wall cap120초는 전시 응답성 보호값이다. RF-1의 0.75초 고정 비차단 exit drain은
+cap/cancel 의도를 늦추지 않는다. RF-2의 advisory progress OSError만 best-effort이고
+final result 발행은 엄격하다. RF-3는 pre-token 오류 원인을 stderr에 남기되 admission을
+완화하지 않는다. worker GUI import·사용자 파일 import·production dispatch 통합은 없다.
+
+frame0의 M은 비어 있고 frame i+1은 완료 trace i의 preinput_M을 사용한다.
+M_before 연결, logical M / physical FLAG / automatic WIN flag를 구분한다.
+자동 flags는 입력 수에 넣지 않는다. partial 이동은 cursor/target만 바꾸고
+board/M/완료 route/누적 Model C를 미리 공개하지 않는다. seek는 해당 패널만 정지·commit한다.
+함께 재생/일시정지는 각 현재 위치·속도에 명령하며 index/진행률을 맞추지 않는다.
+함께 처음으로는 같은 pair의 두 frame0으로 돌아가되 모드·속도는 보존한다.
+
+관람 ms/CPS는 정확한 Fraction µs duration 하나를 편집한다(20~10000ms / 0.1~50CPS).
+기본250ms, 200/500ms preset, 소수3자리 입력·환산 `≈`, 확정 입력과 신호 차단으로 drift를
+방지한다. 실행 중 변경은 구 속도까지 정산하고 partial을 유지한다. Model C 모드에서는
+관람 입력을 비활성화해 값을 보존한다. 실제 Model C 비용·정책은 바꾸지 않는다.
+관람 속도는 인간 physical model/calibration이 아니다. 통계적 효과성을 주장하지 않으며
+Model C time-to-win 차이는 양쪽 WON일 때만 정의한다.
+
 ### Replay
 
 | 모듈 | 책임 |
