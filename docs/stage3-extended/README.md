@@ -2,7 +2,7 @@
 
 ## Status
 
-Current state: **2026-11-01 (Asia/Seoul)**.
+Current state: **2026-11-02 (Asia/Seoul)**.
 **Stage-3 Extended: ACTIVE pending explicit project-closeout adjudication.**
 Stage-3 V1 remains CLOSED / FROZEN; ZiNi Improvement remains CLOSED / V1 RETAINED,
 with its final holdout unopened. This roadmap is not automatic execution authority.
@@ -18,6 +18,8 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | R0-B / Actual E2 | **NOT RUN / NOT AUTHORIZED** |
 | Research visualization/comparison D0–D5 | **FINAL ACCEPTANCE PASS / CLOSED; user packaged A–H PASS** |
 | Production integration / Gate P | **NOT STARTED / NOT PASSED** |
+| Experimental K-LC0 / DISTANCE_BAND_V1 | Source/Claude PASS; fixed-viewer user path confirmation; not frozen/effectiveness approval |
+| Separate K-P0 / K-LC0 random Expert source app | Implemented / Claude PASS / user native accepted 2026-11-02; uncommitted checkpoint |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It is not a
 currently deferred demo proposal. Demo acceptance establishes no effectiveness or
@@ -26,10 +28,13 @@ Actual E2 failure.
 
 Final **D5** visualization/package source:
 **`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**. This is the historical package anchor,
-not the live HEAD of the later source exhibition. At the 2026-11-01 source closeout
-preflight, main == local origin/main == `6b26697b7986752966b67035ecf7e3ba73465f35`,
-0/0, with 13 untracked feature source/tests and no tracked/staged diff before doc edits.
-The implementation is not clean or identified by HEAD alone; recheck live Git later.
+not the live HEAD of the later source exhibition. Current precommit baseline is
+main == local origin/main == `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`,0/0.
+The user already committed/pushed the earlier V1/K-P0 source exhibition at this SHA.
+At this 2026-11-02 doc preflight, tracked/staged diff was empty but K-LC0 four files
+plus the new comparison nine files were untracked. Five existing docs and two new
+closeouts are now prepared. This is not clean or identified by HEAD alone.
+The older `6b26697...`/NEXT in preserved 2026-11-01 closeouts is historical.
 Final package root: `results/program-k-trace-demo-final-acceptance/20261031-230251/`.
 The earlier `05920abeaec541a52fd22753dadec66f5cb98bca` visualization package is
 historical. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
@@ -41,8 +46,9 @@ records final source/package/data hashes, D0–D5 semantics, automated verificat
 and the user's later packaged A–H acceptance. Generated D5 evidence retains its
 original PENDING USER timestamped state; it was not rewritten.
 
-**CURRENT NEXT: user review and Git finalization of accepted source/documentation;
-the user selects the next work unit afterward.** Global Extended closure and Stage 4
+**CURRENT NEXT (2026-11-02): user review and explicit-path Git finalization of K-LC0
+13 files plus these seven docs; no Git mutation by this documentation task.
+The user selects the next work unit afterward.** Global Extended closure and Stage 4
 transition remain undecided. Historical NEXT statements do not authorize new work.
 
 ## Post-D5 bounded source exhibition and pacing analysis
@@ -61,6 +67,38 @@ These are separate post-D5 units, not amendments to accepted E1/D5 evidence or
 new numbered research milestones. RF PASS does not cover an independent audit of
 the later UI. Source acceptance includes no new package/EXE, Main/Live integration,
 effectiveness verdict or Stage-3 Extended global closeout.
+
+## K-LC0 accepted experimental source checkpoint
+
+- [DISTANCE_BAND_V1 closeout](STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md): frozen V1 →
+  K-P0 → experimental K-LC0 (V1-LC0 skipped), native survivors/21/20 band/D→E→L→tie,
+  first input then replan; unchanged guess/inference/M/Model C. Original3 boards/6 runs
+  remain mixed. Claude PASS and the fixed viewer's historical normal-operation/path impression are separate.
+  That viewer is bound to the original316-file raw-hash snapshot. Five current documentation mismatches
+  cause fresh loading to reject; it is not a current launch recommendation.
+- [Random Expert comparison closeout](STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md):
+  actual K-P0→active K-LC0, same public layout/two fresh engines, explicit run/JSON save/reopen,
+  reused RF lifecycle/playback. Five new pairs are a separate unit:8191 +2 inputs,
+  −14.942997 cells,−15,738µs; four other pairs have identical2–4-input early LOST.
+  Codex107unique/179 executions and Claude final54/54 are distinct. R-1 corrects TEST_04
+  UI f770d4f0 versus final5b04577c; pilot UI was c03b7c75.
+
+The user's 2026-11-02 statement, “확인했고 다 괜찮은 것 같아.”, accepts the new app's
+native paths just presented, without invented run counts/index/DPI/OS receipts.
+This is not general effectiveness, production approval or a K-LC0 freeze.
+V1 also uses CHORD and differs from Stage2 Simple. K-P0/K-LC0 remain separate entries,
+not Main/Live selector options. No new package acceptance is implied.
+
+Current K-P0/K-LC0 use is through the new comparison app. Original stored3-board CONTROL/K-LC0
+traces and new actual-run pairs remain different evidence. The documentation correction in
+codex_20261102_02 replaces _01 COMMIT_PLAN/USER_GIT_STEPS while preserving _01 artifacts.
+The same20 commit paths now have revised documentation hashes/expected staged blobs.
+
+Possible next user-selected work: nearby certain-safe action handling informed by other
+board paths; a short video pilot to decide whether full analysis is useful; minimal Main/Live
+algorithm selection integration. Policy/video improvements are not unconditional gates for
+Main integration. Distance-linked reference CPS UI is optional; early independent50/50 or
+general guess changes are separate later work. Nothing starts automatically here.
 
 ## Foundation — closed / integrated
 
@@ -202,7 +240,8 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT: accepted source/documentation Git finalization by the user, then user-selected work.**
+**CURRENT NEXT:** follow the dated 2026-11-02 K-LC0 precommit scope in Status and
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md); older Git/NEXT snapshots are historical.
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
 ### Current Program K boundary
@@ -583,7 +622,8 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT: user Git finalization of accepted source/documentation, then user-selected work.**
+**CURRENT NEXT:** the 2026-11-02 Status/current handoff controls; user review/Git preparation
+for K-LC0 and documentation does not reopen this historical research chain.
 Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection
 and separate Actual E2/Gate-P gates cannot be bypassed. No timing-remediation or

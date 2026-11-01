@@ -483,6 +483,56 @@ board/M/완료 route/누적 Model C를 미리 공개하지 않는다. seek는 �
 관람 속도는 인간 physical model/calibration이 아니다. 통계적 효과성을 주장하지 않으며
 Model C time-to-win 차이는 양쪽 WON일 때만 정의한다.
 
+### Experimental K-LC0 / separate random Expert comparison
+
+2026-11-02 source checkpoint다. 계보는 frozen V1 → K-P0 → 실험적 K-LC0이며
+V1-LC0 구현은 생략했다. V1도 CHORD를 사용하고 Stage2 Simple과 구별한다.
+K-P0/K-LC0는 별도 policy/entry이고 Main/Live selector에는 미연결이다.
+기존 V1/K-P0 앱은 `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`에 committed 상태이며,
+K-LC0 4개와 비교 앱 9개는 이번 문서 작성 시 untracked다. HEAD만으로 실행을 식별하지 않는다.
+
+| 신규 경로 | 책임 |
+| --- | --- |
+| `experiments/program_k_lc0_policy.py` | native 선택1회·기존 survivors·정확21/20 band; 전체 계획 D→E→L→frozen tie 및 별도 validator |
+| `experiments/program_k_lc0_runner.py` | 기존 공개 port/session/실행 검증·effect archive 재사용; 첫 입력만 실행 후 재계획; active K-LC0와 진단 CONTROL |
+| `experiments/k_lc0_exhibition.py`, `_ui.py` | 명시적 index/추첨 요청·취소·JSON 열기, current pair/다음 요청 분리, 독립/공통 재생 |
+| `experiments/k_lc0_exhibition_job.py`, `_worker.py` | 새 start/admission adapter와 private child; 기존 RF poll/cancel/drain/shutdown/cleanup 상속 |
+| `experiments/k_lc0_exhibition_execution.py` | 공개 Expert layout1개·fresh engine2개·동일 table로 actual run_k_p0 → run_k_lc0(control=False), 실제 return만 projection |
+| `experiments/k_lc0_exhibition_model.py`, `_store.py` | immutable ComparePair/Trace/ChoiceNote, 엄격한 JSON v1·request binding·exclusive 저장/round-trip |
+
+band는 `20*L(p)*R(g) <= 21*L(g)*R(p)`이며 D는 cursor부터 모든 setup/terminal까지의
+계획 거리다. native exact_route 순서와 guess·추론·M 유지·Model C는 그대로다.
+runtime monkeypatch, 후보 추가 생성, survivor 복원, 지역 완료 보장은 없다.
+
+CompareJob은 start의 필요한 골격만 복사해 command/durable request/identity를 바꾸며
+기존 job을 일반화하지 않는다. suspended launch→Job assign→resume, venv 자손 containment,
+120초 pair cap, 비차단 poll, 고정0.75초 drain, 취소/닫기/timeout 우선·reap 후 cleanup을
+유지한다. progress OSError는 best-effort, final result는 token/index/run ID/policy에 strict하다.
+저장 실패와 worker 정리는 별도로 표시한다.
+
+CompareTrace는 K-P0 전용 ExhibitionTrace로 위장하지 않는다. 작은 ComparePlayer/panel
+adapter가 PublicBoard/TracePanel/AbsoluteSeekSlider/ExhibitionPlayback을 재사용한다.
+기존 타입 제한을 완화하지 않는다. 완료 frame의 M/observation/flags/누적 비용/route만
+공개하며 다음 선택의 계획 suffix는 완료 route가 아니다. 자동 WIN flags는 입력에 세지 않는다.
+
+저장 JSON은 당시 source40개 hash/HEAD/dirty 상태, profile/table, board/run identity,
+각 실제 action/M 경계와 N+1 frames, 선택 요약을 보존한다. JSON 열기는 실행 모듈을
+호출하지 않고 저장값을 검증·재생한다. private pickle은 소유 child transport에만 사용한다.
+자체 checksum은 서명이나 출처 증명이 아니다. reader는 generator/추론/native 후보를
+재인증하지 않으며 전체 native 후보/proof는 미저장이다. 과거 고정 viewer 산출물은 새 앱의
+필수 실행 의존성이 아니다. 향후 user_runs와 고정 pilot manifest도 구분한다.
+
+기존 고정3보드 외부 viewer는 당시 source snapshot에 묶인 역사적 검토 도구다.
+review_data.py의 load_review()는 원 LAUNCH_IDENTITY에 있는316파일의 현재 raw hash를
+검사한다. 현재는 문서5개가 불일치하므로 새 로딩을 거부한다. source 실행 없이 hash로
+확인했으며 인증 제한을 풀거나 옛 viewer를 수정하지 않았다. 현재 비교 안내는 새 앱을
+중심으로 한다. 기존 저장3보드 CONTROL/K-LC0 trace와 새 actual K-P0/K-LC0 pair는 별도 evidence다.
+도구의 현재/역사적 구분, reader의 optional 보강, 혼합 pilot/검증과 R-1 정정은
+[정책 closeout](docs/stage3-extended/STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md)과
+[비교 앱 closeout](docs/stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md)에 있다.
+Claude PASS 및 사용자 native 수용은 experimental source 범위다. 일반 효과성·production·
+K-LC0 freeze·새 package는 승인하지 않았다. 거리 연동 기준CPS UI도 아직 없다.
+
 ### Replay
 
 | 모듈 | 책임 |

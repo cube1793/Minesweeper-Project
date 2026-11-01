@@ -88,12 +88,18 @@ Closed milestones / durable closeouts:
 
 ### Current Program-K state / next work
 
-As of **2026-11-01 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separate
+As of **2026-11-02 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separate
 Program K research visualization/comparison path **D0–D5 is FINAL ACCEPTANCE
 PASS / CLOSED**, including implemented D4 and final user packaged A–H PASS.
 
 Post-D5 bounded work is recorded separately:
 
+- [K-LC0 / DISTANCE_BAND_V1 closeout](stage3-extended/STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md):
+  native survivors/21/20 band와 혼합3보드6회, Claude PASS, 고정 viewer의 당시 사용자 경로 확인.
+  옛 viewer는 원316파일 raw hash에 묶인 역사적 도구이며 현재 문서5불일치로 새 로딩이 거부된다.
+- [K-LC0 Random Expert 비교 closeout](stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md):
+  actual K-P0→active K-LC0 새 실행/JSON/재생, 별도5 pair, Claude 최종54/54 및 R-1 정정,
+  **2026-11-02 사용자 native 수용**. K-LC0 freeze·일반 효과성·production 수용이 아니다.
 - [Human pacing JSON V1 closeout](stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md):
   canonical 30-game arithmetic / independent Claude PASS; presentation reference only.
 - [Random Expert Exhibition V1 source closeout](stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md):
@@ -121,15 +127,25 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT: user review/staging/commit/push of accepted source and documentation;
-the user selects the next work unit afterward.** The 2026-11-01 precommit snapshot is
-main / `6b26697b7986752966b67035ecf7e3ba73465f35`, 13 untracked source/tests before
-these documentation edits; it is not a clean or HEAD-only implementation identity.
+**CURRENT NEXT (2026-11-02): 사용자 문서 검수 후 이번 K-LC0 13개와 문서7개를 명시 경로로
+stage/commit/push 준비; 실제 Git 작업은 사용자 소유다. 이후 작업은 사용자 선택이다.**
+현재 precommit 기준은 main / HEAD == local origin/main ==
+`3e9f3935f505ff36dd74b6fba668650ab5c1d41d`,0/0이다. 기존 V1/K-P0 전시는 이 commit으로
+이미 Git 절차가 끝났다. 이전 closeout의 `6b26697...`/NEXT는 과거 snapshot이다.
+이번 시작에는 기존4+비교앱9=13 untracked와 빈 index였으며 현재 문서5수정/2신규가 더해졌다.
+현재 사용 안내는 새 K-P0/K-LC0 앱 중심이다. 옛 저장3보드 trace와 새 실행 pair는 별도 evidence다.
+문서 정정 output의 codex_20261102_02 COMMIT_PLAN/USER_GIT_STEPS가 _01 계획을 교체한다.
+20경로는 같지만 문서 hash가 달라졌으므로 이전 계획으로 stage하지 않는다.
 Recheck live Git on recovery. Extended remains **ACTIVE**, with effectiveness
 research deferred/unresolved; global closure and Stage 4 transition are not decided.
 Future research reopening requires new evidence and separate authorization;
 no profiling/R0/E2 rerun is a documentation-recovery step.
 The ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
+
+다음 선택은 다른 보드 경로 기반 인근 확정 안전 수 처리 개선, 짧은 영상 pilot 후 전체 분석
+필요성 판단, Main/Live 최소 알고리즘 선택 통합이다. 영상/정책 개선은 Main 통합의 무조건적인
+선행 gate가 아니다. 거리 연동 기준CPS UI는 선택 개선, 독립50/50 조기 처리/일반guess 변경은
+별도 후순위이며 이번 문서 작업에서 시작하지 않는다.
 
 ## Experiments
 

@@ -197,7 +197,9 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**현재는 수용된 source와 문서의 커밋 준비 단계이며, 이후 work unit은 사용자가 선정합니다.**
+**2026-11-02 현재 K-LC0·새 비교 앱 13개와 문서 7개의 커밋 준비 단계입니다.**
+기존 V1/K-P0 전시의 commit/push는 `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`로
+완료됐습니다. 이번 새 commit은 아직 없으며, 이후 work unit은 사용자가 선정합니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와
 [Extended roadmap](docs/stage3-extended/README.md)에서 현재 복구 상태를 확인하세요.
 
@@ -241,6 +243,53 @@ RF lifecycle/transport 독립 재감사 PASS와 후속 UI의 사용자 수용을
 [전시 기능 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)에
 단계별 검증·실행 identity·한계를, [Human pacing 분석 closeout](docs/stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)에
 관람 기준의 근거와 해석 한계를 기록했습니다. 커밋 전 snapshot과 현재 Git은 구분해 확인하세요.
+
+## K-LC0 / 새 Expert 비교 — 실험적 source checkpoint
+
+**2026-11-02 사용자 native 수용:** “확인했고 다 괜찮은 것 같아.”
+직전 안내한 새 index/추첨·표시 identity/저장, 저장8191의 Model C0.5배·독립/공통
+재생·seek, 저장 열기·취소 후 재실행·닫기 범위의 수용입니다. 사용자 실행 횟수나
+index/DPI/OS별 receipt를 새로 추정하지 않습니다. 기존 고정3보드 viewer의 당시 정상 동작과
+전반적 경로 개선 체감 확인은 별도 역사적 이력입니다. 옛 viewer는 원 LAUNCH_IDENTITY의
+316개 파일 raw hash에 묶인 검토 도구입니다. 문서 5개가 달라진 현재 checkout에서는
+새 로딩이 인증 실패로 거부되므로 현재 실행용으로 안내하지 않습니다.
+
+계보는 frozen V1 → K-P0 → 실험적 K-LC0이며 V1-LC0는 구현하지 않았습니다.
+V1도 CHORD를 사용하며 Stage2 Simple과 구별합니다. K-LC0는 기존 native survivors의
+정확21/20 band 안에서 전체 계획 거리 D→E→L→frozen tie로 고르고 첫 입력 후 재계획합니다.
+guess·추론·M·Model C는 그대로이며 지역 완료·전체 거리 최소·일반 개선을 보장하지 않습니다.
+
+새 source 앱은 왼쪽 actual K-P0, 오른쪽 active K-LC0를 같은 공개 Expert layout의 두
+fresh engine/session에서 전용 child로 순차 실행합니다. 다음 요청 입력값과 현재 표시
+identity를 구분하고, 완료 pair를 새 run ID의 JSON으로 저장·재독합니다.
+재독에는 solver/보드 재생성/planner 호출이 없습니다. 기본 사용자 기록 root는
+`C:\Projects\GraduationProject\K_LC0_RANDOM_EXPERT_COMPARE_RUNS`입니다.
+
+```powershell
+Set-Location -LiteralPath 'C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project'
+$env:PYTHONDONTWRITEBYTECODE='1'
+$env:QT_QPA_PLATFORM='windows'
+& 'C:\venvs\minesweeper\Scripts\python.exe' -B -m experiments.k_lc0_exhibition
+```
+
+시작만으로 계산하지 않으며 `--index 314`도 입력란만 설정합니다. 지정 실행/새 추첨 버튼이
+새 실행입니다. `--open '<pair.json 경로>'`는 저장 재생, `--small`은 작은 창입니다.
+기존 독립/공통 재생·seek·수동 간격/CPS·Model C 배율과 Windows RF lifecycle을 재사용합니다.
+LOST 비용은 승리 시간이 아니며 관람 CPS·합성 커서·Model C·인간 시간은 별개입니다.
+
+원11/97/2026의 혼합 결과와 새5 pair는 별도입니다. 새8191은 입력+2·거리−14.942997칸·
+Model C−15,738µs, 나머지 네 보드는 같은2~4입력 조기LOST였습니다.
+Claude 검토는 두 구현 모두 PASS / REQUIRED_FIXES 없음입니다. 새 앱 최종 source의
+새54 tests는 Claude54/54로 확인됐습니다. Codex TEST_04는 최종 직전 UI였다는 R-1 정정을
+[새 비교 앱 closeout](docs/stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md)에
+기록했습니다. [원 정책·고정 viewer closeout](docs/stage3-extended/STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md)은
+정책 경계·검증 이력과 옛 viewer의 snapshot 결속을 설명합니다. 현재 K-P0/K-LC0 비교에는
+위 새 앱을 사용합니다. 기존 저장3보드의 CONTROL/K-LC0 trace와 새 앱의 실제 실행/저장
+pair는 별도 work unit의 evidence이며 같은 기록으로 취급하지 않습니다.
+
+K-P0/K-LC0는 별도 entry이며 Main/Live selector에는 미연결입니다. 이번 source 수용은
+K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
+다음 작업은 사용자 선택이며 영상/정책 개선이 Main 통합의 무조건적인 선행 gate는 아닙니다.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 
