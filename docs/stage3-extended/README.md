@@ -19,7 +19,8 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Research visualization/comparison D0–D5 | **FINAL ACCEPTANCE PASS / CLOSED; user packaged A–H PASS** |
 | Production integration / Gate P | **NOT STARTED / NOT PASSED** |
 | Experimental K-LC0 / DISTANCE_BAND_V1 | Source/Claude PASS; fixed-viewer user path confirmation; not frozen/effectiveness approval |
-| Separate K-P0 / K-LC0 random Expert source app | Implemented / Claude PASS / user native accepted 2026-11-02; uncommitted checkpoint |
+| Separate K-P0 / K-LC0 random Expert source app | Implemented / Claude PASS / user native accepted; committed/pushed at496fab0 |
+| Separate experimental K-LC1 / SINGLETON_BAND_V1 | Source/tests and Claude R2 PASS; limited saved8191/97 user confirmation; current10-path Git preparation |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It is not a
 currently deferred demo proposal. Demo acceptance establishes no effectiveness or
@@ -28,13 +29,11 @@ Actual E2 failure.
 
 Final **D5** visualization/package source:
 **`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**. This is the historical package anchor,
-not the live HEAD of the later source exhibition. Current precommit baseline is
-main == local origin/main == `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`,0/0.
-The user already committed/pushed the earlier V1/K-P0 source exhibition at this SHA.
-At this 2026-11-02 doc preflight, tracked/staged diff was empty but K-LC0 four files
-plus the new comparison nine files were untracked. Five existing docs and two new
-closeouts are now prepared. This is not clean or identified by HEAD alone.
-The older `6b26697...`/NEXT in preserved 2026-11-01 closeouts is historical.
+not the live HEAD of the later source exhibition. Current main == local origin/main ==
+`496fab0fc8829af7a255c403346985be7ae6a005`, ahead/behind0/0.
+The user already completed the K-LC0 comparison/source/docs20-path commit/push at this SHA.
+This unit prepares K-LC1 source4 plus docs6 (five modified, one new), still uncommitted
+with no staged diff. Earlier3e9f/6b26697/precommit/NEXT statements in dated closeouts are history.
 Final package root: `results/program-k-trace-demo-final-acceptance/20261031-230251/`.
 The earlier `05920abeaec541a52fd22753dadec66f5cb98bca` visualization package is
 historical. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
@@ -46,9 +45,9 @@ records final source/package/data hashes, D0–D5 semantics, automated verificat
 and the user's later packaged A–H acceptance. Generated D5 evidence retains its
 original PENDING USER timestamped state; it was not rewritten.
 
-**CURRENT NEXT (2026-11-02): user review and explicit-path Git finalization of K-LC0
-13 files plus these seven docs; no Git mutation by this documentation task.
-The user selects the next work unit afterward.** Global Extended closure and Stage 4
+**CURRENT NEXT (2026-11-02): user document review → exact10-path K-LC1/docs Git procedure
+→ update the two postcommit recovery copies using the actual new SHA.
+The user owns Git/Desktop replacement and selects any later implementation unit.** Global Extended closure and Stage 4
 transition remain undecided. Historical NEXT statements do not authorize new work.
 
 ## Post-D5 bounded source exhibition and pacing analysis
@@ -90,15 +89,38 @@ V1 also uses CHORD and differs from Stage2 Simple. K-P0/K-LC0 remain separate en
 not Main/Live selector options. No new package acceptance is implied.
 
 Current K-P0/K-LC0 use is through the new comparison app. Original stored3-board CONTROL/K-LC0
-traces and new actual-run pairs remain different evidence. The documentation correction in
-codex_20261102_02 replaces _01 COMMIT_PLAN/USER_GIT_STEPS while preserving _01 artifacts.
-The same20 commit paths now have revised documentation hashes/expected staged blobs.
+traces and new actual-run pairs remain different evidence. The historical codex_20261102_02
+plan superseded _01 and its20 paths were committed/pushed at496fab0. Preserve both records;
+do not repeat that Git procedure. Current K-LC1 preparation is a different10-path unit.
 
 Possible next user-selected work: nearby certain-safe action handling informed by other
 board paths; a short video pilot to decide whether full analysis is useful; minimal Main/Live
 algorithm selection integration. Policy/video improvements are not unconditional gates for
 Main integration. Distance-linked reference CPS UI is optional; early independent50/50 or
 general guess changes are separate later work. Nothing starts automatically here.
+
+## K-LC1 limited saved-path confirmation / separate experimental checkpoint
+
+[SINGLETON_BAND_V1 closeout](STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md) records the
+unchanged source4, original helper failure (LC0 starts2/LC1 starts0/no completed runs),
+recovery campaign4 starts/4 completions, Claude R2 PASS, and external saved-path viewer.
+Original K-LC0 remains a105% policy; LC1 adds only a qualifying original-survivor direct
+safe OPEN with HIDDEN8 component minus current M singleton, outside105%/within110%
+of native g and strictly shorter whole-plan distance than actual LC0 baseline b.
+
+The user's2026-11-02 confirmation is limited: O(23,0) handling in8191 completed145→153
+looked more natural;97 was normal with no difference. After the remaining-region limitation
+was explained as future policy work, the user agreed to move on. Unreported slider/drag/key/
+manual-rate or universal native/DPI/OS acceptance is not inferred. Windows QWidget.grab
+rendering, offscreen tests and the failed Computer Use initialization are separate evidence.
+
+8191 is an in-sample design-source board: LC1−LC0 is−115062µs/−1.6292436877264436 cells;
+97 is unchanged. LC1 run wall was longer. This is not general effectiveness, win-rate,
+native-g optimality or production approval. LC1 is not frozen and does not replace LC0.
+The external viewer only reads four saved traces; the existing k_lc0_exhibition app still
+runs actual K-P0/K-LC0. Main/Live selector, package/EXE and Stage4 remain unimplemented/unaccepted.
+After the current document/Git/recovery sequence, the user chooses minimal Main/Live selection,
+distance-linked viewing pace, further local evaluation or another bounded unit. No automatic start.
 
 ## Foundation — closed / integrated
 
@@ -240,7 +262,7 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT:** follow the dated 2026-11-02 K-LC0 precommit scope in Status and
+**CURRENT NEXT:** follow the 2026-11-02 K-LC1 10-path preparation/recovery sequence in Status and
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md); older Git/NEXT snapshots are historical.
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
@@ -622,8 +644,8 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT:** the 2026-11-02 Status/current handoff controls; user review/Git preparation
-for K-LC0 and documentation does not reopen this historical research chain.
+**CURRENT NEXT:** the 2026-11-02 Status/current handoff controls; user document review,
+K-LC1 10-path Git preparation and later postcommit recovery do not reopen this research chain.
 Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection
 and separate Actual E2/Gate-P gates cannot be bypassed. No timing-remediation or

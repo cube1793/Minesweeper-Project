@@ -1,96 +1,84 @@
 # Current Project Handoff
 
-Updated: **2026-11-02 (Asia/Seoul)** — K-LC0 user native acceptance / documentation precommit snapshot.
-실제 source/tests와 실행 당시 evidence가 구현/실행 authority이고, 이 문서와 외부 recovery는
-복구 안내다. 사용자 보고는 사용자 수용의 근거이며 새 자동 검증/package receipt가 아니다.
+Updated: **2026-11-02 (Asia/Seoul)** — K-LC1 limited saved-path user confirmation / documentation and Git preparation.
+현재 source/tests와 실행 당시 evidence가 구현/실행 authority다. 사용자 확인은 아래 발언 범위이고
+새 자동 검증·전체 native 수용·package receipt가 아니다. 과거 closeout은 dated snapshot으로 보존한다.
+현재 Git/NEXT 안내는 이 handoff와 이번 외부 recovery 교체본을 따른다.
 
 ## 1. Current state and next work
 
-**실험적 K-LC0 및 새 K-P0/K-LC0 비교 source 앱: 구현·개발 검증·Claude 독립 검토 완료,
-사용자 native 수용.** 2026-11-02 사용자 최신 발언: **“확인했고 다 괜찮은 것 같아.”**
-직전 안내한 새 index/추첨·표시 identity/저장, 저장8191의 Model C0.5배·독립/공통 재생·seek,
-저장 열기·취소 후 재실행·닫기에 대한 수용이다. 구체적으로 보고하지 않은 횟수/index/DPI/OS,
-항목별 receipt를 추정하지 않는다. 이전 고정3보드 viewer의 당시 정상 동작·전반적 경로 개선
-체감은 별도 역사적 확인이다. 이 viewer는 원316파일 raw hash에 묶여 있으며 문서5개가 달라진
-현재 checkout에서는 새 로딩이 인증 실패로 거부된다. 현재 실행 앱으로 안내하지 않는다.
-K-LC0 freeze·일반 효과성·production 승인은 아니다.
+**K-LC1 / SINGLETON_BAND_V1: 원 K-LC0를 보존한 별도 실험적 source checkpoint.**
+구현·focused·복구 pilot·Claude R2 검토·외부 저장 viewer를 마쳤고, 사용자는2026-11-02 다음을 확인했다.
 
-- [K-LC0 정책·고정 경로 viewer closeout](stage3-extended/STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md)
-  — 원3보드6회 혼합 결과, Codex152unique/182회와 Claude30/30, viewer29unique/85회·새solver0.
-- [새 Expert 비교 앱 closeout](stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md)
-  — actual K-P0→active K-LC0, 저장/재생,5 pair, Codex107unique/179회, Claude 최종54/54,
-  R-1 정정 및 이번 사용자 수용.
-- [기존 V1/K-P0 전시 closeout](stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md),
-  [Human pacing closeout](stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)
-  — 사용자 source 수용과 commit/push 완료한 이전 work unit. 그 문서의 precommit NEXT는 과거다.
-- [D0–D5 closeout](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
-  — 별도 preserved-E1 viewer/package **FINAL ACCEPTANCE PASS / CLOSED**, packaged A–H PASS.
+> 게임 8191의 145-153 구간에서 O(23,0) 처리 경로는 좀 더 자연스러워진 것으로 판단됨.
+> 게임 97도 정상적임을 확인함. (양쪽에서 차이는 없음)
 
-**CURRENT NEXT: 사용자가 이번 문서 결과를 검수한 뒤 정확한20경로로 stage/commit/push를
-수행할 준비가 됐다. 이번 작업은 Git 쓰기를 하지 않는다. 다음 실행 work unit은 사용자 선택이다.**
-큰 수용 단위마다 docs/recovery를 함께 정리하고 Git 절차를 한 번에 전달한다.
-과거 PENDING/실패/정정 전 보고서를 소급 수정하거나 오래된 NEXT를 재실행하지 않는다.
+잔여 구역 선택을 설명받고 지금 고쳐야 하는지 질문했고, Coordinator가 구현 결함 아닌 후속 정책
+개선 범위로 알려진 한계를 남기자고 권고한 뒤 사용자는 **“그럼 넘어가자.”**라고 동의했다.
+미보고 slider/drag/key/manual rate·모든 native 조작/DPI/OS를 PASS로 추정하지 않는다.
+CU 초기화 오류로 개발자의 실제 click/key는 미확인이고 Windows Qt 렌더/offscreen tests와도 구분한다.
+일반 효과성·승률·production/native g 최적성·새 package 수용이나 LC1 freeze가 아니다.
 
-다음 선택 후보는 다른 보드 경로 기반 인근 확정 안전 수 처리 개선, 짧은 영상 pilot 후 전체
-분석 필요성 판단, Main/Live 최소 알고리즘 선택 통합이다. 영상/정책 개선은 Main 통합의
-무조건적인 선행 gate가 아니다. 거리 연동 기준CPS UI는 선택 개선이며 독립50/50 조기 처리/
-일반guess 변경은 별도 후순위다. 어떤 후보도 이번에 자동 시작하지 않는다.
-Extended 전체는 ACTIVE, milestones1–9는 CLOSED이며 전체 종료/Stage4는 미결정이다.
+- [K-LC1 closeout](stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md): 계약, 초기 실패/복구,
+  662/666/662 저장 자료, 검토/검증, 제한된 사용자 확인, 알려진 한계와 현재 viewer 명령.
+- [K-LC0 정책 closeout](stage3-extended/STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md),
+  [K-P0/K-LC0 비교 앱 closeout](stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md):
+  이전 사용자 수용/실험 근거. 그20경로 Git 절차는496fab0에서 이미 완료됐다.
+- [V1/K-P0 전시](stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md),
+  [Human pacing](stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md),
+  [D0–D5](stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)는 각각 별도 완료 이력이다.
+
+**CURRENT NEXT: 사용자 문서 검수 → 이번 정확한10경로 Git 절차 → 실제 새 SHA로
+postcommit recovery2개 갱신. Git 실행과 Desktop 교체는 사용자가 한다.**
+그 뒤 Main/Live 최소 알고리즘 선택 통합, 거리 연동 관람 속도, 추가 지역 평가 등은 사용자가
+다음 unit을 고른다. 정책 개선이 Main 통합의 무조건적인 선행 gate는 아니다.
+어떤 다음 구현/연구도 자동 시작하지 않는다. Extended ACTIVE·전체 종료/Stage4 미결정은 유지한다.
 
 ## 2. Live Git and source identity
 
 repo: `C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project`.
-2026-11-02 문서 작업 **시작** snapshot: main, HEAD == local origin/main ==
-`3e9f3935f505ff36dd74b6fba668650ab5c1d41d`, ahead/behind0/0,
-tracked 변경 없음·index 비어 있음, **기존 K-LC0 4개 + 새 비교 앱 9개 = 13 untracked**.
-현재 문서5수정/2신규가 더해졌다. clean이 아니고 HEAD만으로 미커밋 실행을 식별하지 않는다.
+시작 main / HEAD == local origin/main == `496fab0fc8829af7a255c403346985be7ae6a005` /0·0,
+tracked/staged 변경 없음, LC1 정책/runner/tests/fixture4개만 untracked였다.
+이번 결과는 기존 문서5개 수정 + 신규 closeout1개가 더해진 정확히10경로 미커밋 상태다.
+index에 staged diff가 없고 clean이 아니다. 미래 SHA/commit/push 성공은 아직 없다.
 
-`3e9f3935...`는 사용자가 기존 V1/K-P0 source 전시의 stage/commit/push를 완료한 기준이다.
-`6b26697b7986752966b67035ecf7e3ba73465f35`는 그 이전 D5 docs/개발 baseline이다.
-이번 새 commit SHA/push 완료는 아직 없다. 로컬 origin/main 확인은 새 fetch를 뜻하지 않는다.
-향후 사용자 Git 뒤에는 branch/HEAD/local origin/main/ahead·behind/worktree/index와 실제 새
-commit 메시지·포함 경로를 다시 확인해 recovery를 갱신한다. 기억한 SHA로 reset하지 않는다.
+K-LC0 원4+비교 앱9+문서7의20경로는 사용자가496fab0에서 commit/push 완료했다.
+3e9f3935는 그 전 V1/K-P0 source 기준,6b26697은 더 이전 개발 기준이다. 옛 precommit/NEXT를
+재실행하지 않는다. 로컬 origin/main 확인은 서버 조회나 새 fetch가 아니다.
 
-원4/새9의 NEW_FILES bytes는 그대로다. pilot UI c03b7c75, TEST_04 UI f770d4f0,
-최종UI5b04577c는 서로 다른 실행 identity다. **Codex가 최종9파일 전체 bytes로 tests를
-실행했다고 주장하지 않는다.** 최종 새54 tests 근거는 Claude54/54와 tooltip 해제 probe다.
-기존 fixture CRLF SHA와 core.autocrlf=true에서 예상되는 staged LF blob을 COMMIT_PLAN에서
-구분한다. stage 전 예상과 다르면 재검토하며 설정 변경/renormalize/과거 receipt 갱신은 하지 않는다.
-
-D5 package source는 `fb59d5fa253f04f50ea57c6a9e863aa1999a517e`, root는
-`results/program-k-trace-demo-final-acceptance/20261031-230251/`로 그대로다.
-어떤 새 commit도 과거 pilot/package 실행 hash를 소급 대체하지 않는다.
+LC1 source4의 raw bytes는 최초 최종 NEW_FILES 그대로다. fixture는574621bytes/CRLF,
+raw SHA256 `1d00d24309c76418b0af3707c984fc4a5751036ea2ada20048e7314674f49d44`다.
+core.autocrlf=true, attributes unspecified에서 예상 staged LF blob은543035bytes,
+SHA256 `e7b8edda78dfebdec0dacf72a91217a03c4be367d149b2f03c7fd66c5cff8ff9`,
+OID `6eb3e50b8d6a993f30868a9589ca6e16bcf9a780`다. raw 실행 identity와 index 정규화를 구분한다.
+source/fixture format이나 과거 receipt를 바꾸지 않는다. 각10경로 값은 외부 COMMIT_PLAN에 있다.
 
 ## 3. Source use and display boundary
 
-계보는 frozen V1 → K-P0 → 실험적 K-LC0이며 V1-LC0는 구현하지 않았다.
-V1도 CHORD를 사용한다. Stage2 Simple, 원 K-P0, K-LC0는 구별하며 Main/Live selector는 미통합이다.
-현재 K-P0/K-LC0 비교는 기존 승인 Python/PyQt5 환경에서 새 비교 앱을 사용한다.
+계보: frozen V1 → K-P0 → 실험적 K-LC0 → 별도 K-LC1. V1 확장은 생략했고 원 정책들은 그대로다.
+실제 LC0 b 위에 원 survivor direct-safe OPEN의 productive singleton/정확105–110%/strict D 예외만
+얹는다. 입력당 native 선택1회, 첫 입력 후 fresh replan, guess·추론·M·Model C 불변이다.
+110%는 전체 게임 비용 제한이 아니다. 상세 계약과 잔여 지역의 한계는 LC1 closeout을 따른다.
+
+현재 LC0/LC1 사용자 확인 도구는 외부 저장 viewer다. 기본8191/최대화, --small은900×760,
+--index97은 저장97 선택이다. 새 solver/보드/worker 버튼은 없다.
 
 ```powershell
-Set-Location -LiteralPath 'C:\Projects\GraduationProject\Minesweeper Project\Minesweeper-Project'
 $env:PYTHONDONTWRITEBYTECODE='1'
+$env:GIT_OPTIONAL_LOCKS='0'
 $env:QT_QPA_PLATFORM='windows'
-# 새 actual K-P0 / active K-LC0: 시작/--index는 자동 실행하지 않음
-& 'C:\venvs\minesweeper\Scripts\python.exe' -B -m experiments.k_lc0_exhibition
+& 'C:\venvs\minesweeper\Scripts\python.exe' -B 'C:\Projects\GraduationProject\K_LC1_USER_PATH_REVIEW_2026-11-02\codex_20261102_01\review_viewer.py'
 ```
 
-새 앱 `--open '<pair.json 경로>'`는 solver/보드 재생성/planner 없는 저장 재생,
-`--small`은900×760이다. 실제8191 열기 전체 명령은 새 비교 앱 closeout에 있다.
-기본 사용자 root `C:\Projects\GraduationProject\K_LC0_RANDOM_EXPERT_COMPARE_RUNS`는
-고정 pilot 산출물 manifest와 별개이며 과거 외부 산출물은 새 앱의 필수 의존성이 아니다.
-기존 V1/K-P0 앱의 용도/명령은 그 별도 closeout을 따른다. 옛 고정3보드 viewer는
-review_data.py의 load_review()에서 원 LAUNCH_IDENTITY316파일을 검사하는 역사적 도구다.
-현재311일치/문서5불일치를 raw hash만으로 확인했다. 기존 저장3보드 trace는 원 CONTROL/
-K-LC0 실행 evidence이며 새 앱의 actual K-P0/K-LC0 실행이나 JSON으로 대체·재라벨하지 않는다.
+8191의 완료145/145에서 다음 선택을 비교하고145→153 구간 보기, 이후97의 시작/마지막136을
+확인할 수 있다. 이 viewer는 이번 Git 대상이 아니다. 저장/review identity를 검사하지만 현재
+docs/HEAD 전체와 과거 raw hash 일치를 요구하지 않는다. 이 문서 갱신에서는 reader를 실행하지
+않고 의존 경계 텍스트만 확인했다. 완료 frame의 M/FLAG/cost/route와 다음 선택 메모는 분리한다.
 
-공개 EXPERT_GENERAL_V1 index0..99999의 같은 layout/두 fresh session으로 child에서
-K-P0→active LC0를 실행한다. native survivors/정확21/20 band/D→E→L→tie와 첫 입력 후
-재계획을 유지한다. guess·추론·M·Model C 변경이나 지역 완료 보장은 없다.
-현재 pair identity와 다음 요청 입력란, 전체 비용/입력과 현재 누적값을 구별한다.
-공통 재생이 같은 번호/진행률을 강제하지 않는다. 완료 frame만 M/board/route/cost를 갱신한다.
-수동20..10000ms/0.1..50CPS, 기본250ms·200/500ms 및 Model C 배율을 재사용한다.
-관람 CPS·합성 cursor는 인간 시간/움직임 측정이 아니다. LOST 비용은 승리 시간이 아니다.
+기존 `python -B -m experiments.k_lc0_exhibition`은 actual K-P0/K-LC0 앱이며 LC1은 미통합이다.
+옛 K-LC0 고정3보드 viewer의316파일 raw-hash guard/문서5불일치는 별도 역사적 제한이다.
+그 도구나 과거 PENDING/실패 자료는 수정하지 않았다. Main/Live selector·package/EXE·Stage4는
+아직 미진행/미수용이다. 관람 속도와 선택 정책 비용 가중치 변경도 서로 다른 후속 후보다.
 
 ## 4. Preserved scientific / production boundary
 
@@ -110,17 +98,13 @@ E0/E1/R0/Phase1/E2/공식100k를 안심용으로 재실행하지 않는다.
 
 ## 5. Documentation output and recovery
 
-이번 소유 output:
-`C:\Projects\GraduationProject\K_LC0_DOC_CLOSEOUT_2026-11-02\codex_20261102_02`.
-이는 옛 viewer 안내 정정판이다. 기존 codex_20261102_01 산출물은 보존했으며 그 COMMIT_PLAN과
-USER_GIT_STEPS는 **교체됨(superseded)** 상태다. 커밋20경로는 같지만 문서 hash와 예상 staged
-blob이 달라졌으므로 _02 계획/절차를 사용한다.
-REPORT_KO.md, DOCUMENTATION_CLOSEOUT.json, SOURCE_SNAPSHOT.json, COMMIT_PLAN.json과
-명명 보존/diff/링크·경로 확인 기록을 둔다. Desktop recovery 두 원본은 수정하지 않고
-같은 파일명의 **교체용 전체 문서 사본**만 output에 제공한다. RECOVERY_CURRENT_KO.txt도 참고한다.
+이번 output: `C:\Projects\GraduationProject\K_LC1_DOC_CLOSEOUT_2026-11-02\codex_20261102_01`.
+REPORT_KO, COMMIT_PLAN, USER_GIT_STEPS_KO.md/USER_GIT_STEPS.ps1, 문서 diff·hash,
+전후 보존·정적 검증과 Desktop 동명 recovery 교체용2개를 제공한다.
+Desktop 원본은 변경하지 않았다. 현재 사본은496fab0+미커밋10경로이며 사용자 Git 후 실제
+새 SHA를 받아 postcommit 기준으로 두 사본을 다시 정리할 예정이다. Desktop 교체도 사용자 소유다.
 
-이번 검증은 문서 링크/경로/수치/identity/명명 hash와 Git diff/whitespace의 읽기 전용 확인이다.
-source/tests13개 및 허용5문서 밖 보호 파일, 과거 산출물·Desktop 원본·Git index를 보존한다.
-tests·앱·solver·영상·분석·build 실행, stage/commit/push/fetch/stash/reset/설정 변경은 없다.
-복구 때 과거 실행 스크립트를 돌리지 말고 현재 source와 관련 저장 evidence만 읽는다.
-검증 강도는 주장과 위험에 비례하며 일반 UI/구현에 불필요한 R0/E2급 gate를 추가하지 않는다.
+이번 수행은 승인 문서6개 작성과 저장 JSON/링크/Git diff/예상 blob/PowerShell AST의 정적 확인뿐이다.
+기존 source/tests/fixture/viewer·원 증거·Claude/과거 helper는 실행/수정하지 않았다.
+tests·앱·solver·pilot·native·build·network와 stage/commit/push/fetch/pull/설정 변경은0회다.
+사용자 문서 검수와 Git 실행 직전에서 STOP한다. 별도 formal gate나 연구를 추가하지 않는다.

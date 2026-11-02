@@ -488,8 +488,9 @@ Model C time-to-win 차이는 양쪽 WON일 때만 정의한다.
 2026-11-02 source checkpoint다. 계보는 frozen V1 → K-P0 → 실험적 K-LC0이며
 V1-LC0 구현은 생략했다. V1도 CHORD를 사용하고 Stage2 Simple과 구별한다.
 K-P0/K-LC0는 별도 policy/entry이고 Main/Live selector에는 미연결이다.
-기존 V1/K-P0 앱은 `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`에 committed 상태이며,
-K-LC0 4개와 비교 앱 9개는 이번 문서 작성 시 untracked다. HEAD만으로 실행을 식별하지 않는다.
+기존 V1/K-P0 앱의 `3e9f3935...` 뒤 K-LC0 4개·비교 앱9개와 문서7개의20경로는
+`496fab0fc8829af7a255c403346985be7ae6a005`로 commit/push 완료됐다.
+그 이전 실행은 당시 raw hash/dirty identity를 따르며 새 HEAD로 소급 식별하지 않는다.
 
 | 신규 경로 | 책임 |
 | --- | --- |
@@ -532,6 +533,40 @@ review_data.py의 load_review()는 원 LAUNCH_IDENTITY에 있는316파일의 현
 [비교 앱 closeout](docs/stage3-extended/STAGE3_K_LC0_RANDOM_EXPERT_COMPARE_CLOSEOUT.md)에 있다.
 Claude PASS 및 사용자 native 수용은 experimental source 범위다. 일반 효과성·production·
 K-LC0 freeze·새 package는 승인하지 않았다. 거리 연동 기준CPS UI도 아직 없다.
+
+### Experimental K-LC1 / saved LC0–LC1 path review
+
+2026-11-02 별도 실험적 checkpoint다. 계보는 frozen V1 → K-P0 → K-LC0 → K-LC1이며
+V1 확장은 생략했다. 원 K-LC0/DISTANCE_BAND_V1과 기존 실행 UI·policy는 불변이다.
+
+| 신규 repo 경로 | 책임 |
+| --- | --- |
+| `experiments/program_k_lc1_policy.py` | SINGLETON_BAND_V1, 새 SingletonSelection 기록·별도 validator; native/실제 LC0 b/최종 선택 분리 |
+| `experiments/program_k_lc1_runner.py` | 기존 public port/session/물리 validator/effect archive 경계로 실제 첫 move만 실행 후 fresh replan |
+| `tests/test_program_k_lc1.py` | 선택 산술·불변성·기록 변조·작은 runner seam의 focused 검증 |
+| `tests/fixtures/program_k_lc1_singleton_native.json` | 세 captured public state의 detached 선택 산술 fixture; 새 추론/engine 증거 아님 |
+
+입력당 native 선택1회 후 동일 결과에 실제 LC0 `apply_distance_band(control=False)`를 적용해
+b를 얻는다. 원 survivor 중 certainty safe pool의 물리 HIDDEN direct-safe OPEN 하나(R=1,
+setup 없음)만 예외 대상이다. HIDDEN8-neighbor 성분 C에는 숨은 논리 M도 연결한 뒤
+`C − preinput_M = {target}`인지 본다. 물리 FLAG와 M은 다르며 추론 독립 component 인증이 아니다.
+native g 기준 `20*L(p)*R(g) > 21*L(g)*R(p)`, `10*L(p)*R(g) <= 11*L(g)*R(p)`,
+`D(p) < D(b)`를 만족해야 한다. 전체 계획 D→정확 Fraction(L,R)→L→frozen tie로 고른다.
+추가 추론/후보/route/pruning은 없고 guess·초기 OPEN·M·Model C는 불변이다.
+110%는 한 선택의 L/R 상한이지 전체 게임 비용 제한이 아니다.
+
+외부 저장 viewer는 K_LC1_PILOT_RECOVERY_TRACE_V1 / K_LC1_PUBLIC_SELECTION_RECORD_V1의
+662 actions/666 frames/662 choices를 immutable하게 보존한다. 원 UI의 표시 클래스만 정적으로
+재사용하며 pure DTO/playback import 외 solver/worker/generator 계층은 차단한다.
+reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identity를 검사한다.
+현재 repo source/docs/HEAD를 과거 raw hash와 비교하는 startup 조건은 없다.
+이번 doc refresh가 새 viewer를 무효화한다고 추정하지 않았고 reader 텍스트만 정적으로 확인했다.
+
+현재 확인 도구는 외부 저장8191/97 viewer이며 `experiments.k_lc0_exhibition`에는 LC1이 없다.
+사용자 확인은 두 저장 경로에 한정된다. native Qt 렌더 확인/offscreen tests/미확인 CU 제스처를
+분리하며 자세한 수치·알려진 한계·실행 안내는
+[K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)을 따른다.
+Main/Live·production·새 package/Stage4는 미진행이다.
 
 ### Replay
 

@@ -197,9 +197,10 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-02 현재 K-LC0·새 비교 앱 13개와 문서 7개의 커밋 준비 단계입니다.**
-기존 V1/K-P0 전시의 commit/push는 `3e9f3935f505ff36dd74b6fba668650ab5c1d41d`로
-완료됐습니다. 이번 새 commit은 아직 없으며, 이후 work unit은 사용자가 선정합니다.
+**2026-11-02 현재 K-LC1의 제한된 저장 경로 사용자 확인을 반영한 문서·Git 준비 단계입니다.**
+기존 K-LC0·비교 앱의 20경로 commit/push는 `496fab0fc8829af7a255c403346985be7ae6a005`에서
+이미 완료됐습니다. 이번 대상은 K-LC1 신규4개와 문서6개, 정확히10경로이며 아직 미커밋입니다.
+CURRENT NEXT는 사용자 문서 검수 → 이번 Git 절차 → 새 SHA로 postcommit recovery 갱신입니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와
 [Extended roadmap](docs/stage3-extended/README.md)에서 현재 복구 상태를 확인하세요.
 
@@ -290,6 +291,25 @@ pair는 별도 work unit의 evidence이며 같은 기록으로 취급하지 않�
 K-P0/K-LC0는 별도 entry이며 Main/Live selector에는 미연결입니다. 이번 source 수용은
 K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
 다음 작업은 사용자 선택이며 영상/정책 개선이 Main 통합의 무조건적인 선행 gate는 아닙니다.
+
+## K-LC1 / SINGLETON_BAND_V1 — 제한된 저장 경로 확인
+
+원 K-LC0를 보존한 별도 실험적 source checkpoint입니다. 2026-11-02 사용자는
+8191의 완료145→153 구간에서 O(23,0) 처리 경로가 “좀 더 자연스러워진 것으로 판단됨”,
+97은 “정상적임을 확인함. (양쪽에서 차이는 없음)”이라고 확인했습니다.
+잔여 지역 선택의 한계를 설명받은 뒤 “그럼 넘어가자.”라고 동의했습니다.
+미보고 slider/drag/key/manual rate·모든 native 조작/DPI/OS 수용으로 확대하지 않습니다.
+
+실제 LC0의105% baseline 위에 원 survivor direct-safe OPEN의 productive singleton,
+native g 대비105% 밖/110% 이내·엄격한 거리 감소만 허용합니다. K-LC1은 frozen이 아니며
+원 K-LC0 교체, 일반 효과성·승률·production 승인이 아닙니다.
+
+현재 확인 도구는 외부 `K_LC1_USER_PATH_REVIEW_2026-11-02\codex_20261102_01\review_viewer.py`입니다.
+8191/97 저장 LC0/LC1 네 trace만 재생합니다. 기존 `experiments.k_lc0_exhibition`은
+actual K-P0/K-LC0 앱 그대로이며 LC1 실행은 통합되지 않았습니다.
+[K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)에
+실행 명령,145→153/97 확인 순서, 복구 pilot·검토·viewer 기록과 알려진 한계를 정리했습니다.
+새 source4·문서6만 이번 Git 대상이고 외부 viewer는 포함하지 않습니다.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 
