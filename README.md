@@ -1,6 +1,6 @@
 # Minesweeper Project
 
-Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm으로 현재 수를 분석하거나 자동 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm과 frozen Stage3 V1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
 
 ## 핵심 기능
 
@@ -10,6 +10,16 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 추천과 실제 다음 수 비교
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
+
+## Main/Live Simple·V1 — 사용자 기능/UI 수용
+
+2026-11-03 현재 Main의 Simple·Stage3 V1 Auto, 수동↔V1 재인수, 미검증 FLAG 정리와 UI 개선을 사용자가 native에서 확인하고 “모두 정상인 것 같아.”라고 수용했습니다. 새 판은 수동 가능·Auto OFF·guess OFF입니다. 정책 선택은 실행 명령이 아닙니다.
+
+Simple은 기존 수동/Auto 혼합을 유지합니다. V1은 보드 press로 Auto를 멈추고 원래 gesture를 수동 처리하며, cleanup 뒤 같은 판을 다시 인수합니다. V1 Auto OFF는 추천 보관 일시정지, **추천·계산 종료**는 추천 폐기/worker 종료입니다. K-P0/LC0/LC1은 disabled입니다.
+
+V1 인수 시 공개 FLAG-free view의 직접 zero/all와 총 지뢰수 zero/all로 증명된 FLAG만 유지합니다. SAFE/UNVERIFIED는 실제 FLAG 토글로 해제해 닫아 둡니다. **미검증은 오답 판정이 아니며 실제 지뢰도 해제될 수 있습니다.** 분석-only는 실제 입력하지 않습니다. 화면 이름은 Stage3 V1이고 내부 frozen 정책·Model C는 그대로입니다.
+
+[Main/Live closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)에 사용법·계약·버전별 검증·수용 범위를 모았습니다. 독립 F02 미확인과 과거 helper의 Qt 설정 보존 FAIL은 남습니다. 현재 Main 속도는 ms 관람 간격이며 Model C/CPS/거리 가변 속도 모드나 새 package 수용은 아닙니다.
 
 ## Simple Algorithm
 
@@ -197,12 +207,12 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-02 현재 K-LC1의 제한된 저장 경로 사용자 확인을 반영한 문서·Git 준비 단계입니다.**
-기존 K-LC0·비교 앱의 20경로 commit/push는 `496fab0fc8829af7a255c403346985be7ae6a005`에서
-이미 완료됐습니다. 이번 대상은 K-LC1 신규4개와 문서6개, 정확히10경로이며 아직 미커밋입니다.
-CURRENT NEXT는 사용자 문서 검수 → 이번 Git 절차 → 새 SHA로 postcommit recovery 갱신입니다.
-[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와
-[Extended roadmap](docs/stage3-extended/README.md)에서 현재 복구 상태를 확인하세요.
+**2026-11-03 현재 Main/Live 기능·UI 사용자 수용 후 문서·Git 준비 단계입니다.**
+K-LC0의20경로 Git은496fab0, K-LC1의10경로 Git은d1201e4에서 이미 완료됐습니다.
+현재 main/HEAD=local origin/main=`d1201e481da7199a46b4ab80eaf5c303e77db10a`,0/0, staged0이며
+source/tests18+문서6의 정확한24경로가 미커밋입니다. NEXT는 문서/commit plan 검수 → 사용자 Git →
+실제 SHA의 postcommit recovery → K 연결 첫 단위 준비입니다. 자동 착수하지 않습니다.
+[CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
 [최종 closeout](docs/stage3-extended/STAGE3_TIMELINE_ANALYTICS_CLOSEOUT.md)에
@@ -239,7 +249,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 관람 속도와 synthetic 직선 커서는 실제 인간 시간·mouse trace가 아니며 Model C를 바꾸지 않습니다.
 양쪽 WON이 아니면 Model C 승리 시간 차이는 N/A입니다.
 
-**source-only 수용**입니다. 새 package/EXE·Main/Live 통합·효과성 수용은 없습니다.
+**이 외부 전시의 source-only 수용**입니다. 이 수용은 새 package/EXE·Main/Live 통합·효과성 승인이 아닙니다. 현재 Main Simple/V1의 별도 수용은 위 Main/Live closeout을 따릅니다.
 RF lifecycle/transport 독립 재감사 PASS와 후속 UI의 사용자 수용을 구분합니다.
 [전시 기능 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)에
 단계별 검증·실행 identity·한계를, [Human pacing 분석 closeout](docs/stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)에
@@ -309,7 +319,7 @@ native g 대비105% 밖/110% 이내·엄격한 거리 감소만 허용합니다.
 actual K-P0/K-LC0 앱 그대로이며 LC1 실행은 통합되지 않았습니다.
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)에
 실행 명령,145→153/97 확인 순서, 복구 pilot·검토·viewer 기록과 알려진 한계를 정리했습니다.
-새 source4·문서6만 이번 Git 대상이고 외부 viewer는 포함하지 않습니다.
+당시 source4·문서6의10경로는 d1201e4에서 commit/push 완료됐습니다. 외부 viewer는 그 commit 대상이 아닙니다.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 
@@ -397,8 +407,10 @@ ZIP 전체를 압축 해제한 뒤 `Minesweeper/Minesweeper.exe`를 실행합니
 Python 3.10 이상과 PyQt5, PyQtGraph가 필요합니다. Repository 루트에서 실행합니다.
 
 ```powershell
-python -m pip install -r requirements.txt
-python main.py
+$env:PYTHONDONTWRITEBYTECODE='1'
+$env:GIT_OPTIONAL_LOCKS='0'
+$env:QT_QPA_PLATFORM='windows'
+& 'C:\venvs\minesweeper\Scripts\python.exe' -B .\main.py
 ```
 
 기본 보드는 상급 `30 × 16 / 99 mines`입니다. UI에서 난이도를 바꿀 수 있습니다.
@@ -484,8 +496,8 @@ Expert seed 1003의 알려진 **120-click trace**는 `tests/test_zini_core.py`�
 
 ## 주요 제한과 향후 방향
 
-- 잘못 꽂은 깃발은 분석의 가정을 깨뜨릴 수 있습니다. 감지된 모순은 분석 불가로 표시하지만 모든 오답 깃발을 찾아내지는 못합니다.
-- 큰 constraint component의 exact probability는 지수 시간이 걸릴 수 있습니다. 현재 Live/Replay 분석은 UI thread에서 동기 실행되어 화면이 지연될 수 있습니다.
+- Simple/Replay 분석은 FLAG를 지뢰로 가정합니다. V1 인수의 별도 FLAG 검토는 제한된 공개 직접 증명만 인정하며, 모든 오답 깃발 탐지나 최대 증명력을 보장하지 않습니다.
+- 큰 constraint component의 exact probability는 지수 시간이 걸릴 수 있습니다. Simple Live/Replay 분석은 UI thread에서 동기 실행되어 지연될 수 있습니다. V1 계획/FLAG 검토는 별도 bounded public-only worker입니다.
 - Simple Algorithm은 닫힌 칸의 OPEN/FLAG만 추천합니다. CHORD·UNFLAG는 추천 범위 밖입니다.
 - Replay schema v1은 full-game과 continuation/suffix를 구분할 metadata가 없습니다. 중간부터 기록한 구간의 복원·분석에는 [schema v1 한계](ARCHITECTURE.md#replay-schema-v1)가 적용됩니다.
 - 향후 후보는 UI controller/worker 관리 분리, 분석 성능 개선, Replay checkpoint, subprocess 실패·취소 검증 확대입니다. AI 학습 환경은 아직 구현하지 않았습니다.

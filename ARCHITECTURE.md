@@ -24,6 +24,10 @@ main.py ── engine 생성 → UI에 주입
                          ├─ Core Engine ─────────▶ core_engine.py
                          │                            ├─ board_snapshot.py
                          │                            └─ board_analyzer.py
+                         ├─ V1 Live public worker ▶ live_policy_job.py / live_policy_transport.py
+                         │                            ╰─ live_policy_worker.py
+                         │                               ├─ live_flag_review.py (준비 검토)
+                         │                               └─ frozen stage3_planner / runner validator
                          ├─ Simple analysis ─────▶ simple_decision.py
                          │  / presentation ─────▶ live_analysis.py
                          ├─ Replay ─────────────▶ replay_recorder.py
@@ -68,7 +72,7 @@ simple_runner ──▶ simple_decision
 ```
 
 `live_analysis.py`는 decision/probability 모델을 참조하는 순수 presentation 계층이다.
-Live Auto는 UI의 QTimer 제어이며 `simple_runner.run_simple()`을 호출하지 않는다.
+Live Auto는 UI의 QTimer 제어이며 `simple_runner.run_simple()`을 호출하지 않는다. V1은 `live_policy_job`/`live_policy_transport`를 통해 public-only `live_policy_worker`에 계획·FLAG 검토를 맡긴다. `live_policy` DTO/validator와 `live_flag_review`를 거쳐 frozen planner의 첫 입력만 Main engine에 적용한다.
 Solver가 `core_engine`에서 가져오는 것은 `Action`, `CellState` 같은 공개 타입이다.
 
 ## 3. 모듈별 책임
@@ -77,7 +81,7 @@ Solver가 `core_engine`에서 가져오는 것은 `Action`, `CellState` 같은 �
 
 | 모듈 | 책임 |
 | --- | --- |
-| `main.py` | Qt 설정·GUI import 전 ZiNi / Stage-3 worker 모드 분기, Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
+| `main.py` | Qt 설정·GUI import 전 ZiNi / Stage-3 / Live policy worker 모드 분기, Windows Qt plugin 경로 설정, QApplication과 engine 생성, UI에 engine 주입 |
 | `core_engine.py` | 지뢰 배치, OPEN/FLAG/CHORD, flood fill, 승패 판정, 타이머, active/wasted 클릭 및 진행량 집계 |
 | `board_snapshot.py` | 크기·지뢰 수·배치 여부·mine layout·adjacent를 담은 불변 `BoardSnapshot` |
 | `board_analyzer.py` | 확정 보드의 opening 그룹과 OPENING/BORDER/ISOLATED 분류, 정적 3BV/Ops |
@@ -566,7 +570,7 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 사용자 확인은 두 저장 경로에 한정된다. native Qt 렌더 확인/offscreen tests/미확인 CU 제스처를
 분리하며 자세한 수치·알려진 한계·실행 안내는
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)을 따른다.
-Main/Live·production·새 package/Stage4는 미진행이다.
+K/LC의 Main/Live 연결·production·새 package/Stage4는 미진행이다. Simple/V1 Main/Live는 별도 [사용자 수용 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다.
 
 ### Replay
 
@@ -672,6 +676,14 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
+2026-11-03 Simple/V1 Main/Live 기능·UI 사용자 native 수용. 아래 공통 입력과 기존 Simple 흐름에 더해 V1은 별도 worker의 FLAG_REVIEW/V1 phase와 snapshot→token 소비→step→Replay→status-first ACK를 사용한다. 상세 [Main/Live 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다.
+
+새 판은 수동 가능·Auto OFF·guess OFF이며 정책 선택만으로 실행하지 않는다. Simple의 수동/Auto 혼합은 유지하고, V1은 첫 유효 board press에서 Auto를 끄고 원래 gesture를 이어간다. 실제 수동 입력 뒤 다음 V1 segment는 guess OFF이며, 이전 owner의 exit/reap/tree0/cleanup 뒤 같은 판의 현재 상태를 새 ADOPT owner로 인수한다.
+
+V1 Auto OFF는 owner·유효 pending을 보관하는 일시정지다. **추천·계산 종료**는 pending을 버리고 worker를 종료한다(Simple에서는 비활성). 일시정지/간격/guess 변경만으로 유효 계획·FLAG 검토를 다시 계산하지 않는다. 정책 변경은 Auto OFF와 옛 owner retire 뒤 다음 명시 ON에 적용하며 보드·기록은 보존한다.
+
+준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, owner≤960, wire v2/seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
+
 ```text
 사용자 입력 / Live Auto timeout
 → UI의 단일 action 경로
@@ -709,7 +721,7 @@ Replay 진입·종료와 cell-size 변경은 stale held input을 무효화한다
 Engine은 physical press/release/origin 정책을 모르며 semantic OPEN/FLAG/CHORD와
 기존 active/wasted 규칙만 처리한다.
 
-수동 `현재 상태 분석`은 행동을 실행하지 않는다. `분석 표시`가 OFF이면 그 결과는 다음 행동에 지워지고, ON이면 매 행동 후 갱신된다. Auto는 single-shot QTimer로 추천 하나만 예약하며, timeout에 observation 일치 여부와 HIDDEN target, 첫 수 정책의 유효성을 다시 검사한다.
+아래 갱신 규칙은 기존 Simple 경로다. 수동 `현재 상태 분석`은 행동을 실행하지 않는다. `분석 표시`가 OFF이면 그 결과는 다음 행동에 지워지고, ON이면 매 행동 후 갱신된다. Auto는 single-shot QTimer로 추천 하나만 예약하며, timeout에 observation 일치 여부와 HIDDEN target, 첫 수 정책의 유효성을 다시 검사한다.
 
 추측 허용이 OFF이면 guess 추천과 overlay를 유지한 채 대기한다. 사용자가 직접 행동하면 예약을 취소하고 새 상태에서 분석한다. Reset·난이도 변경·Replay 진입·창 닫기·게임 종료·분석 오류도 예약을 취소한다. 행동을 여러 개 queue하지 않으며 비종료 Auto 행동 후 HIDDEN 수가 줄지 않으면 중단한다.
 
@@ -737,7 +749,7 @@ ReplayData → ReplayPlayer
            → 저장 이벤트 적용 → observation → UI
 ```
 
-Live UI와 runner 모두 확정 보드를 recorder에 한 번 전달하고 실제 action을 기록한다. 승리 시 engine의 자동 깃발은 별도 physical action/event가 아니다. Runner의 source는 `algorithm`이며 UI의 기존 recorder는 `human`을 사용한다. `source_type`은 게임 단위 필드이므로 Live Auto와 사람 입력을 event별로 구별하지 않는다.
+Live UI와 runner 모두 확정 보드를 recorder에 한 번 전달하고 실제 action을 기록한다. 승리 시 engine의 자동 깃발은 별도 physical action/event가 아니다. Runner의 source는 `algorithm`이며 UI의 새 판은 `human`이다. Main의 첫 실제 Auto 입력(준비 UNFLAG 포함)부터 `algorithm`으로 바꾸고 이후 mixed 수동 구간도 non-human으로 유지한다. 분석/Auto toggle만으로 HUMAN을 바꾸지 않는다. `source_type`은 게임 단위 필드이므로 Live Auto와 사람 입력을 event별로 구별하지 않는다.
 
 <a id="replay-index"></a>
 
@@ -849,7 +861,7 @@ Replay 추천 경로도 다음을 decision input으로 사용하지 않는다.
 
 다음 Replay event는 [추천 계산 완료 후](#replay-analysis-flow) 비교 용도로만 읽는다. 재생 복원·기록·Replay Statistics·ZiNi가 실제 layout을 사용하는 경로와 분리한다. Live/runner의 첫 수 확인에서는 snapshot의 **`mines_placed` boolean만** 정책 입력으로 사용하며 layout은 읽지 않는다.
 
-깃발은 지뢰로 가정한다. Analyzer는 local 추론 전에 개별 clue와 `0 <= num_mines - flag_count <= hidden_count`를 검증한다. Local 경로는 직접 모순과 안전/지뢰 충돌을 확인하지만 전체 constraint 만족 가능성을 검사하지 않는다. 전체 world의 존재 여부는 probability 경로에서 검사한다. 따라서 감지되지 않은 잘못된 깃발까지 교정하거나 certainty의 실제 안전을 무조건 보장하지 않는다.
+Simple/Replay 및 일반 frozen planner는 깃발을 지뢰로 가정한다. V1 인수는 그 전에 detached FLAG-free view의 직접 zero/all+전체수 zero/all로 검토해 PROVED_MINE만 유지하며 SAFE/UNVERIFIED를 준비 토글로 해제한다. UNVERIFIED는 실제 안전/오답 판정이 아니며 hidden truth/counter 차이를 사용하지 않는다. Analyzer는 local 추론 전에 개별 clue와 `0 <= num_mines - flag_count <= hidden_count`를 검증한다. Local 경로는 직접 모순과 안전/지뢰 충돌을 확인하지만 전체 constraint 만족 가능성을 검사하지 않는다. 전체 world의 존재 여부는 probability 경로에서 검사한다. 따라서 감지되지 않은 잘못된 깃발까지 교정하거나 certainty의 실제 안전을 무조건 보장하지 않는다.
 
 <a id="first-click"></a>
 
@@ -857,7 +869,7 @@ Replay 추천 경로도 다음을 decision input으로 사용하지 않는다.
 
 Engine은 **미배치 상태의 첫 OPEN 한 칸만** 지뢰 후보에서 제외한다. 주변 8칸의 안전이나 첫 숫자 0은 보장하지 않는다. 먼저 FLAG하면 안전지대 없이 지뢰를 배치하며, 이를 해제해도 배치는 유지된다. `reset_with_mines()`도 지정된 배치를 그대로 사용한다.
 
-아래는 PLAYING position에 적용하는 정책이다.
+아래는 기존 Simple/runner/Replay의 PLAYING 정책이다. V1은 별도로 CANONICAL_NEW의 fresh provenance·placement 전·all-HIDDEN·revision0·cursor(0,0)·owner seq0만 canonical 예외로 인정한다. 수동 입력/FLAG→UNFLAG 뒤 all-HIDDEN도 ADOPT_CURRENT seq0이며 guess gate를 따른다.
 
 | 상황 | 분석·실행 정책 |
 | --- | --- |

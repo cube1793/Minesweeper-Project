@@ -163,6 +163,20 @@ class SameBoardMainUITests(unittest.TestCase):
             self.ui.on_reset()
             self.assertFalse(self.ui.same_board_comparison_action.isEnabled())
 
+    def test_completed_auto_or_mixed_live_is_not_human_comparison_eligible(self):
+        self.ui.engine.reset_with_mines(4, 1, 1, {(1, 0)})
+        self.ui._reset_replay_recorder()
+        self.ui._apply_live_action(0, 0, Action.OPEN)
+        before = self.ui.engine.get_observation()
+        self.ui._apply_live_action(2, 0, Action.OPEN, auto_observation=before)
+        self.ui._apply_live_action(3, 0, Action.OPEN)
+        self.assertEqual(self.ui.engine.status, GameStatus.WON)
+        self.assertEqual(self.ui._replay_recorder.source_type, SOURCE_ALGORITHM)
+        self.assertFalse(self.ui.same_board_comparison_action.isEnabled())
+        self.assert_rejected("SOURCE_HUMAN")
+        self.ui.on_reset()
+        self.assertEqual(self.ui._replay_recorder.source_type, "human")
+
     def test_placed_unfinished_live_and_direct_unavailable_call_are_safe(self):
         self.ui.engine.reset_with_mines(4, 1, 1, {(1, 0)})
         self.ui._update_same_board_comparison_action()

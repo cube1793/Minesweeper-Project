@@ -5,6 +5,8 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
+- [Main/Live Simple·V1 사용자 수용 closeout](stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md): 수동 재인수·공개 FLAG 정리·UI, 버전별 근거와 독립 F02/과거 보존 FAIL의 한계.
+
 - [Current project handoff](CURRENT_HANDOFF.md): 현재 source 수용, 닫힌 기준선, 커밋 준비와 다음 작업 선정 경계.
 - [Project README](../README.md): 실행 방법, 주요 기능과 프로젝트 개요.
 - [Architecture](../ARCHITECTURE.md): Engine/UI/Replay/analysis/worker 책임 경계.
@@ -88,7 +90,7 @@ Closed milestones / durable closeouts:
 
 ### Current Program-K state / next work
 
-As of **2026-11-02 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separate
+As of **2026-11-03 (Asia/Seoul)**, milestones **1–9 are CLOSED** and the separate
 Program K research visualization/comparison path **D0–D5 is FINAL ACCEPTANCE
 PASS / CLOSED**, including implemented D4 and final user packaged A–H PASS.
 
@@ -132,22 +134,12 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT (2026-11-02): 사용자 문서 검수 → K-LC1 신규4+문서6의 정확한10경로
-Git 절차 → 새 SHA로 postcommit recovery2개 갱신. 실제 Git과 Desktop 교체는 사용자 소유다.**
-현재 main / HEAD == local origin/main == `496fab0fc8829af7a255c403346985be7ae6a005`,0/0이다.
-K-LC0의 기존20경로 commit/push는 끝났으며 옛3e9f/precommit 지시를 반복하지 않는다.
-이번 문서 갱신 후 기존문서5수정·신규closeout1·LC1 source4가 미커밋이고 staged diff는 비어 있다.
-현재 LC0/LC1 확인은 외부 저장8191/97 viewer다. 기존 앱은 actual K-P0/K-LC0 그대로다.
-과거 closeout과 PENDING/실패 자료는 dated snapshot이며 현재 안내는 handoff/recovery를 따른다.
-Recheck live Git on recovery. Extended remains **ACTIVE**, with effectiveness
-research deferred/unresolved; global closure and Stage 4 transition are not decided.
-Future research reopening requires new evidence and separate authorization;
-no profiling/R0/E2 rerun is a documentation-recovery step.
-The ZiNi final holdout `2,010,000 .. 2,010,099` remains unopened/excluded.
+**CURRENT NEXT (2026-11-03): Main/Live 문서/정확한24경로 commit plan 검수 → 사용자 stage·commit·push → 실제 SHA의 postcommit recovery → K 연결 첫 단위 준비.**
+현재 main/HEAD=local origin/main=`d1201e481da7199a46b4ab80eaf5c303e77db10a`,0/0, staged0이며 source/tests18+문서6이 미커밋이다. K-LC0의20경로는496fab0, K-LC1의10경로는d1201e4에서 이미 완료됐다. 옛 precommit/NEXT는 반복하지 않는다. 검수할 plan/script는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)에 적힌 최신 외부 output 사본을 사용한다.
 
-그 뒤 Main/Live 최소 알고리즘 선택 통합, 거리 연동 관람 속도, 추가 지역 평가 등은
-사용자가 다음 unit을 고른다. 관람 속도 변경과 선택 정책 비용 가중치 변경은 별개이며
-이번에는 어느 쪽도 추가하지 않는다. 정책 개선은 Main 통합의 무조건적인 선행 gate가 아니다.
+사용자는 현재 Main/Live 기능·최신 UI를 native에서 수용했다. 다른 OS/DPI·package·전체 branch/테스트·효과성 승인은 아니다. 독립 F02 NOT_VERIFIED, 과거 Qt 공용 설정 보존 FAIL/offscreen glyph 한계와 E helper R1 재사용 금지를 유지한다. 과거 PENDING 보고서는 고치지 않는다.
+
+Main Simple/V1과 외부 K/LC 전시·저장 viewer는 다르며 K selector는 disabled다. K 지속 세션/M/FLAG/ACK/재인수는 다음 단위의 별도 계약이다. 거리 가변 CPS/Model C 속도 모드·package·후속 연구·Stage4는 미구현/미수용 범위로 남기며 자동 착수하지 않는다. 추가 대규모 영상 분석/재평가는 새 필수 gate가 아니다. Extended ACTIVE와 holdout unopened/excluded를 유지한다.
 
 ## Experiments
 

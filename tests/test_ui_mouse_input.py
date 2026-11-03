@@ -1237,6 +1237,199 @@ class MouseInputTests(unittest.TestCase):
         self.release((12, 11))
         self.step.assert_called_once_with(12, 11, Action.OPEN)
 
+@unittest.skipIf(QApplication is None, "PyQt5 unavailable")
+class LiveV1HandoffMouseTests(unittest.TestCase):
+    """Offscreen Qt delivered gestures; synthetic worker, real Main/engine/Replay."""
+    point = MouseInputTests.point
+    outside = MouseInputTests.outside
+    send = MouseInputTests.send
+    press = MouseInputTests.press
+    move = MouseInputTests.move
+    release = MouseInputTests.release
+    close_ui = MouseInputTests.close_ui
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        from tests.test_live_auto import SyntheticLivePolicyJob
+        from live_policy import POLICY_V1
+        self.settings = isolate_ui_settings(self)
+        worker = patch.object(MinesweeperUI, "_ensure_zini_metric_job")
+        worker.start()
+        self.addCleanup(worker.stop)
+        job = patch("ui_manager.LivePolicyJob", SyntheticLivePolicyJob)
+        job.start()
+        self.addCleanup(job.stop)
+        self.engine = MinesweeperEngine(9, 9, 10)
+        self.ui = MinesweeperUI(self.engine)
+        self.addCleanup(self.close_ui)
+        self.ui.live_policy_combo.setCurrentIndex(self.ui.live_policy_combo.findData(POLICY_V1))
+        self.ui.on_reset()
+        self.ui.simple_auto_interval_spin.setValue(2000)
+        self.ui.show()
+        self.ui.activateWindow()
+        self.app.processEvents()
+        self.held, self.receiver = Qt.NoButton, None
+
+    def arm(self):
+        from live_policy import plan_snapshot
+        self.ui.simple_auto_checkbox.setChecked(True)
+        job = self.ui._v1_job
+        proposal = plan_snapshot(job.requests[-1])
+        job.deliver(proposal)
+        if proposal.is_guess:
+            self.ui.allow_guess_checkbox.setChecked(True)
+        return job, proposal
+
+    def fresh(self):
+        job = self.ui._v1_job
+        self.ui.on_reset()
+        if job.active_run_id is not None:
+            job.complete_cancel()
+        self.held, self.receiver = Qt.NoButton, None
+
+    def test_left_press_retires_before_hold_and_original_release_commits_once(self):
+        job, _ = self.arm()
+        self.ui.allow_guess_checkbox.setChecked(True)
+        old_callback = self.ui._simple_auto_timeout_slot
+        old_hold = (self.ui._mouse_buttons, self.ui._mouse_left_suppressed,
+                    self.ui._mouse_both, self.ui._mouse_left_consumed)
+        cancel = job.cancel
+
+        def inspect_cancel(reason):
+            self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+            self.assertIsNone(self.ui._v1_pending)
+            self.assertIsNone(self.ui._v1_timer_reservation)
+            self.assertIsNone(self.ui._analysis_result)
+            self.assertTrue(all(cell.analysis_overlay is None for cell in self.ui._buttons.values()))
+            self.assertEqual((self.ui._mouse_buttons, self.ui._mouse_left_suppressed,
+                              self.ui._mouse_both, self.ui._mouse_left_consumed), old_hold)
+            cancel(reason)
+
+        with patch.object(job, "cancel", side_effect=inspect_cancel) as retiring:
+            self.press((2, 3))
+        retiring.assert_called_once()
+        self.assertEqual(self.ui._mouse_buttons, Qt.LeftButton)
+        self.assertEqual(job.state, "cancelling")
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.assertEqual(self.ui._replay_recorder.events, ())
+        self.assertTrue(self.ui.allow_guess_checkbox.isChecked())
+        old_callback()
+        self.ui.on_analyze_current()
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.assertEqual(len(job.requests), 1)
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.release((2, 3))
+        events = self.ui._replay_recorder.events
+        self.assertEqual([(e.action, e.x, e.y) for e in events], [("OPEN", 2, 3)])
+        self.assertEqual((self.ui._live_action_count, self.ui._v1_cursor), (1, (2, 3)))
+        self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
+        self.assertEqual(self.ui._replay_recorder.source_type, "human")
+        self.assertEqual(job.acks, [])
+
+    def test_right_press_and_double_click_toggle_at_each_original_press(self):
+        job, _ = self.arm()
+        self.press((4, 4), Qt.RightButton)
+        self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        self.assertEqual(self.engine.get_observation()[4][4], CellState.FLAGGED)
+        self.release((4, 4), Qt.RightButton)
+        self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        self.send(QEvent.MouseButtonDblClick, (4, 4), Qt.RightButton)
+        self.assertEqual(len(self.ui._replay_recorder.events), 2)
+        self.assertEqual(self.engine.get_observation()[4][4], CellState.HIDDEN)
+        self.release((4, 4), Qt.RightButton)
+        self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG", "FLAG"])
+        self.assertEqual(job.applied, [])
+        self.assertEqual(job.acks, [])
+
+    def test_both_press_release_orders_preserve_intended_flag_plus_chord(self):
+        for first_press in (Qt.LeftButton, Qt.RightButton):
+            for first_release in (Qt.LeftButton, Qt.RightButton):
+                with self.subTest(first_press=first_press, first_release=first_release):
+                    self.fresh()
+                    # Physical FLAG then UNFLAG fixes the board without opening it.
+                    self.ui.on_right_click(7, 7)
+                    self.ui.on_right_click(7, 7)
+                    self.ui.on_chord_mode_changed(ChordMode.BOTH_CLICK)
+                    job, _ = self.arm()
+                    count = len(self.ui._replay_recorder.events)
+                    second_press = Qt.RightButton if first_press == Qt.LeftButton else Qt.LeftButton
+                    second_release = Qt.RightButton if first_release == Qt.LeftButton else Qt.LeftButton
+                    self.press((4, 4), first_press)
+                    self.press((4, 4), second_press)
+                    self.release((4, 4), first_release)
+                    self.release((4, 4), second_release)
+                    expected = ["FLAG", "CHORD"] if first_press == Qt.RightButton else ["CHORD"]
+                    self.assertEqual([e.action for e in self.ui._replay_recorder.events[count:]], expected)
+                    self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
+                    self.assertEqual(job.acks, [])
+                    self.assertEqual(self.ui._v1_cursor, (4, 4))
+
+    def test_drag_outside_and_reset_stale_release_keep_original_meaning(self):
+        self.arm()
+        self.press((0, 0))
+        self.move((1, 0))
+        self.release((1, 0))
+        self.assertEqual([(e.action, e.x, e.y) for e in self.ui._replay_recorder.events], [("OPEN", 1, 0)])
+        self.fresh()
+        self.arm()
+        self.press((0, 0))
+        self.release(self.outside())
+        self.assertEqual(self.ui._replay_recorder.events, ())
+        self.assertEqual(self.ui._live_action_count, 0)
+        self.assertEqual(self.ui._v1_cursor, (0, 0))
+        self.fresh()
+        self.arm()
+        self.press((0, 0))
+        self.ui.on_reset()
+        self.release((0, 0))
+        self.assertEqual(self.ui._replay_recorder.events, ())
+        self.assertEqual(self.ui._mouse_buttons, Qt.NoButton)
+
+    def test_hover_and_toolbar_rate_do_not_handoff_or_recompute(self):
+        job, proposal = self.arm()
+        old_callback = self.ui._simple_auto_timeout_slot
+        self.send(QEvent.MouseMove, (2, 2), receiver=self.ui._buttons[(2, 2)])
+        self.ui.simple_auto_interval_spin.setValue(500)
+        old_callback()
+        self.assertTrue(self.ui._v1_owned)
+        self.assertIs(self.ui._v1_pending, proposal)
+        self.assertTrue(self.ui.simple_auto_checkbox.isChecked())
+        self.assertEqual(len(job.requests), 1)
+        self.assertEqual(self.ui._replay_recorder.events, ())
+
+    def test_manual_auto_manual_auto_real_mouse_flag_handoffs_keep_mixed_provenance(self):
+        from live_policy import ADOPT_CURRENT, plan_snapshot
+        self.press((4, 4), Qt.RightButton)
+        self.release((4, 4), Qt.RightButton)
+        job, first = self.arm()
+        self.assertTrue(first.is_flag_review)
+        self.ui._simple_auto_timer.timeout.emit()
+        job.deliver_ack()
+        guess = plan_snapshot(job.requests[-1])
+        job.deliver(guess)
+        prior_run = self.ui._live_run_id
+        self.press((5, 4), Qt.RightButton)
+        self.release((5, 4), Qt.RightButton)
+        self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG", "FLAG", "FLAG"])
+        self.assertEqual(job.state, "cancelling")
+        self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
+        job.complete_cancel()
+        self.ui.simple_auto_checkbox.setChecked(True)
+        snapshot = job.requests[-1]
+        self.assertEqual((snapshot.entry_mode, snapshot.input_seq, snapshot.input_revision,
+                          snapshot.cursor), (ADOPT_CURRENT, 0, 3, (5, 4)))
+        self.assertNotEqual(snapshot.run_id, prior_run)
+        second = plan_snapshot(snapshot)
+        job.deliver(second)
+        self.ui._simple_auto_timer.timeout.emit()
+        self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG"] * 4)
+        self.assertEqual(self.ui._replay_recorder.source_type, "algorithm")
+        self.assertFalse(self.ui._mouse_trace_recorder.eligible)
+        self.assertEqual(self.ui.live_auto_totals["preparation_inputs"], 2)
+        self.assertEqual(len(self.ui.live_owner_records), 2)
 
 if __name__ == "__main__":
     unittest.main()

@@ -742,13 +742,15 @@ class MouseTraceUITests(unittest.TestCase):
         self.assertFalse(self.recorder.eligible)
         self.assertIsNone(self.recorder.snapshot())
         self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
-        self.assertEqual(self.ui._replay_recorder.source_type, "human")
+        # Actual Auto input makes even a mixed recording non-human evidence.
+        self.assertEqual(self.ui._replay_recorder.source_type, "algorithm")
         self.ui.simple_auto_checkbox.setChecked(False)
         self.hover((4, 0))
         self.click((4, 0))
         self.assertIsNone(self.recorder.snapshot())
         self.ui.on_reset()
         self.assertTrue(self.ui._mouse_trace_recorder.eligible)
+        self.assertEqual(self.ui._replay_recorder.source_type, "human")
 
     def test_failed_auto_step_does_not_invalidate_trace(self):
         self.click()
@@ -1178,6 +1180,10 @@ class MouseTraceUITests(unittest.TestCase):
     def test_mixed_live_sizes_and_terminal_resize_preserve_trace_geometry(self):
         self.click()
         self.ui.on_cell_size_changed(56)
+        self.app.processEvents()
+        # The fixed status rows reserve space even for short messages. Make
+        # this enlarged target visible before testing its physical trace.
+        self.ui.scroll_area.ensureWidgetVisible(self.ui._buttons[(3, 3)])
         self.app.processEvents()
         self.click((3, 3))
         data = self.recorder.snapshot()

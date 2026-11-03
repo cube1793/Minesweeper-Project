@@ -140,3 +140,37 @@ def reduced_number(observation: Observation, x: int, y: int) -> int:
         if (nx, ny) != (x, y)
     )
     return observation[y][x] - flags
+
+
+def present_v1_proposal(proposal) -> LiveAnalysis:
+    """Project the worker's existing evidence and selected first input only."""
+    if proposal.is_flag_review:
+        review = proposal.review
+        status = (f"V1 준비 · 미검증 깃발 해제 ({proposal.x}, {proposal.y}) | "
+                  f"증명 지뢰 {len(review.proved_mine)} · 증명 안전 {len(review.proved_safe)} · "
+                  f"미검증 {len(review.unverified)} | 실제 지뢰도 미검증이면 해제될 수 있습니다. "
+                  "지역 직접 추론 범위이며 전수 검증이 아닙니다.")
+        # A preparation toggle is neither an OPEN nor a frozen selected move.
+        # In particular it must not display pre-review flag-conditioned certainty.
+        return LiveAnalysis(None, proposal.move, status,
+                            {(proposal.x, proposal.y): CellOverlay(recommended=True)})
+    overlays = {}
+    recommended = (proposal.x, proposal.y)
+    for cell in proposal.overlays:
+        probability = None
+        if cell.mine_worlds is not None:
+            probability = CellProbability((cell.x, cell.y), cell.mine_worlds, cell.total_worlds)
+        overlays[(cell.x, cell.y)] = CellOverlay(
+            OverlayKind(cell.kind) if cell.kind is not None else None,
+            (cell.x, cell.y) == recommended,
+            probability,
+        )
+    # CHORD's selected target is a revealed clue, not a HIDDEN evidence cell.
+    previous = overlays.get(recommended, CellOverlay())
+    overlays[recommended] = CellOverlay(previous.kind, True, previous.probability)
+    prefix = "첫 입력" if proposal.kind == "initial" else ("추측" if proposal.is_guess else "확정 수")
+    status = f"Stage3 V1 | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
+    selected = overlays[recommended].probability
+    if selected is not None and 0 < selected.mine_worlds < selected.total_worlds:
+        status += f" | 지뢰 확률 {format_mine_probability(selected)}"
+    return LiveAnalysis(None, proposal.move, status, overlays)

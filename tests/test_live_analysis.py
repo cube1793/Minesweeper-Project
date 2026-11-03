@@ -11,7 +11,7 @@ from unittest.mock import patch
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 from live_analysis import (
     CellOverlay, OverlayKind, first_click_presentation, format_mine_probability,
-    is_all_hidden, present_decision, reduced_number,
+    is_all_hidden, present_decision, reduced_number, present_v1_proposal,
 )
 from simple_algorithm import InconsistentObservationError, InferenceResult, SimpleMove
 from simple_decision import DecisionKind, SimpleDecision, analyze_position
@@ -39,6 +39,45 @@ def probability_decision(counts, denominator, move, kind=DecisionKind.PROBABILIT
 
 
 class LiveAnalysisPresentationTests(unittest.TestCase):
+    def test_flag_review_presentation_has_no_pre_review_certainty_or_probability(self):
+        from live_policy import ADOPT_CURRENT, PHASE_FLAG_REVIEW, make_snapshot, plan_snapshot
+        snapshot = make_snapshot(run_id="3" * 32, board_generation=2, input_seq=0,
+                                 width=3, height=1, num_mines=1,
+                                 observation=((F, 1, H),), cursor=(0, 0),
+                                 entry_mode=ADOPT_CURRENT, input_revision=2,
+                                 phase=PHASE_FLAG_REVIEW, initial_flag_count=1)
+        proposal = plan_snapshot(snapshot)
+        with patch("live_policy.review_flags") as review, patch("stage3_planner.plan_position") as plan:
+            result = present_v1_proposal(proposal)
+        review.assert_not_called()
+        plan.assert_not_called()
+        self.assertIn("미검증 깃발 해제", result.status_text)
+        self.assertIn("실제 지뢰도", result.status_text)
+        self.assertIn("전수 검증이 아닙니다", result.status_text)
+        self.assertNotIn("50", result.status_text)
+        self.assertEqual(set(result.overlays), {(0, 0)})
+        self.assertTrue(result.overlays[(0, 0)].recommended)
+        self.assertIsNone(result.overlays[(0, 0)].kind)
+        self.assertIsNone(result.overlays[(0, 0)].probability)
+
+    def test_v1_chord_marks_revealed_anchor_using_existing_projection(self):
+        from live_policy import make_snapshot, Proposal, OverlayCell
+        snapshot = make_snapshot(run_id="1" * 32, board_generation=1, input_seq=2,
+                                 width=2, height=2, num_mines=1,
+                                 observation=((1, F), (H, H)), cursor=(0, 0))
+        proposal = Proposal(snapshot, "2" * 32, "CHORD", 0, 0, "certain", 126005, 100,
+                            (OverlayCell(0, 1, "safe"), OverlayCell(1, 1, "safe")))
+        with patch("simple_decision.analyze_position") as analyze:
+            result = present_v1_proposal(proposal)
+        analyze.assert_not_called()
+        self.assertIsNone(result.decision)
+        self.assertEqual(result.move.action, Action.CHORD)
+        self.assertTrue(result.overlays[(0, 0)].recommended)
+        self.assertIsNone(result.overlays[(0, 0)].probability)
+        self.assertEqual(sum(cell.recommended for cell in result.overlays.values()), 1)
+        self.assertIn("Stage3 V1", result.status_text)
+        self.assertIn("CHORD", result.status_text)
+
     def test_first_click_has_only_recommendation_without_safe_or_probability(self):
         result = first_click_presentation()
         self.assertEqual(result.status_text, "첫 클릭 추천: OPEN (0, 0)")
