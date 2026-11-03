@@ -969,6 +969,7 @@ if QApplication is not None:
     class SyntheticLivePolicyJob(QObject):
         """UI seam only: no subprocess and no automatic policy execution."""
         proposal_ready = pyqtSignal(object)
+        admitted = pyqtSignal(object)
         acknowledged = pyqtSignal(object)
         finished = pyqtSignal(object)
 
@@ -1111,7 +1112,8 @@ class LiveV1UITests(unittest.TestCase):
         self.ui.on_reset()
         self.assertEqual(self.ui._live_policy, POLICY_SIMPLE)
         self.assertEqual(self.ui._replay_recorder.source_type, "human")
-        for index in (2, 3, 4):
+        self.assertTrue(self.ui.live_policy_combo.model().item(2).isEnabled())
+        for index in (3, 4):
             self.assertFalse(self.ui.live_policy_combo.model().item(index).isEnabled())
 
     def test_initial_proposal_pause_resume_and_rate_reuse_without_simple_analysis(self):

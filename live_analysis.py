@@ -174,3 +174,22 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
     if selected is not None and 0 < selected.mine_worlds < selected.total_worlds:
         status += f" | 지뢰 확률 {format_mine_probability(selected)}"
     return LiveAnalysis(None, proposal.move, status, overlays)
+
+
+def present_k_proposal(proposal) -> LiveAnalysis:
+    """Native first action and already computed exact guess marginals only."""
+    prefix = "첫 입력" if proposal.initial else "추측" if proposal.is_guess else "확정 수"
+    status = f"K-P0 (실험적) | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
+    recommended = (proposal.x, proposal.y)
+    overlays = {recommended: CellOverlay(recommended=True)}
+    exact = proposal.probabilities
+    if exact is not None:
+        for x, y, numerator in exact.cells:
+            coordinate = (x, y)
+            kind = (OverlayKind.GUESS_CANDIDATE if coordinate in exact.minimum_risk_cells
+                    else OverlayKind.UNCERTAIN)
+            overlays[coordinate] = CellOverlay(
+                kind, coordinate == recommended, CellProbability(coordinate, numerator, exact.total_worlds))
+        status += f" | 지뢰 확률 {format_mine_probability(overlays[recommended].probability)}"
+    # Pending M is excluded from exact U, never painted as an acknowledged FLAG.
+    return LiveAnalysis(None, proposal.move, status, overlays)

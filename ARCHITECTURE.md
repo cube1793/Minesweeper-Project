@@ -24,10 +24,12 @@ main.py ── engine 생성 → UI에 주입
                          ├─ Core Engine ─────────▶ core_engine.py
                          │                            ├─ board_snapshot.py
                          │                            └─ board_analyzer.py
-                         ├─ V1 Live public worker ▶ live_policy_job.py / live_policy_transport.py
+                         ├─ V1/K Live public worker ▶ live_policy_job.py / live_policy_transport.py
                          │                            ╰─ live_policy_worker.py
                          │                               ├─ live_flag_review.py (준비 검토)
-                         │                               └─ frozen stage3_planner / runner validator
+                         │                               ├─ frozen stage3_planner / runner validator
+                         │                               └─ live_k_policy.KOwner → K session/policy
+                         ├─ Draw-only Auto cursor ▶ live_auto_cursor.py
                          ├─ Simple analysis ─────▶ simple_decision.py
                          │  / presentation ─────▶ live_analysis.py
                          ├─ Replay ─────────────▶ replay_recorder.py
@@ -72,7 +74,7 @@ simple_runner ──▶ simple_decision
 ```
 
 `live_analysis.py`는 decision/probability 모델을 참조하는 순수 presentation 계층이다.
-Live Auto는 UI의 QTimer 제어이며 `simple_runner.run_simple()`을 호출하지 않는다. V1은 `live_policy_job`/`live_policy_transport`를 통해 public-only `live_policy_worker`에 계획·FLAG 검토를 맡긴다. `live_policy` DTO/validator와 `live_flag_review`를 거쳐 frozen planner의 첫 입력만 Main engine에 적용한다.
+Live Auto는 UI의 QTimer 제어이며 `simple_runner.run_simple()`을 호출하지 않는다. V1/K는 `live_policy_job`/`live_policy_transport`를 통해 public-only `live_policy_worker`를 사용한다. V1은 `live_policy`/`live_flag_review`와 frozen planner, K는 `live_k_policy.KOwner`의 persistent session/M·원 graph를 사용한다. K는 VALIDATE/ADMITTED 뒤 최종 비교·token 소비·첫 입력1·정확 ACK를 거친다. `live_auto_cursor`는 별도 표시이며 선택·비용·입력 권한이 없다.
 Solver가 `core_engine`에서 가져오는 것은 `Action`, `CellState` 같은 공개 타입이다.
 
 ## 3. 모듈별 책임
@@ -99,7 +101,10 @@ Ops는 8방향으로 연결된 0 영역의 수이고, 3BV는 Ops에 고립 숫�
 | `simple_probability.py` | 공개 조건에 맞는 complete-board world 수와 셀별 지뢰 확률 계산, 확률 기반 move 선택 |
 | `simple_decision.py` | `analyze_position(observation, num_mines)`으로 두 계산 경로를 통합한 `SimpleDecision` 반환 |
 | `simple_runner.py` | 현재 engine을 동기 실행하고 guess 전 중단 또는 종료, 실제 행동의 Replay 기록 |
-| `live_analysis.py` | 계산된 decision을 `LiveAnalysis`/overlay/status로 변환, 확률 포맷과 Reduction |
+| `live_analysis.py` | 계산된 Simple/V1/K 증거를 `LiveAnalysis`/overlay/status로 변환, exact 확률 포맷과 Reduction |
+| `live_k_policy.py` | K snapshot/proposal/permit/ACK DTO, exact 추측 수치 투영, worker-only persistent KOwner |
+| `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v4 wire·검증·ACK·정리 소유권 |
+| `live_auto_cursor.py` | mouse-transparent/NoFocus 가상 셀 좌표 보간, 논리 cursor/Model C와 분리 |
 
 Local inference는 열린 숫자 `N`, 인접 깃발 수 `F`, 인접 HIDDEN 집합 `H`로 `N-F` 제약을 만든다.
 
@@ -491,7 +496,7 @@ Model C time-to-win 차이는 양쪽 WON일 때만 정의한다.
 
 2026-11-02 source checkpoint다. 계보는 frozen V1 → K-P0 → 실험적 K-LC0이며
 V1-LC0 구현은 생략했다. V1도 CHORD를 사용하고 Stage2 Simple과 구별한다.
-K-P0/K-LC0는 별도 policy/entry이고 Main/Live selector에는 미연결이다.
+이2026-11-02 checkpoint에서 K-P0/K-LC0는 별도 policy/entry였다. 현재 Main에는 실험적 K-P0만 추가 연결됐고 LC0/LC1은 미연결이다.
 기존 V1/K-P0 앱의 `3e9f3935...` 뒤 K-LC0 4개·비교 앱9개와 문서7개의20경로는
 `496fab0fc8829af7a255c403346985be7ae6a005`로 commit/push 완료됐다.
 그 이전 실행은 당시 raw hash/dirty identity를 따르며 새 HEAD로 소급 식별하지 않는다.
@@ -570,7 +575,7 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 사용자 확인은 두 저장 경로에 한정된다. native Qt 렌더 확인/offscreen tests/미확인 CU 제스처를
 분리하며 자세한 수치·알려진 한계·실행 안내는
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)을 따른다.
-K/LC의 Main/Live 연결·production·새 package/Stage4는 미진행이다. Simple/V1 Main/Live는 별도 [사용자 수용 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다.
+현재 Main 실험적 K-P0는 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md), 기존 Simple/V1은 [이전 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다. LC0/LC1 Main 연결·production·새 package/Stage4는 미진행이다.
 
 ### Replay
 
@@ -682,7 +687,11 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 V1 Auto OFF는 owner·유효 pending을 보관하는 일시정지다. **추천·계산 종료**는 pending을 버리고 worker를 종료한다(Simple에서는 비활성). 일시정지/간격/guess 변경만으로 유효 계획·FLAG 검토를 다시 계산하지 않는다. 정책 변경은 Auto OFF와 옛 owner retire 뒤 다음 명시 ON에 적용하며 보드·기록은 보존한다.
 
-준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, owner≤960, wire v2/seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
+준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, V1 owner≤960, 현재 공통 wire v4/V1 seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
+
+K-P0는 명시 새 게임·세 preset만 지원하며 수동/Simple/V1 진행 판의 인수·종료 후 재인수는 후속이다. worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환하고 GUI는 yield 없이 최종 비교/token/step1을 적용한 뒤 ACK/NEXT를 보낸다. K 입력≤480, envelope≤31681, pending당 VALIDATE≤64다. v3 Unit1과 v4 표시 증분의 근거를 구분한다.
+
+K EXACT_GUESS 확률은 원 phase_e 정수의 primitive projection이며 추가 분석·선택을 하지 않는다. 현재 K 확정 SAFE/MINE 색 overlay는 미연결이다. V1/K 가상 원형은 논리 cursor와 별도로 기존 관람 간격을 보간하며 표시 토글은 예약/admission/owner를 변경하지 않는다. 현재 범위 사용자 수용·독립430/worker2·역사적 실패와 미관측은 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 기록한다.
 
 ```text
 사용자 입력 / Live Auto timeout

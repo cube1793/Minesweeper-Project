@@ -5,6 +5,8 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
+- [Main/Live K-P0 첫 연결·확률·커서 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md): 현재 범위 사용자 수용, 세 preset 새 게임·M/session·검증/ACK, 버전별 근거와 후속 확정색/같은 판 인수.
+
 - [Main/Live Simple·V1 사용자 수용 closeout](stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md): 수동 재인수·공개 FLAG 정리·UI, 버전별 근거와 독립 F02/과거 보존 FAIL의 한계.
 
 - [Current project handoff](CURRENT_HANDOFF.md): 현재 source 수용, 닫힌 기준선, 커밋 준비와 다음 작업 선정 경계.
@@ -134,12 +136,12 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT (2026-11-03): Main/Live 문서/정확한24경로 commit plan 검수 → 사용자 stage·commit·push → 실제 SHA의 postcommit recovery → K 연결 첫 단위 준비.**
-현재 main/HEAD=local origin/main=`d1201e481da7199a46b4ab80eaf5c303e77db10a`,0/0, staged0이며 source/tests18+문서6이 미커밋이다. K-LC0의20경로는496fab0, K-LC1의10경로는d1201e4에서 이미 완료됐다. 옛 precommit/NEXT는 반복하지 않는다. 검수할 plan/script는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)에 적힌 최신 외부 output 사본을 사용한다.
+**CURRENT NEXT (2026-11-03): 새 K-P0 문서/24경로 plan 확인 → 사용자 일괄 stage·commit·push → receipt·실제 SHA의 postcommit recovery.**
+현재 main/HEAD=local origin/main=98203e809581f969685addeed45d7ebc7ff4c528,0/0, staged0이며 새 K source/tests18+문서6(M13/U11)이 미커밋이다. 이전 Simple/V1의24경로는98203e8, K-LC0는496fab0, K-LC1은d1201e4에서 Git 완료됐다. 옛 script/NEXT는 반복하지 않는다. 정확한 새 output은 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따른다.
 
-사용자는 현재 Main/Live 기능·최신 UI를 native에서 수용했다. 다른 OS/DPI·package·전체 branch/테스트·효과성 승인은 아니다. 독립 F02 NOT_VERIFIED, 과거 Qt 공용 설정 보존 FAIL/offscreen glyph 한계와 E helper R1 재사용 금지를 유지한다. 과거 PENDING 보고서는 고치지 않는다.
+K-P0 세 preset 새 게임·추측 exact 확률·V1/K 가상 원형 커서는 구현/독립 검토 뒤 현재 범위 사용자 수용을 받았다. 세부 native6항목·모든 OS/DPI·package·전체 suite·효과성 승인으로 확대하지 않는다. 같은 판 K 인수/재인수와 확정 안전/지뢰 색상은 후속이며 LC0/LC1 Main 실행은 disabled다.
 
-Main Simple/V1과 외부 K/LC 전시·저장 viewer는 다르며 K selector는 disabled다. K 지속 세션/M/FLAG/ACK/재인수는 다음 단위의 별도 계약이다. 거리 가변 CPS/Model C 속도 모드·package·후속 연구·Stage4는 미구현/미수용 범위로 남기며 자동 착수하지 않는다. 추가 대규모 영상 분석/재평가는 새 필수 gate가 아니다. Extended ACTIVE와 holdout unopened/excluded를 유지한다.
+독립 F02 NOT_VERIFIED, 과거 Qt FileDialog FAIL, Codex 중단 focused temp 정리 NOT_VERIFIED와 검토 절차 이탈·정정은 보존한다. E helper R1 전 재사용 금지와 frozen/Model C/holdout 경계를 유지하며 과거 보고서는 고치지 않는다. Main의 실험적 K 연결은 Production K/Gate P 승인이나 연구 재개가 아니다. Extended ACTIVE다.
 
 ## Experiments
 

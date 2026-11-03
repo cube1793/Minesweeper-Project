@@ -401,7 +401,8 @@ class AdoptionAndReviewProtocolTests(unittest.TestCase):
         with self.assertRaises(policy.LivePolicyError):
             replace(exhausted, input_seq=961)
         self.assertEqual((policy.MAX_BOARD_CELLS, policy.MAX_V1_INPUTS, policy.MAX_INPUTS,
-                          transport.MAX_SEQUENCE), (480, 480, 960, 1921))
+                          transport.MAX_V1_SEQUENCE), (480, 480, 960, 1921))
+        self.assertEqual(transport.MAX_SEQUENCE, 31681)  # K's separate bounded revalidations.
 
 
 class WriteOnceTransportTests(unittest.TestCase):

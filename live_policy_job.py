@@ -15,7 +15,8 @@ from live_policy import (
     PublicSnapshot, ack_from_dict, ack_to_dict, make_ack, proposal_from_dict,
     snapshot_from_dict, snapshot_to_dict, validate_ack, validate_start_snapshot,
 )
-from live_policy_transport import message, read_next, write_once
+from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, write_once
+import live_k_policy as k_live
 
 
 ROOT = Path(__file__).resolve().parent
@@ -35,6 +36,7 @@ def build_worker_command(directory, run_id, scope_name=""):
 
 class LivePolicyJob(QObject):
     proposal_ready = pyqtSignal(object)
+    admitted = pyqtSignal(object)
     acknowledged = pyqtSignal(object)
     finished = pyqtSignal(object)
 
@@ -58,6 +60,8 @@ class LivePolicyJob(QObject):
         self._kill_requested = self._shutting_down = False
         self._proposal_count = self._applied_count = self._ack_count = 0
         self._review_proposal_count = self._v1_proposal_count = 0
+        self._k_proposal_count = self._validation_count = 0
+        self._sent_validation = self._permit = self._accepted_nonce = None
         self.timer = QTimer(self)
         self.timer.setInterval(25)
         self.timer.timeout.connect(self.poll)
@@ -75,8 +79,12 @@ class LivePolicyJob(QObject):
         return max(0.0, self._clock() - self._started) if self._active_run_id else 0.0
 
     def start(self, snapshot):
-        snapshot = snapshot_from_dict(snapshot_to_dict(snapshot))
-        validate_start_snapshot(snapshot)
+        if type(snapshot) is k_live.KSnapshot:
+            snapshot = k_live.from_dict(k_live.to_dict(snapshot), k_live.KSnapshot)
+            k_live.validate_start_snapshot(snapshot)
+        else:
+            snapshot = snapshot_from_dict(snapshot_to_dict(snapshot))
+            validate_start_snapshot(snapshot)
         if (self.state != "idle" or self._process is not None or self._scope is not None
                 or self._directory is not None or self._shutting_down):
             raise RuntimeError("이전 자동 실행 worker의 정리가 끝나지 않았습니다.")
@@ -92,6 +100,8 @@ class LivePolicyJob(QObject):
         self._awaiting = "PROPOSAL"
         self._proposal_count = self._applied_count = self._ack_count = 0
         self._review_proposal_count = self._v1_proposal_count = 0
+        self._k_proposal_count = self._validation_count = 0
+        self._sent_validation = self._permit = self._accepted_nonce = None
         self._started = self._clock()
         self._deadline = self._clock() + COMPUTE_CAP_SECONDS
         self.last_record = None
@@ -100,7 +110,7 @@ class LivePolicyJob(QObject):
             self._temp_parent = Path(tempfile.gettempdir()).resolve()
             self._directory = Path(tempfile.mkdtemp(prefix=PREFIX, dir=self._temp_parent)).resolve()
             write_once(self._directory, "parent", 0,
-                       message(snapshot.run_id, 0, "START", snapshot_to_dict(snapshot)))
+                       message(snapshot.run_id, 0, "START", self._snapshot_dict(snapshot)))
             env = os.environ.copy()
             env["PYTHONDONTWRITEBYTECODE"] = "1"
             env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -123,18 +133,52 @@ class LivePolicyJob(QObject):
         return snapshot.run_id
 
     def request(self, snapshot):
-        snapshot = snapshot_from_dict(snapshot_to_dict(snapshot))
+        snapshot = (k_live.from_dict(k_live.to_dict(snapshot), k_live.KSnapshot)
+                    if self._is_k else snapshot_from_dict(snapshot_to_dict(snapshot)))
         if (self.state != "ready" or self._intent is not None or self._failure
                 or self._shutting_down or snapshot != self._expected_snapshot):
             raise ValueError("Fresh request is not the acknowledged current public state.")
-        self._send("NEXT", snapshot_to_dict(snapshot), "PROPOSAL", COMPUTE_CAP_SECONDS)
+        self._send("NEXT", self._snapshot_dict(snapshot), "PROPOSAL", COMPUTE_CAP_SECONDS)
         self.state = "computing"
 
-    def mark_applying(self, token):
-        if (self.state != "pending" or self._intent is not None or self._failure
+    @property
+    def _is_k(self):
+        return type(self._start_snapshot) is k_live.KSnapshot
+
+    @staticmethod
+    def _snapshot_dict(snapshot):
+        return k_live.to_dict(snapshot) if type(snapshot) is k_live.KSnapshot else snapshot_to_dict(snapshot)
+
+    def validate_pending(self, snapshot, nonce):
+        if (not self._is_k or self.state != "pending" or self._pending is None
+                or self._intent is not None or self._failure or self._shutting_down):
+            raise ValueError("K validation requires an unconsumed pending proposal.")
+        k_live.admit_proposal(self._pending, snapshot)
+        request = k_live.KValidation(snapshot, self._pending.token, nonce, self._pending.pending_m_revision)
+        self._sent_validation = request
+        self._accepted_nonce = nonce
+        self._permit = None
+        self._send("VALIDATE", k_live.to_dict(request), "ADMITTED", RESPONSE_CAP_SECONDS)
+        self._validation_count += 1
+        self.state = "validating"
+
+    def invalidate_admission(self):
+        # Keep the single pending decision and any in-flight deadline. A late
+        # response must be drained, but cannot authorize an input after pause.
+        if self._is_k:
+            self._accepted_nonce = None
+            if self.state == "admitted":
+                self._permit = None
+                self.state = "pending"
+
+    def mark_applying(self, token, nonce=None):
+        if (self.state != ("admitted" if self._is_k else "pending") or self._intent is not None or self._failure
                 or self._shutting_down or self._pending is None
                 or type(token) is not str or token != self._pending.token):
             raise ValueError("Proposal is absent, stale, or already consumed.")
+        if self._is_k and (self._permit is None or type(nonce) is not str
+                           or nonce != self._accepted_nonce or nonce != self._permit.nonce):
+            raise ValueError("K input requires the current worker-admitted nonce.")
         self.state = "applying"
         self._deadline = self._clock() + RESPONSE_CAP_SECONDS
         self._applied_count += 1
@@ -145,9 +189,11 @@ class LivePolicyJob(QObject):
                 or self._shutting_down or self._pending is None):
             raise ValueError("Only a consumed proposal can be acknowledged.")
         try:
-            ack = make_ack(self._pending, status=status, observation=observation)
+            ack = (k_live.make_ack(self._permit, status=status, observation=observation) if self._is_k
+                   else make_ack(self._pending, status=status, observation=observation))
             self._sent_ack = ack
-            self._send("ACK", ack_to_dict(ack), "ACKED" if ack.status == "PLAYING" else "FINISHED",
+            self._send("ACK", k_live.to_dict(ack) if self._is_k else ack_to_dict(ack),
+                       "ACKED" if ack.status == "PLAYING" else "FINISHED",
                        RESPONSE_CAP_SECONDS)
             self.state = "acknowledging" if ack.status == "PLAYING" else "finishing"
         except Exception as exc:
@@ -158,6 +204,8 @@ class LivePolicyJob(QObject):
         if self._directory is None or self._awaiting is not None:
             raise RuntimeError("Cannot send while another response is outstanding.")
         try:
+            if not self._is_k and self._sequence > MAX_V1_SEQUENCE:
+                raise ValueError("V1 transport sequence bound exceeded.")
             write_once(self._directory, "parent", self._sequence,
                        message(self._active_run_id, self._sequence, kind, payload))
         except Exception as exc:
@@ -182,6 +230,7 @@ class LivePolicyJob(QObject):
     def _request_stop(self):
         self.state = "cancelling"
         self._pending = None
+        self._permit = self._accepted_nonce = self._sent_validation = None
         self._awaiting = None
         self._deadline = None
         self._finish_exit_deadline = None
@@ -221,30 +270,49 @@ class LivePolicyJob(QObject):
         self._sequence += 1
         self._awaiting = None
         if kind == "PROPOSAL":
-            proposal = proposal_from_dict(payload)
+            proposal = (k_live.from_dict(payload, k_live.KProposal) if self._is_k else proposal_from_dict(payload))
             if proposal.snapshot != self._expected_snapshot:
                 raise ValueError("Worker proposal differs from requested public snapshot.")
             self._pending = proposal
             self._proposal_count += 1
-            if proposal.phase == "FLAG_REVIEW":
+            if self._is_k:
+                self._k_proposal_count += 1
+            elif proposal.phase == "FLAG_REVIEW":
                 self._review_proposal_count += 1
             else:
                 self._v1_proposal_count += 1
             self._deadline = None
             self.state = "pending"
             self.proposal_ready.emit(proposal)
+        elif kind == "ADMITTED":
+            if not self._is_k or self._pending is None or self._sent_validation is None:
+                raise ValueError("Unexpected K permit.")
+            permit = k_live.from_dict(payload, k_live.KPermit)
+            if permit.proposal != self._pending or permit.nonce != self._sent_validation.nonce:
+                raise ValueError("K permit differs from requested proposal/nonce.")
+            self._sent_validation = None
+            self._deadline = None
+            self._permit = permit if permit.nonce == self._accepted_nonce else None
+            self.state = "admitted" if self._permit is not None else "pending"
+            self.admitted.emit(permit)
         elif kind == "ACKED":
-            ack = ack_from_dict(payload)
+            ack = k_live.from_dict(payload, k_live.KAck) if self._is_k else ack_from_dict(payload)
             if ack != self._sent_ack or ack.status != "PLAYING" or self._pending is None:
                 raise ValueError("Worker ACK differs from the applied action/target/token.")
-            self._expected_snapshot = validate_ack(self._pending, ack)
+            self._expected_snapshot = (k_live.next_snapshot(self._pending, ack) if self._is_k
+                                       else validate_ack(self._pending, ack))
             self._pending = self._sent_ack = None
+            self._permit = self._accepted_nonce = None
             self._ack_count += 1
             self._deadline = None
             self.state = "ready"
             self.acknowledged.emit(ack)
         else:
-            if (type(payload) is not dict or set(payload) != {"token", "input_seq", "status"}
+            if self._is_k:
+                ack = k_live.from_dict(payload, k_live.KAck)
+                if self._sent_ack is None or ack != self._sent_ack or ack.status == "PLAYING":
+                    raise ValueError("K FINISHED differs from actual terminal ACK.")
+            elif (type(payload) is not dict or set(payload) != {"token", "input_seq", "status"}
                     or self._sent_ack is None or self._sent_ack.status == "PLAYING"
                     or type(payload["token"]) is not str
                     or payload["token"] != self._sent_ack.token
@@ -255,6 +323,7 @@ class LivePolicyJob(QObject):
                 raise ValueError("Worker terminal receipt differs from the actual terminal ACK.")
             self._terminal_reply = payload
             self._pending = self._sent_ack = None
+            self._permit = self._accepted_nonce = None
             self._ack_count += 1
             self._deadline = None
             self._finish_exit_deadline = self._clock() + EXIT_CAP_SECONDS
@@ -383,17 +452,20 @@ class LivePolicyJob(QObject):
             error = f"{error or ''}\nTREE_QUERY: {exc!r}"
         return {
             "run_id": self._active_run_id, "status": status, "intent_reason": self._intent_reason,
-            "entry_mode": self._start_snapshot.entry_mode if self._start_snapshot else None,
-            "start_phase": self._start_snapshot.phase if self._start_snapshot else None,
+            "policy_id": self._start_snapshot.policy_id if self._start_snapshot else None,
+            "definition": k_live.DEFINITION if self._is_k else "STAGE3_V1",
+            "entry_mode": "CANONICAL_NEW" if self._is_k else (self._start_snapshot.entry_mode if self._start_snapshot else None),
+            "start_phase": "K_P0" if self._is_k else (self._start_snapshot.phase if self._start_snapshot else None),
             "start_input_revision": self._start_snapshot.input_revision if self._start_snapshot else None,
             "board_generation": self._start_snapshot.board_generation if self._start_snapshot else None,
-            "initial_flag_count": self._start_snapshot.initial_flag_count if self._start_snapshot else None,
+            "initial_flag_count": 0 if self._is_k else (self._start_snapshot.initial_flag_count if self._start_snapshot else None),
             "wall_seconds": self.elapsed, "error": error, "stderr": stderr,
             "exit_code": exit_code, "reaped": self._process is None,
             "tree_active_count": tree_count, "cleanup_complete": False,
             "proposal_count": self._proposal_count, "consumed_token_count": self._applied_count,
             "preparation_proposal_count": self._review_proposal_count,
             "v1_proposal_count": self._v1_proposal_count,
+            "k_proposal_count": self._k_proposal_count, "validation_count": self._validation_count,
             "ack_count": self._ack_count, "terminal": self._terminal_reply,
             "compute_cap_seconds": COMPUTE_CAP_SECONDS,
             "response_cap_seconds": RESPONSE_CAP_SECONDS,

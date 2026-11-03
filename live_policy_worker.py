@@ -9,6 +9,7 @@ from live_policy import (
     PHASE_FLAG_REVIEW, snapshot_from_dict, validate_ack, validate_start_snapshot,
 )
 from live_policy_transport import message, read_next, write_once
+import live_k_policy as k_live
 from stage3_physical import load_timing_table
 
 
@@ -19,6 +20,7 @@ def serve(directory, run_id):
     pending = None
     expected_snapshot = None
     review = None
+    k_owner = None
     while True:
         try:
             incoming = read_next(directory, "parent", sequence, run_id)
@@ -29,6 +31,15 @@ def serve(directory, run_id):
             if sequence == 0:
                 if kind != "START":
                     raise LivePolicyError("First command must be START.")
+                if payload.get("policy_id") == k_live.POLICY_K:
+                    snapshot = k_live.from_dict(payload, k_live.KSnapshot)
+                    if snapshot.run_id != run_id:
+                        raise LivePolicyError("K START run identity mismatch.")
+                    k_owner = k_live.KOwner(snapshot, table)
+                    outgoing = message(run_id, sequence, "PROPOSAL", k_live.to_dict(k_owner.propose(snapshot)))
+                    write_once(directory, "worker", sequence, outgoing)
+                    sequence += 1
+                    continue
                 snapshot = snapshot_from_dict(payload)
                 if snapshot.run_id != run_id or snapshot.input_seq != 0:
                     raise LivePolicyError("START identity/input sequence mismatch.")
@@ -36,6 +47,23 @@ def serve(directory, run_id):
                 pending = plan_snapshot(snapshot, table=table)
                 review = pending.review
                 outgoing = message(run_id, sequence, "PROPOSAL", proposal_to_dict(pending))
+            elif k_owner is not None:
+                if kind == "VALIDATE":
+                    permit = k_owner.validate(k_live.from_dict(payload, k_live.KValidation))
+                    outgoing = message(run_id, sequence, "ADMITTED", k_live.to_dict(permit))
+                elif kind == "ACK":
+                    ack = k_live.from_dict(payload, k_live.KAck)
+                    k_owner.acknowledge(ack)
+                    outgoing = message(run_id, sequence, "ACKED" if ack.status == "PLAYING" else "FINISHED",
+                                       k_live.to_dict(ack))
+                    if ack.status != "PLAYING":
+                        write_once(directory, "worker", sequence, outgoing)
+                        return 0
+                elif kind == "NEXT":
+                    snapshot = k_live.from_dict(payload, k_live.KSnapshot)
+                    outgoing = message(run_id, sequence, "PROPOSAL", k_live.to_dict(k_owner.propose(snapshot)))
+                else:
+                    raise LivePolicyError("K pending requires VALIDATE/ACK, or explicit NEXT after ACK.")
             elif pending is not None:
                 if kind != "ACK":
                     raise LivePolicyError("Pending proposal requires ACK before another analysis.")

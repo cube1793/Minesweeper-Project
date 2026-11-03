@@ -1,6 +1,6 @@
 # Minesweeper Project
 
-Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm과 frozen Stage3 V1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 실험적 K-P0로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
 
 ## 핵심 기능
 
@@ -11,15 +11,17 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Main/Live Simple·V1 — 사용자 기능/UI 수용
+## Main/Live Simple·V1·실험적 K-P0 — 현재 범위 사용자 수용
 
-2026-11-03 현재 Main의 Simple·Stage3 V1 Auto, 수동↔V1 재인수, 미검증 FLAG 정리와 UI 개선을 사용자가 native에서 확인하고 “모두 정상인 것 같아.”라고 수용했습니다. 새 판은 수동 가능·Auto OFF·guess OFF입니다. 정책 선택은 실행 명령이 아닙니다.
+기존 Simple/V1·수동↔V1 인수·공개 FLAG 정리·UI는98203e8에서 commit/push 완료됐습니다. 이후 K-P0 첫 연결과 K 추측 확률·V1/K 원형 커서를 구현·독립 검토했고, 사용자는 현재 동작을 수용하면서 같은 판 K 인수와 확정 칸 색상을 후속으로 확인했습니다. native 항목별 실행 수·모든 DPI/완주를 추정하지 않습니다.
 
-Simple은 기존 수동/Auto 혼합을 유지합니다. V1은 보드 press로 Auto를 멈추고 원래 gesture를 수동 처리하며, cleanup 뒤 같은 판을 다시 인수합니다. V1 Auto OFF는 추천 보관 일시정지, **추천·계산 종료**는 추천 폐기/worker 종료입니다. K-P0/LC0/LC1은 disabled입니다.
+새 판은 수동 가능·Auto OFF·guess OFF이며 정책 선택만으로 실행하지 않습니다. K-P0는 **선택 정책으로 새 게임**을 누른 초급·중급·상급만 지원합니다. K Auto OFF는 같은 owner의 일시정지입니다. 수동/Simple/V1로 진행한 판의 K 인수, 수동 인계·owner 종료 뒤 K 재인수는 아직 미지원입니다. Simple의 혼합 입력과 V1의 cleanup 뒤 같은 판 인수는 유지합니다. LC0/LC1은 disabled입니다.
 
-V1 인수 시 공개 FLAG-free view의 직접 zero/all와 총 지뢰수 zero/all로 증명된 FLAG만 유지합니다. SAFE/UNVERIFIED는 실제 FLAG 토글로 해제해 닫아 둡니다. **미검증은 오답 판정이 아니며 실제 지뢰도 해제될 수 있습니다.** 분석-only는 실제 입력하지 않습니다. 화면 이름은 Stage3 V1이고 내부 frozen 정책·Model C는 그대로입니다.
+K 추측의 **지뢰 확률**과 기존 확률 토글은 이미 계산한 exact 수치를 표시합니다. K 확정 안전/지뢰의 초록·빨강 overlay는 후속 UI 항목입니다. **자동 커서 표시**는 V1/K의 가상 원형이며 기존 관람 간격 안에서 이동하고 간격0은 점프합니다. K 승인 대기에서는 입력 전에 target에 도착할 수 있습니다. 실제 OS 마우스·Model C·인간 Mouse Trace/Replay는 바꾸지 않습니다.
 
-[Main/Live closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)에 사용법·계약·버전별 검증·수용 범위를 모았습니다. 독립 F02 미확인과 과거 helper의 Qt 설정 보존 FAIL은 남습니다. 현재 Main 속도는 ms 관람 간격이며 Model C/CPS/거리 가변 속도 모드나 새 package 수용은 아닙니다.
+V1은 공개 FLAG-free 직접 zero/all·총수 zero/all로 증명된 FLAG를 유지하고 SAFE/UNVERIFIED를 닫힌 상태로 해제합니다. 미검증은 오답/안전 판정이 아니며 실제 지뢰도 해제될 수 있습니다. 이 준비 검토를 K M에 임의 주입하지 않습니다.
+
+[K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 현재 계약·버전별 근거·수용과 한계를, [이전 Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)에 당시 기록을 보존했습니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. Main 속도는 ms 관람 간격이며 효과성·Production K/Gate P·새 package는 미승인입니다.
 
 ## Simple Algorithm
 
@@ -207,11 +209,11 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-03 현재 Main/Live 기능·UI 사용자 수용 후 문서·Git 준비 단계입니다.**
-K-LC0의20경로 Git은496fab0, K-LC1의10경로 Git은d1201e4에서 이미 완료됐습니다.
-현재 main/HEAD=local origin/main=`d1201e481da7199a46b4ab80eaf5c303e77db10a`,0/0, staged0이며
-source/tests18+문서6의 정확한24경로가 미커밋입니다. NEXT는 문서/commit plan 검수 → 사용자 Git →
-실제 SHA의 postcommit recovery → K 연결 첫 단위 준비입니다. 자동 착수하지 않습니다.
+**2026-11-03 현재 Main/Live K-P0 연결·확률·커서의 현재 범위 수용 후 문서 마감·사용자 Git 준비 단계입니다.**
+main/HEAD=local origin/main=98203e809581f969685addeed45d7ebc7ff4c528,0/0, staged0입니다.
+이번 새 source/tests18+문서6의24경로(M13/U11)가 미커밋이며 이전 Simple/V1의24경로 Git은98203e8에서 완료됐습니다.
+NEXT는 이번 plan 확인 → 사용자 일괄 Git → 실제 receipt/SHA의 postcommit recovery입니다.
+후속 확정색·같은 판 K 인수·LC0/LC1 Main 연결은 별도 작업이며 자동 착수하지 않습니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
@@ -249,7 +251,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 관람 속도와 synthetic 직선 커서는 실제 인간 시간·mouse trace가 아니며 Model C를 바꾸지 않습니다.
 양쪽 WON이 아니면 Model C 승리 시간 차이는 N/A입니다.
 
-**이 외부 전시의 source-only 수용**입니다. 이 수용은 새 package/EXE·Main/Live 통합·효과성 승인이 아닙니다. 현재 Main Simple/V1의 별도 수용은 위 Main/Live closeout을 따릅니다.
+**이 외부 전시의 source-only 수용**입니다. 이 수용은 새 package/EXE·Main/Live 통합·효과성 승인이 아닙니다. 현재 Main Simple/V1과 이후 실험적 K-P0 연결의 수용은 위 두 Main/Live closeout을 따릅니다.
 RF lifecycle/transport 독립 재감사 PASS와 후속 UI의 사용자 수용을 구분합니다.
 [전시 기능 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)에
 단계별 검증·실행 identity·한계를, [Human pacing 분석 closeout](docs/stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)에
@@ -298,7 +300,7 @@ Claude 검토는 두 구현 모두 PASS / REQUIRED_FIXES 없음입니다. 새 �
 위 새 앱을 사용합니다. 기존 저장3보드의 CONTROL/K-LC0 trace와 새 앱의 실제 실행/저장
 pair는 별도 work unit의 evidence이며 같은 기록으로 취급하지 않습니다.
 
-K-P0/K-LC0는 별도 entry이며 Main/Live selector에는 미연결입니다. 이번 source 수용은
+이 비교 앱 수용 당시 K-P0/K-LC0는 별도 entry였습니다. 현재 Main에는 K-P0만 추가 연결됐고 K-LC0는 미연결입니다. 이 비교 앱 source 수용은
 K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
 다음 작업은 사용자 선택이며 영상/정책 개선이 Main 통합의 무조건적인 선행 gate는 아닙니다.
 
@@ -433,7 +435,12 @@ Minesweeper-Project/
 ├─ simple_probability.py        # exact probability와 확률 기반 선택
 ├─ simple_decision.py           # 순수 position 분석 및 decision 통합
 ├─ simple_runner.py             # UI 없이 동기 실행·중단·Replay 기록
-├─ live_analysis.py             # 계산된 decision의 표시 모델과 Reduction
+├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
+├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
+├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
+├─ live_policy_worker.py        # public-only V1/K worker dispatch
+├─ live_policy_transport.py     # v4 strict wire·sequence·payload 경계
+├─ live_auto_cursor.py          # 입력과 분리된 가상 원형 커서
 ├─ stage3_identity.py           # 동결 Stage-3 알고리즘 identity
 ├─ stage3_physical.py           # Model C/profile/table identity·인증·비용
 ├─ stage3_execution.py          # 고정 expert 보드 identity + 완료된 V1 실행
