@@ -230,7 +230,7 @@ class LiveKUITests(unittest.TestCase):
         self.assertEqual(len(self.job.requests), 1)
         self.ui.on_left_click(2, 0)
         self.assertEqual(self.ui._replay_recorder.source_type, 'algorithm')
-        self.assertTrue(self.ui._k_retired)
+        self.assertFalse(self.ui._k_retired)
         self.job.complete_cancel()
         self.ui.on_reset()
         self.assertEqual(self.ui._replay_recorder.source_type, 'human')
@@ -260,7 +260,7 @@ class LiveKUITests(unittest.TestCase):
         button = self.ui._buttons[(2, 2)]
         QTest.mousePress(button, Qt.RightButton)
         self.assertFalse(self.ui._v1_owned)
-        self.assertTrue(self.ui._k_retired)
+        self.assertFalse(self.ui._k_retired)
         self.assertEqual(self.ui._replay_recorder.events[-1].action, 'FLAG')
         self.assertEqual(self.ui._live_action_count, 1)
         self.job.deliver_admission()
@@ -276,29 +276,31 @@ class LiveKUITests(unittest.TestCase):
         self.assertEqual(len(self.ui._replay_recorder.events), 0)
         self.assertTrue(self.ui._k_retired)
 
-    def test_hard_retire_same_board_rejected_but_v1_adoption_allowed_after_cleanup(self):
+    def test_normal_retire_allows_new_owner_after_cleanup(self):
         self.start()
-        self.ui.on_live_takeover()
+        self.ui._retire_v1_for_manual("manual handoff")
         self.job.complete_cancel()
         self.ui.on_analyze_current()
-        self.assertEqual(len(self.job.requests), 1)
-        self.assertIn('새 게임', self.ui.live_policy_status_label.text())
-        self.ui.live_policy_combo.setCurrentIndex(self.ui.live_policy_combo.findData(POLICY_V1))
-        self.ui.on_analyze_current()
         self.assertEqual(len(self.job.requests), 2)
+        self.assertNotEqual(self.job.requests[0].run_id, self.job.requests[1].run_id)
+        self.ui.live_policy_combo.setCurrentIndex(self.ui.live_policy_combo.findData(POLICY_V1))
+        self.job.complete_cancel()
+        self.ui.on_analyze_current()
+        self.assertEqual(len(self.job.requests), 3)
 
-    def test_progressed_and_rehidden_board_selection_never_resets_or_unflags(self):
+    def test_rehidden_board_adoption_never_resets_or_unflags(self):
         self.ui.on_right_click(2, 2)
         self.ui.on_right_click(2, 2)
         before = self.engine.get_observation()
         self.ui.on_analyze_current()
-        self.assertEqual(self.job.requests, [])
+        self.assertEqual(len(self.job.requests), 1)
+        self.assertEqual(self.job.requests[0].entry_mode, k.ADOPT_CURRENT)
         self.assertEqual(self.engine.get_observation(), before)
         self.assertEqual(self.ui._live_action_count, 2)
 
     def test_cleanup_failure_blocks_simple_v1_and_k_new_owners_even_after_reset(self):
         self.start()
-        self.ui.on_live_takeover()
+        self.ui._retire_v1_for_manual("manual handoff")
         self.job.complete_cancel(cleanup=False)
         for policy in (POLICY_SIMPLE, POLICY_V1, POLICY_K):
             with self.subTest(policy=policy):

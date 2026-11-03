@@ -155,9 +155,10 @@ class KCertaintyProjectionTests(unittest.TestCase):
             k.from_dict({**original, 'native_safe_proof': []}, k.KProposal)
         with self.assertRaises(LivePolicyError):
             replace(p, safe_cells=([3, 0],))
-        flagged = replace(p.snapshot, observation=((1, -3, 1, -2), (1, 1, 1, -2)), base_m=((1, 0),))
-        with self.assertRaises(LivePolicyError):
-            replace(p, snapshot=flagged, safe_cells=((1, 0),))
+        flagged = replace(p.snapshot, input_seq=2, input_revision=2, base_m_revision=1,
+                          observation=((1, -3, 1, -2), (1, 1, 1, -2)), base_m=((1, 0),))
+        with self.assertRaisesRegex(LivePolicyError, 'K safe cells'):
+            replace(p, snapshot=flagged, pending_m_revision=2, safe_cells=((1, 0),))
 
     def test_safe_set_consistency_initial_guess_open_and_chord(self):
         state = fixtures.initial()
@@ -229,14 +230,14 @@ class KCertaintyProjectionTests(unittest.TestCase):
                         'EXACT_SAFE', 1, 1, 1, (), safe_cells=safes)
         ack = k.make_ack(k.KPermit(p, 'c' * 32), 'WON')
         envelope = transport.message(state.run_id, k.MAX_K_SEQUENCE, 'FINISHED', k.to_dict(ack))
-        self.assertEqual(envelope['version'], 5)
+        self.assertEqual(envelope['version'], 7)
         with TemporaryDirectory() as directory:
             path = transport.write_once(Path(directory), 'worker', k.MAX_K_SEQUENCE, envelope)
             self.assertLess(path.stat().st_size, transport.MAX_MESSAGE_BYTES)
             decoded = transport.read_next(Path(directory), 'worker', k.MAX_K_SEQUENCE, state.run_id)
             self.assertEqual(k.from_dict(decoded['payload'], k.KAck), ack)
         with self.assertRaises(LivePolicyError):
-            transport.message(state.run_id, k.MAX_K_SEQUENCE + 1, 'FINISHED', k.to_dict(ack))
+            transport.message(state.run_id, transport.MAX_SEQUENCE + 1, 'FINISHED', k.to_dict(ack))
 
 
 class KCertaintyJobTests(unittest.TestCase):
@@ -476,7 +477,7 @@ class KCertaintyUITests(unittest.TestCase):
         self._expire(lambda: self.ui.live_policy_combo.setCurrentIndex(self.ui.live_policy_combo.findData(POLICY_SIMPLE)))
 
     def test_hard_retire_clears_colors_and_old_callbacks(self):
-        self._expire(self.ui.on_live_takeover)
+        self._expire(lambda: self.ui._retire_v1_for_manual("manual handoff"))
 
     def test_error_clears_colors_and_old_callbacks(self):
         self._expire(lambda: self.ui._fail_v1('certainty fixture'))

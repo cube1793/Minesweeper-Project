@@ -681,17 +681,21 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
-2026-11-03 Simple/V1 Main/Live 기능·UI 사용자 native 수용. 아래 공통 입력과 기존 Simple 흐름에 더해 V1은 별도 worker의 FLAG_REVIEW/V1 phase와 snapshot→token 소비→step→Replay→status-first ACK를 사용한다. 상세 [Main/Live 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다.
+2026-11-04 현재 K 인수·FLAG 준비·수동 인계·Simple 준비·Replay UI까지 범위 한정 독립 검토와 사용자 native 수용을 마쳤다. 현재 [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)을 우선하며, [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)과 [K v3–v5](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)는 버전별 역사다.
 
-새 판은 수동 가능·Auto OFF·guess OFF이며 정책 선택만으로 실행하지 않는다. Simple의 수동/Auto 혼합은 유지하고, V1은 첫 유효 board press에서 Auto를 끄고 원래 gesture를 이어간다. 실제 수동 입력 뒤 다음 V1 segment는 guess OFF이며, 이전 owner의 exit/reap/tree0/cleanup 뒤 같은 판의 현재 상태를 새 ADOPT owner로 인수한다.
+새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
 
-V1 Auto OFF는 owner·유효 pending을 보관하는 일시정지다. **추천·계산 종료**는 pending을 버리고 worker를 종료한다(Simple에서는 비활성). 일시정지/간격/guess 변경만으로 유효 계획·FLAG 검토를 다시 계산하지 않는다. 정책 변경은 Auto OFF와 옛 owner retire 뒤 다음 명시 ON에 적용하며 보드·기록은 보존한다.
+K-P0는 세 preset에서 canonical 새 판과 현재 판 ADOPT/재인수를 지원한다. FLAG-free ADOPT는 빈 M과 현재 global revision·실제 입력 이력에 결속한다. FLAG 인수는 K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1이며, native KLocalSession이 detached FLAG-masked 공개 관측을 한 번 local 분석한다. 원 FLAG와 증명 M의 교집합만 유지하고 나머지를 row-major로 실제 해제한다. 같은 session/proof를 이어 실제 판 검증·정상 분석/선택을 수행한다. M 외부 주입, V1 proof 재사용, masked graph의 실제 입력 승인은 없다.
 
-준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, V1 owner≤960, 현재 공통 wire v5/V1 seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
+worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환한다. GUI는 yield 없이 최종 비교→token 소비→step1을 수행하고 정확한 원 입력의 ACK 뒤 NEXT로 간다. ACK 중 수동 인계는 불변 _KInputReceipt로 기존 입력/game/Replay prefix를 확인하며 현재 수동 판을 과거 상태로 되돌리거나 NEXT를 보내지 않는다. 실제 ACK/이력/정리 오류의 fail-closed와 최초 원인 기록은 유지한다.
 
-K-P0는 명시 새 게임·세 preset만 지원하며 수동/Simple/V1 진행 판의 인수·종료 후 재인수는 후속이다. worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환하고 GUI는 yield 없이 최종 비교/token/step1을 적용한 뒤 ACK/NEXT를 보낸다. K 입력≤480, envelope≤31681, pending당 VALIDATE≤64다. v3 Unit1, v4 확률/커서, v5 확정색의 근거를 구분한다.
+현재 공통 wire v7이다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
 
-K EXACT_GUESS 확률은 원 phase_e 정수의 primitive projection이다. 확정색(v5)은 원 selection_safe_cells의 HIDDEN SAFE를 초록, preinput_m의 HIDDEN MINE을 빨강으로 표시한다. 확률 OFF는 숫자만 숨긴다. 구조 검사는 native proof가 아니며, worker VALIDATE는 기존 실행 검증 뒤 원 safe 집합과의 동등성을 확인한다. 표시를 위한 추가 분석·선택·실제 FLAG·ACK 승격은 없다. V1/K 원형과 논리 cursor/Model C는 분리돼 있고 job/worker/UI/cursor 실행 bytes는 e23dec2와 같다. 독립 검토 302 method/356 subtest + worker 2개, 사용자 native 5항목 PASS, 실패·절차 이탈과 역사 근거는 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 구분한다.
+Simple Main 준비는 live_simple_preparation.py에서 공개 FLAG-masked 직접 zero/all·전체 지뢰 수로 기존 FLAG를 확인한다. 기존 Simple planner는 불변이다. 수동 입력은 준비 epoch를 폐기하고 Auto를 끈다. 실제 준비 입력은 event를 남긴다. Model C 표 밖(dx≥30 또는 dy≥16) 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled 입력 수로 기록하며 0비용이나 완전 합계로 표현하지 않는다.
+
+K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selection_safe_cells/preinput_m의 HIDDEN 셀 표시다. 표시를 위한 추가 추론·선택·FLAG·ACK 승격은 없다. 확률 OFF에도 확정색이 남고 V1/K 가상 원형은 OS 마우스·Model C와 분리된다. 최종 source107과 검증·실패 이력·사용자 수용의 정확한 범위는 현재 closeout에 기록한다.
+
+Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일시정지 한 번이다. Replay Return/Enter/reset은 상태를 바꾸지 않는다. 비편집 정책 콤보의 focus에서도 Live 키가 동작하며 편집 가능한 콤보·line/text/spinbox, popup/modal, auto-repeat 방어를 유지한다. 종료 정리 예외는 기존 closing/job 잠금을 유지하면서 한 줄 이유·전체 tooltip/접근성 설명과 비활성 제어로 표시한다. 강제 종료/추가 worker/자동 복구를 만들지 않는다.
 
 ```text
 사용자 입력 / Live Auto timeout
@@ -732,7 +736,7 @@ Engine은 physical press/release/origin 정책을 모르며 semantic OPEN/FLAG/C
 
 아래 갱신 규칙은 기존 Simple 경로다. 수동 `현재 상태 분석`은 행동을 실행하지 않는다. `분석 표시`가 OFF이면 그 결과는 다음 행동에 지워지고, ON이면 매 행동 후 갱신된다. Auto는 single-shot QTimer로 추천 하나만 예약하며, timeout에 observation 일치 여부와 HIDDEN target, 첫 수 정책의 유효성을 다시 검사한다.
 
-추측 허용이 OFF이면 guess 추천과 overlay를 유지한 채 대기한다. 사용자가 직접 행동하면 예약을 취소하고 새 상태에서 분석한다. Reset·난이도 변경·Replay 진입·창 닫기·게임 종료·분석 오류도 예약을 취소한다. 행동을 여러 개 queue하지 않으며 비종료 Auto 행동 후 HIDDEN 수가 줄지 않으면 중단한다.
+추측 허용이 OFF이면 guess 추천과 overlay를 유지한 채 대기한다. 사용자가 직접 행동하면 Auto/guess를 끄고 예약을 취소한 뒤 새 상태에서 표시를 갱신한다. Reset·난이도 변경·Replay 진입·창 닫기·게임 종료·분석 오류도 예약을 취소한다. 행동을 여러 개 queue하지 않으며 비종료 Auto 행동 후 HIDDEN 수가 줄지 않으면 중단한다.
 
 ### 4.2 UI 없는 동기 runner
 
@@ -758,7 +762,7 @@ ReplayData → ReplayPlayer
            → 저장 이벤트 적용 → observation → UI
 ```
 
-Live UI와 runner 모두 확정 보드를 recorder에 한 번 전달하고 실제 action을 기록한다. 승리 시 engine의 자동 깃발은 별도 physical action/event가 아니다. Runner의 source는 `algorithm`이며 UI의 새 판은 `human`이다. Main의 첫 실제 Auto 입력(준비 UNFLAG 포함)부터 `algorithm`으로 바꾸고 이후 mixed 수동 구간도 non-human으로 유지한다. 분석/Auto toggle만으로 HUMAN을 바꾸지 않는다. `source_type`은 게임 단위 필드이므로 Live Auto와 사람 입력을 event별로 구별하지 않는다.
+Live UI와 runner 모두 확정 보드를 recorder에 한 번 전달하고 실제 action을 기록한다. 승리 시 engine의 자동 깃발은 별도 physical action/event가 아니다. Runner의 source는 `algorithm`이며 UI의 새 판은 `human`이다. Main의 첫 실제 Auto 입력(준비 UNFLAG 포함)부터 `algorithm`으로 바꾸고 이후 mixed 수동 구간도 non-human으로 유지한다. 분석/Auto toggle만으로 HUMAN을 바꾸지 않는다. `source_type`은 게임 단위 필드이므로 Live Auto와 사람 입력을 event별로 구별하지 않는다. Replay UI는 algorithm/ai를 사용 기록 있음, human을 기록 없음, 데이터 없음을 확인 불가로 표시한다. 옛 JSON의 필드 생략은 기존 decoder에서 human으로 읽으므로 실제 과거 사용 여부를 확정하지 않는다. 알고리즘 이름/정책 변경 이력은 새로 저장하지 않는다.
 
 <a id="replay-index"></a>
 

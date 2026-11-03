@@ -51,9 +51,9 @@ class LiveAnalysisPresentationTests(unittest.TestCase):
             result = present_v1_proposal(proposal)
         review.assert_not_called()
         plan.assert_not_called()
-        self.assertIn("미검증 깃발 해제", result.status_text)
-        self.assertIn("실제 지뢰도", result.status_text)
-        self.assertIn("전수 검증이 아닙니다", result.status_text)
+        self.assertIn("미확인 깃발 해제", result.status_text)
+        self.assertIn("실제 지뢰여도", result.status_text)
+        self.assertIn("직접 추론 범위", result.status_text)
         self.assertNotIn("50", result.status_text)
         self.assertEqual(set(result.overlays), {(0, 0)})
         self.assertTrue(result.overlays[(0, 0)].recommended)
@@ -253,7 +253,8 @@ class LiveAnalysisUITests(unittest.TestCase):
 
     def test_local_ui_does_not_request_probabilities(self):
         self.prepared_board()
-        self.engine.step(1, 1, Action.FLAG)
+        self.ui.on_analyze_current()
+        self.ui._apply_live_action(1, 1, Action.FLAG, auto_observation=self.engine.get_observation())
         self.ui.render_board()
         with (
             patch("simple_decision.calculate_probabilities") as calculate,
@@ -370,6 +371,7 @@ class LiveAnalysisUITests(unittest.TestCase):
                 self.assert_clear()
 
     def test_live_on_invalidates_then_renders_then_analyzes_fresh_after_every_action(self):
+        from live_simple_preparation import prepare_flags
         self.prepared_board()
         self.ui.analysis_checkbox.setChecked(True)
         for handler, coordinate in (
@@ -401,11 +403,14 @@ class LiveAnalysisUITests(unittest.TestCase):
                 with (
                     patch.object(self.ui, "render_board", side_effect=check_render),
                     patch("ui_manager.analyze_position", side_effect=check_analyze) as analyze,
+                    patch("ui_manager.prepare_flags", wraps=prepare_flags) as prepare,
                     patch.object(self.engine, "step", wraps=self.engine.step) as step,
                 ):
                     handler(*coordinate)
                 self.assertEqual(step.call_count, 1)
-                self.assertEqual(analyze.call_count, 1)
+                self.assertEqual(prepare.call_count, 1)
+                self.assertEqual(analyze.call_count, int(not self.ui._simple_preparation.removable))
+                self.assertEqual(rendered[-1], self.engine.get_observation())
                 self.assertIsNotNone(self.ui._analysis_result)
 
     def test_off_toggle_clears_and_stops_automatic_analysis(self):
@@ -455,6 +460,7 @@ class LiveAnalysisUITests(unittest.TestCase):
                 self.assert_clear()
 
     def test_reduction_changes_only_display_and_solver_sees_original_observation(self):
+        from live_simple_preparation import prepare_flags
         for mines, flags, original_text, reduced_text in (
             ({(1, 1)}, ((1, 1),), "1", ""),
             ({(1, 0), (1, 1)}, ((1, 1),), "2", "1"),
@@ -479,9 +485,10 @@ class LiveAnalysisUITests(unittest.TestCase):
                     self.assertEqual(button.text(), reduced_text)
                     self.assertEqual(button.styleSheet(), original_style)
                     self.assertEqual(self.engine.get_observation(), before)
-                    with patch("ui_manager.analyze_position", wraps=analyze_position) as analyze:
+                    with patch("ui_manager.prepare_flags", wraps=prepare_flags) as prepare:
                         self.ui.analyze_button.click()
-                    analyze.assert_called_once_with(before, len(mines))
+                    prepare.assert_called_once_with(before, len(mines))
+                    self.assertEqual(self.ui._analysis_observation, tuple(tuple(row) for row in before))
                     self.assertEqual(self.engine.get_observation(), before)
                     self.ui.reduction_checkbox.setChecked(False)
                     self.assertEqual(button.text(), original_text)
@@ -493,12 +500,15 @@ class LiveAnalysisUITests(unittest.TestCase):
     def test_invalid_public_state_clears_previous_result_without_engine_changes(self):
         self.prepared_board()
         self.ui.analyze_button.click()
-        # Two flags contradict the opened 1 and the public total mine count.
+        # FLAG count alone is no longer a contradiction: review masks flags.
         self.engine.step(1, 0, Action.FLAG)
         self.engine.step(0, 1, Action.FLAG)
         before = self.engine.get_observation()
         counters = self.engine.get_counter_snapshot()
-        with patch.object(self.engine, "step") as step:
+        invalid = [list(row) for row in before]
+        invalid[0][0] = 8  # A corner cannot have eight neighboring mines.
+        with patch.object(self.engine, "step") as step, \
+                patch.object(self.engine, 'get_observation', return_value=invalid):
             self.ui.analyze_button.click()
         step.assert_not_called()
         self.assertIn("분석 불가 - 공개 상태가 모순됩니다.", self.ui.analysis_status_label.text())
@@ -523,7 +533,7 @@ class LiveAnalysisUITests(unittest.TestCase):
         self.prepared_board()
         self.ui.analysis_checkbox.setChecked(True)
         with (
-            patch("ui_manager.analyze_position", side_effect=InconsistentObservationError("bad flags")),
+            patch("ui_manager.prepare_flags", side_effect=InconsistentObservationError("bad public clues")),
             patch.object(self.engine, "step", wraps=self.engine.step) as step,
         ):
             self.ui.on_right_click(1, 1)

@@ -2,7 +2,7 @@
 
 ## Status
 
-Current state: **2026-11-03 (Asia/Seoul)**.
+Current state: **2026-11-04 (Asia/Seoul)**.
 **Stage-3 Extended: ACTIVE pending explicit project-closeout adjudication.**
 Stage-3 V1 remains CLOSED / FROZEN; ZiNi Improvement remains CLOSED / V1 RETAINED,
 with its final holdout unopened. This roadmap is not automatic execution authority.
@@ -14,67 +14,60 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Bounded K-C/K-P0 implementation, E0/E1, E2 I1–I8, R0 harness, remediation 1A–1W | Accepted implementation/history retained |
 | Scientific/effectiveness | **PHASE1_INCONCLUSIVE_TRANSFER; effectiveness NOT ESTABLISHED** |
 | Current de-dup remediation-class timing profiling | **STOP / DEFER — UNBOUNDED_RESEARCH_RISK** |
-| Phase 2 | **NOT AUTHORIZED** |
-| R0-B / Actual E2 | **NOT RUN / NOT AUTHORIZED** |
+| Phase 2 / R0-B / Actual E2 | **NOT AUTHORIZED / NOT RUN** |
 | Research visualization/comparison D0–D5 | **FINAL ACCEPTANCE PASS / CLOSED; user packaged A–H PASS** |
 | Production integration / Gate P | **NOT STARTED / NOT PASSED** |
-| Experimental K-LC0 / DISTANCE_BAND_V1 | Source/Claude PASS; fixed-viewer user path confirmation; not frozen/effectiveness approval |
-| Separate K-P0 / K-LC0 random Expert source app | Implemented / Claude PASS / user native accepted; committed/pushed at496fab0 |
-| Main/Live Simple + frozen V1, manual handoff/FLAG review/UI | User accepted; committed/pushed at98203e8; historical F02 NOT_VERIFIED |
-| Main/Live experimental K-P0 + probability/cursor + certainty colours | Base connection committed at e23dec2; v5 certainty independent REQUIRED_FIXES0 and native5-item PASS; new12-path docs/Git preparation |
-| Separate experimental K-LC1 / SINGLETON_BAND_V1 | Source/tests and Claude R2 PASS; limited saved8191/97 user confirmation; committed/pushed at d1201e4 |
+| Experimental K-LC0 / DISTANCE_BAND_V1 | Accepted separate comparison app at496fab0; no effectiveness approval |
+| Experimental K-LC1 / SINGLETON_BAND_V1 | Accepted limited saved8191/97 viewer at d1201e4; not frozen |
+| Main Simple/V1, K connection/probability/cursor/colours | Earlier accepted commits98203e8/e23dec2/a992892; historical F02 NOT_VERIFIED |
+| Main K current-board/FLAG adoption, ACK handoff, Simple preparation, Replay UI | Final independent required fixes 0 and user native accepted; source107, 32-path source/tests/docs Git preparation |
 
-D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It is not a
-currently deferred demo proposal. Demo acceptance establishes no effectiveness or
-aggregate superiority. The scientific disposition is not PHASE1_NO_GO or an
-Actual E2 failure.
+D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It establishes no
+effectiveness or aggregate superiority. The scientific disposition is not PHASE1_NO_GO
+or an Actual E2 failure. Final D5 package source remains fb59d5fa253f04f50ea57c6a9e863aa1999a517e,
+with package root results/program-k-trace-demo-final-acceptance/20261031-230251/.
+Earlier05920abeaec541a52fd22753dadec66f5cb98bca and technical48f6ebc97e6c4d3ed4a746a92a8d169783803bf9
+are historical anchors, distinct from later Main source and E1/R0 execution identities.
 
-Final **D5** visualization/package source:
-**`fb59d5fa253f04f50ea57c6a9e863aa1999a517e`**. This is the historical package anchor,
-not the live HEAD of the later Main/Live work. Current main == local origin/main ==
-`e23dec225753350738f296f742f57ce3ab86c8f5`, ahead/behind0/0, staged0.
-K-LC0 at496fab0, K-LC1 at d1201e4, Simple/V1 at98203e8 and K connection/probability/cursor at e23dec2 are committed/pushed.
-New certainty source/tests6 + docs6 are12 uncommitted paths (M10/U2); this new push is pending.
-Earlier precommit/NEXT statements in dated closeouts remain history.
-Final package root: `results/program-k-trace-demo-final-acceptance/20261031-230251/`.
-The earlier `05920abeaec541a52fd22753dadec66f5cb98bca` visualization package is
-historical. Remediation technical anchor `48f6ebc97e6c4d3ed4a746a92a8d169783803bf9`
-and original E1/R0 execution identities remain distinct.
+Current precommit main == local origin/main == a9928921e873f11c72283d35a6d0d9847eacd8e3,
+ahead/behind0/0, staged0. Source/tests24 + documents8 are **32 uncommitted paths (M22/U10)**.
+After the user executes the prepared Git script, the actual receipt and replaced recovery
+provide the resulting SHA; this dated snapshot is not a claim that push has already happened.
 
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) is the concise recovery record.
-The [Program K research-demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
-records final source/package/data hashes, D0–D5 semantics, automated verification
-and the user's later packaged A–H acceptance. Generated D5 evidence retains its
-original PENDING USER timestamped state; it was not rewritten.
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [current K adoption/UI closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)
+are current authority. [D0–D5 closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md) and generated
+PENDING USER evidence retain their original timestamps and dispositions.
 
-**CURRENT NEXT (2026-11-03): review certainty docs/12-path plan → user one-shot stage/commit/push →
-verify receipt/actual SHA → prepare postcommit recovery.**
-Deferred: same-board K adoption/readoption and Main LC0/LC1 connection.
-No Git write or further implementation starts in this document unit. Global Extended closure/Stage4 is undecided.
+**CURRENT NEXT (2026-11-04): user one-shot stage/commit/push → verify receipt/actual SHA →
+postcommit recovery replacement → specify Main/Live LC0 then LC1 connection.**
+No LC implementation or research starts in this documentation unit. Global Extended closure/Stage4 remains undecided.
 
-## Main/Live Simple·V1 — accepted functionality/UI
+## Main/Live current accepted scope
 
-[Main/Live closeout](STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md) records current native user acceptance:
-“모두 정상인 것 같아.” after four UI fixes, following confirmation of manual↔V1/FLAG handling.
-Fresh games allow manual play with Auto/guess OFF. Simple retains mixed input; V1 board press hands off
-without losing the gesture and can ADOPT the same board after cleanup. Auto OFF preserves pending;
-추천·계산 종료 discards it. Detached FLAG-free direct zero/all + total zero/all proof keeps only PROVED_MINE;
-SAFE/UNVERIFIED are physical FLAG toggles to closed HIDDEN. Unverified can be an actual mine.
-At that Simple/V1 checkpoint K/LC were disabled. The later experimental K-P0 connection is recorded below; LC0/LC1 remain disabled. Frozen V1 identity/Model C are unchanged.
+The [current closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md) supersedes current-behaviour
+statements in the [Simple/V1 history](STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md) and [K v3–v5 history](STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md).
+K now adopts/readopts existing manual/Simple/V1 preset boards, including existing FLAGs after
+native public-proof preparation. Persistent session/M and VALIDATE→ADMITTED→atomic input1→exact ACK
+remain; normal manual input during ACK retires the old owner without overwriting the manual board.
+Real ACK/history/cleanup failures remain fail-closed. Common wire is v7.
 
-D380 and F35 are version-bound composites, not a single final all-suite run. E80 assertions include6 duplicates;
-its Auto3 inputs were UNFLAG1/FLAG2. Independent Claude F02 remains NOT_VERIFIED (7 historical methods,
-0 created processes). Past shared Qt FileDialog preservation FAIL and offscreen missing glyphs remain;
-E's dialog helper must not be reused before R1. Native user acceptance does not retroactively repair those
-records or establish every branch/OS/DPI/package/effectiveness. Main viewing rate is still milliseconds.
+All three policies stop Auto/guess on manual input; Auto OFF alone pauses. The old recommendation-stop
+button is removed. Simple has public FLAG preparation with frozen-table outside costs explicitly null,
+not zero. K exact probability/certainty colours and V1/K virtual cursor remain display-only.
+Replay shows recorded algorithm use from existing source_type without adding policy-name history.
+Live Space/Return/Enter starts one new game even with noneditable policy-combo focus; Replay Space
+plays/pauses and Return/Enter/reset does nothing. Editors retain their own key handling.
 
-## Main/Live experimental K-P0 — accepted current scope
+Final source107 SHA256 is 848cbdc1423479fa2f65b2da5c915b033b5af075b111bef78007c3cd2077e5b2.
+Codex345/479 and independent345/479+probe4/4 are final UI scope, worker0. Earlier adoption353/481,
+FLAG413/677 and native-feedback443/731 with bounded real-worker evidence are distinct versions,
+not an aggregate full suite. The initial UI R1 failure stays recorded; final R1/O1/O2/O3 are CLOSED,
+O3 offscreen/fake only. The user confirmed all final native guide items in the current environment.
+No universal DPI/OS/preset completion, effectiveness or production approval is inferred.
 
-[K-P0 closeout](STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md) records the e23dec2 connection/probability/cursor checkpoint and the later v5 certainty unit. Current hidden safe cells are green from the original selection_safe_cells; hidden logical M is red. Probability OFF keeps colours. Colours do not create physical FLAGs, admissions or ACKs. Original inference/selection/M/Model C and the persistent-session one-input ACK boundary remain unchanged.
-
-The certainty Codex302/356+worker2 composite and independent Claude302/356 once+worker2 are distinct evidence. The user reported all five native checklist items PASS in the current environment. Exact DPI/preset counts, universal OS coverage, full-suite/effectiveness/production approval are not inferred. Current raw91 manifest is 5f8f0bdae6febcd7c32f6e028cf8fa967d23de21a3db0c884bdfe02c15243b69, wire v5.
-
-Same-owner pause/resume remains supported; same-board K adoption/readoption and Main LC0/LC1 remain deferred. Historical v3/v4 tests, F02 NOT_VERIFIED, Qt FileDialog FAIL and aborted temp NOT_VERIFIED stay separate. Certainty-review helper counting (reviewer1/coordinator conservative2), invalid original manifest root escaping, source-reference corrections and bounded registry view are recorded in closeout without rewriting evidence. REQUIRED_FIXES0; OPTIONAL deferred. No new research or verification campaign is opened.
+F02 NOT_VERIFIED, past shared Qt FileDialog FAIL, aborted focused temp NOT_VERIFIED and prior helper/
+procedure deviations remain. Low-priority OPTIONAL including final S1/S2 is deferred, not a new loop.
+K-P0 retains its experimental label; Main LC0/LC1 and V1/K custom remain disabled/unsupported.
 
 ## Post-D5 bounded source exhibition and pacing analysis
 
@@ -144,7 +137,7 @@ rendering, offscreen tests and the failed Computer Use initialization are separa
 native-g optimality or production approval. LC1 is not frozen and does not replace LC0.
 The external viewer only reads four saved traces; the existing k_lc0_exhibition app still
 runs actual K-P0/K-LC0. Main later added experimental K-P0 only. LC0/LC1 Main execution, new package/EXE and Stage4 remain unimplemented/unaccepted.
-Current Main contracts and the new certainty12-path document/Git/recovery sequence are in the K-P0 closeout and current handoff.
+Current Main contracts and the32-path document/Git/recovery sequence are in the K adoption/UI closeout and current handoff.
 Further implementation does not start automatically.
 
 ## Foundation — closed / integrated
@@ -287,7 +280,7 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT:** follow the 2026-11-03 certainty12-path preparation/recovery sequence in Status and
+**CURRENT NEXT:** follow the 2026-11-04 adoption/UI32-path preparation/recovery sequence in Status and
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md); older Git/NEXT snapshots are historical.
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
@@ -669,7 +662,7 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT:** the 2026-11-03 Status/current handoff controls; current certainty12-path document/Git
+**CURRENT NEXT:** the 2026-11-04 Status/current handoff controls; current adoption/UI32-path document/Git
 preparation and postcommit recovery do not reopen this research chain.
 Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection

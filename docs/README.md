@@ -5,7 +5,9 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live K-P0 연결·확률·커서·확정색 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md): e23dec2 완료본과 후속 v5 확정색 독립 검토·사용자 native 5항목 PASS, 버전별 근거·이력과 같은 판 K/LC 후속.
+- [Main/Live K 현재 판 인수·Simple 준비·Replay UI closeout](stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md): 2026-11-04 최종 source107, 독립 필수 수정 0, 사용자 native 수용. 24개 source/tests와 문서 8개의 일괄 Git 준비; 완료 SHA는 이후 실제 receipt/recovery를 따른다.
+
+- [Main/Live K-P0 연결·확률·커서·확정색 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md): e23dec2/a992892까지 완료된 v3–v5의 버전별 근거·이력. 현재 판 K 인수는 위의 새 closeout을 따른다.
 
 - [Main/Live Simple·V1 사용자 수용 closeout](stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md): 수동 재인수·공개 FLAG 정리·UI, 버전별 근거와 독립 F02/과거 보존 FAIL의 한계.
 

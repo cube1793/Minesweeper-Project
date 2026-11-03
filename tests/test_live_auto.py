@@ -71,6 +71,12 @@ class LiveAutoUITests(unittest.TestCase):
         # No sleeps or wall-clock races: deliver the connected timeout directly.
         self.ui._simple_auto_timer.timeout.emit()
 
+    def put_automatic_flag(self, x, y):
+        # Exercise the unchanged normal planner path with an already-owned
+        # automatic FLAG. External manual flags now go through preparation.
+        self.ui.on_analyze_current()
+        self.ui._apply_live_action(x, y, Action.FLAG, auto_observation=self.engine.get_observation())
+
     def assert_stopped(self):
         self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
         self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
@@ -98,7 +104,9 @@ class LiveAutoUITests(unittest.TestCase):
             self.ui.simple_auto_checkbox.setChecked(False)
             self.tick()
         step.assert_not_called()
-        self.assert_stopped()
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.assertTrue(self.ui.allow_guess_checkbox.isChecked())
+        self.assertFalse(self.ui._simple_auto_timer.isActive())
         self.assertTrue(self.ui.analysis_checkbox.isChecked())
         self.assertIsNotNone(self.ui._analysis_result)
 
@@ -229,7 +237,7 @@ class LiveAutoUITests(unittest.TestCase):
 
     def test_zero_interval_executes_one_move_per_timeout_and_analyzes_fresh(self):
         self.prepare_board()
-        self.ui.on_right_click(1, 1)
+        self.put_automatic_flag(1, 1)
         self.ui.simple_auto_interval_spin.setValue(0)
         self.ui.simple_auto_checkbox.setChecked(True)
         with (patch("ui_manager.analyze_position", wraps=analyze_position) as analyze,
@@ -291,7 +299,7 @@ class LiveAutoUITests(unittest.TestCase):
                         if scenario == "local":
                             self.ui.on_left_click(0, 0)
                         if scenario != "guess":
-                            self.ui.on_right_click(1, 1)
+                            self.put_automatic_flag(1, 1)
                     self.ui.simple_auto_interval_spin.setValue(interval)
                     with patch("core_engine.random.sample", return_value=[(1, 1)]):
                         self.ui.simple_auto_checkbox.setChecked(True)
@@ -417,7 +425,7 @@ class LiveAutoUITests(unittest.TestCase):
 
     def test_local_certainty_one_action_per_timeout_with_fresh_render_stats_and_analysis(self):
         self.prepare_board()
-        self.ui.on_right_click(1, 1)
+        self.put_automatic_flag(1, 1)
         snapshots = []
         order = []
         render = self.ui.render_board
@@ -469,7 +477,7 @@ class LiveAutoUITests(unittest.TestCase):
     def test_global_certainty_executes_existing_decision_move(self):
         # A flagged-only board has no local clues; the total budget proves safety.
         self.engine.reset_with_mines(3, 3, 1, {(1, 1)})
-        self.ui.on_right_click(1, 1)
+        self.put_automatic_flag(1, 1)
         with (
             patch("ui_manager.analyze_position", wraps=analyze_position) as analyze,
             patch.object(self.engine, "step", wraps=self.engine.step) as step,
@@ -585,7 +593,7 @@ class LiveAutoUITests(unittest.TestCase):
         second = recommendation(Action.OPEN, 1, 0)
         third = recommendation(Action.OPEN, 2, 0)
         with (
-            patch("ui_manager.analyze_position", side_effect=[first, second, third]) as analyze,
+            patch("ui_manager.analyze_position", side_effect=[first, second, second, third]) as analyze,
             patch.object(self.engine, "step", wraps=self.engine.step) as step,
             patch("ui_manager.ReplayRecorder") as new_recorder,
         ):
@@ -593,10 +601,12 @@ class LiveAutoUITests(unittest.TestCase):
             self.ui.on_left_click(2, 2)
             self.assertEqual(analyze.call_args.args[0], self.engine.get_observation())
             self.assertIs(self.ui._analysis_result.decision, second)
-            self.assertTrue(self.ui._simple_auto_timer.isActive())
+            self.assertFalse(self.ui._simple_auto_timer.isActive())
+            self.tick()
+            self.ui.simple_auto_checkbox.setChecked(True)
             self.tick()
         self.assertEqual(step.call_args_list, [call(2, 2, Action.OPEN), call(1, 0, Action.OPEN)])
-        self.assertEqual(analyze.call_count, 3)
+        self.assertEqual(analyze.call_count, 4)
         self.assertIs(self.ui._replay_recorder, recorder)
         self.assertEqual([(e.x, e.y, e.action) for e in recorder.events],
                          [(0, 0, "OPEN"), (2, 2, "OPEN"), (1, 0, "OPEN")])
@@ -613,6 +623,8 @@ class LiveAutoUITests(unittest.TestCase):
         self.assertFalse(self.ui._simple_auto_timer.isActive())
         self.ui.on_left_click(0, 0)
         self.assertEqual(self.ui._analysis_result.decision.kind, DecisionKind.GLOBAL_CERTAINTY)
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.ui.simple_auto_checkbox.setChecked(True)
         move = self.ui._analysis_result.move
         with patch.object(self.engine, "step", wraps=self.engine.step) as step:
             self.tick()
@@ -669,7 +681,7 @@ class LiveAutoUITests(unittest.TestCase):
             self.tick()
         step.assert_not_called()
         self.assert_stopped()
-        self.assertIn("첫 클릭 추천", self.ui.analysis_status_label.text())
+        self.assertIn("일치하지", self.ui.analysis_status_label.text())
 
     def test_missing_or_unsupported_decision_stops(self):
         self.prepare_board()
@@ -970,6 +982,7 @@ if QApplication is not None:
         """UI seam only: no subprocess and no automatic policy execution."""
         proposal_ready = pyqtSignal(object)
         admitted = pyqtSignal(object)
+        bootstrapped = pyqtSignal(object)
         acknowledged = pyqtSignal(object)
         finished = pyqtSignal(object)
 
@@ -1313,7 +1326,7 @@ class LiveV1UITests(unittest.TestCase):
         job.proposal_ready.emit(proposal)
         self.assertIsNone(self.ui._v1_pending)
         self.assertFalse(self.ui.simple_auto_checkbox.isEnabled())
-        self.assertIn("Stage2 Simple", self.ui.live_policy_status_label.text())
+        self.assertEqual(self.ui.live_policy_status_label.text(), "알고리즘 사용 기록: 없음")
 
     def test_all_new_game_policy_pairs_clear_guess_without_old_owner_signals(self):
         from live_policy import POLICY_SIMPLE, POLICY_V1
@@ -1332,7 +1345,7 @@ class LiveV1UITests(unittest.TestCase):
                     self.ui.live_policy_combo.setCurrentIndex(self.ui.live_policy_combo.findData(selected))
                     self.assertEqual(self.ui._live_run_id, identity)
                     self.assertEqual(self.ui._live_policy, selected)
-                    self.assertTrue(self.ui.allow_guess_checkbox.isChecked())
+                    self.assertEqual(self.ui.allow_guess_checkbox.isChecked(), previous == selected)
                     self.ui.on_reset()
                     self.assertEqual(self.ui._live_policy, selected)
                     self.assertNotEqual(self.ui._live_run_id, identity)
@@ -1401,7 +1414,7 @@ class LiveV1UITests(unittest.TestCase):
         self.assertTrue(self.ui._simple_auto_timer.isActive())
         self.assertEqual(job.applied, [])
         self.ui.live_policy_combo.setCurrentIndex(0)
-        self.assertTrue(self.ui.allow_guess_checkbox.isChecked())
+        self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
         self.assertIsNone(self.ui._v1_pending)
         self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
         self.assertEqual(self.ui._live_run_id, identity[0])
@@ -1439,15 +1452,16 @@ class LiveV1UITests(unittest.TestCase):
             self.tick()
         step.assert_not_called()
 
-    def test_legacy_ai_and_algorithm_replay_labels_are_unknown(self):
+    def test_replay_labels_use_recorded_source_not_selected_policy(self):
         from replay_model import SOURCE_AI, SOURCE_ALGORITHM, SOURCE_HUMAN
         for source in (SOURCE_AI, SOURCE_ALGORITHM, SOURCE_HUMAN):
             with self.subTest(source=source):
                 data = ReplayData(ReplayBoard(3, 3, 1, {(1, 1)}), (), source_type=source)
                 self.ui._enter_replay_mode(ReplayPlayer(data))
                 label = self.ui.live_policy_status_label.text()
-                self.assertEqual("unknown" in label, source != SOURCE_HUMAN)
-                self.assertIn("참고 분석: Stage2 Simple", label)
+                self.assertEqual(label, "알고리즘 사용 기록: " + ("없음" if source == SOURCE_HUMAN else "있음"))
+                self.assertTrue(self.ui.live_policy_combo.isHidden())
+                self.assertNotIn("Stage3 V1", label)
                 self.assertEqual(self.ui._replay_data.source_type, source)
 
     @contextmanager
@@ -1547,7 +1561,7 @@ class LiveV1UITests(unittest.TestCase):
         self.assertEqual(before, (self.engine.get_observation(), self.ui._replay_recorder.events,
                                   self.ui._replay_recorder.source_type, self.ui.live_auto_totals))
         self.assertEqual(job.applied, [])
-        self.assertIn("미검증 깃발 해제", self.ui.analysis_status_label.text())
+        self.assertIn("미확인 깃발 해제", self.ui.analysis_status_label.text())
         self.assertTrue(all(cell.kind is None and cell.probability is None
                             for cell in self.ui._analysis_result.overlays.values()))
 

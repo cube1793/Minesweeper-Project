@@ -1,5 +1,7 @@
 # Main/Live Simple·V1 Auto / 수동 재인수·FLAG 정리·UI closeout
 
+> **2026-11-03 역사 checkpoint.** 당시 수용·실패·검증을 보존한다. 2026-11-04 현재 계약은 [K 인수·Simple 준비·Replay UI closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)을 따른다. K 현재 판 인수/FLAG 준비는 이제 지원되며, Simple 수동 입력도 Auto/guess를 끄고, 추천·계산 종료 버튼은 제거했다. 아래 K disabled·Simple 혼합 자동 계속·버튼 설명은 당시 동작이다.
+
 기준일: **2026-11-03 (Asia/Seoul)**. 현재 source의 Main/Live 기능·UI는 **사용자 native 수용**으로 정리한다. 이번 작업은 문서·recovery 교체본·Git 절차 준비뿐이며 새 테스트/앱/worker/solver/pilot/build를 실행하지 않았다. stage/commit/push도 아직 하지 않았다.
 
 ## 사용자 수용과 남는 경계
@@ -8,7 +10,7 @@
 
 수용은 해당 환경의 Main/Live 기능·UI에 한정된다. 다른 OS/DPI, package/EXE, 전체 테스트, 모든 승패/추측 branch, 별도 Human 물리 모델 연구·Model C 재보정·알고리즘 효과성·Production K 승인으로 확대하지 않는다. 과거 보고서의 미실시/PENDING/FAIL/Claude 판정은 작성 시점 그대로 보존한다. 독립 F02는 **NOT_VERIFIED**이고 과거 Qt 공용 설정 보존은 **FAIL**이다.
 
-## 현재 기능과 사용 순서
+## 당시 기능과 사용 순서
 
 Main은 `main.py`로 실행하는 실제 Live 보드다. Simple을 유지하면서 공개 상태를 실제 frozen Stage3 V1에 전달해 첫 입력 하나씩 실행한다. 저장 trace viewer나 전체 runner 완료 결과의 재생이 아니다. K-P0/LC0/LC1 선택 실행은 계속 disabled·미지원이다. 지원 V1 preset은 Beginner9×9/10, Intermediate16×16/40, Expert30×16/99이며 custom은 미지원이다.
 

@@ -36,6 +36,7 @@ def build_worker_command(directory, run_id, scope_name=""):
 
 class LivePolicyJob(QObject):
     proposal_ready = pyqtSignal(object)
+    bootstrapped = pyqtSignal(object)
     admitted = pyqtSignal(object)
     acknowledged = pyqtSignal(object)
     finished = pyqtSignal(object)
@@ -62,6 +63,9 @@ class LivePolicyJob(QObject):
         self._review_proposal_count = self._v1_proposal_count = 0
         self._k_proposal_count = self._validation_count = 0
         self._sent_validation = self._permit = self._accepted_nonce = None
+        self._last_k_ack = None
+        self._k_bootstrap = None
+        self._k_preparation_count = self._k_input_count = self._k_decision_count = 0
         self.timer = QTimer(self)
         self.timer.setInterval(25)
         self.timer.timeout.connect(self.poll)
@@ -97,11 +101,15 @@ class LivePolicyJob(QObject):
         self._finish_exit_deadline = None
         self._kill_requested = False
         self._sequence = 0
-        self._awaiting = "PROPOSAL"
+        self._awaiting = ("BOOTSTRAPPED" if self._is_k and snapshot.entry_mode == k_live.FLAG_ADOPT
+                          else "PROPOSAL")
         self._proposal_count = self._applied_count = self._ack_count = 0
         self._review_proposal_count = self._v1_proposal_count = 0
         self._k_proposal_count = self._validation_count = 0
         self._sent_validation = self._permit = self._accepted_nonce = None
+        self._last_k_ack = None
+        self._k_bootstrap = None
+        self._k_preparation_count = self._k_input_count = self._k_decision_count = 0
         self._started = self._clock()
         self._deadline = self._clock() + COMPUTE_CAP_SECONDS
         self.last_record = None
@@ -182,6 +190,11 @@ class LivePolicyJob(QObject):
         self.state = "applying"
         self._deadline = self._clock() + RESPONSE_CAP_SECONDS
         self._applied_count += 1
+        if self._is_k:
+            if self._pending.is_preparation:
+                self._k_preparation_count += 1
+            else:
+                self._k_input_count += 1
         return self._pending
 
     def acknowledge(self, status, observation=None):
@@ -204,8 +217,7 @@ class LivePolicyJob(QObject):
         if self._directory is None or self._awaiting is not None:
             raise RuntimeError("Cannot send while another response is outstanding.")
         try:
-            if not self._is_k and self._sequence > MAX_V1_SEQUENCE:
-                raise ValueError("V1 transport sequence bound exceeded.")
+            self._check_sequence()
             write_once(self._directory, "parent", self._sequence,
                        message(self._active_run_id, self._sequence, kind, payload))
         except Exception as exc:
@@ -213,6 +225,11 @@ class LivePolicyJob(QObject):
             raise
         self._awaiting = awaiting
         self._deadline = self._clock() + cap
+
+    def _check_sequence(self):
+        limit = k_live.sequence_limit(self._start_snapshot) if self._is_k else MAX_V1_SEQUENCE
+        if self._sequence > limit:
+            raise ValueError("Entry-mode transport sequence bound exceeded.")
 
     def cancel(self, reason="CANCELLED"):
         if type(reason) is not str or not reason or len(reason) > 128:
@@ -248,6 +265,7 @@ class LivePolicyJob(QObject):
                     self._failure = self._failure or f"TREE_TERMINATE: {exc!r}"
 
     def _read_reply(self):
+        self._check_sequence()
         if self._awaiting is None:
             # No child reply is allowed while the owner is choosing when to apply.
             unexpected = read_next(self._directory, "worker", self._sequence, self._active_run_id)
@@ -269,14 +287,28 @@ class LivePolicyJob(QObject):
             raise ValueError("Worker reply is out of sequence.")
         self._sequence += 1
         self._awaiting = None
-        if kind == "PROPOSAL":
+        if kind == "BOOTSTRAPPED":
+            if not self._is_k or self._k_bootstrap is not None:
+                raise ValueError("Unexpected or duplicate K bootstrap.")
+            summary = k_live.from_dict(payload, k_live.KBootstrap)
+            following = k_live.after_bootstrap(self._start_snapshot, summary)
+            self._k_bootstrap = summary
+            self._expected_snapshot = following
+            self._deadline = None
+            self.state = "ready"
+            self.bootstrapped.emit((self._start_snapshot, following))
+        elif kind == "PROPOSAL":
             proposal = (k_live.from_dict(payload, k_live.KProposal) if self._is_k else proposal_from_dict(payload))
             if proposal.snapshot != self._expected_snapshot:
                 raise ValueError("Worker proposal differs from requested public snapshot.")
             self._pending = proposal
             self._proposal_count += 1
             if self._is_k:
-                self._k_proposal_count += 1
+                if proposal.is_preparation:
+                    self._review_proposal_count += 1
+                else:
+                    self._k_proposal_count += 1
+                    self._k_decision_count += int(not proposal.initial)
             elif proposal.phase == "FLAG_REVIEW":
                 self._review_proposal_count += 1
             else:
@@ -301,6 +333,8 @@ class LivePolicyJob(QObject):
                 raise ValueError("Worker ACK differs from the applied action/target/token.")
             self._expected_snapshot = (k_live.next_snapshot(self._pending, ack) if self._is_k
                                        else validate_ack(self._pending, ack))
+            if self._is_k:
+                self._last_k_ack = ack
             self._pending = self._sent_ack = None
             self._permit = self._accepted_nonce = None
             self._ack_count += 1
@@ -312,6 +346,7 @@ class LivePolicyJob(QObject):
                 ack = k_live.from_dict(payload, k_live.KAck)
                 if self._sent_ack is None or ack != self._sent_ack or ack.status == "PLAYING":
                     raise ValueError("K FINISHED differs from actual terminal ACK.")
+                self._last_k_ack = ack
             elif (type(payload) is not dict or set(payload) != {"token", "input_seq", "status"}
                     or self._sent_ack is None or self._sent_ack.status == "PLAYING"
                     or type(payload["token"]) is not str
@@ -453,12 +488,21 @@ class LivePolicyJob(QObject):
         return {
             "run_id": self._active_run_id, "status": status, "intent_reason": self._intent_reason,
             "policy_id": self._start_snapshot.policy_id if self._start_snapshot else None,
-            "definition": k_live.DEFINITION if self._is_k else "STAGE3_V1",
-            "entry_mode": "CANONICAL_NEW" if self._is_k else (self._start_snapshot.entry_mode if self._start_snapshot else None),
-            "start_phase": "K_P0" if self._is_k else (self._start_snapshot.phase if self._start_snapshot else None),
+            "definition": self._start_snapshot.definition if self._is_k else "STAGE3_V1",
+            "entry_mode": self._start_snapshot.entry_mode if self._start_snapshot else None,
+            "start_phase": self._start_snapshot.phase if self._start_snapshot else None,
             "start_input_revision": self._start_snapshot.input_revision if self._start_snapshot else None,
+            "start_cursor": self._start_snapshot.cursor if self._start_snapshot else None,
+            "last_k_ack": k_live.to_dict(self._last_k_ack) if self._last_k_ack is not None else None,
+            "unconfirmed_k_ack": k_live.to_dict(self._sent_ack) if self._is_k and self._sent_ack is not None else None,
             "board_generation": self._start_snapshot.board_generation if self._start_snapshot else None,
-            "initial_flag_count": 0 if self._is_k else (self._start_snapshot.initial_flag_count if self._start_snapshot else None),
+            "initial_flag_count": (sum(v == -3 for row in self._start_snapshot.observation for v in row)
+                                   if self._is_k else (self._start_snapshot.initial_flag_count if self._start_snapshot else None)),
+            "bootstrap": k_live.to_dict(self._k_bootstrap) if self._k_bootstrap is not None else None,
+            "bootstrap_local_calls": 1 if self._k_bootstrap is not None else 0,
+            "k_decision_count": self._k_decision_count,
+            "k_preparation_input_count": self._k_preparation_count,
+            "k_input_count": self._k_input_count,
             "wall_seconds": self.elapsed, "error": error, "stderr": stderr,
             "exit_code": exit_code, "reaped": self._process is None,
             "tree_active_count": tree_count, "cleanup_complete": False,

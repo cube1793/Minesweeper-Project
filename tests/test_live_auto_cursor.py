@@ -276,7 +276,7 @@ class KFeedbackUITests(unittest.TestCase):
         self.assertEqual(called.call_count, 1)
         self.assertEqual(called.call_args.args, (0, 0, expected))
         self.assertEqual(self.ui._live_action_count, 1)
-        self.assertTrue(self.ui._k_retired)
+        self.assertFalse(self.ui._k_retired)
         self.job.deliver_admission()
         self.assertEqual(self.ui._live_action_count, 1)
         self.assertTrue(self.overlay.isHidden())
@@ -318,7 +318,7 @@ class KFeedbackUITests(unittest.TestCase):
             self.ui.live_policy_combo.findData(POLICY_SIMPLE)))
 
     def test_hard_retire_expires_probability_and_cursor(self):
-        self._expire(self.ui.on_live_takeover)
+        self._expire(lambda: self.ui._retire_v1_for_manual("manual handoff"))
 
     def test_error_expires_probability_and_cursor(self):
         self._expire(lambda: self.ui._fail_v1('synthetic validation error'))

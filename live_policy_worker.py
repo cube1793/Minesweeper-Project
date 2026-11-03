@@ -8,9 +8,14 @@ from live_policy import (
     LivePolicyError, ack_from_dict, ack_to_dict, plan_snapshot, proposal_to_dict,
     PHASE_FLAG_REVIEW, snapshot_from_dict, validate_ack, validate_start_snapshot,
 )
-from live_policy_transport import message, read_next, write_once
+from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, write_once
 import live_k_policy as k_live
 from stage3_physical import load_timing_table
+
+
+def _check_sequence(sequence, bound):
+    if type(sequence) is not int or not 0 <= sequence <= bound:
+        raise LivePolicyError("Entry-mode transport sequence bound exceeded.")
 
 
 def serve(directory, run_id):
@@ -21,8 +26,10 @@ def serve(directory, run_id):
     expected_snapshot = None
     review = None
     k_owner = None
+    sequence_bound = MAX_V1_SEQUENCE
     while True:
         try:
+            _check_sequence(sequence, sequence_bound)
             incoming = read_next(directory, "parent", sequence, run_id)
             if incoming is None:
                 sleep(.01)
@@ -36,7 +43,12 @@ def serve(directory, run_id):
                     if snapshot.run_id != run_id:
                         raise LivePolicyError("K START run identity mismatch.")
                     k_owner = k_live.KOwner(snapshot, table)
-                    outgoing = message(run_id, sequence, "PROPOSAL", k_live.to_dict(k_owner.propose(snapshot)))
+                    sequence_bound = k_live.sequence_limit(snapshot)
+                    if snapshot.entry_mode == k_live.FLAG_ADOPT:
+                        outgoing = message(run_id, sequence, "BOOTSTRAPPED",
+                                           k_live.to_dict(k_owner.bootstrap_proof.summary))
+                    else:
+                        outgoing = message(run_id, sequence, "PROPOSAL", k_live.to_dict(k_owner.propose(snapshot)))
                     write_once(directory, "worker", sequence, outgoing)
                     sequence += 1
                     continue

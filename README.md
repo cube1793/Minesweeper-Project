@@ -13,19 +13,19 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 ## Main/Live Simple·V1·실험적 K-P0 — 현재 범위 사용자 수용
 
-기존 Simple/V1은 98203e8, K-P0 첫 연결·추측 확률·V1/K 원형은 e23dec2에서 Git/recovery까지 완료됐습니다. 이후 확정색(v5)을 구현·독립 검토했고, 사용자는 직전 native 체크리스트 5항목에 “모두 통과야.”라고 확인했습니다. 현재 사용자 환경의 수용이며, 모든 DPI/OS·preset별 완주를 추정하지 않습니다.
+2026-11-04 기준, K 현재 판 인수·기존 깃발 준비·ACK 중 수동 인계·Simple 준비와 Replay UI 보완을 마쳤습니다. 최종 독립 보충 검토는 필수 수정 0이며, 사용자는 마지막 native 확인에 “드디어! 전부 통과야.”라고 확인했습니다. 현재 사용자 환경의 수용이며 모든 OS/DPI·preset별 완주·전체 suite를 의미하지 않습니다.
 
-새 판은 수동 가능·Auto OFF·guess OFF이며 정책 선택만으로 실행하지 않습니다. K-P0는 **선택 정책으로 새 게임**을 누른 초급·중급·상급만 지원합니다. K Auto OFF는 같은 owner의 일시정지입니다. 수동/Simple/V1로 진행한 판의 K 인수, 수동 인계·owner 종료 뒤 K 재인수는 아직 미지원입니다. Simple의 혼합 입력과 V1의 cleanup 뒤 같은 판 인수는 유지합니다. LC0/LC1은 disabled입니다.
+새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0는 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하며, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1/K custom과 Main LC0/LC1은 미지원입니다.
 
-K 추측의 **지뢰 확률**과 기존 확률 토글은 이미 계산한 exact 수치를 표시합니다. K가 이미 확정한 안전칸은 초록, HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 유지하며 실제 깃발 입력은 별도입니다. **자동 커서 표시**는 V1/K의 가상 원형이며 기존 관람 간격 안에서 이동하고 간격0은 점프합니다. K 승인 대기에서는 입력 전에 target에 도착할 수 있습니다. 실제 OS 마우스·Model C·인간 Mouse Trace/Replay는 바꾸지 않습니다.
+Auto OFF는 일시정지입니다. Simple/V1/K 모두 수동 입력하면 Auto와 추측 허용을 끄고 원래 클릭을 처리합니다. 다시 진행하려면 Auto를 켭니다. 별도 **추천·계산 종료** 버튼은 제거했습니다. 정책 라벨·선택·새 게임 버튼은 같은 줄에 모았습니다.
 
-V1은 공개 FLAG-free 직접 zero/all·총수 zero/all로 증명된 FLAG를 유지하고 SAFE/UNVERIFIED를 닫힌 상태로 해제합니다. 미검증은 오답/안전 판정이 아니며 실제 지뢰도 해제될 수 있습니다. 이 준비 검토를 K M에 임의 주입하지 않습니다.
+K 추측 확률은 이미 계산한 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace/Replay에 합성 입력을 만들지 않습니다.
 
-[K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 현재 계약·버전별 근거·수용과 한계를, [이전 Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)에 당시 기록을 보존했습니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. Main 속도는 ms 관람 간격이며 효과성·Production K/Gate P·새 package는 미승인입니다.
+현재 계약·버전별 검증·한계는 [K 인수·Simple 준비·Replay UI closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)에 정리했습니다. [이전 K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)과 [Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시의 역사입니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. **K-P0 (실험적)** 표시는 유지하며 효과성·Production K/Gate P·새 package는 미승인입니다.
 
 ## Simple Algorithm
 
-사람에게 보이는 열린 숫자·닫힌 칸·깃발과 공개 총 지뢰 수를 사용해 수를 추천합니다. 실제 숨겨진 지뢰 배치를 정답으로 참조하지 않으며, **깃발은 지뢰라고 가정**합니다.
+사람에게 보이는 열린 숫자·닫힌 칸·깃발과 공개 총 지뢰 수를 사용해 수를 추천합니다. 실제 숨겨진 지뢰 배치를 정답으로 참조하지 않습니다. 기존 Simple 분석기는 **깃발을 지뢰라고 가정**하며, Main Auto에서는 그 전에 공개 정보로 기존 깃발을 확인·정리합니다.
 
 1. **Local deterministic inference:** 열린 숫자에서 인접 깃발 수를 뺀 값으로 확정 안전/지뢰를 찾습니다.
 2. **Exact probability:** local 확정 수가 없을 때 공개 조건을 만족하는 전체 보드 경우의 수로 지뢰 확률을 계산합니다.
@@ -48,6 +48,8 @@ V1은 공개 FLAG-free 직접 zero/all·총수 zero/all로 증명된 FLAG를 유
 
 - `Replay 저장`과 `Replay 다른 이름으로 저장`으로 JSON을 저장하고, `Replay 불러오기`로 다시 열 수 있습니다. 지뢰 배치가 끝났다면 미완료 게임도 저장할 수 있습니다.
 - 게임 종료 후 `이번 판 Replay`로 파일 저장 없이 바로 볼 수 있습니다.
+- Replay는 기존 JSON의 `source_type`으로 **알고리즘 사용 기록: 있음/없음**을 표시합니다. 첫 실제 Auto 입력부터 기록하며, 알고리즘 이름·현재 참고 분석 정책과는 별개입니다. 옛 파일의 필드 생략은 기존 loader에서 `human`으로 읽으므로 “기록 없음”이 과거 자동 사용의 부재를 증명하지는 않습니다.
+- Replay의 Space는 재생/일시정지이며 끝·빈 기록을 자동으로 되감지 않습니다. Return/Enter는 새 게임을 만들지 않습니다. Live에서는 Space/Return/Enter가 새 게임이며 편집 중인 입력 위젯의 키는 보존합니다.
 - 처음·이전·다음·마지막 위치와 slider 이동, Index/Time 자동 재생을 지원합니다. Time 모드는 기록된 이벤트 시간을 사용하며 0.25배속부터 8배속까지 조절합니다.
 - 완료된 Replay는 현재 위치에 맞는 Counters를 표시하고, 미완료 Replay의 Counters는 마스킹합니다.
 - Replay 종료는 이전 Live 판을 이어가는 대신 저장해 둔 Live 난이도로 **새 게임**을 시작합니다.

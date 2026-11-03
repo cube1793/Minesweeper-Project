@@ -1,10 +1,12 @@
 # Main/Live K-P0 connection, probability/cursor and certainty closeout
 
+> **Historical v3–v5 checkpoint.** 2026-11-04 현재 판 인수·기존 FLAG·ACK 수동 인계·Simple/Replay UI까지의 현재 계약은 [새 closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)과 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 아래 새 게임 전용·추천/계산 종료·미커밋 문구는 당시 상태다. 이 문서의 확정색 단위는 a992892에서 Git/recovery까지 완료됐으며, 이후 v7 인수와 UI를 이 과거 실행에 소급하지 않는다.
+
 Updated: **2026-11-03 (Asia/Seoul)**. Status: **확정색(v5) 구현·독립 검토·사용자 native 5항목 PASS / 문서 마감 / 사용자 commit·push PENDING**.
 
 실험적 K-P0 첫 연결·K 추측 확률·V1/K 원형은 e23dec2에서 Git/recovery까지 완료됐다. 이 문서는 이후 확정색(v5) 증분을 포함한다. 사용자는 직전 확정색 native 체크리스트 5항목에 “모두 통과야.”라고 확인했다. 현재 환경의 체크리스트 PASS이며 배율 수치·preset별 실행 수/완주·모든 OS/DPI 수용은 추정하지 않는다. [이전 Simple/V1 closeout](STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시 버전의 역사로 보존한다.
 
-## 현재 기능과 사용
+## v5 당시 기능과 사용
 
 - **K-P0 (실험적)**를 선택하고 **선택 정책으로 새 게임**을 누른다. 초급·중급·상급 세 preset의 명시 새 게임만 지원하며 custom은 미지원이다. 새 판은 수동 가능·Auto OFF·guess OFF, 정책 선택만으로 실행하지 않는다. 분석-only는 실제 입력하지 않는다.
 - K Auto OFF는 같은 owner와 유효 pending 보관 일시정지다. 수동 입력 없이 재개할 수 있다. 수동 첫 press·추천/계산 종료·정책 전환 등으로 owner를 종료한 뒤 같은 판 K 재진입은 미지원이다. 수동/Simple/V1로 진행한 판의 K 신규 인수도 후속이다. 기존 V1의 cleanup 뒤 ADOPT와 Simple 혼합 입력은 유지한다.

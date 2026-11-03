@@ -41,7 +41,7 @@ engine.get_observation() 결과로 보드를 렌더링하며, Replay 재생 상�
 import os
 import time
 from bisect import bisect_right
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import IntEnum
 from uuid import uuid4
@@ -50,6 +50,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QGridLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QSizePolicy, QShortcut, QInputDialog,
     QSpinBox, QDoubleSpinBox, QScrollArea, QSlider,
+    QAbstractSpinBox, QLineEdit, QTextEdit, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QCheckBox, QMenu, QToolButton,
 )
@@ -60,13 +61,15 @@ from core_engine import MinesweeperEngine, CellState, GameStatus, Action
 from live_analysis import (
     CellOverlay, LiveAnalysis, OverlayKind, first_click_presentation,
     format_mine_probability, is_all_hidden, present_decision, reduced_number,
-    present_v1_proposal, present_k_proposal,
+    present_v1_proposal, present_k_proposal, present_flag_preparation,
 )
 from live_policy import (
     POLICY_SIMPLE, POLICY_V1, POLICY_K, CANONICAL_NEW, ADOPT_CURRENT, PHASE_FLAG_REVIEW, PHASE_V1,
     admit_proposal, make_ack, make_snapshot, supports_v1_board, validate_ack,
 )
 from live_flag_review import report_to_dict
+from live_simple_preparation import prepare_flags
+from stage3_physical import action_cost, load_timing_table, PROFILE_SHA256, TABLE_SHA256
 from live_policy_job import LivePolicyJob
 from live_auto_cursor import LiveAutoCursorOverlay
 import live_k_policy as k_live
@@ -104,6 +107,25 @@ MAX_CELL_SIZE = 60
 DEFAULT_CELL_SIZE = 28
 SIMPLE_AUTO_STEP_INTERVAL_MS = 180
 MAX_DIMENSION = 100  # 커스텀 가로/세로 최대 칸 수
+
+
+@dataclass(frozen=True)
+class _KInputReceipt:
+    """Seal of the completed input, independent of later manual board changes."""
+    ack: object
+    game_id: str
+    history: tuple
+    events: tuple
+    action: tuple
+    acknowledged: bool = False
+
+
+_K_RECEIPT_FIELDS = (
+    'game_id', 'run_id', 'board_generation', 'token', 'permit_nonce',
+    'input_revision_before', 'input_revision_after', 'event_index',
+    'action', 'x', 'y', 'before', 'after', 'status', 'cursor_after',
+    'actual_input_confirmed', 'ack_sent',
+)
 
 # 통계 패널 폭(px). 150~180 권장 범위 내.
 REPLAY_AUTOPLAY_INTERVAL_MS = 200
@@ -281,6 +303,8 @@ class LiveStatusLabel(QLabel):
             if "정리 실패" in state:
                 state = "정리 실패 · " + state
             return state + " | " + policy.removeprefix("현재: ")
+        if "깃발 확인/정리" in text and "미확인 깃발" in text:
+            return "미확인 깃발은 실제 지뢰여도 해제될 수 있습니다.\n" + " | ".join(text.split(" | ", 2)[:2])
         if "미검증" in text and "깃발" in text:
             phase = "검토 중" if "검토 중" in text else "준비"
             warning = "미검증 깃발 해제 · 실제 지뢰일 수 있음"
@@ -504,6 +528,14 @@ class MinesweeperUI(QWidget):
         self._replay_view_index = None
         self._analysis_observation = None
         self._analysis_first_click = False
+        self._simple_preparation = None
+        self._simple_preparation_seq = 0
+        self._simple_preparation_start = 0
+        self._simple_review_dirty = True
+        self._simple_expected_binding = None
+        self._simple_analysis_binding = None
+        self._simple_applying_preparation = False
+        self._simple_timing_table = None
         self._simple_auto_pending = False
         self._simple_auto_timer = QTimer(self)
         self._simple_auto_timer.setSingleShot(True)
@@ -520,8 +552,10 @@ class MinesweeperUI(QWidget):
         self._live_fresh_reset = (engine.status == GameStatus.PLAYING
                                   and is_all_hidden(engine.get_observation())
                                   and not engine.get_board_snapshot().mines_placed)
+        self._live_history_known = self._live_fresh_reset
         self._live_input_uncertain = False
         self._live_closing = False
+        self._live_close_error = None
         self._v1_cursor = (0, 0)
         self._v1_input_seq = 0
         self._v1_entry_mode = CANONICAL_NEW
@@ -529,12 +563,21 @@ class MinesweeperUI(QWidget):
         self._v1_initial_flag_count = 0
         self._v1_review_inputs = 0
         self._v1_expected_ack = None
+        self._k_ack_receipt = None
+        self._k_retiring = None
+        self._live_first_failure = None
+        self.live_failure_records = []
         self._v1_pending = None
         self._v1_display_requested = False
         self._v1_owned = False
         self._v1_manual_only = False
-        self._k_retired = False
+        self._k_retired = False  # Failure latch only; normal retirement permits a new owner.
         self._k_reset_ready = False  # Explicit new-game/reset provenance, not merely all-HIDDEN.
+        self._k_start_input_revision = 0
+        self._k_phase = k_live.PHASE_K
+        self._k_preparation_seq = 0
+        self._k_normal_start = None
+        self._k_bootstrap = None
         self._k_base_m = ()
         self._k_m_revision = 0
         self._k_validation_nonce = None
@@ -609,6 +652,7 @@ class MinesweeperUI(QWidget):
                     and self._v1_job.last_record.get('policy_id') == POLICY_K):
                 self._on_v1_finished(self._v1_job.last_record)
             self._v1_status = f"정리 실패: {exc}"
+            self._live_close_error = str(exc)
             self._update_policy_controls()
             event.ignore()
             return
@@ -641,8 +685,14 @@ class MinesweeperUI(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, watched, event):
-        # These filters observe only the window/board/viewport, never consume
-        # input, and do not split segments at ordinary cell-to-cell crossings.
+        if (event.type() == QEvent.ShortcutOverride
+                and event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter)
+                and not self._game_shortcut_available()):
+            # Leave editing, popup and modal keys with their original widget.
+            event.accept()
+            return True
+        # Mouse observers do not consume input or split segments at ordinary
+        # cell-to-cell crossings.
         if event.type() in (QEvent.Hide, QEvent.WindowDeactivate, QEvent.WindowBlocked):
             self._invalidate_mouse_input()
         if event.type() in (QEvent.Leave, QEvent.Hide, QEvent.Move, QEvent.Resize,
@@ -1062,28 +1112,29 @@ class MinesweeperUI(QWidget):
         main_layout.addLayout(top_bar)
 
         policy_bar = QHBoxLayout()
-        policy_bar.addWidget(QLabel("Auto 알고리즘:"))
+        self.live_policy_label = QLabel("Auto 알고리즘:")
+        self.live_policy_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        policy_bar.addWidget(self.live_policy_label)
         self.live_policy_combo = QComboBox()
         self.live_policy_combo.addItem("Stage2 Simple", POLICY_SIMPLE)
         self.live_policy_combo.addItem("Stage3 V1", POLICY_V1)
-        self.live_policy_combo.addItem("K-P0 (실험적 · 새 게임 전용)", POLICY_K)
+        self.live_policy_combo.addItem("K-P0 (실험적)", POLICY_K)
         for label, policy in (("K-LC0", "K_LC0"), ("K-LC1", "K_LC1")):
             self.live_policy_combo.addItem(f"{label} — 이번 단계 미지원", policy)
             item = self.live_policy_combo.model().item(self.live_policy_combo.count() - 1)
             item.setEnabled(False)
             item.setToolTip("다음 구현 단위에서 연결할 실험적 정책입니다.")
         self.live_policy_combo.setToolTip("정책 변경은 Auto를 멈춥니다. 다음 Auto ON부터 현재 판에 적용합니다.")
+        self.live_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.live_policy_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.live_policy_combo.currentIndexChanged.connect(self._on_live_policy_changed)
         self.live_policy_new_game_button = QPushButton("선택 정책으로 새 게임")
+        self.live_policy_new_game_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.live_policy_new_game_button.clicked.connect(self.on_reset)
-        self.live_takeover_button = QPushButton("추천·계산 종료")
-        self.live_takeover_button.setToolTip(
-            "보관된 추천을 버리고 계산을 종료합니다. 다시 Auto를 켜면 현재 보드에서 새로 계산합니다.")
-        self.live_takeover_button.clicked.connect(self.on_live_takeover)
         self.live_policy_status_label = LiveStatusLabel("현재: Stage2 Simple", 1)
         policy_bar.addWidget(self.live_policy_combo)
         policy_bar.addWidget(self.live_policy_new_game_button)
-        policy_bar.addWidget(self.live_takeover_button)
+        policy_bar.addStretch()
         main_layout.addLayout(policy_bar)
         # A full-width fixed status row keeps the state readable on narrow
         # windows instead of competing with the policy selection buttons.
@@ -1107,9 +1158,10 @@ class MinesweeperUI(QWidget):
         self.simple_auto_interval_spin.valueChanged.connect(self.on_simple_auto_interval_changed)
         self.simple_auto_interval_spin.lineEdit().textEdited.connect(
             self._on_simple_auto_interval_edited)
-        auto_interval_label = QLabel("자동 간격:")
-        auto_interval_label.setBuddy(self.simple_auto_interval_spin)
+        self.auto_interval_label = QLabel("자동 간격:")
+        self.auto_interval_label.setBuddy(self.simple_auto_interval_spin)
         self.allow_guess_checkbox = QCheckBox("추측 허용")
+        self.allow_guess_checkbox.setToolTip("Auto 일시정지는 선택을 보관합니다. 수동 전환·정책 변경·오류·새 게임에서는 해제됩니다.")
         self.allow_guess_checkbox.setEnabled(False)
         self.analyze_button.setFocusPolicy(Qt.NoFocus)
         self.analysis_checkbox.setToolTip("현재 보드를 분석하고 사용자 액션 후 자동 갱신")
@@ -1124,7 +1176,7 @@ class MinesweeperUI(QWidget):
         self.allow_guess_checkbox.toggled.connect(self.on_allow_guess_toggled)
         for control in (self.analysis_checkbox, self.probability_checkbox,
                         self.reduction_checkbox, self.analyze_button,
-                        self.simple_auto_checkbox, auto_interval_label,
+                        self.simple_auto_checkbox, self.auto_interval_label,
                         self.simple_auto_interval_spin, self.allow_guess_checkbox):
             analysis_bar.addWidget(control)
         analysis_bar.addStretch()
@@ -1252,11 +1304,34 @@ class MinesweeperUI(QWidget):
         self.resize(w, h)
 
     def _init_shortcuts(self):
-        """창 전체에 글로벌 작동하는 재시작 단축키."""
+        """Route one key press according to the current Live/Replay mode."""
         for key in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WindowShortcut)
-            sc.activated.connect(self.on_reset)
+            sc.setAutoRepeat(False)
+            sc.activated.connect(lambda key=key: self._on_game_shortcut(key))
+
+    def _game_shortcut_available(self):
+        if (self._live_closing or QApplication.activeModalWidget() is not None
+                or QApplication.activePopupWidget() is not None):
+            return False
+        focus = QApplication.focusWidget()
+        while focus is not None and focus is not self:
+            if isinstance(focus, (QAbstractSpinBox, QLineEdit, QTextEdit, QPlainTextEdit)):
+                return False
+            if isinstance(focus, QComboBox) and focus.isEditable():
+                return False
+            focus = focus.parentWidget()
+        return True
+
+    def _on_game_shortcut(self, key):
+        if not self._game_shortcut_available():
+            return
+        if self._replay_mode:
+            if key == Qt.Key_Space and self.replay_play_button.isEnabled():
+                self.replay_play_button.click()
+            return
+        self.on_reset()
 
     # ------------------------------------------------------------------
     # 타이머 처리
@@ -2702,6 +2777,7 @@ class MinesweeperUI(QWidget):
         if self._live_closing or self._replay_mode or self.engine.status != GameStatus.PLAYING:
             return None
         if auto_observation is None:
+            self._reset_simple_preparation()
             self._retire_v1_for_manual("수동 입력으로 인계")
             if self._live_policy in (POLICY_V1, POLICY_K):
                 blocked = self.allow_guess_checkbox.blockSignals(True)
@@ -2787,6 +2863,8 @@ class MinesweeperUI(QWidget):
         self._update_same_board_comparison_action()
 
     def on_reset(self):
+        if self._replay_mode or self._live_closing:
+            return
         if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K):
             self._stop_simple_auto()
             self._clear_live_analysis("선택한 정책은 이번 단계에서 지원하지 않습니다.")
@@ -2794,8 +2872,6 @@ class MinesweeperUI(QWidget):
         self._invalidate_v1_run("새 게임")
         self._invalidate_mouse_input()
         self._stop_simple_auto()
-        if self._replay_mode:
-            return
         self._clear_live_analysis()
         self._reset_counter_metrics_for_board_change()
         self.engine.reset()
@@ -2827,6 +2903,7 @@ class MinesweeperUI(QWidget):
         job = LivePolicyJob(self)
         job.proposal_ready.connect(self._on_v1_proposal)
         job.admitted.connect(self._on_k_admitted)
+        job.bootstrapped.connect(self._on_k_bootstrapped)
         job.acknowledged.connect(self._on_v1_acknowledged)
         job.finished.connect(self._on_v1_finished)
         return job
@@ -2839,6 +2916,7 @@ class MinesweeperUI(QWidget):
             self._v1_job = self._create_v1_job()
             self._v1_job.records.extend(prior_records)
             self._live_closing = False
+            self._live_close_error = None
             self._update_policy_controls()
 
     def _v1_supported(self):
@@ -2854,6 +2932,7 @@ class MinesweeperUI(QWidget):
         return {"auto_inputs": 0, "simple_inputs": 0, "v1_inputs": 0,
                 "preparation_inputs": 0, "v1_modeled_us": 0,
                 "preparation_modeled_us": 0, "modeled_us": 0,
+                "preparation_unmodeled_inputs": 0,
                 "k_inputs": 0, "k_modeled_us": 0}
 
     def _k_fresh_start(self):
@@ -2861,6 +2940,38 @@ class MinesweeperUI(QWidget):
                 and self._v1_cursor == (0, 0) and self.engine.status == GameStatus.PLAYING
                 and is_all_hidden(self.engine.get_observation())
                 and not self.engine.get_board_snapshot().mines_placed)
+
+    def _known_live_history(self):
+        """Attest this UI's input ledger, never reconstruct history from a grid."""
+        if not self._live_history_known or self._live_input_uncertain:
+            return False
+        count = self._live_action_count
+        counters = self.engine.get_counter_snapshot()
+        if (type(count) is not int or count < 0 or len(self.live_input_records) != count
+                or counters['active_clicks'] + counters['wasted_clicks'] != count):
+            return False
+        if count == 0:
+            return not self._replay_recorder.events and self._v1_cursor == (0, 0)
+        last = self.live_input_records[-1]
+        return (last['game_id'] == self._live_game_id and last['input_revision'] == count
+                and (last['x'], last['y']) == self._v1_cursor
+                and last['event_index'] is not None
+                and last['event_index'] == len(self._replay_recorder.events) - 1)
+
+    def _k_start_block_reason(self):
+        if self._k_retired or self._v1_manual_only or self._live_input_uncertain:
+            return self._live_failure_text()
+        if self._k_retiring is not None:
+            return "수동 인계 정리 중 · 이전 입력 확인 후 다시 시작하세요."
+        if self.engine.status != GameStatus.PLAYING:
+            return "게임이 종료되었습니다."
+        if not self._v1_supported():
+            return "초급·중급·상급만 지원합니다. 커스텀 보드는 지원하지 않습니다."
+        if not self._known_live_history():
+            return "실제 입력 이력·기록을 확인할 수 없습니다. 새 게임이 필요합니다."
+        if self._live_action_count == 0 and not self._k_fresh_start():
+            return "K-P0 첫 시작은 선택 정책으로 새 게임을 눌러 주세요."
+        return None
 
     def _on_live_policy_changed(self, *_args):
         selected = self.live_policy_combo.currentData()
@@ -2870,16 +2981,10 @@ class MinesweeperUI(QWidget):
             self.live_policy_combo.blockSignals(blocked)
             return
         if selected != self._live_policy:
-            self._invalidate_v1_run("Auto 정책 변경", cancel=False)
-            blocked = self.simple_auto_checkbox.blockSignals(True)
-            self.simple_auto_checkbox.setChecked(False)
-            self.simple_auto_checkbox.blockSignals(blocked)
-            self.allow_guess_checkbox.setEnabled(False)
+            self._invalidate_v1_run("Auto 정책 변경", drain_ack=True)
             self._live_policy = selected
             self._v1_status = "수동 · 다음 Auto ON에 현재 판 인수"
             self._clear_live_analysis("정책 선택 완료 · Auto OFF")
-            if self._v1_job.active_run_id is not None:
-                self._v1_job.cancel("Auto 정책 변경")
         self._update_policy_controls()
 
     def _update_policy_controls(self, *_args):
@@ -2893,26 +2998,47 @@ class MinesweeperUI(QWidget):
                 and not (self._live_policy == POLICY_K and self._k_retired))
             self.auto_cursor_checkbox.setEnabled(
                 self._live_policy in (POLICY_V1, POLICY_K) and not self._replay_mode and not self._live_closing)
-        self.live_policy_combo.setEnabled(not self._replay_mode and not self._live_closing)
-        self.live_policy_new_game_button.setEnabled(not self._replay_mode and not self._live_closing)
-        self.live_takeover_button.setEnabled(
-            not self._replay_mode and not self._live_closing
-            and self._live_policy in (POLICY_V1, POLICY_K) and self._v1_owned)
+        live_available = not self._replay_mode and not self._live_closing
+        self.reset_button.setEnabled(live_available)
+        self.difficulty_combo.setEnabled(live_available)
+        self.live_policy_combo.setEnabled(live_available)
+        self.live_policy_new_game_button.setEnabled(live_available)
+        self.simple_auto_interval_spin.setEnabled(live_available)
+        if self._live_closing:
+            self.allow_guess_checkbox.setEnabled(False)
+        for control in (self.live_policy_label, self.live_policy_combo,
+                        self.live_policy_new_game_button, self.simple_auto_checkbox,
+                        self.auto_interval_label, self.simple_auto_interval_spin,
+                        self.allow_guess_checkbox):
+            control.setVisible(not self._replay_mode)
+        self.analysis_checkbox.setText("참고 분석 표시" if self._replay_mode else "분석 표시")
+        self.analyze_button.setText("참고 분석" if self._replay_mode else "현재 상태 분석")
+        self.analysis_checkbox.setToolTip(
+            "Replay 현재 보드의 참고 분석입니다. 저장된 플레이 정책을 나타내지 않습니다."
+            if self._replay_mode else "현재 보드를 분석하고 사용자 액션 후 자동 갱신")
+        self.analyze_button.setToolTip(
+            "Stage2 Simple로 한 번 참고 분석합니다. 저장된 플레이 정책과는 무관합니다."
+            if self._replay_mode else "한 번 분석하여 표시 (추천 액션은 실행하지 않음)")
         self.simple_auto_checkbox.setToolTip(
-            "체크를 끄면 일시정지하며 현재 추천을 보관합니다. 보드를 클릭하면 수동으로 전환합니다."
-            if self._live_policy in (POLICY_V1, POLICY_K) else
-            "체크를 끄면 자동 진행을 멈추고 현재 분석 표시를 보관합니다. "
-            "Simple은 수동 입력과 자동 진행을 함께 사용할 수 있습니다.")
-        self.live_takeover_button.setToolTip(
-            "보관된 추천을 버리고 계산을 종료합니다. K-P0를 다시 시작하려면 새 게임이 필요합니다."
-            if self._live_policy == POLICY_K else
-            "보관된 추천을 버리고 계산을 종료합니다. 다시 Auto를 켜면 현재 보드에서 새로 계산합니다.")
-        if self._replay_mode:
-            source = self._replay_data.source_type if self._replay_data is not None else "unknown"
-            label = "알고리즘 미기록 / unknown" if source in (SOURCE_ALGORITHM, SOURCE_AI) else "저장 Replay"
-            self.live_policy_status_label.setText(f"{label} | 참고 분석: Stage2 Simple")
+            "Auto OFF는 추천·추측 선택을 보관하는 일시정지입니다. 보드를 클릭하면 수동으로 전환하며 추측 선택을 해제합니다.")
+        if self._live_close_error is not None:
+            # Presentation only: shutdown's closing/ownership/failure state stays latched.
+            self.simple_auto_checkbox.setEnabled(False)
+            self.analyze_button.setEnabled(self._replay_mode)
+            self.live_policy_status_label.setText(
+                "종료 정리에 실패했습니다. 새 게임·자동 진행을 사용할 수 없습니다.\n"
+                f"원인: {self._live_close_error}")
             return
-        cleanup_ready = self._v1_owned or self._v1_job.state == "idle"
+        if self._replay_mode:
+            source = self._replay_data.source_type if self._replay_data is not None else None
+            recorded = ("있음" if source in (SOURCE_ALGORITHM, SOURCE_AI)
+                        else "없음" if source == SOURCE_HUMAN else "확인 불가")
+            self.live_policy_status_label.setText(f"알고리즘 사용 기록: {recorded}")
+            self.live_policy_status_label.setToolTip(
+                "저장된 사용 기록만 표시합니다. 외부·옛 파일의 실제 알고리즘 사용 여부나 정책을 검증한 정보는 아닙니다.")
+            return
+        self.live_policy_status_label.setToolTip("")
+        cleanup_ready = self._k_retiring is None and (self._v1_owned or self._v1_job.state == "idle")
         runnable = (not self._live_closing and not self._live_input_uncertain
                     and self.engine.status == GameStatus.PLAYING
                     and cleanup_ready)
@@ -2933,11 +3059,22 @@ class MinesweeperUI(QWidget):
                 text = f"현재: {label} | 초급·중급·상급 지원 (커스텀 미지원)"
             runnable = (runnable and self._v1_supported() and not self._v1_manual_only
                         and not self._live_input_uncertain and self._v1_job.state != "blocked")
-            if self._live_policy == POLICY_K and not self._v1_owned and not self._k_fresh_start():
-                text = "현재: K-P0 (실험적) | 새 게임 필요 · 같은 판 재인수 미지원"
+            if self._live_policy == POLICY_K and not self._v1_owned:
+                reason = self._k_start_block_reason()
+                if reason:
+                    text = "현재: K-P0 (실험적) | " + reason
+                    runnable = False
+                elif any(v == CellState.FLAGGED for row in self.engine.get_observation() for v in row):
+                    text = "현재: K-P0 (실험적) | 깃발 확인/정리 후 현재 판 계속"
                 if not cleanup_ready:
                     text += " · 이전 worker 정리 중/실패"
-                runnable = False
+        if self._live_first_failure is not None or self._live_input_uncertain or self._v1_manual_only:
+            text = self._live_failure_text()
+            runnable = False
+        elif self._k_retiring is not None:
+            text = "수동 인계 정리 중 · 이전 입력 확인/worker 정리 대기"
+        elif self.engine.status != GameStatus.PLAYING:
+            text = f"게임 종료 ({self.engine.status.name}) | {self._v1_status}"
         self.simple_auto_checkbox.setEnabled(runnable)
         self.analyze_button.setEnabled(runnable)
         self.live_policy_status_label.setText(text)
@@ -2963,7 +3100,11 @@ class MinesweeperUI(QWidget):
         self._live_game_id = uuid4().hex
         self._live_action_count = 0
         self._live_fresh_reset = True
+        self._live_history_known = True
         self._live_input_uncertain = False
+        self._live_first_failure = None
+        self._k_ack_receipt = None
+        self._k_retiring = None
         self._v1_cursor = (0, 0)
         self.auto_cursor_overlay.set_actual((0, 0))
         self.auto_cursor_overlay.clear()
@@ -2976,6 +3117,11 @@ class MinesweeperUI(QWidget):
         self._v1_owned = False
         self._v1_manual_only = False
         self._k_retired = False
+        self._k_start_input_revision = 0
+        self._k_phase = k_live.PHASE_K
+        self._k_preparation_seq = 0
+        self._k_normal_start = None
+        self._k_bootstrap = None
         self._k_base_m = ()
         self._k_m_revision = 0
         self._k_validation_nonce = None
@@ -2987,46 +3133,63 @@ class MinesweeperUI(QWidget):
         self.live_auto_totals = self._empty_live_auto_totals()
         self._update_policy_controls()
 
-    def _invalidate_v1_run(self, reason, *, cancel=True):
-        if self._live_policy == POLICY_K and (self._v1_owned or reason == "Auto 정책 변경"):
-            self._k_retired = True
+    def _invalidate_v1_run(self, reason, *, cancel=True, drain_ack=False):
+        # Revoke input permission immediately. Only the sealed completed input
+        # can outlive this owner; its ACK never authorizes another NEXT.
+        self._reset_simple_preparation()
+        if drain_ack and self._k_retiring is None and self._k_ack_receipt is not None:
+            try:
+                self._verify_k_receipt(self._k_ack_receipt, self._v1_expected_ack)
+                self._k_retiring = self._k_ack_receipt
+            except Exception as exc:
+                self._record_live_failure(str(exc), stage="handoff")
+        waiting = drain_ack and self._k_retiring is not None
+        if not waiting:
+            if self._v1_expected_ack is not None and self._live_policy == POLICY_K:
+                self._record_live_failure("이전 실제 입력의 ACK를 확인하지 못했습니다.", stage="ACK")
+            self._k_retiring = None
+        self._set_auto_off(clear_guess=True)
         self._live_board_generation += 1
         self._cancel_simple_auto_step()
         self._v1_pending = None
         self._v1_expected_ack = None
+        self._k_ack_receipt = None
         self._v1_owned = False
         self.auto_cursor_overlay.clear()
         self._v1_display_requested = False
-        if self._live_policy == POLICY_K:
-            self._clear_live_analysis(reason)
+        self._clear_live_analysis(reason)
         for record in reversed(self.live_owner_records):
             if record["run_id"] == self._live_run_id and record.get("end_reason") is None:
                 record.update(end_reason=reason, end_revision=self._live_action_count,
-                              end_event_index=len(self._replay_recorder.events))
+                              end_event_index=len(self._replay_recorder.events),
+                              end_cursor=self._v1_cursor)
                 break
+        self._k_base_m = ()
+        self._k_m_revision = 0
+        self._k_start_input_revision = 0
+        self._k_phase = k_live.PHASE_K
+        self._k_preparation_seq = 0
+        self._k_normal_start = None
+        self._k_bootstrap = None
         if self._live_policy in (POLICY_V1, POLICY_K):
             self._v1_status = reason
-        if cancel and self._v1_job.active_run_id is not None:
+        if cancel and not waiting and self._v1_job.active_run_id is not None:
             self._v1_job.cancel(reason)
 
     def _retire_v1_for_manual(self, reason):
-        if (self._live_policy not in (POLICY_V1, POLICY_K) or self._replay_mode
-                or not (self._v1_owned or self._v1_pending is not None
-                        or self.simple_auto_checkbox.isChecked())):
+        if self._replay_mode:
             return
-        self._invalidate_v1_run(reason, cancel=False)
-        blocked = self.simple_auto_checkbox.blockSignals(True)
-        self.simple_auto_checkbox.setChecked(False)
-        self.simple_auto_checkbox.blockSignals(blocked)
-        self.allow_guess_checkbox.setEnabled(False)
-        self._clear_live_analysis("수동 플레이 · K-P0는 새 게임 필요" if self._live_policy == POLICY_K
+        if self._live_policy == POLICY_SIMPLE:
+            self._set_auto_off(clear_guess=True)
+            self._clear_live_analysis("수동 플레이")
+            return
+        if not (self._v1_owned or self._v1_pending is not None or self.simple_auto_checkbox.isChecked()):
+            self._set_auto_off(clear_guess=True)
+            return
+        self._invalidate_v1_run(reason, drain_ack=True)
+        self._clear_live_analysis("수동 플레이 · 정리 후 현재 판을 K-P0로 인수" if self._live_policy == POLICY_K
                                   else "수동 플레이 · 정리 후 Auto ON으로 다시 인수")
-        if self._v1_job.active_run_id is not None:
-            self._v1_job.cancel(reason)
         self._update_policy_controls()
-
-    def on_live_takeover(self):
-        self._retire_v1_for_manual("추천·계산 종료 · 수동 가능")
 
     def _v1_snapshot(self):
         if self._live_policy == POLICY_K:
@@ -3035,7 +3198,11 @@ class MinesweeperUI(QWidget):
                 input_seq=self._v1_input_seq, width=self.engine.width, height=self.engine.height,
                 num_mines=self.engine.num_mines, observation=self.engine.get_observation(),
                 cursor=self._v1_cursor, input_revision=self._live_action_count,
-                base_m_revision=self._k_m_revision, base_m=self._k_base_m)
+                base_m_revision=self._k_m_revision, base_m=self._k_base_m,
+                entry_mode=self._v1_entry_mode, start_input_revision=self._k_start_input_revision,
+                phase=self._k_phase, preparation_seq=self._k_preparation_seq,
+                k_start_input_revision=self._k_normal_start, bootstrap=self._k_bootstrap,
+                definition=k_live.definition_for_entry(self._v1_entry_mode), status=self.engine.status.name)
         return make_snapshot(
             run_id=self._live_run_id, board_generation=self._live_board_generation,
             input_seq=self._v1_input_seq, width=self.engine.width, height=self.engine.height,
@@ -3052,16 +3219,62 @@ class MinesweeperUI(QWidget):
         return admit_proposal(proposal, self._v1_snapshot())
 
     def _fail_v1(self, message):
+        self._record_live_failure(message)
         self._invalidate_v1_run("중단 · 새 게임이 필요합니다")
         if self._live_policy == POLICY_K:
             self._k_retired = True
-        else:
-            self._v1_manual_only = True  # Unexpected V1 failure, never normal handoff.
-            self._live_input_uncertain = True
-        self._stop_simple_auto()
+        self._v1_manual_only = True  # Unexpected failure, never normal handoff.
+        self._live_input_uncertain = True
+        self._set_auto_off(clear_guess=True)
         label = "K-P0" if self._live_policy == POLICY_K else "V1"
         self._clear_live_analysis(f"{label} 자동 진행 중단 - {message}")
         self._update_policy_controls()
+
+    def _live_failure_text(self):
+        cause = (self._live_first_failure or {}).get('cause', '실제 입력·기록을 확인할 수 없습니다.')
+        terminal = f"{self._v1_status} | " if self.engine.status != GameStatus.PLAYING else ""
+        return f"{terminal}자동 진행 차단: {cause} · 새 게임이 필요합니다. 수동 플레이는 가능합니다."
+
+    def _record_live_failure(self, message, *, stage=None):
+        if self._live_first_failure is None:
+            failure = dict(game_id=self._live_game_id, run_id=self._live_run_id,
+                           input_revision=self._live_action_count, cause=str(message),
+                           stage=stage or self._v1_job.state,
+                           ack_pending=self._v1_expected_ack is not None or self._k_retiring is not None,
+                           cleanup_state=self._v1_job.state)
+            self._live_first_failure = failure
+            self.live_failure_records.append(failure)
+            for owner in reversed(self.live_owner_records):
+                if owner['run_id'] == self._live_run_id:
+                    owner['first_failure'] = dict(failure)
+                    break
+        self._live_input_uncertain = True
+        self._v1_manual_only = True
+        if self._live_policy == POLICY_K or self._k_retiring is not None:
+            self._k_retired = True
+
+    def _seal_k_receipt(self, ack, action):
+        if not self._known_live_history():
+            raise ValueError("K 실제 입력 이력을 확인할 수 없습니다.")
+        return _KInputReceipt(ack, self._live_game_id,
+                              tuple(tuple(sorted(row.items())) for row in self.live_input_records),
+                              tuple(self._replay_recorder.events),
+                              tuple(action.get(key) for key in _K_RECEIPT_FIELDS))
+
+    def _verify_k_receipt(self, receipt, ack):
+        if type(receipt) is not _KInputReceipt or ack != receipt.ack or receipt.acknowledged:
+            raise ValueError("K ACK가 원 입력과 다르거나 중복되었습니다.")
+        ack.__post_init__()
+        k_live.next_snapshot(ack.permit.proposal, ack)
+        matches = [row for row in self.live_action_records
+                   if row.get('run_id') == ack.run_id and row.get('token') == ack.token]
+        if (receipt.game_id != self._live_game_id or len(matches) != 1
+                or tuple(matches[0].get(key) for key in _K_RECEIPT_FIELDS) != receipt.action
+                or tuple(tuple(sorted(row.items())) for row in self.live_input_records[:len(receipt.history)]) != receipt.history
+                or tuple(self._replay_recorder.events[:len(receipt.events)]) != receipt.events
+                or not self._known_live_history()):
+            raise ValueError("K 원 입력/Replay 이력이 달라졌습니다.")
+        return matches[0]
 
     def _show_v1_pending(self):
         proposal = self._v1_pending
@@ -3107,11 +3320,14 @@ class MinesweeperUI(QWidget):
                 self._v1_status = "이전 worker 정리 중 · 완료 후 다시 시작하세요"
                 self._update_policy_controls()
                 return
-            if self._live_policy == POLICY_K and not self._k_fresh_start():
-                self._stop_simple_auto()
-                self._v1_status = "새 게임 필요 · 같은 판 K 재인수 미지원"
-                self._update_policy_controls()
-                return
+            if self._live_policy == POLICY_K:
+                reason = self._k_start_block_reason()
+                if reason:
+                    self._stop_simple_auto()
+                    self._v1_status = reason
+                    self._clear_live_analysis(reason)
+                    self._update_policy_controls()
+                    return
             observation = self.engine.get_observation()
             pristine = (self._live_fresh_reset and self._live_action_count == 0
                         and is_all_hidden(observation)
@@ -3123,27 +3339,76 @@ class MinesweeperUI(QWidget):
             self._v1_input_seq = self._v1_review_inputs = 0
             self._v1_expected_ack = None
             self._v1_entry_mode = CANONICAL_NEW if pristine else ADOPT_CURRENT
+            self._k_start_input_revision = self._live_action_count
+            self._k_base_m = ()
+            self._k_m_revision = 0
             self._v1_initial_flag_count = sum(value == CellState.FLAGGED
                                               for row in observation for value in row)
+            self._k_phase = k_live.PHASE_K
+            self._k_preparation_seq = 0
+            self._k_normal_start = None
+            self._k_bootstrap = None
+            if self._live_policy == POLICY_K and self._v1_initial_flag_count:
+                self._v1_entry_mode = k_live.FLAG_ADOPT
+                self._k_phase = k_live.PHASE_BOOTSTRAP
             self._v1_phase = PHASE_FLAG_REVIEW if self._v1_initial_flag_count else PHASE_V1
             snapshot = self._v1_snapshot()
             self.live_owner_records.append({
                 "game_id": self._live_game_id, "run_id": self._live_run_id,
                 "policy_id": self._live_policy,
-                "definition": k_live.DEFINITION if self._live_policy == POLICY_K else "STAGE3_V1",
+                "definition": snapshot.definition if self._live_policy == POLICY_K else "STAGE3_V1",
                 "board_generation": self._live_board_generation,
-                "entry_mode": self._v1_entry_mode, "phase": self._v1_phase,
+                "entry_mode": self._v1_entry_mode,
+                "phase": self._k_phase if self._live_policy == POLICY_K else self._v1_phase,
                 "start_revision": self._live_action_count,
+                "start_input_revision": self._live_action_count,
                 "start_event_index": len(self._replay_recorder.events),
                 "cursor": self._v1_cursor, "initial_flag_count": self._v1_initial_flag_count,
                 "end_reason": None, "cleanup": None, "review": None,
                 "k_actions": [],
+                "preparation_input_count": 0, "k_input_count": 0, "k_ack_count": 0,
             })
             self._v1_owned = True
             self._v1_job.start(snapshot)
-            self._v1_status = ("깃발 검토 중 · 정리 전" if self._v1_initial_flag_count else "계산 중")
+            self._v1_status = ("깃발 확인/정리 중" if self._v1_initial_flag_count else "계산 중")
             if self._v1_initial_flag_count:
-                self._clear_live_analysis("깃발 검토 중 · 미검증 깃발은 실제 지뢰여도 해제될 수 있습니다.")
+                self._clear_live_analysis("깃발 확인/정리 중 · 미확인 깃발은 실제 지뢰여도 해제될 수 있습니다.")
+            self._update_policy_controls()
+        except Exception as exc:
+            self._fail_v1(str(exc))
+
+    def _record_k_policy_start(self):
+        if self._k_phase != k_live.PHASE_K or self._v1_entry_mode != k_live.FLAG_ADOPT:
+            return
+        for owner in reversed(self.live_owner_records):
+            if owner['run_id'] == self._live_run_id and 'k_start_revision' not in owner:
+                owner.update(k_start_revision=self._live_action_count,
+                             k_start_event_index=len(self._replay_recorder.events), k_start_cursor=self._v1_cursor)
+                break
+
+    def _on_k_bootstrapped(self, exchange):
+        if (self._live_policy != POLICY_K or self._live_closing or self._replay_mode
+                or not self._v1_owned or self._k_retired):
+            return
+        try:
+            start, following = exchange
+            if start.run_id != self._live_run_id:
+                return
+            if (self._mouse_buttons or not self._known_live_history() or not self._v1_supported()
+                    or start != self._v1_snapshot() or following != k_live.after_bootstrap(start, following.bootstrap)):
+                raise ValueError("깃발 확인 뒤 현재 판/입력 이력이 달라졌습니다.")
+            self._k_bootstrap = following.bootstrap
+            self._k_base_m, self._k_m_revision = following.base_m, following.base_m_revision
+            self._k_normal_start, self._k_phase = following.k_start_input_revision, following.phase
+            for owner in reversed(self.live_owner_records):
+                if owner['run_id'] == self._live_run_id:
+                    owner.update(bootstrap=k_live.to_dict(following.bootstrap),
+                                 planned_k_start_revision=self._k_normal_start)
+                    break
+            self._record_k_policy_start()
+            # This is still the explicit analysis request, not an actual input.
+            self._v1_job.request(self._v1_snapshot())
+            self._v1_status = "깃발 확인/정리 후 현재 판 계속"
             self._update_policy_controls()
         except Exception as exc:
             self._fail_v1(str(exc))
@@ -3163,7 +3428,8 @@ class MinesweeperUI(QWidget):
                     if record["run_id"] == self._live_run_id:
                         record["review"] = report_to_dict(proposal.review)
                         break
-            self._v1_status = ("미검증 깃발 해제 · 준비 대기" if self._live_policy == POLICY_V1 and proposal.is_flag_review else
+            preparing = (proposal.is_preparation if self._live_policy == POLICY_K else proposal.is_flag_review)
+            self._v1_status = ("깃발 확인/정리 · 준비 대기" if preparing else
                                "입력 대기" if self.simple_auto_checkbox.isChecked() else "일시정지 · 추천 보관")
             if self.analysis_checkbox.isChecked() or self._v1_display_requested:
                 self._show_v1_pending()
@@ -3189,8 +3455,9 @@ class MinesweeperUI(QWidget):
                 return
             if self._live_policy == POLICY_K and self._v1_job.state != "pending":
                 return  # Drain an outstanding VALIDATE before reserving another.
-            self._v1_status = ("미검증 깃발 해제 · 준비 입력 대기"
-                               if self._live_policy == POLICY_V1 and self._v1_pending.is_flag_review else "입력 대기")
+            preparing = (self._v1_pending.is_preparation if self._live_policy == POLICY_K
+                         else self._v1_pending.is_flag_review)
+            self._v1_status = "깃발 확인/정리 · 준비 입력 대기" if preparing else "입력 대기"
             reservation = (self._live_run_id, self._live_board_generation,
                            self._live_action_count, self._v1_pending.token, self._v1_timer_nonce)
             self._v1_timer_reservation = reservation
@@ -3319,10 +3586,16 @@ class MinesweeperUI(QWidget):
             proposal = self._admit_live_proposal(permit.proposal)
             if proposal != self._v1_pending:
                 raise ValueError("K 승인과 보관 추천이 다릅니다.")
+            if not self._v1_supported() or not self._known_live_history():
+                raise ValueError("K 입력의 보드 지원·실제 입력 이력이 달라졌습니다.")
             if proposal.initial and not self._k_fresh_start():
                 raise ValueError("K 첫 입력의 새 게임 상태가 달라졌습니다.")
             # No event-loop yield/modal/await between final full comparison,
             # token consumption and this one actual engine input.
+            owner_record = next((item for item in reversed(self.live_owner_records)
+                                 if item['run_id'] == self._live_run_id), None)
+            if owner_record is None:
+                raise ValueError('K owner record is missing before input.')
             admitted = self._v1_job.mark_applying(proposal.token, permit.nonce)
             if admitted != proposal:
                 raise ValueError("K 소비 token이 승인과 다릅니다.")
@@ -3333,7 +3606,13 @@ class MinesweeperUI(QWidget):
             record = {
                 'game_id': self._live_game_id, 'run_id': self._live_run_id,
                 'board_generation': self._live_board_generation, 'policy_id': POLICY_K,
-                'definition': k_live.DEFINITION, 'input_seq': proposal.snapshot.input_seq,
+                'definition': proposal.snapshot.definition, 'entry_mode': proposal.snapshot.entry_mode,
+                'start_input_revision': proposal.snapshot.start_input_revision,
+                'k_start_input_revision': proposal.snapshot.k_start_input_revision,
+                'phase': proposal.snapshot.phase, 'preparation_seq': proposal.snapshot.preparation_seq,
+                'semantic_input': 'UNFLAG' if proposal.is_preparation else proposal.action,
+                'bootstrap': k_live.to_dict(proposal.snapshot.bootstrap) if proposal.snapshot.bootstrap else None,
+                'input_seq': proposal.snapshot.input_seq,
                 'input_revision_before': proposal.snapshot.input_revision,
                 'token': proposal.token, 'permit_nonce': permit.nonce,
                 'action': proposal.action, 'x': proposal.x, 'y': proposal.y,
@@ -3350,10 +3629,7 @@ class MinesweeperUI(QWidget):
                 'end_reason': None, 'cleanup': None,
             }
             self.live_action_records.append(record)
-            for owner in reversed(self.live_owner_records):
-                if owner['run_id'] == self._live_run_id:
-                    owner['k_actions'].append(record)
-                    break
+            owner_record['k_actions'].append(record)
             try:
                 event_index = self._apply_live_action(proposal.x, proposal.y, proposal.move.action,
                                                        auto_observation=proposal.snapshot.observation)
@@ -3370,17 +3646,22 @@ class MinesweeperUI(QWidget):
                               event_index=before_events if events == before_events + 1 else None,
                               actual_input_confirmed=actual)
                 if actual:
-                    self.live_auto_totals['k_inputs'] += 1
-                    self.live_auto_totals['k_modeled_us'] += proposal.modeled_action_us
+                    category = 'preparation' if proposal.is_preparation else 'k'
+                    self.live_auto_totals[category + '_inputs'] += 1
+                    self.live_auto_totals[category + '_modeled_us'] += proposal.modeled_action_us
                     self.live_auto_totals['modeled_us'] += proposal.modeled_action_us
+                    owner_record[category + '_input_count'] += 1
                 record['auto_totals'] = dict(self.live_auto_totals)
             if not record['actual_input_confirmed'] or event_index is None or event_index != record['event_index']:
                 raise RuntimeError("실제 K 입력의 Replay 기록을 확인할 수 없습니다.")
-            self._v1_input_seq = proposal.snapshot.input_seq + 1
+            self._v1_input_seq = proposal.snapshot.input_seq + int(not proposal.is_preparation)
+            self._k_preparation_seq = proposal.snapshot.preparation_seq + int(proposal.is_preparation)
             ack = k_live.make_ack(permit, status.name, observation=after)
             self._v1_expected_ack = ack
             self._v1_job.acknowledge(status.name, observation=after)
             record.update(ack_sent=True, ack_state='SENT')
+            record['expected_ack'] = k_live.to_dict(ack)
+            self._k_ack_receipt = self._seal_k_receipt(ack, record)
             self._v1_status = "K 입력 확인 중" if status == GameStatus.PLAYING else "게임 종료 · worker 정리 중"
             self._update_policy_controls()
             self.live_action_applied.emit(dict(record))
@@ -3391,10 +3672,23 @@ class MinesweeperUI(QWidget):
             self._fail_v1(str(exc))
 
     def _on_k_acknowledged(self, ack):
+        retiring = self._k_retiring
+        if retiring is not None and ack.run_id == retiring.ack.run_id:
+            try:
+                action = self._verify_k_receipt(retiring, ack)
+                action['ack_state'] = 'ACKED'
+                self._k_retiring = replace(retiring, acknowledged=True)
+                # No current-board/M/cursor/revision writes and no NEXT here.
+                self._v1_job.cancel("수동 인계 · 원 입력 확인 완료")
+                self._update_policy_controls()
+            except Exception as exc:
+                self._fail_v1(str(exc))
+            return
         if (self._live_policy != POLICY_K or self._live_closing or self._replay_mode
                 or not self._v1_owned or ack.run_id != self._live_run_id):
             return
         try:
+            self._verify_k_receipt(self._k_ack_receipt, ack)
             ack.__post_init__()
             expected = k_live.next_snapshot(ack.permit.proposal, ack)
             if (ack != self._v1_expected_ack or expected is None
@@ -3405,14 +3699,25 @@ class MinesweeperUI(QWidget):
                 input_seq=self._v1_input_seq, input_revision=self._live_action_count,
                 width=self.engine.width, height=self.engine.height, num_mines=self.engine.num_mines,
                 observation=self.engine.get_observation(), cursor=self._v1_cursor,
-                base_m_revision=expected.base_m_revision, base_m=expected.base_m)
-            if current != expected:
+                base_m_revision=expected.base_m_revision, base_m=expected.base_m,
+                entry_mode=self._v1_entry_mode, start_input_revision=self._k_start_input_revision,
+                phase=expected.phase, preparation_seq=self._k_preparation_seq,
+                k_start_input_revision=self._k_normal_start, bootstrap=self._k_bootstrap,
+                definition=k_live.definition_for_entry(self._v1_entry_mode))
+            if current != expected or not self._known_live_history():
                 raise ValueError("K ACK 뒤 현재 공개 상태/binding이 다릅니다.")
             self._k_base_m, self._k_m_revision = expected.base_m, expected.base_m_revision
+            self._k_phase = expected.phase
+            self._record_k_policy_start()
             self._v1_expected_ack = None
+            self._k_ack_receipt = None
             for record in reversed(self.live_action_records):
                 if record.get('token') == ack.token and record.get('run_id') == ack.run_id:
                     record['ack_state'] = 'ACKED'
+                    break
+            for owner in reversed(self.live_owner_records):
+                if owner['run_id'] == self._live_run_id:
+                    owner['k_ack_count'] += 1
                     break
             self._v1_status = "일시정지 · K 입력 확인 완료"
             if (self.simple_auto_checkbox.isChecked() and self.analysis_checkbox.isChecked()
@@ -3448,6 +3753,27 @@ class MinesweeperUI(QWidget):
             self._fail_v1(str(exc))
 
     def _on_v1_finished(self, record):
+        receipt = self._k_retiring or self._k_ack_receipt
+        if receipt is not None and receipt.ack.run_id == record.get('run_id'):
+            clean = (record.get('cleanup_complete') is True and record.get('reaped') is True
+                     and record.get('tree_active_count') == 0 and not record.get('error'))
+            confirmed = receipt.acknowledged
+            if (not confirmed and clean and record.get('status') == 'SUCCEEDED'
+                    and receipt.ack.status in ('WON', 'LOST')
+                    and record.get('last_k_ack') == k_live.to_dict(receipt.ack)):
+                try:
+                    self._verify_k_receipt(receipt, receipt.ack)
+                    confirmed = True
+                except Exception as exc:
+                    self._record_live_failure(str(exc), stage='terminal ACK')
+            if not (clean and confirmed and record.get('status') in ('CANCELLED', 'SUCCEEDED')):
+                self._record_live_failure(
+                    record.get('error') or ("worker 정리 실패" if not clean else "원 입력 ACK 미확인"),
+                    stage='cleanup' if confirmed else 'ACK')
+                self._set_auto_off(clear_guess=True)
+            else:
+                self._v1_expected_ack = None
+            self._k_retiring = self._k_ack_receipt = None
         retained_actions = [action for owner in self.live_owner_records
                             for action in owner.get('k_actions', [])]
         for action in retained_actions:
@@ -3455,6 +3781,8 @@ class MinesweeperUI(QWidget):
                 action['cleanup'] = dict(record)
                 action['end_reason'] = record.get('error') or record.get('intent_reason') or record.get('status')
                 if (record.get('status') == 'SUCCEEDED' and record.get('cleanup_complete') is True
+                        and record.get('last_k_ack') == action.get('expected_ack')
+                        and action.get('expected_ack') is not None
                         and action.get('ack_sent') and action.get('status') in ('WON', 'LOST')):
                     action['ack_state'] = 'ACKED'
                 if action.get('actual_input_confirmed') and action.get('ack_state') != 'ACKED':
@@ -3464,10 +3792,18 @@ class MinesweeperUI(QWidget):
         for owner in reversed(self.live_owner_records):
             if owner["run_id"] == record.get("run_id"):
                 owner["cleanup"] = dict(record)
+                if owner.get('first_failure') is not None:
+                    owner['first_failure']['cleanup_result'] = dict(record)
+                if owner['policy_id'] == POLICY_K:
+                    owner['k_ack_count'] = sum(a.get('ack_state') == 'ACKED' for a in owner['k_actions'])
+                    owner['preparation_ack_count'] = sum(a.get('ack_state') == 'ACKED'
+                        and a.get('semantic_input') == 'UNFLAG' for a in owner['k_actions'])
+                    owner['k_policy_ack_count'] = owner['k_ack_count'] - owner['preparation_ack_count']
                 if owner["end_reason"] is None:
                     owner.update(end_reason=record.get("error") or record.get("status"),
                                  end_revision=self._live_action_count,
-                                 end_event_index=len(self._replay_recorder.events))
+                                 end_event_index=len(self._replay_recorder.events),
+                                 end_cursor=self._v1_cursor)
                 break
         if self._live_closing:
             return
@@ -3476,13 +3812,17 @@ class MinesweeperUI(QWidget):
             return
         # Selection can change while this owner is being retired. Its unexpected
         # failure must not disappear merely because Simple is now selected.
-        if not self._v1_owned and record.get("error") and record.get("policy_id") != POLICY_K:
+        if not self._v1_owned and (record.get("error") or record.get("cleanup_complete") is not True
+                                  or record.get("status") not in ("CANCELLED", "CLOSED", "SUCCEEDED")):
             self._v1_manual_only = True
             self._live_input_uncertain = True
+            self._record_live_failure(record.get('error') or record.get('status'), stage='cleanup')
+            if record.get("policy_id") == POLICY_K:
+                self._k_retired = True
             cleanup = "정리 완료" if record.get("cleanup_complete") is True else "정리 실패"
             self._v1_status = f"수동 · 이전 Auto worker 오류 · {cleanup}"
             self._stop_simple_auto()
-            self._clear_live_analysis(f"이전 Auto 오류 - {record['error']}")
+            self._clear_live_analysis(f"이전 Auto 오류 - {record.get('error') or record.get('status')}")
             self._update_policy_controls()
             return
         if self._live_policy not in (POLICY_V1, POLICY_K):
@@ -3492,6 +3832,8 @@ class MinesweeperUI(QWidget):
                 and self.engine.status != GameStatus.PLAYING):
             self._v1_owned = False
             self._v1_pending = None
+            self._v1_expected_ack = None
+            self._set_auto_off(clear_guess=True)
             self._v1_status = f"{self.engine.status.name} · 정리 완료"
             self._update_policy_controls()
         elif self._v1_owned:
@@ -3504,9 +3846,7 @@ class MinesweeperUI(QWidget):
                 self._update_policy_controls()
         else:
             if self._v1_job.state == "idle" and not self._v1_manual_only:
-                self._v1_status = ("수동 가능 · K-P0는 새 게임 필요" if self._live_policy == POLICY_K else
-                                   "추천·계산 종료 · 수동 가능"
-                                   if self._v1_status.startswith("추천·계산 종료")
+                self._v1_status = ("수동 · 정리 완료 · 현재 판을 K-P0로 인수 가능" if self._live_policy == POLICY_K
                                    else "수동 · 정리 완료 · Auto ON으로 다시 인수")
             self._update_policy_controls()
 
@@ -3561,6 +3901,10 @@ class MinesweeperUI(QWidget):
         self._analyze_simple_current()
 
     def _analyze_simple_current(self):
+        if self._live_input_uncertain or self._live_closing:
+            self._set_auto_off(clear_guess=True)
+            self._clear_live_analysis(self._live_failure_text())
+            return
         if self._v1_job.state not in ("idle", "closed"):
             self._clear_live_analysis("이전 Auto 정리 후 분석할 수 있습니다.")
             return
@@ -3571,27 +3915,45 @@ class MinesweeperUI(QWidget):
         self._clear_live_analysis()
         try:
             observation = self.engine.get_observation()
+            binding = self._simple_binding()
+            if self._simple_expected_binding is not None and binding != self._simple_expected_binding:
+                self._reset_simple_preparation()
+            if self._simple_review_dirty:
+                self._simple_preparation = (prepare_flags(observation, self.engine.num_mines)
+                    if any(v == CellState.FLAGGED for row in observation for v in row) else None)
+                self._simple_preparation_start = self._live_action_count
+                self._simple_preparation_seq = 0
+                self._simple_review_dirty = False
+            self._simple_expected_binding = binding
+            preparation = self._simple_preparation
             # FLAG then unflag can hide every cell on an already fixed board.
             # Only the public placement boolean participates in this UI policy.
             first_click = (is_all_hidden(observation)
                            and not self.engine.get_board_snapshot().mines_placed)
-            if first_click:
+            if preparation is not None and self._simple_preparation_seq < len(preparation.removable):
+                first_click = False
+                target = preparation.target(self._simple_preparation_seq,
+                                            tuple(tuple(row) for row in observation))
+                result = present_flag_preparation("Simple", target, len(preparation.retained),
+                    len(preparation.removable), "공개 단서·총수의 직접 추론 범위입니다.")
+            elif first_click:
                 result = first_click_presentation()
             else:
                 decision = analyze_position(observation, self.engine.num_mines)
                 result = present_decision(observation, decision)
         except InconsistentObservationError:
-            self._stop_simple_auto()
+            self._set_auto_off(clear_guess=True)
             self._clear_live_analysis("분석 불가 - 공개 상태가 모순됩니다.")
             return
         except Exception as error:
             # Solver validation/failure must not escape a Qt slot or trigger moves.
-            self._stop_simple_auto()
+            self._set_auto_off(clear_guess=True)
             self._clear_live_analysis(f"분석 불가 - {error}")
             return
         self._analysis_result = result
         self._analysis_observation = tuple(tuple(row) for row in observation)
         self._analysis_first_click = first_click
+        self._simple_analysis_binding = binding
         self.analysis_status_label.setText(result.status_text)
         self._render_live_analysis()
         self._schedule_simple_auto_step()
@@ -3627,20 +3989,106 @@ class MinesweeperUI(QWidget):
             self._apply_stats_from_info(info)
             self._check_end_state()
         if self._replay_mode or self.engine.status != GameStatus.PLAYING:
+            self._set_auto_off(clear_guess=True)
             return
         if self._live_policy in (POLICY_V1, POLICY_K):
             self._update_policy_controls()
             return
         if auto_observation is not None:
+            if self._simple_applying_preparation:
+                prep = self._simple_preparation
+                expected = prep.observation_after(self._simple_preparation_seq + 1)
+                if tuple(tuple(row) for row in self.engine.get_observation()) != expected:
+                    self._live_input_uncertain = True
+                    raise ValueError("깃발 정리가 정확한 한 칸 해제와 다릅니다.")
+                self._simple_preparation_seq += 1
             hidden_before = sum(value == CellState.HIDDEN
                                 for row in auto_observation for value in row)
             hidden_after = sum(value == CellState.HIDDEN
                                for row in self.engine.get_observation() for value in row)
-            if hidden_after >= hidden_before:
+            if not self._simple_applying_preparation and hidden_after >= hidden_before:
                 self._fail_simple_auto("실행 후 보드가 진행되지 않았습니다.")
                 return
+            # Our own FLAG/UNFLAG never starts another preparation epoch.
+            self._simple_expected_binding = self._simple_binding()
         if self.analysis_checkbox.isChecked():
             self._analyze_simple_current()
+
+    def _reset_simple_preparation(self):
+        self._simple_preparation = None
+        self._simple_preparation_seq = 0
+        self._simple_review_dirty = True
+        self._simple_expected_binding = None
+        self._simple_analysis_binding = None
+
+    def _simple_binding(self):
+        counters = self.engine.get_counter_snapshot()
+        return (self._live_game_id, self._live_board_generation, self._live_action_count,
+                self._v1_cursor, self.engine.width, self.engine.height, self.engine.num_mines,
+                tuple(tuple(row) for row in self.engine.get_observation()),
+                counters['active_clicks'], counters['wasted_clicks'],
+                tuple(tuple(sorted(row.items())) for row in self.live_input_records),
+                tuple(self._replay_recorder.events))
+
+    def _simple_preparation_move(self, observation):
+        prep = self._simple_preparation
+        if prep is None or self._simple_preparation_seq == len(prep.removable):
+            return None
+        if self._live_action_count != self._simple_preparation_start + self._simple_preparation_seq:
+            raise ValueError("깃발 정리 입력 순서가 달라졌습니다.")
+        target = prep.target(self._simple_preparation_seq, tuple(tuple(row) for row in observation))
+        move = self._analysis_result.move
+        if (move.action != Action.FLAG or (move.x, move.y) != target
+                or observation[move.y][move.x] != CellState.FLAGGED):
+            raise ValueError("깃발 정리 대상이 현재 추천과 다릅니다.")
+        return move
+
+    def _apply_simple_preparation(self, move, observation):
+        before_revision, before_events = self._live_action_count, len(self._replay_recorder.events)
+        counters = self.engine.get_counter_snapshot()
+        before_inputs = counters['active_clicks'] + counters['wasted_clicks']
+        start = self._v1_cursor
+        dx, dy = abs(start[0] - move.x), abs(start[1] - move.y)
+        if self._simple_timing_table is None:
+            self._simple_timing_table = load_timing_table()
+        cost = (action_cost(self._simple_timing_table, (0, 0), (dx, dy))
+                if dx < 30 and dy < 16 else None)
+        record = dict(game_id=self._live_game_id, policy_id=POLICY_SIMPLE,
+                      phase='SIMPLE_FLAG_PREPARATION', semantic_input='UNFLAG',
+                      action='FLAG', x=move.x, y=move.y,
+                      input_revision_before=before_revision, cursor_before=start,
+                      preparation_seq=self._simple_preparation_seq,
+                      before=tuple(tuple(row) for row in observation),
+                      modeled_action_us=cost, profile_sha256=PROFILE_SHA256, table_sha256=TABLE_SHA256,
+                      modeled_cost_status='EXACT' if cost is not None else 'OUTSIDE_FROZEN_TABLE',
+                      actual_input_confirmed=False, event_index=None)
+        self.live_action_records.append(record)
+        self._simple_applying_preparation = True
+        try:
+            event = self._apply_live_action(move.x, move.y, Action.FLAG, auto_observation=observation)
+            if (event != before_events or len(self._replay_recorder.events) != before_events + 1
+                    or self._live_action_count != before_revision + 1 or self._live_input_uncertain):
+                raise ValueError("깃발 정리의 실제 입력/Replay 기록을 확인할 수 없습니다.")
+            record['actual_input_confirmed'] = True
+        except Exception as exc:
+            record['incomplete_reason'] = str(exc)
+            self._record_live_failure(str(exc), stage='Simple preparation input')
+            raise
+        finally:
+            self._simple_applying_preparation = False
+            counters = self.engine.get_counter_snapshot()
+            actual = counters['active_clicks'] + counters['wasted_clicks'] == before_inputs + 1
+            record.update(input_revision_after=self._live_action_count, cursor_after=self._v1_cursor,
+                          event_index=before_events if len(self._replay_recorder.events) == before_events + 1 else None,
+                          after=tuple(tuple(row) for row in self.engine.get_observation()))
+            record['actual_input_confirmed'] = actual
+            if actual:
+                self.live_auto_totals['preparation_inputs'] += 1
+                if cost is not None:
+                    self.live_auto_totals['preparation_modeled_us'] += cost
+                    self.live_auto_totals['modeled_us'] += cost
+                else:
+                    self.live_auto_totals['preparation_unmodeled_inputs'] += 1
 
     def _cancel_simple_auto_step(self):
         self._simple_auto_timer.stop()
@@ -3664,15 +4112,18 @@ class MinesweeperUI(QWidget):
         self._simple_auto_timeout_slot = slot
         self._simple_auto_timer.timeout.connect(slot)
 
-    def _stop_simple_auto(self):
+    def _set_auto_off(self, *, clear_guess):
         self._cancel_simple_auto_step()
-        controls = ((self.simple_auto_checkbox,) if self._live_policy in (POLICY_V1, POLICY_K)
-                    else (self.simple_auto_checkbox, self.allow_guess_checkbox))
+        controls = ((self.simple_auto_checkbox, self.allow_guess_checkbox) if clear_guess
+                    else (self.simple_auto_checkbox,))
         for checkbox in controls:
             blocked = checkbox.blockSignals(True)
             checkbox.setChecked(False)
             checkbox.blockSignals(blocked)
         self.allow_guess_checkbox.setEnabled(False)
+
+    def _stop_simple_auto(self, *, pause=False):
+        self._set_auto_off(clear_guess=not pause)
         if self._v1_owned and self.engine.status == GameStatus.PLAYING:
             self._v1_status = "일시정지 · 추천/계산 보관"
             self._update_policy_controls()
@@ -3681,7 +4132,9 @@ class MinesweeperUI(QWidget):
         if self._live_policy in (POLICY_V1, POLICY_K):
             self._fail_v1(message)
             return
-        self._stop_simple_auto()
+        self._set_auto_off(clear_guess=True)
+        if self._live_input_uncertain:
+            self._record_live_failure(message, stage='Simple input')
         self._clear_live_analysis(f"자동 진행 중지 - {message}")
 
     def _on_simple_auto_interval_edited(self, text: str):
@@ -3699,6 +4152,9 @@ class MinesweeperUI(QWidget):
             self._schedule_v1_step()
 
     def on_simple_auto_toggled(self, enabled):
+        if not enabled:
+            self._stop_simple_auto(pause=True)
+            return
         if enabled and self._mouse_buttons and not self._replay_mode:
             self._stop_simple_auto()
             return
@@ -3741,11 +4197,16 @@ class MinesweeperUI(QWidget):
 
     def _simple_auto_move(self, observation):
         """Validate against public state, then apply policy; None means guess wait."""
+        if self._simple_analysis_binding != self._simple_binding():
+            raise ValueError("추천의 게임/입력 이력이 현재 보드와 일치하지 않습니다.")
         if tuple(tuple(row) for row in observation) != self._analysis_observation:
             raise ValueError("추천이 현재 보드와 일치하지 않습니다.")
         result = self._analysis_result
         if result is None or result.move is None:
             raise ValueError("진행 중인 보드에 추천 수가 없습니다.")
+        preparation = self._simple_preparation_move(observation)
+        if preparation is not None:
+            return preparation
         if self._analysis_first_click:
             # No hidden layout fields enter move selection, even at timeout.
             if (not is_all_hidden(observation)
@@ -3775,7 +4236,8 @@ class MinesweeperUI(QWidget):
     def _simple_auto_can_run(self):
         if self._mouse_buttons:
             return False
-        if (self._replay_mode or not self.analysis_checkbox.isChecked()
+        if (self._replay_mode or self._live_closing or self._live_input_uncertain
+                or self._v1_job.state not in ('idle', 'closed') or not self.analysis_checkbox.isChecked()
                 or self.engine.status != GameStatus.PLAYING):
             self._stop_simple_auto()
             return False
@@ -3819,8 +4281,11 @@ class MinesweeperUI(QWidget):
             observation = self.engine.get_observation()
             move = self._simple_auto_move(observation)
             if move is not None:
-                self._apply_live_action(move.x, move.y, move.action,
-                                        auto_observation=observation)
+                if self._simple_preparation_move(observation) is not None:
+                    self._apply_simple_preparation(move, observation)
+                else:
+                    self._apply_live_action(move.x, move.y, move.action,
+                                            auto_observation=observation)
         except Exception as error:
             self._fail_simple_auto(str(error))
 

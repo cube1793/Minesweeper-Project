@@ -127,7 +127,7 @@ class LiveKCertaintyProcessTests(unittest.TestCase):
                     self.receipt['wire'].append(dict(file=path.name, message=json.loads(path.read_text('utf-8'))))
 
     def launch(self, state):
-        self.assertEqual(PROTOCOL_VERSION, 5)
+        self.assertEqual(PROTOCOL_VERSION, 7)
         self.assertLess(self.ledger['owner_start_attempts'], self.plan['planned_owner_starts'])
         self.assertLess(self.ledger['owner_start_attempts'], self.plan['max_owner_starts'])
         self.assertEqual(self.ledger['case_attempts'].get(self.id(), 0), 0)

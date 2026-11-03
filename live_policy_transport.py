@@ -7,18 +7,20 @@ import re
 from uuid import uuid4
 
 from live_policy import LivePolicyError, MAX_INPUTS, _identity, _integer, _require
-from live_k_policy import MAX_K_SEQUENCE
+from live_k_policy import MAX_K_SEQUENCE, MAX_FLAG_ADOPT_SEQUENCE
 
 
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 7
 MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 # At most 480 preparation toggles plus 480 normal V1 inputs per owner.
 # This bound is independent of global game revision and board overlay size.
 # K: <=480 actual inputs, <=64 VALIDATE round trips per pending input,
 # plus START/NEXT and ACK. The worker enforces the per-input limit as well.
 MAX_V1_SEQUENCE = 2 * MAX_INPUTS + 1
-MAX_SEQUENCE = max(MAX_V1_SEQUENCE, MAX_K_SEQUENCE)
-KINDS = frozenset({"START", "NEXT", "VALIDATE", "ADMITTED", "ACK", "PROPOSAL", "ACKED", "FINISHED", "ERROR"})
+# FLAG_ADOPT adds <=480 preparation inputs and one bootstrap transition.
+# Endpoints retain the narrower bound of each entry mode.
+MAX_SEQUENCE = max(MAX_V1_SEQUENCE, MAX_K_SEQUENCE, MAX_FLAG_ADOPT_SEQUENCE)
+KINDS = frozenset({"START", "BOOTSTRAPPED", "NEXT", "VALIDATE", "ADMITTED", "ACK", "PROPOSAL", "ACKED", "FINISHED", "ERROR"})
 
 
 def validate_message(value, *, run_id=None, seq=None):

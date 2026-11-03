@@ -123,7 +123,7 @@ class LivePresentationTests(unittest.TestCase):
             analyze.assert_called_once()
             self.assertEqual(self.ui._analysis_observation,
                              tuple(tuple(row) for row in self.ui.engine.get_observation()))
-            self.assertTrue(self.ui.simple_auto_checkbox.isChecked())
+            self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
             self.assertFalse(self.ui._simple_auto_pending)
             self.assertFalse(self.ui._simple_auto_timer.isActive())
             self.assertEqual(len(self.ui._replay_recorder.events), 1)
@@ -133,6 +133,8 @@ class LivePresentationTests(unittest.TestCase):
             self.assertEqual(len(self.ui._replay_recorder.events), 1)
             QTest.mouseRelease(cell, Qt.RightButton)
             analyze.assert_called_once()
+        self.assertFalse(self.ui._simple_auto_pending)
+        self.ui.simple_auto_checkbox.setChecked(True)
         self.assertTrue(self.ui._simple_auto_pending)
         fresh_callback = self.ui._simple_auto_timeout_slot
         old_callback()
@@ -171,11 +173,6 @@ class LivePresentationTests(unittest.TestCase):
         self.select_v1()
         self.assertEqual(self.ui.live_policy_combo.currentText(), "Stage3 V1")
         self.assertEqual(self.ui.live_policy_combo.currentData(), POLICY_V1)
-        self.assertEqual(self.ui.live_takeover_button.text(), "추천·계산 종료")
-        self.assertEqual(self.ui.simple_auto_checkbox.toolTip(),
-                         "체크를 끄면 일시정지하며 현재 추천을 보관합니다. 보드를 클릭하면 수동으로 전환합니다.")
-        self.assertEqual(self.ui.live_takeover_button.toolTip(),
-                         "보관된 추천을 버리고 계산을 종료합니다. 다시 Auto를 켜면 현재 보드에서 새로 계산합니다.")
         self.ui.on_right_click(4, 4)
         self.ui.simple_auto_checkbox.setChecked(True)
         job = self.ui._v1_job
@@ -189,20 +186,19 @@ class LivePresentationTests(unittest.TestCase):
         self.ui.simple_auto_checkbox.setChecked(True)
         self.assertIs(self.ui._v1_pending, proposal)
         self.assertEqual(len(job.requests), 1)
-        self.ui.live_takeover_button.click()
+        self.ui.on_right_click(5, 4)
         self.assertIsNone(self.ui._v1_pending)
         self.assertEqual(job.state, "cancelling")
         self.assertFalse(self.ui.simple_auto_checkbox.isEnabled())
         job.complete_cancel()
-        self.assertIn("추천·계산 종료", self.ui.live_policy_status_label.text())
+        self.assertIn("정리 완료", self.ui.live_policy_status_label.text())
         self.ui.simple_auto_checkbox.setChecked(True)
         self.assertEqual(len(job.requests), 2)
         self.assertNotEqual(job.requests[-1].run_id, proposal.snapshot.run_id)
         self.assertEqual(job.requests[-1].entry_mode, "ADOPT_CURRENT")
         self.ui.simple_auto_checkbox.setChecked(False)
         self.ui.live_policy_combo.setCurrentIndex(0)
-        self.assertFalse(self.ui.live_takeover_button.isEnabled())
-        self.assertIn("함께 사용할 수 있습니다", self.ui.simple_auto_checkbox.toolTip())
+        self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
 
     def test_persistent_disabled_conditions_remain(self):
         self.select_v1()

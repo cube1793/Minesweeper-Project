@@ -164,14 +164,15 @@ class KProbabilityFeedbackTests(unittest.TestCase):
         self.assertIsNone(owner.pending)
         self.assertIsNone(owner.decision)
 
-    def test_v5_rejects_old_v4_v3_without_changing_sequence_bounds(self):
+    def test_v7_rejects_old_versions_and_retains_legacy_sequence_bound(self):
         valid = transport.message('a' * 32, 0, 'START', {})
-        self.assertEqual(valid['version'], 5)
-        for old_version in (3, 4):
+        self.assertEqual(valid['version'], 7)
+        for old_version in (3, 4, 5, 6):
             with self.subTest(version=old_version), self.assertRaises(LivePolicyError):
                 transport.validate_message({**valid, 'version': old_version})
         self.assertEqual(transport.MAX_V1_SEQUENCE, 1921)
-        self.assertEqual(transport.MAX_SEQUENCE, 31681)
+        self.assertEqual(k.MAX_K_SEQUENCE, 31681)
+        self.assertEqual(transport.MAX_SEQUENCE, 63362)
         self.assertEqual(k.MAX_VALIDATIONS_PER_INPUT, 64)
 
     def test_maximum_board_exact_payload_fits_wire_without_losing_integer_bytes(self):

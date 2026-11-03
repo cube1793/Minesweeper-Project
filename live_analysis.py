@@ -142,18 +142,23 @@ def reduced_number(observation: Observation, x: int, y: int) -> int:
     return observation[y][x] - flags
 
 
+def present_flag_preparation(policy, target, retained, removable, scope) -> LiveAnalysis:
+    x, y = target
+    status = (f"{policy} 깃발 확인/정리 | 미확인 깃발 해제 ({x}, {y}) · "
+              f"확인한 지뢰 유지 {retained}개 · 해제 {removable}개 | "
+              f"미확인 깃발은 실제 지뢰여도 해제될 수 있습니다. {scope}")
+    return LiveAnalysis(None, SimpleMove(Action.FLAG, x, y), status,
+                        {target: CellOverlay(recommended=True)})
+
+
 def present_v1_proposal(proposal) -> LiveAnalysis:
     """Project the worker's existing evidence and selected first input only."""
     if proposal.is_flag_review:
         review = proposal.review
-        status = (f"V1 준비 · 미검증 깃발 해제 ({proposal.x}, {proposal.y}) | "
-                  f"증명 지뢰 {len(review.proved_mine)} · 증명 안전 {len(review.proved_safe)} · "
-                  f"미검증 {len(review.unverified)} | 실제 지뢰도 미검증이면 해제될 수 있습니다. "
-                  "지역 직접 추론 범위이며 전수 검증이 아닙니다.")
         # A preparation toggle is neither an OPEN nor a frozen selected move.
         # In particular it must not display pre-review flag-conditioned certainty.
-        return LiveAnalysis(None, proposal.move, status,
-                            {(proposal.x, proposal.y): CellOverlay(recommended=True)})
+        return present_flag_preparation("V1", (proposal.x, proposal.y), len(review.proved_mine),
+                                        len(review.removable), "공개 단서·총수의 직접 추론 범위입니다.")
     overlays = {}
     recommended = (proposal.x, proposal.y)
     for cell in proposal.overlays:
@@ -178,6 +183,10 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
 
 def present_k_proposal(proposal) -> LiveAnalysis:
     """Display the current native decision, without inference or physical flags."""
+    if proposal.is_preparation:
+        summary = proposal.snapshot.bootstrap
+        return present_flag_preparation("K-P0", (proposal.x, proposal.y), len(summary.retained),
+                                        len(summary.removable), "K native local 확인 범위입니다.")
     prefix = "첫 입력" if proposal.initial else "추측" if proposal.is_guess else "확정 수"
     status = f"K-P0 (실험적) | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
     recommended = (proposal.x, proposal.y)

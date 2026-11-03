@@ -402,7 +402,7 @@ class AdoptionAndReviewProtocolTests(unittest.TestCase):
             replace(exhausted, input_seq=961)
         self.assertEqual((policy.MAX_BOARD_CELLS, policy.MAX_V1_INPUTS, policy.MAX_INPUTS,
                           transport.MAX_V1_SEQUENCE), (480, 480, 960, 1921))
-        self.assertEqual(transport.MAX_SEQUENCE, 31681)  # K's separate bounded revalidations.
+        self.assertEqual(transport.MAX_SEQUENCE, 63362)  # New FLAG_ADOPT envelope; V1 remains 1921.
 
 
 class WriteOnceTransportTests(unittest.TestCase):
