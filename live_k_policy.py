@@ -155,6 +155,7 @@ class KProposal:
     pending_m_revision: int
     preinput_m: tuple
     probabilities: ExactGuessProbabilities | None = None
+    safe_cells: tuple = ()  # Current decision only; never accumulated across inputs.
 
     def __post_init__(self):
         _require(type(self.snapshot) is KSnapshot, "Expected K snapshot.")
@@ -172,6 +173,15 @@ class KProposal:
         _require(_mines(self.preinput_m, s) and set(s.base_m) <= set(self.preinput_m)
                  and all(s.observation[y][x] in (-2, -3) for x, y in self.preinput_m),
                  "Invalid pending M acquisition.")
+        _require(type(self.safe_cells) is tuple and len(self.safe_cells) <= MAX_K_INPUTS
+                 and all(_coordinate(c, s.width, s.height) for c in self.safe_cells)
+                 and self.safe_cells == _ordered(set(self.safe_cells)),
+                 "Invalid K safe cell projection.")
+        _require(all(s.observation[y][x] == -2 for x, y in self.safe_cells)
+                 and not set(self.safe_cells).intersection(self.preinput_m),
+                 "K safe cells must be HIDDEN and disjoint from owned M.")
+        _require(bool(self.safe_cells) == (self.kind == 'certain'),
+                 "Only a certain K decision has nonempty safe cells.")
         if self.is_guess:
             _require(type(self.probabilities) is ExactGuessProbabilities, "Missing exact guess probabilities.")
             exact = self.probabilities
@@ -203,13 +213,16 @@ class KProposal:
                      and (self.x, self.y) in self.preinput_m, "K FLAG requires owned M and SETUP_CHORD.")
         elif self.action == "OPEN":
             _require(glyph == -2 and (self.x, self.y) not in self.preinput_m
+                     and (self.is_guess or (self.x, self.y) in self.safe_cells)
                      and self.category == ("EXACT_MINIMUM_RISK_GUESS" if self.is_guess else "DIRECT_SAFE_OPEN"),
                      "Invalid projected K OPEN.")
         else:
             adjacent = _neighbors(self.x, self.y, s.width, s.height)
             _require(not self.is_guess and self.category == "DIRECT_CHORD" and 1 <= glyph <= 8
                      and sum(s.observation[y][x] == -3 for x, y in adjacent) == glyph
-                     and any(s.observation[y][x] == -2 for x, y in adjacent), "Invalid physical K CHORD.")
+                     and any(s.observation[y][x] == -2 for x, y in adjacent)
+                     and all((x, y) in self.safe_cells for x, y in adjacent
+                             if s.observation[y][x] == -2), "Invalid physical K CHORD.")
 
     @property
     def move(self):
@@ -323,7 +336,7 @@ def to_dict(value):
     for name in ("snapshot", "proposal", "permit", "probabilities"):
         if name in result and result[name] is not None:
             result[name] = to_dict(result[name])
-    for name in ("observation", "base_m", "preinput_m", "cells", "minimum_risk_cells"):
+    for name in ("observation", "base_m", "preinput_m", "cells", "minimum_risk_cells", "safe_cells"):
         if name in result and result[name] is not None:
             result[name] = [list(row) for row in result[name]]
     if "cursor" in result:
@@ -338,7 +351,7 @@ def from_dict(value, cls):
                         ("probabilities", ExactGuessProbabilities)):
         if name in data and (name != 'probabilities' or data[name] is not None):
             data[name] = from_dict(data[name], child)
-    for name in ("observation", "base_m", "preinput_m", "cells", "minimum_risk_cells"):
+    for name in ("observation", "base_m", "preinput_m", "cells", "minimum_risk_cells", "safe_cells"):
         if name in data and data[name] is not None:
             _require(type(data[name]) is list and len(data[name]) <= MAX_K_INPUTS
                      and all(type(row) is list and len(row) <= 30 for row in data[name]),
@@ -389,10 +402,13 @@ class KOwner:
             move, category = self.selection.move, self.selection.category
             continuation = self.decision.continuation
             kind = 'guess' if continuation == 'EXACT_GUESS' else 'certain'
+            _require(self.selection.evidence is self.decision and self.decision.after.M == self.session.M,
+                     "K display projection requires the original owned decision.")
         self.pending = KProposal(snapshot, uuid4().hex, move.action.name, move.x, move.y, kind,
                                  category, continuation, action_cost(self.table, snapshot.cursor, (move.x, move.y)),
                                  elapsed, snapshot.base_m_revision + (not initial), _ordered(self.session.M),
-                                 project_exact_guess(self.decision, self.selection) if kind == 'guess' else None)
+                                 project_exact_guess(self.decision, self.selection) if kind == 'guess' else None,
+                                 () if initial else _ordered(self.decision.selection_safe_cells))
         self.expected = None
         self._nonces.clear()
         return self.pending
@@ -411,6 +427,10 @@ class KOwner:
                        current_mines=current_mines, decision=self.decision, selection=self.selection,
                        initial=p.initial)
         _require(_ordered(current_mines) == p.preinput_m, "Current K M differs from pending projection.")
+        # DTO checks establish structure, not proof. Bind the displayed safe set
+        # to the same original graph that native execution validation just used.
+        _require(p.safe_cells == (() if p.initial else _ordered(self.decision.selection_safe_cells)),
+                 "K safe projection differs from original decision.")
         self._nonces.add(request.nonce)
         self.permit = KPermit(p, request.nonce)
         return self.permit

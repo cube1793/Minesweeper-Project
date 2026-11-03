@@ -5,7 +5,7 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live K-P0 첫 연결·확률·커서 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md): 현재 범위 사용자 수용, 세 preset 새 게임·M/session·검증/ACK, 버전별 근거와 후속 확정색/같은 판 인수.
+- [Main/Live K-P0 연결·확률·커서·확정색 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md): e23dec2 완료본과 후속 v5 확정색 독립 검토·사용자 native 5항목 PASS, 버전별 근거·이력과 같은 판 K/LC 후속.
 
 - [Main/Live Simple·V1 사용자 수용 closeout](stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md): 수동 재인수·공개 FLAG 정리·UI, 버전별 근거와 독립 F02/과거 보존 FAIL의 한계.
 
@@ -136,12 +136,12 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT (2026-11-03): 새 K-P0 문서/24경로 plan 확인 → 사용자 일괄 stage·commit·push → receipt·실제 SHA의 postcommit recovery.**
-현재 main/HEAD=local origin/main=98203e809581f969685addeed45d7ebc7ff4c528,0/0, staged0이며 새 K source/tests18+문서6(M13/U11)이 미커밋이다. 이전 Simple/V1의24경로는98203e8, K-LC0는496fab0, K-LC1은d1201e4에서 Git 완료됐다. 옛 script/NEXT는 반복하지 않는다. 정확한 새 output은 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따른다.
+**CURRENT NEXT (2026-11-03): 확정색 문서/12경로 plan 확인 → 사용자 일괄 stage·commit·push → 실제 receipt/SHA의 recovery 교체.**
+현재 main/HEAD=local origin/main=e23dec225753350738f296f742f57ce3ab86c8f5,0/0,staged0입니다. 새 source/tests6+문서6(M10/U2)이 미커밋입니다. 이전 K 연결24경로는e23dec2, Simple/V1은98203e8에서 완료됐습니다. 옛 script/NEXT는 반복하지 않습니다. 새 output과 절차는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따릅니다.
 
-K-P0 세 preset 새 게임·추측 exact 확률·V1/K 가상 원형 커서는 구현/독립 검토 뒤 현재 범위 사용자 수용을 받았다. 세부 native6항목·모든 OS/DPI·package·전체 suite·효과성 승인으로 확대하지 않는다. 같은 판 K 인수/재인수와 확정 안전/지뢰 색상은 후속이며 LC0/LC1 Main 실행은 disabled다.
+K 확정색은 원 safe의 초록/HIDDEN M의 빨강 표시이며, 표시를 위해 실제 FLAG·원 추론·M·Model C를 바꾸지 않습니다. 독립 검토 302 method/356 subtest + worker 2개와 사용자의 직전 native 5항목 “모두 통과야.”를 별도 기록합니다. 모든 DPI/OS·preset별 완주·전체 suite·효과성 승인은 아닙니다. 같은 판 K 인수/재인수와 LC0/LC1 Main 연결은 후속입니다.
 
-독립 F02 NOT_VERIFIED, 과거 Qt FileDialog FAIL, Codex 중단 focused temp 정리 NOT_VERIFIED와 검토 절차 이탈·정정은 보존한다. E helper R1 전 재사용 금지와 frozen/Model C/holdout 경계를 유지하며 과거 보고서는 고치지 않는다. Main의 실험적 K 연결은 Production K/Gate P 승인이나 연구 재개가 아니다. Extended ACTIVE다.
+F02 NOT_VERIFIED, 과거 FileDialog FAIL, 과거 중단 temp NOT_VERIFIED와 검토 절차 이탈·계수·manifest 형식·참조 정정을 보존합니다. 기존 보고서를 고치거나 복구·재검증 루프를 열지 않습니다. E helper R1 전 재사용 금지, frozen/Model C/holdout 경계, Production K/Gate P 미승인과 Extended ACTIVE를 유지합니다.
 
 ## Experiments
 

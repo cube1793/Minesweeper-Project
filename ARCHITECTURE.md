@@ -102,8 +102,8 @@ Ops는 8방향으로 연결된 0 영역의 수이고, 3BV는 Ops에 고립 숫�
 | `simple_decision.py` | `analyze_position(observation, num_mines)`으로 두 계산 경로를 통합한 `SimpleDecision` 반환 |
 | `simple_runner.py` | 현재 engine을 동기 실행하고 guess 전 중단 또는 종료, 실제 행동의 Replay 기록 |
 | `live_analysis.py` | 계산된 Simple/V1/K 증거를 `LiveAnalysis`/overlay/status로 변환, exact 확률 포맷과 Reduction |
-| `live_k_policy.py` | K snapshot/proposal/permit/ACK DTO, exact 추측 수치 투영, worker-only persistent KOwner |
-| `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v4 wire·검증·ACK·정리 소유권 |
+| `live_k_policy.py` | K snapshot/proposal/permit/ACK·safe_cells DTO, exact 추측/확정색 투영, worker-only persistent KOwner |
+| `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v5 wire·검증·ACK·정리 소유권 |
 | `live_auto_cursor.py` | mouse-transparent/NoFocus 가상 셀 좌표 보간, 논리 cursor/Model C와 분리 |
 
 Local inference는 열린 숫자 `N`, 인접 깃발 수 `F`, 인접 HIDDEN 집합 `H`로 `N-F` 제약을 만든다.
@@ -687,11 +687,11 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 V1 Auto OFF는 owner·유효 pending을 보관하는 일시정지다. **추천·계산 종료**는 pending을 버리고 worker를 종료한다(Simple에서는 비활성). 일시정지/간격/guess 변경만으로 유효 계획·FLAG 검토를 다시 계산하지 않는다. 정책 변경은 Auto OFF와 옛 owner retire 뒤 다음 명시 ON에 적용하며 보드·기록은 보존한다.
 
-준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, V1 owner≤960, 현재 공통 wire v4/V1 seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
+준비 FLAG 토글은 HIDDEN을1 늘리고 해당 FLAG 한 칸 외 관측을 보존한다. 일반 V1은 매 PLAYING ACK HIDDEN 감소, 입력≤480이다. 준비≤초기FLAG, V1 owner≤960, 현재 공통 wire v5/V1 seq≤1921, compute30/ACK5/FINISHED 후 exit5/reap 후 drain0.75초다. 게임 전체 revision/event에는480 상한이 없다. UI hold 중 외관 enabled와 실행 admission을 분리하고, 고정 font/DPI 상태 영역의 전체 설명은 tooltip/접근성에 남긴다.
 
-K-P0는 명시 새 게임·세 preset만 지원하며 수동/Simple/V1 진행 판의 인수·종료 후 재인수는 후속이다. worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환하고 GUI는 yield 없이 최종 비교/token/step1을 적용한 뒤 ACK/NEXT를 보낸다. K 입력≤480, envelope≤31681, pending당 VALIDATE≤64다. v3 Unit1과 v4 표시 증분의 근거를 구분한다.
+K-P0는 명시 새 게임·세 preset만 지원하며 수동/Simple/V1 진행 판의 인수·종료 후 재인수는 후속이다. worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환하고 GUI는 yield 없이 최종 비교/token/step1을 적용한 뒤 ACK/NEXT를 보낸다. K 입력≤480, envelope≤31681, pending당 VALIDATE≤64다. v3 Unit1, v4 확률/커서, v5 확정색의 근거를 구분한다.
 
-K EXACT_GUESS 확률은 원 phase_e 정수의 primitive projection이며 추가 분석·선택을 하지 않는다. 현재 K 확정 SAFE/MINE 색 overlay는 미연결이다. V1/K 가상 원형은 논리 cursor와 별도로 기존 관람 간격을 보간하며 표시 토글은 예약/admission/owner를 변경하지 않는다. 현재 범위 사용자 수용·독립430/worker2·역사적 실패와 미관측은 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 기록한다.
+K EXACT_GUESS 확률은 원 phase_e 정수의 primitive projection이다. 확정색(v5)은 원 selection_safe_cells의 HIDDEN SAFE를 초록, preinput_m의 HIDDEN MINE을 빨강으로 표시한다. 확률 OFF는 숫자만 숨긴다. 구조 검사는 native proof가 아니며, worker VALIDATE는 기존 실행 검증 뒤 원 safe 집합과의 동등성을 확인한다. 표시를 위한 추가 분석·선택·실제 FLAG·ACK 승격은 없다. V1/K 원형과 논리 cursor/Model C는 분리돼 있고 job/worker/UI/cursor 실행 bytes는 e23dec2와 같다. 독립 검토 302 method/356 subtest + worker 2개, 사용자 native 5항목 PASS, 실패·절차 이탈과 역사 근거는 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)에 구분한다.
 
 ```text
 사용자 입력 / Live Auto timeout

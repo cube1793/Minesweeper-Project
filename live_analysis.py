@@ -177,11 +177,14 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
 
 
 def present_k_proposal(proposal) -> LiveAnalysis:
-    """Native first action and already computed exact guess marginals only."""
+    """Display the current native decision, without inference or physical flags."""
     prefix = "첫 입력" if proposal.initial else "추측" if proposal.is_guess else "확정 수"
     status = f"K-P0 (실험적) | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
     recommended = (proposal.x, proposal.y)
-    overlays = {recommended: CellOverlay(recommended=True)}
+    overlays = {cell: CellOverlay(OverlayKind.SAFE) for cell in proposal.safe_cells}
+    for x, y in proposal.preinput_m:
+        if proposal.snapshot.observation[y][x] == CellState.HIDDEN:
+            overlays[(x, y)] = CellOverlay(OverlayKind.MINE)
     exact = proposal.probabilities
     if exact is not None:
         for x, y, numerator in exact.cells:
@@ -191,5 +194,8 @@ def present_k_proposal(proposal) -> LiveAnalysis:
             overlays[coordinate] = CellOverlay(
                 kind, coordinate == recommended, CellProbability(coordinate, numerator, exact.total_worlds))
         status += f" | 지뢰 확률 {format_mine_probability(overlays[recommended].probability)}"
-    # Pending M is excluded from exact U, never painted as an acknowledged FLAG.
+    # A revealed CHORD target gets a border only. A selected HIDDEN FLAG target
+    # keeps its logical mine color; neither color writes a physical FLAG.
+    previous = overlays.get(recommended, CellOverlay())
+    overlays[recommended] = CellOverlay(previous.kind, True, previous.probability)
     return LiveAnalysis(None, proposal.move, status, overlays)

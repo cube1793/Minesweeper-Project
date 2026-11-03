@@ -13,11 +13,11 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 ## Main/Live Simple·V1·실험적 K-P0 — 현재 범위 사용자 수용
 
-기존 Simple/V1·수동↔V1 인수·공개 FLAG 정리·UI는98203e8에서 commit/push 완료됐습니다. 이후 K-P0 첫 연결과 K 추측 확률·V1/K 원형 커서를 구현·독립 검토했고, 사용자는 현재 동작을 수용하면서 같은 판 K 인수와 확정 칸 색상을 후속으로 확인했습니다. native 항목별 실행 수·모든 DPI/완주를 추정하지 않습니다.
+기존 Simple/V1은 98203e8, K-P0 첫 연결·추측 확률·V1/K 원형은 e23dec2에서 Git/recovery까지 완료됐습니다. 이후 확정색(v5)을 구현·독립 검토했고, 사용자는 직전 native 체크리스트 5항목에 “모두 통과야.”라고 확인했습니다. 현재 사용자 환경의 수용이며, 모든 DPI/OS·preset별 완주를 추정하지 않습니다.
 
 새 판은 수동 가능·Auto OFF·guess OFF이며 정책 선택만으로 실행하지 않습니다. K-P0는 **선택 정책으로 새 게임**을 누른 초급·중급·상급만 지원합니다. K Auto OFF는 같은 owner의 일시정지입니다. 수동/Simple/V1로 진행한 판의 K 인수, 수동 인계·owner 종료 뒤 K 재인수는 아직 미지원입니다. Simple의 혼합 입력과 V1의 cleanup 뒤 같은 판 인수는 유지합니다. LC0/LC1은 disabled입니다.
 
-K 추측의 **지뢰 확률**과 기존 확률 토글은 이미 계산한 exact 수치를 표시합니다. K 확정 안전/지뢰의 초록·빨강 overlay는 후속 UI 항목입니다. **자동 커서 표시**는 V1/K의 가상 원형이며 기존 관람 간격 안에서 이동하고 간격0은 점프합니다. K 승인 대기에서는 입력 전에 target에 도착할 수 있습니다. 실제 OS 마우스·Model C·인간 Mouse Trace/Replay는 바꾸지 않습니다.
+K 추측의 **지뢰 확률**과 기존 확률 토글은 이미 계산한 exact 수치를 표시합니다. K가 이미 확정한 안전칸은 초록, HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 유지하며 실제 깃발 입력은 별도입니다. **자동 커서 표시**는 V1/K의 가상 원형이며 기존 관람 간격 안에서 이동하고 간격0은 점프합니다. K 승인 대기에서는 입력 전에 target에 도착할 수 있습니다. 실제 OS 마우스·Model C·인간 Mouse Trace/Replay는 바꾸지 않습니다.
 
 V1은 공개 FLAG-free 직접 zero/all·총수 zero/all로 증명된 FLAG를 유지하고 SAFE/UNVERIFIED를 닫힌 상태로 해제합니다. 미검증은 오답/안전 판정이 아니며 실제 지뢰도 해제될 수 있습니다. 이 준비 검토를 K M에 임의 주입하지 않습니다.
 
@@ -209,11 +209,11 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-03 현재 Main/Live K-P0 연결·확률·커서의 현재 범위 수용 후 문서 마감·사용자 Git 준비 단계입니다.**
-main/HEAD=local origin/main=98203e809581f969685addeed45d7ebc7ff4c528,0/0, staged0입니다.
-이번 새 source/tests18+문서6의24경로(M13/U11)가 미커밋이며 이전 Simple/V1의24경로 Git은98203e8에서 완료됐습니다.
-NEXT는 이번 plan 확인 → 사용자 일괄 Git → 실제 receipt/SHA의 postcommit recovery입니다.
-후속 확정색·같은 판 K 인수·LC0/LC1 Main 연결은 별도 작업이며 자동 착수하지 않습니다.
+**2026-11-03 현재 K 확정색 native 5항목 PASS 후 문서 마감·사용자 Git 준비 단계입니다.**
+main/HEAD=local origin/main=e23dec225753350738f296f742f57ce3ab86c8f5,0/0,staged0입니다.
+이번 source/tests 6개 + 문서 6개의 12경로(M10/U2)가 미커밋입니다. 이전 K 첫 연결의24경로는e23dec2에서 완료됐습니다.
+NEXT는 이번 12경로 plan 확인 → 사용자 일괄 Git → 실제 receipt/SHA의 recovery 교체입니다.
+후속은 같은 판 K 인수·재인수와 LC0/LC1 Main 연결이며 자동 착수하지 않습니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.

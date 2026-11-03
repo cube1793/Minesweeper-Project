@@ -50,17 +50,20 @@ class KProbabilityFeedbackTests(unittest.TestCase):
             self.assertEqual(owner.session.M, frozenset({(1, 0)}))
             self.assertEqual(p.snapshot.base_m, ())
 
-    def test_presentation_has_exact_unresolved_candidates_and_no_pending_m_overlay(self):
+    def test_presentation_has_exact_unresolved_candidates_and_separate_logical_m(self):
         owner, snapshot = guess_owner()
         p = owner.propose(snapshot)
         result = present_k_proposal(p)
         self.assertIn('지뢰 확률 66.7%', result.status_text)
         self.assertEqual(result.move, owner.selection.move)
-        self.assertEqual(set(result.overlays), {(2, 0), (3, 0), (4, 0)})
+        self.assertEqual(set(result.overlays), {(1, 0), (2, 0), (3, 0), (4, 0)})
+        self.assertEqual(result.overlays[(1, 0)].kind, OverlayKind.MINE)
+        self.assertIsNone(result.overlays[(1, 0)].probability)
+        uncertain = [o for cell, o in result.overlays.items() if cell not in p.preinput_m]
         self.assertEqual([c for c, o in result.overlays.items() if o.recommended], [(2, 0)])
-        self.assertTrue(all(o.kind == OverlayKind.GUESS_CANDIDATE for o in result.overlays.values()))
+        self.assertTrue(all(o.kind == OverlayKind.GUESS_CANDIDATE for o in uncertain))
         self.assertTrue(all((o.probability.mine_worlds, o.probability.total_worlds) == (2, 3)
-                            for o in result.overlays.values()))
+                            for o in uncertain))
 
     def test_initial_and_certain_do_not_fabricate_probabilities(self):
         initial = fixtures.initial()
@@ -161,11 +164,12 @@ class KProbabilityFeedbackTests(unittest.TestCase):
         self.assertIsNone(owner.pending)
         self.assertIsNone(owner.decision)
 
-    def test_v4_rejects_old_v3_without_changing_sequence_bounds(self):
+    def test_v5_rejects_old_v4_v3_without_changing_sequence_bounds(self):
         valid = transport.message('a' * 32, 0, 'START', {})
-        self.assertEqual(valid['version'], 4)
-        with self.assertRaises(LivePolicyError):
-            transport.validate_message({**valid, 'version': 3})
+        self.assertEqual(valid['version'], 5)
+        for old_version in (3, 4):
+            with self.subTest(version=old_version), self.assertRaises(LivePolicyError):
+                transport.validate_message({**valid, 'version': old_version})
         self.assertEqual(transport.MAX_V1_SEQUENCE, 1921)
         self.assertEqual(transport.MAX_SEQUENCE, 31681)
         self.assertEqual(k.MAX_VALIDATIONS_PER_INPUT, 64)
