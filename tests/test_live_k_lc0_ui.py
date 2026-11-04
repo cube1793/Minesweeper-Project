@@ -73,9 +73,9 @@ class LiveLC0UITests(unittest.TestCase):
 
     def test_lc0_enabled_label_p0_lc1_kept_and_three_presets(self):
         combo = self.ui.live_policy_combo
-        for policy in (POLICY_K, POLICY_K_LC0):
+        for policy, label in ((POLICY_K, 'K-P0'), (POLICY_K_LC0, 'K-LC0')):
             self.assertTrue(combo.model().item(combo.findData(policy)).isEnabled())
-            self.assertIn('(\uc2e4\ud5d8\uc801)', combo.itemText(combo.findData(policy)))
+            self.assertEqual(combo.itemText(combo.findData(policy)), label)
         self.assertTrue(combo.model().item(combo.findData('K_LC1')).isEnabled())
         for index in (0, 1, 2):
             self.ui.difficulty_combo.setCurrentIndex(index)

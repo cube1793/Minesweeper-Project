@@ -2,7 +2,7 @@
 
 ## Status
 
-Current state: **2026-11-04 (Asia/Seoul)**.
+Current state: **2026-11-05 (Asia/Seoul)**.
 **Stage-3 Extended: ACTIVE pending explicit project-closeout adjudication.**
 Stage-3 V1 remains CLOSED / FROZEN; ZiNi Improvement remains CLOSED / V1 RETAINED,
 with its final holdout unopened. This roadmap is not automatic execution authority.
@@ -22,7 +22,8 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Main Simple/V1, K connection/probability/cursor/colours | Earlier accepted commits98203e8/e23dec2/a992892; historical F02 NOT_VERIFIED |
 | Main K current-board/FLAG adoption, ACK handoff, Simple preparation, Replay UI | Accepted and committed at7f15355; historical source107 |
 | Main K-LC0 integration, all three entries and manual handoff | Accepted and committed at4f34a96; historical source111 |
-| Main K-LC1 and Replay/certainty display stability | Independent required fixes0 and user native accepted; source314,30-path source/tests/docs Git preparation |
+| Main K-LC1 and Replay/certainty display stability | Accepted and committed at68c272e; historical source314 |
+| Main pacing, bounded fixed-rate and exact CPS input | Limited independent review + user native accepted; source327,28-path source/tests/docs Git preparation |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It establishes no
 effectiveness or aggregate superiority. The scientific disposition is not PHASE1_NO_GO
@@ -31,16 +32,16 @@ with package root results/program-k-trace-demo-final-acceptance/20261031-230251/
 Earlier05920abeaec541a52fd22753dadec66f5cb98bca and technical48f6ebc97e6c4d3ed4a746a92a8d169783803bf9
 are historical anchors, distinct from later Main source and E1/R0 execution identities.
 
-Current precommit main == local origin/main ==4f34a9690fd913f8702404a3c1c6122c078bd4d0,
-ahead/behind0/0, staged0. LC1+display source/tests22 + documents8 are **30 uncommitted paths (M21/U9)**.
-After the user executes the prepared script, the actual receipt and replaced recovery give the resulting SHA.
-The earlier LC0 29-path Git/recovery procedure is complete and must not be repeated.
+Current precommit main == local origin/main ==68c272e7272032cdfe9774a36d41c3686a8f375e,
+ahead/behind0/0, staged0. Pacing source/tests22 + documents6 are **28 uncommitted paths (M14/U14)**.
+The earlier LC1/display30-path commit/push/recovery is complete. Do not repeat its script.
 
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [LC1/display Main closeout](STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [pacing/CPS closeout](STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)
 are current authority. Older PENDING/FAIL records and D0–D5 evidence retain their original dispositions.
 
-**CURRENT NEXT: user one-shot stage/commit/push → verify actual receipt/SHA → postcommit recovery
-replacement → choose the next bounded task.** Global Extended closure, Stage4, new package and research remain separate decisions.
+**CURRENT NEXT: user one-shot stage/commit/push → actual receipt/SHA verification → postcommit recovery
+replacement.** Then define same-board replay, burst measurement or distance-based viewing work separately.
+Global Extended closure, Stage4, new package and research remain separate decisions.
 
 ## Main/Live current accepted scope
 
@@ -58,18 +59,22 @@ Replay shows the recorded next input/outline separately from Simple reference an
 analysis calls. UI comparison verdict text is removed; internal comparison API and Replay JSON remain unchanged.
 Replay algorithm use still comes from source_type, with no new policy-name history. Keyboard/editor behavior remains.
 
-Current source314 manifest SHA256: 61d96678759c04f38f4931cc0bd5b465a10953b2b6c78f82c03d99691138bb3d.
-LC1 independent review ran625/905 once on source310,6 real-worker cases/8owners/Auto10 and24 probe checks.
-The later display review ran263/355 once on source314,2 cases/2owners/Auto4 and9 probe checks.
-Counts are version-bound selected checks, not a combined full suite. Both reviews found required fixes0.
-The user accepted the LC1 flow and then the display changes in the current native environment.
+Current pacing source327 manifest SHA256: a700d67dfabc6df4a9ed597c2bf0e4d228a7f4ed830bcd8a0f6495c7d78fc228.
+Final independent precision review:105 methods/1084 subtests,3owners/96Auto inputs,32probe assertions,
+no required fixes. LC1 default5CPS over60inputs measured4.903573 using(N-1)/Auto-span. Counts are selected
+version-bound checks, not a full suite or a guarantee for all loads. User native acceptance is separate.
 
-Known display OPTIONALs remain: Replay tooltip's Live legend, paused-after-input calculation wording,
-and theoretical object-id reuse already guarded by run/generation. The kit's missing EXECUTION_LEDGER was
-initialized before any failing run, counted as preparation rather than recovery; future kit copies are corrected.
-Older LC0 probe48/49, inherited TMPDIR cleanup NOT_VERIFIED, F02 NOT_VERIFIED, Qt FileDialog FAIL and previous
-OPTIONAL/failure records remain history. No global TEMP scan or old rerun loop is opened.
-K-P0/K-LC0/K-LC1 keep their experimental labels; V1/K-family custom boards remain unsupported.
+Default fixed200ms/target5CPS and Model C rate are separate controls. Exact ns authority preserves6CPS as6
+with166.667ms display. Fixed scheduling keeps phase for lateness<=P/10 and restarts after larger delays;
+minimum gap is0.9P, no input precedes its own target and no backlog is replayed. Fixed usesPreciseTimer/QPC;
+Model C uses frozen action cost/rate and its original timer type. Worker/policy/model accounting remain unchanged.
+Main K labels no longer include the experimental suffix; this does not approve Production or freeze K policies.
+
+The older source310/314 LC1/display checks, coarse-clock FAIL/repair, strict-cadence metric correction,
+PreciseTimer LC1 performance FAIL and bounded-rate PASS retain their individual histories in the closeouts.
+Editor API/harness coupling and load sensitivity remain optional limitations. Historical F02 NOT_VERIFIED,
+FileDialog FAIL and TEMP NOT_VERIFIED remain; no global TEMP scan or old revalidation loop is opened.
+V1/K custom boards remain unsupported. Same-board Main replay and calibrated burst/distance pacing are future work.
 
 ## Post-D5 bounded source exhibition and pacing analysis
 
@@ -139,7 +144,7 @@ rendering, offscreen tests and the failed Computer Use initialization are separa
 native-g optimality or production approval. LC1 is not frozen and does not replace LC0.
 The external viewer only reads four saved traces; the existing k_lc0_exhibition app still
 runs actual K-P0/K-LC0. Main now also supports LC1; that does not expand the saved viewer or comparison app. New package/EXE and Stage4 remain unapproved.
-Current Main contracts and the30-path LC1/display document/Git/recovery sequence are in the latest Main closeout and current handoff.
+Current Main contracts and the 28-path pacing document/Git/recovery sequence are in the latest Main closeout and current handoff. The earlier 30-path LC1/display procedure is complete.
 Further implementation does not start automatically.
 
 ## Foundation — closed / integrated
@@ -282,7 +287,7 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT:** follow the 2026-11-04 LC1/display Main30-path preparation/recovery sequence in Status and
+**CURRENT NEXT:** follow the 2026-11-05 pacing Main28-path preparation/recovery sequence in Status and
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md); older Git/NEXT snapshots are historical.
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
@@ -664,7 +669,7 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT:** the 2026-11-04 Status/current handoff controls; current LC1/display Main30-path document/Git
+**CURRENT NEXT:** the 2026-11-05 Status/current handoff controls; current pacing Main28-path document/Git
 preparation and postcommit recovery do not reopen this research chain.
 Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection

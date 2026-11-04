@@ -575,7 +575,7 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 사용자 확인은 두 저장 경로에 한정된다. native Qt 렌더 확인/offscreen tests/미확인 CU 제스처를
 분리하며 자세한 수치·알려진 한계·실행 안내는
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)을 따른다.
-위 내용은 별도 저장 viewer의 역사적 범위다. 현재 Main은 K-P0/K-LC0/K-LC1을 연결했으며 [LC1 및 표시 개선 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따른다. 기존 비교 앱에 LC1이 추가됐다는 뜻은 아니다. Production·새 package/Stage4는 미승인이다.
+위 내용은 별도 저장 viewer의 역사적 범위다. 현재 Main은 K-P0/K-LC0/K-LC1 및 속도 입력을 연결했으며 [관람 속도/CPS closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)을 따른다. 기존 비교 앱에 LC1이 추가됐다는 뜻은 아니다. Production·새 package/Stage4는 미승인이다.
 
 ### Replay
 
@@ -588,6 +588,8 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 | `replay_analysis.py` | 현재 공개 position의 Simple 추천과 내부 비교 데이터. 읽기 전용 |
 | `replay_display.py` | 녹화된 다음 입력의 문구/테두리와 별도 Simple 참고 표시. 비교 판정은 화면에 노출하지 않음 |
 | `live_display_state.py` | 동일 Auto context의 HIDDEN 확정색만 다음 계산까지 보관하는 immutable frame. 입력 권한 없음 |
+| `live_pacing.py` | Fraction 입력, 정수 ns 고정 주기, 원 Model C 관람 배속과 deadline. 정책/비용 변경 없음 |
+| `live_fixed_cadence.py` | 실제 입력 시각과 예정 목표를 분리한 제한된 위상 보정. 입력 권한 없음 |
 | `replay_statistics.py` | 별도 player로 counter timeline을 만들고 위치·재생 시간·ZiNi에 따른 Counters 반환 |
 
 Replay 재생, Replay Analysis, Replay Statistics는 서로 다른 책임이다. 재생은 기록을 engine에 적용하고, Analysis는 현재 position의 추천을 설명하며, Statistics는 과거 행동의 통계를 집계한다. Analysis는 플레이 평가 점수를 계산하지 않는다.
@@ -683,7 +685,7 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
-2026-11-04 현재 K-LC1 Main 연결과 Replay/확정색 표시 개선의 독립 검토 및 사용자 native 수용을 마쳤다. 현재 [LC1 및 표시 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 우선한다. [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md), [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md), [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 버전별 역사다.
+2026-11-05 현재 K-LC1 연결·Replay/확정색에 이어 관람 속도와 정밀 CPS 입력의 범위 한정 독립 검토 및 사용자 native 수용을 마쳤다. 현재 [속도/CPS 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)을 우선한다. [LC1 및 표시 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)은 이전 checkpoint다. [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md), [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md), [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 버전별 역사다.
 
 새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 계열 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
 
@@ -702,6 +704,16 @@ K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selectio
 live_display_state의 DisplayContext는 game/policy/run/generation/owner/revision/이력·관측 digest에 결속된다. CertaintyFrame은 SAFE/MINE만 저장한다. 같은 context에서 Auto 입력1회 후 다음 계산을 기다릴 때 여전히 HIDDEN인 색만 유지한다. 열린/FLAG 칸은 즉시 제외하고 이전 추천·확률은 보관하지 않는다. 새 분석이 있으면 새 frame으로 교체하며 합집합을 누적하지 않는다. pause는 유효 frame을 유지하고, 수동 첫 press·정책·새 게임·Replay·종료·분석 OFF·오류·owner 폐기는 frame을 지운다. 실행 분석의 무효화와 표시는 분리되므로 frame이 token/입력/다음 선택을 승인하지 못한다. CellButton은 overlay/확률 문구/테두리/tooltip이 모두 같을 때만 중복 update를 생략한다.
 
 Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일시정지 한 번이다. Replay Return/Enter/reset은 상태를 바꾸지 않는다. 비편집 정책 콤보의 focus에서도 Live 키가 동작하며 편집 가능한 콤보·line/text/spinbox, popup/modal, auto-repeat 방어를 유지한다. 종료 정리 예외는 기존 closing/job 잠금을 유지하면서 한 줄 이유·전체 tooltip/접근성 설명과 비활성 제어로 표시한다. 강제 종료/추가 worker/자동 복구를 만들지 않는다.
+
+#### Main/Live 관람 속도
+
+기본은 고정200ms/목표5CPS다. 고정 모드의 실행 권위는 FixedPeriod.period_ns 하나다. 정확한 Fraction 입력을 ns로 올림하고 표시 반올림을 되먹이지 않는다. 6CPS는166,666,667ns이며 사용자가 입력한6을 유지한다. 같은 주기 재확정은 timer/phase/nonce를 바꾸지 않고 실제 주기 변경만 drain 후 재예약한다. 고정 간격·목표 CPS와 Model C 배속은 모드별로 표시하며 숨긴 편집기의 늦은 commit을 막는다.
+
+고정 목표 T와 실제 입력 A를 분리한다. 0<=10*(A-T)<=P이면 다음 목표는T+P, 그 밖에는A+P로 재시작한다. 각 입력은 자기 목표 이전에 실행하지 않으며 작은 보정의 최소 간격은0.9P다. Auto/owner/수동/모드 전환의 위상 수명을 따로 관리하고 밀린 입력을 몰아 실행하지 않는다. K의 현재 proposal은 먼저 VALIDATE할 수 있지만 permit은 목표까지 보관한다. due 시 재검증→token→step의 기존 무yield 구간과 정확ACK 뒤 NEXT는 유지한다.
+
+고정 모드는 PreciseTimer, Model C는 기존 timer type이다. deadline은 time.perf_counter_ns(QPC), 원형은 perf_counter 초를 쓴다. timer의 조기 callback은 남은 시간을 재대기한다. Model C는 원 행동 비용/배속(0.05–8)의 ceil-ms 관람 지연이며 고정 위상 보정을 적용하지 않는다. frozen 비용 기록·원 추론·worker/job/transport는 바꾸지 않는다.
+
+성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이·burst 보장·거리별 추가 보정은 아직 구현하지 않았다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
 
 ```text
 사용자 입력 / Live Auto timeout

@@ -190,7 +190,7 @@ def present_k_proposal(proposal) -> LiveAnalysis:
         return present_flag_preparation(label, (proposal.x, proposal.y), len(summary.retained),
                                         len(summary.removable), "K native local 확인 범위입니다.")
     prefix = "첫 입력" if proposal.initial else "추측" if proposal.is_guess else "확정 수"
-    status = f"{label} (실험적) | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
+    status = f"{label} | {prefix}: {proposal.action} ({proposal.x}, {proposal.y})"
     recommended = (proposal.x, proposal.y)
     overlays = {cell: CellOverlay(OverlayKind.SAFE) for cell in proposal.safe_cells}
     for x, y in proposal.preinput_m:

@@ -32,6 +32,35 @@ def certain_owner():
 
 
 class KCertaintyProjectionTests(unittest.TestCase):
+    def test_policy_labels_and_decision_prefixes_without_extra_analysis(self):
+        state = fixtures.initial()
+        initial_owner = k.KOwner(state, load_timing_table())
+        initial = initial_owner.propose(state)
+        certain_source, certain = certain_owner()
+        owner, state = fixtures.after_initial(((1, -2, -2, -2, -2),), mines=2)
+        guess = owner.propose(state)
+        with patch.object(KLocalSession, 'analyze_decision', side_effect=AssertionError('extra analysis')), \
+                patch.object(initial_owner, '_select', side_effect=AssertionError('extra selection')), \
+                patch.object(certain_source, '_select', side_effect=AssertionError('extra selection')), \
+                patch.object(owner, '_select', side_effect=AssertionError('extra selection')), \
+                patch.object(k.KOwner, 'validate', side_effect=AssertionError('extra validation')):
+            for proposal, prefix in ((initial, '첫 입력'), (certain, '확정 수'), (guess, '추측')):
+                reference = present_k_proposal(proposal)
+                for policy, label in ((k.POLICY_K, 'K-P0'), (k.POLICY_K_LC0, 'K-LC0'),
+                                      (k.POLICY_K_LC1, 'K-LC1')):
+                    with self.subTest(policy=policy, kind=proposal.kind):
+                        # Display-only copies reuse fixture evidence; no policy is rerun.
+                        snapshot = replace(proposal.snapshot, policy_id=policy,
+                                           definition=k.definition_for_entry(proposal.snapshot.entry_mode, policy),
+                                           phase=k.normal_phase(policy))
+                        result = present_k_proposal(replace(proposal, snapshot=snapshot))
+                        suffix = ' | 지뢰 확률 33.3%' if proposal.is_guess else ''
+                        self.assertEqual(result.status_text,
+                                         f'{label} | {prefix}: {proposal.action} ({proposal.x}, {proposal.y}){suffix}')
+                        self.assertNotIn('(실험적)', result.status_text)
+                        self.assertEqual(result.move, reference.move)
+                        self.assertEqual(result.overlays, reference.overlays)
+
     def test_initial_has_border_only_and_no_native_calls(self):
         state = fixtures.initial()
         owner = k.KOwner(state, load_timing_table())

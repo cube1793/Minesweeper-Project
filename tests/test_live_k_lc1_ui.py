@@ -44,11 +44,18 @@ class LiveLC1UITests(unittest.TestCase):
     test_late_permit_reset_replay_policy_difficulty_close_has_no_input_or_residue = lc0.LiveLC0UITests.test_late_permit_reset_replay_policy_difficulty_close_has_no_input_or_residue
     test_history_tampering_before_token_consumption = flags.KFlagAdoptUITests.test_history_only_tampering_blocks_preparation_before_token_consumption
 
-    def test_enabled_experimental_label_all_three_presets_and_custom_block(self):
+    def test_enabled_labels_policy_ids_all_three_presets_and_custom_block(self):
         combo = self.ui.live_policy_combo
-        for policy in (POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        self.assertEqual([combo.itemData(i) for i in range(combo.count())],
+                         [POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1])
+        for policy, label in ((POLICY_K, 'K-P0'), (POLICY_K_LC0, 'K-LC0'), (POLICY_K_LC1, 'K-LC1')):
             self.assertTrue(combo.model().item(combo.findData(policy)).isEnabled())
-            self.assertIn('(실험적)', combo.itemText(combo.findData(policy)))
+            self.assertEqual(combo.itemText(combo.findData(policy)), label)
+            self.select(policy)
+            self.assertEqual(combo.currentData(), policy)
+            self.assertEqual(self.ui._live_policy, policy)
+            self.assertTrue(self.ui.live_policy_status_label.text().startswith(f'현재: {label} | '))
+            self.assertNotIn('(실험적)', self.ui.live_policy_status_label.text())
         for index in (0, 1, 2):
             with self.subTest(preset=index):
                 self.ui.difficulty_combo.setCurrentIndex(index)

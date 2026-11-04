@@ -1,6 +1,6 @@
 # Minesweeper Project
 
-Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 실험적 K-P0/K-LC0/K-LC1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 K-P0/K-LC0/K-LC1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
 
 ## 핵심 기능
 
@@ -11,9 +11,9 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Main/Live Simple·V1·실험적 K-P0/K-LC0/K-LC1 — 현재 범위 사용자 수용
+## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 현재 범위 사용자 수용
 
-2026-11-04 기준 **K-LC1 Main 연결과 Replay/확정색 표시 개선까지 독립 검토 필수 수정 0·사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
+2026-11-05 기준 **K-LC1 연결·표시 개선에 이어 관람 속도·고정 CPS·정밀 입력 UI까지 범위 한정 독립 검토 및 사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
 
 새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0/K-LC0/K-LC1은 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하고, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1과 K 계열의 사용자 지정 보드는 미지원입니다.
 
@@ -21,7 +21,17 @@ Auto OFF는 일시정지입니다. 모든 정책은 수동 첫 입력에서 Auto
 
 K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. 같은 Auto 세션의 다음 계산을 기다리는 동안 유효한 확정색만 유지하고, 열린 칸과 깃발 칸의 색은 즉시 지웁니다. 새 결과가 오면 통째로 교체하며 이전 추천·확률을 다음 입력으로 재사용하지 않습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 실제 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace에 합성 경로를 만들지 않습니다.
 
-현재 계약·검증·알려진 문구 한계는 [LC1 및 표시 개선 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)에 정리했습니다. [LC0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)과 [K 인수/UI closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)은 이전 checkpoint입니다. **K-P0/K-LC0/K-LC1 (실험적)** 표시는 유지하며, F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
+현재 속도 계약·검증·실패 이력은 [관람 속도/CPS closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)에 정리했습니다. [LC1 및 표시 개선](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)과 [K 인수/UI](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)는 이전 checkpoint입니다. Main의 세 K 정책에서 “(실험적)”을 제거했지만 F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
+
+### 자동 진행 속도
+
+새 창은 **고정 간격 200ms / 목표 CPS 5**입니다. 고정 모드에서는 간격과 목표 CPS를 서로 환산하고, Model C 모드에서는 배속만 표시합니다. CPS 6을 입력하면 6을 유지하며 내부 주기는 약166.667ms입니다. 화면에 반올림된 값이 실행 주기를 덮어쓰지 않습니다.
+
+고정 속도는 예정 입력 주기를 유지하되 작은 지연만 보정합니다. 200ms에서 일부 간격은180ms까지 짧아질 수 있고, 큰 지연 후에는 새 주기로 시작해 밀린 입력을 몰아 실행하지 않습니다. 계산이 늦으면 목표 CPS에 미달할 수 있습니다. 왼쪽 Counters CPS는 실제 클릭/게임 시간이고 목표 설정과 별도입니다.
+
+**Model C 기반**은 기존 거리별 행동 비용을 배속으로 나눈 관람 지연입니다. 고정 CPS와 다른 방식이며 원 정책·비용 표는 바꾸지 않습니다. 현재 창에서 바꾼 간격·배속은 reset/정책 변경/Replay 왕복 후에도 유지합니다.
+
+같은 보드를 새 판으로 **다시 플레이**하는 Main 기능은 아직 없습니다. Replay 시청과 별도 Same-board Comparison은 기존 기능으로 유지합니다.
 
 ## Simple Algorithm
 
@@ -211,9 +221,9 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-04 현재 Main K-LC1과 Replay/확정색 개선까지 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
-main/HEAD=local origin/main=4f34a9690fd913f8702404a3c1c6122c078bd4d0,0/0,staged0입니다.
-이번 source/tests22 + 문서8 =30경로(M21/U9)는 미커밋입니다.
+**2026-11-05 현재 Main K-LC1·표시 개선에 이어 속도/CPS 입력까지 범위 한정 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
+작성 기준 main/HEAD=local origin/main=68c272e7272032cdfe9774a36d41c3686a8f375e,0/0,staged0입니다.
+이번 source/tests22 + 문서6 =28경로(M14/U14)는 미커밋입니다. 이전 LC1/표시30경로는68c272e에서 완료됐습니다.
 NEXT는 사용자 일괄 Git → 실제 receipt/commit 검증 → recovery 교체 → 다음 작업 범위 선정입니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
@@ -323,7 +333,7 @@ actual K-P0/K-LC0 앱 그대로이며 LC1 실행은 통합되지 않았습니다
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)에
 실행 명령,145→153/97 확인 순서, 복구 pilot·검토·viewer 기록과 알려진 한계를 정리했습니다.
 당시 source4·문서6의10경로는 d1201e4에서 commit/push 완료됐습니다. 외부 viewer는 그 commit 대상이 아닙니다.
-이후 Main/Live LC1 연결·표시 개선도 사용자 수용했으며 현재 상태는 [최신 Main closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따릅니다.
+이후 Main/Live LC1 연결·표시 개선과 속도 입력까지 사용자 수용했으며 현재 상태는 [최신 Main closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)을 따릅니다.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 

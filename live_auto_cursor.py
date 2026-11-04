@@ -1,6 +1,6 @@
 """Draw-only Live Auto cursor. No engine, policy, input or trace dependencies."""
 
-from time import monotonic
+from time import perf_counter
 
 from PyQt5.QtCore import QPointF, Qt, QTimer
 from PyQt5.QtGui import QColor, QPainter, QPen
@@ -16,7 +16,7 @@ class LiveAutoCursorOverlay(QWidget):
     without an owner the overlay is hidden.
     """
 
-    def __init__(self, parent, *, clock=monotonic):
+    def __init__(self, parent, *, clock=perf_counter):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_NoSystemBackground)

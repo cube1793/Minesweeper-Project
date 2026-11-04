@@ -42,6 +42,19 @@ def recommendation(action, x, y, kind=DecisionKind.LOCAL_DETERMINISTIC):
     return SimpleDecision(kind, move, (), InferenceResult(safe, mines), probability)
 
 
+def advance_auto_timer(ui):
+    """Legacy deterministic seam: deliver only after the current deadline.
+
+    New cadence tests explicitly probe earlier instants. Real-clock and IPC
+    tests do not use this helper or replace the product clock.
+    """
+    wait = ui._pacing_wait or ui._fixed_cadence
+    if ui._simple_auto_pending and wait is not None:
+        due = max(ui._pacing_clock_ns(), wait.deadline_ns)
+        ui._pacing_clock_ns = lambda: due
+    ui._simple_auto_timer.timeout.emit()
+
+
 @unittest.skipIf(QApplication is None, "PyQt5 unavailable")
 class LiveAutoUITests(unittest.TestCase):
     @classmethod
@@ -69,8 +82,7 @@ class LiveAutoUITests(unittest.TestCase):
         self.ui.on_left_click(0, 0)
 
     def tick(self):
-        # No sleeps or wall-clock races: deliver the connected timeout directly.
-        self.ui._simple_auto_timer.timeout.emit()
+        advance_auto_timer(self.ui)
 
     def put_automatic_flag(self, x, y):
         # Exercise the unchanged normal planner path with an already-owned
@@ -113,13 +125,14 @@ class LiveAutoUITests(unittest.TestCase):
 
     def test_interval_defaults_range_step_and_display(self):
         spin = self.ui.simple_auto_interval_spin
-        self.assertEqual(spin.value(), 180)
-        self.assertEqual(self.ui._simple_auto_timer.interval(), 180)
+        self.assertEqual(spin.value(), 200)
+        self.assertEqual(self.ui._simple_auto_timer.interval(), 200)
         self.assertEqual((spin.minimum(), spin.maximum(), spin.singleStep()), (0, 2000, 10))
-        self.assertEqual(spin.text(), "180 ms")
+        self.assertEqual(spin.text(), "200 ms")
+        self.assertEqual(self.ui.pacing_cps_edit.text(), "5")
         self.assertTrue(spin.isEnabled())
         self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
-        for value, text in ((500, "500 ms"), (0, "최대 속도"), (2000, "2000 ms")):
+        for value, text in ((180, "180 ms"), (500, "500 ms"), (0, "최대 속도"), (2000, "2000 ms")):
             spin.setValue(value)
             self.assertEqual(spin.text(), text)
             self.assertEqual(self.ui._simple_auto_timer.interval(), value)
@@ -143,6 +156,7 @@ class LiveAutoUITests(unittest.TestCase):
                     change_count = len(changes)
                     QTest.keyClick(spin, Qt.Key_A, Qt.ControlModifier)
                     QTest.keyClicks(spin, str(value))
+                    QTest.keyClick(spin, Qt.Key_Return)
                     self.app.processEvents()
                     self.assertEqual(spin.value(), value)
                     self.assertEqual(spin.text(), "최대 속도" if value == 0 else f"{value} ms")
@@ -158,6 +172,7 @@ class LiveAutoUITests(unittest.TestCase):
             QTest.keyClick(spin, Qt.Key_Backspace)
             self.assertFalse(spin.hasAcceptableInput())
             QTest.keyClicks(spin, "500")
+            QTest.keyClick(spin, Qt.Key_Return)
             self.app.processEvents()
             self.assertEqual(spin.value(), 500)
             self.assertEqual(spin.text(), "500 ms")
@@ -184,6 +199,7 @@ class LiveAutoUITests(unittest.TestCase):
               patch.object(self.engine, "step", wraps=self.engine.step) as step):
             QTest.keyClick(spin, Qt.Key_A, Qt.ControlModifier)
             QTest.keyClicks(spin, "0")
+            QTest.keyClick(spin, Qt.Key_Return)
             # Inspect before event dispatch: a pending zero timer may then move.
             self.assertEqual(spin.value(), 0)
             self.assertEqual(spin.text(), "최대 속도")
@@ -1102,7 +1118,7 @@ class LiveV1UITests(unittest.TestCase):
         return self.ui._v1_job
 
     def tick(self):
-        self.ui._simple_auto_timer.timeout.emit()
+        advance_auto_timer(self.ui)
 
     def prepare_chord(self):
         """Install a named synthetic execution prefix after testing fresh admission."""

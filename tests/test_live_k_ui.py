@@ -13,7 +13,7 @@ import live_k_policy as k
 from core_engine import Action, GameStatus, MinesweeperEngine
 from live_policy import POLICY_K, POLICY_V1, POLICY_SIMPLE
 from stage3_physical import load_timing_table
-from tests.test_live_auto import SyntheticLivePolicyJob
+from tests.test_live_auto import SyntheticLivePolicyJob, advance_auto_timer
 from tests.ui_settings import isolate_ui_settings
 from ui_manager import MinesweeperUI
 
@@ -124,7 +124,7 @@ class LiveKUITests(unittest.TestCase):
         return self.job.pending
 
     def tick(self):
-        self.ui._simple_auto_timer.timeout.emit()
+        advance_auto_timer(self.ui)
 
     def apply_initial(self):
         p = self.start()

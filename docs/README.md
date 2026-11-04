@@ -5,7 +5,9 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live K-LC1 및 표시 개선 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md): 2026-11-04 LC1 연결·Replay 녹화 입력/참고 분석 분리·Auto 확정색 유지, 독립 필수 수정0 및 사용자 native 수용. 현재 source314, source/tests22+문서8의30경로 Git 준비. 완료 SHA는 후속 실제 receipt/recovery를 따른다.
+- [Main/Live 관람 속도·정밀 CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md): 2026-11-05 최종 source327, 고정 주기/Model C 분리·정확한 CPS 입력·기본200ms·K 라벨 정리. 최종 독립105/1084 및 real3owner/96입력, 사용자 native 수용. 현재 문서/Git authority.
+
+- [Main/Live K-LC1 및 표시 개선 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md): 2026-11-04 LC1 연결·Replay 녹화 입력/참고 분석 분리·Auto 확정색 유지, 독립 필수 수정0 및 사용자 native 수용. 이전 source314와30경로 commit/push는68c272e에서 완료됐다. 속도 변경 전 checkpoint다.
 
 - [Main/Live K-LC0 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md): 세 entry·인계·표시 연결의 이전 수용 기록. 29경로 commit/push와 recovery는 4f34a96에서 완료됐다. 원 검증과 당시 PENDING은 역사로 보존한다.
 
@@ -142,8 +144,8 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT (2026-11-04): LC1/표시 문서30경로 plan 확인 → 사용자 일괄 stage·commit·push → 실제 receipt/commit 검증 → recovery 교체.**
-현재 main/HEAD=local origin/main=4f34a9690fd913f8702404a3c1c6122c078bd4d0,0/0,staged0입니다. source/tests22+문서8(M21/U9)이 미커밋입니다. 이전 확정색12경로는a992892, 인수/UI32경로는7f15355, LC0 29경로는4f34a96에서 완료됐습니다. 옛 script/NEXT는 반복하지 않습니다. 새 output과 절차는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따릅니다.
+**CURRENT NEXT (2026-11-05): 속도/CPS 문서28경로 plan → 사용자 일괄 stage·commit·push → 실제 receipt 검증 → recovery 교체.**
+현재 작성 기준 main/HEAD=local origin/main=68c272e7272032cdfe9774a36d41c3686a8f375e,0/0,staged0이다. source/tests22+문서6(M14/U14)이 미커밋이다. 이전 LC1/표시30경로는68c272e에서 완료됐으며 옛 script는 반복하지 않는다. 새 output/계약/향후 같은 보드 재플레이·burst 측정은 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따른다.
 
 K 확정색은 원 safe의 초록/HIDDEN M의 빨강 표시이며, 표시를 위해 실제 FLAG·원 추론·M·Model C를 바꾸지 않습니다. 독립 검토 302 method/356 subtest + worker 2개와 사용자의 직전 native 5항목 “모두 통과야.”를 별도 기록합니다. 모든 DPI/OS·preset별 완주·전체 suite·효과성 승인은 아닙니다. 위302/356 검증은 당시 확정색 snapshot의 역사입니다. 이후 같은 판 K 인수/재인수·LC0/LC1 Main 연결·표시 개선도 완료했으며 현재 계약은 최신 closeout을 따릅니다.
 

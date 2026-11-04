@@ -119,6 +119,7 @@ class KFeedbackUITests(unittest.TestCase):
         self.now = [0.0]
         self.overlay = self.ui.auto_cursor_overlay
         self.overlay._clock = lambda: self.now[0]
+        self.ui._pacing_clock_ns = lambda: 0  # Explicit deterministic input clock; tick advances it.
         self.ui.simple_auto_interval_spin.setValue(2000)
 
     def guess_pending(self):
@@ -236,12 +237,14 @@ class KFeedbackUITests(unittest.TestCase):
         old_draw, old_input = self.overlay._timeout_slot, self.ui._simple_auto_timeout_slot
         self.now[0] = 1
         self.ui.simple_auto_interval_spin.setValue(0)
-        self.assertEqual(self.overlay.position, (p.x, p.y))
+        self.assertEqual(self.overlay.position, self.ui._v1_cursor)
         reservation = self.ui._v1_timer_reservation
         old_draw()
         old_input()
         self.assertEqual(self.ui._v1_timer_reservation, reservation)
         self.assertEqual(self.ui._live_action_count, 1)
+        self.job.deliver_admission()  # Revoked early validation drains first.
+        self.assertEqual(self.overlay.position, (p.x, p.y))
         self.tick()
         self.ui.allow_guess_checkbox.setChecked(False)
         self.job.deliver_admission()
@@ -380,6 +383,7 @@ class V1CursorUITests(unittest.TestCase):
         self.now = [0.0]
         self.overlay = self.ui.auto_cursor_overlay
         self.overlay._clock = lambda: self.now[0]
+        self.ui._pacing_clock_ns = lambda: 0  # Preparation CPU time is not part of this interpolation fixture.
         self.ui.simple_auto_interval_spin.setValue(2000)
 
     def test_v1_motion_toggle_and_actual_chord_keep_cost_and_logical_cursor(self):
