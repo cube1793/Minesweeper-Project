@@ -681,19 +681,21 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
-2026-11-04 현재 K 인수·FLAG 준비·수동 인계·Simple 준비·Replay UI까지 범위 한정 독립 검토와 사용자 native 수용을 마쳤다. 현재 [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)을 우선하며, [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)과 [K v3–v5](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)는 버전별 역사다.
+2026-11-04 현재 K 인수·FLAG 준비·수동 인계·Simple 준비·Replay UI에 이어 K-LC0 Main 연결의 독립 검토와 사용자 native 수용을 마쳤다. 현재 [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)을 우선하고, [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)은 이전 checkpoint이며, [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)과 [K v3–v5](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)는 버전별 역사다.
 
 새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
 
-K-P0는 세 preset에서 canonical 새 판과 현재 판 ADOPT/재인수를 지원한다. FLAG-free ADOPT는 빈 M과 현재 global revision·실제 입력 이력에 결속한다. FLAG 인수는 K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1이며, native KLocalSession이 detached FLAG-masked 공개 관측을 한 번 local 분석한다. 원 FLAG와 증명 M의 교집합만 유지하고 나머지를 row-major로 실제 해제한다. 같은 session/proof를 이어 실제 판 검증·정상 분석/선택을 수행한다. M 외부 주입, V1 proof 재사용, masked graph의 실제 입력 승인은 없다.
+K-P0와 K-LC0는 세 preset에서 canonical 새 판과 현재 판 ADOPT/재인수를 지원한다. FLAG-free ADOPT는 빈 M과 현재 global revision·실제 입력 이력에 결속한다. FLAG 인수는 K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1이며, native KLocalSession이 detached FLAG-masked 공개 관측을 한 번 local 분석한다. 원 FLAG와 증명 M의 교집합만 유지하고 나머지를 row-major로 실제 해제한다. 같은 session/proof를 이어 실제 판 검증·정상 분석/선택을 수행한다. M 외부 주입, V1 proof 재사용, masked graph의 실제 입력 승인은 없다.
 
 worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환한다. GUI는 yield 없이 최종 비교→token 소비→step1을 수행하고 정확한 원 입력의 ACK 뒤 NEXT로 간다. ACK 중 수동 인계는 불변 _KInputReceipt로 기존 입력/game/Replay prefix를 확인하며 현재 수동 판을 과거 상태로 되돌리거나 NEXT를 보내지 않는다. 실제 ACK/이력/정리 오류의 fail-closed와 최초 원인 기록은 유지한다.
 
-현재 공통 wire v7이다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
+현재 공통 wire v8이며 KSnapshot에 필수 game_id가 있다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
 
 Simple Main 준비는 live_simple_preparation.py에서 공개 FLAG-masked 직접 zero/all·전체 지뢰 수로 기존 FLAG를 확인한다. 기존 Simple planner는 불변이다. 수동 입력은 준비 epoch를 폐기하고 Auto를 끈다. 실제 준비 입력은 event를 남긴다. Model C 표 밖(dx≥30 또는 dy≥16) 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled 입력 수로 기록하며 0비용이나 완전 합계로 표현하지 않는다.
 
-K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selection_safe_cells/preinput_m의 HIDDEN 셀 표시다. 표시를 위한 추가 추론·선택·FLAG·ACK 승격은 없다. 확률 OFF에도 확정색이 남고 V1/K 가상 원형은 OS 마우스·Model C와 분리된다. 최종 source107과 검증·실패 이력·사용자 수용의 정확한 범위는 현재 closeout에 기록한다.
+K_LC0는 같은 normal DecisionAnalysis와 native select_policy를 각 한 번 얻고 원 apply_distance_band(control=False)를 한 번 적용한다. 원 survivors의105% 정수 band와 전체 exact_route D→Fraction E→L→frozen tie를 유지하며, 원 DistanceSelection identity/graph/rank와 기존 K 물리 검증을 VALIDATE에서 함께 확인한다. 첫 입력만 실행하고 suffix는 폐기한다. canonical/FLAG-free/FLAG_ADOPT 모두 지원하며 원 native/LC 정책·bootstrap·Model C를 바꾸지 않았다. 자세한 정의/실행 근거와 한계는 LC0 closeout을 따른다.
+
+K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selection_safe_cells/preinput_m의 HIDDEN 셀 표시다. 표시를 위한 추가 추론·선택·FLAG·ACK 승격은 없다. 확률 OFF에도 확정색이 남고 V1/K 가상 원형은 OS 마우스·Model C와 분리된다. 최종 source111과 LC0 검증·실패 이력·사용자 수용의 정확한 범위는 현재 closeout에 기록한다.
 
 Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일시정지 한 번이다. Replay Return/Enter/reset은 상태를 바꾸지 않는다. 비편집 정책 콤보의 focus에서도 Live 키가 동작하며 편집 가능한 콤보·line/text/spinbox, popup/modal, auto-repeat 방어를 유지한다. 종료 정리 예외는 기존 closing/job 잠금을 유지하면서 한 줄 이유·전체 tooltip/접근성 설명과 비활성 제어로 표시한다. 강제 종료/추가 worker/자동 복구를 만들지 않는다.
 

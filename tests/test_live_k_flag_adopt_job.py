@@ -40,7 +40,7 @@ class KFlagJobTests(unittest.TestCase):
         self.job.request(state)
         self.assertEqual(self.job.state, 'computing')
         msg = transport.read_next(self.job._directory, 'parent', 1, self.start.run_id)
-        self.assertEqual((msg['version'], msg['kind']), (7, 'NEXT'))
+        self.assertEqual((msg['version'], msg['kind']), (8, 'NEXT'))
         self.assertEqual(k.from_dict(msg['payload'], k.KSnapshot), state)
 
     def test_preparation_validation_ack_counters_and_binding(self):

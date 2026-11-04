@@ -25,7 +25,7 @@ from tests.test_live_k_policy import initial, ONE_SETUP, permit
 def adopted(observation=ONE_SETUP, mines=1, revision=503, cursor=(3, 1)):
     return k.KSnapshot(uuid4().hex, 7, 0, len(observation[0]), len(observation), mines,
                        observation, cursor, revision, entry_mode=k.ADOPT_CURRENT,
-                       start_input_revision=revision, definition=k.ADOPT_DEFINITION)
+                       start_input_revision=revision, definition=k.ADOPT_DEFINITION, game_id="f" * 32)
 
 
 class KAdoptContractTests(unittest.TestCase):

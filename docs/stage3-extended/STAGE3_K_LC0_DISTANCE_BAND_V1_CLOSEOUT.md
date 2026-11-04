@@ -1,5 +1,7 @@
 # K-LC0 / DISTANCE_BAND_V1 — source checkpoint closeout
 
+> **별도 정책/전시 앱의 역사 checkpoint.** 이후 Main/Live LC0 연결도 2026-11-04 독립 검토와 사용자 native 수용을 마쳤다. 현재 Main 계약·wirev8·인수/인계·검증·Git NEXT는 [Main/Live LC0 closeout](STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)을 따른다. 아래 미연결/당시HEAD·실행 자료는 역사로 보존한다.
+
 작성: 2026-11-02 (Asia/Seoul). **구현·focused 검증·Claude 독립 source 검토 PASS,
 사용자 고정 경로 viewer 정상 동작 및 전반적 경로 개선 체감 확인**을 기록한다.
 이는 실험적 source checkpoint다. K-LC0 freeze, 일반 개선 효과, production 승인이 아니다.

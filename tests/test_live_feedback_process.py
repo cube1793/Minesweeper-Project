@@ -212,7 +212,7 @@ class LiveFeedbackProcessTests(unittest.TestCase):
     def test_ui_p01_k_exact_probability_wire_pause_readmit(self):
         engine = MinesweeperEngine(5, 1, 3)
         engine.reset_with_mines(5, 1, 3, {(1, 0), (3, 0), (4, 0)})
-        state = k.KSnapshot(uuid4().hex, 1, 0, 5, 1, 3, ((-2,) * 5,), (0, 0), 0)
+        state = k.KSnapshot(uuid4().hex, 1, 0, 5, 1, 3, ((-2,) * 5,), (0, 0), 0, game_id="f" * 32)
         self.launch(state)
         ack = self.actual_step(engine, self.validate())
         self.until(lambda: self.job.state in ('ready', 'idle', 'blocked'))

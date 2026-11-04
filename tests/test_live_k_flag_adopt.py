@@ -26,7 +26,7 @@ def tiny_engine(prefix=MIXED_PREFIX):
 def flag_start(engine=None, revision=5, cursor=(4, 0)):
     engine = tiny_engine() if engine is None else engine
     return k.make_snapshot(
-        run_id=uuid4().hex, board_generation=7, input_seq=0,
+        run_id=uuid4().hex, game_id='f' * 32, board_generation=7, input_seq=0,
         width=engine.width, height=engine.height, num_mines=engine.num_mines,
         observation=engine.get_observation(), cursor=cursor, input_revision=revision,
         entry_mode=k.FLAG_ADOPT, definition=k.FLAG_ADOPT_DEFINITION,
@@ -274,7 +274,7 @@ class KFlagAdoptTests(unittest.TestCase):
                 (k.ADOPT_CURRENT, (('OPEN', 0, 0),), (2, 3))):
             with self.subTest(entry=entry):
                 engine = tiny_engine(prefix)
-                state = k.make_snapshot(run_id=uuid4().hex, board_generation=7, input_seq=0,
+                state = k.make_snapshot(run_id=uuid4().hex, game_id='f' * 32, board_generation=7, input_seq=0,
                                         width=5, height=1, num_mines=2,
                                         observation=engine.get_observation(), cursor=(0, 0),
                                         entry_mode=entry, definition=k.definition_for_entry(entry),

@@ -227,7 +227,7 @@ class LiveKCertaintyProcessTests(unittest.TestCase):
     def test_certainty_p01_k_guess_safe_colors_terminal(self):
         engine = MinesweeperEngine(5, 1, 2)
         engine.reset_with_mines(5, 1, 2, {(1, 0), (4, 0)})
-        state = k.KSnapshot(uuid4().hex, 1, 0, 5, 1, 2, ((-2,) * 5,), (0, 0), 0)
+        state = k.KSnapshot(uuid4().hex, 1, 0, 5, 1, 2, ((-2,) * 5,), (0, 0), 0, game_id="f" * 32)
         self.launch(state)
         initial = self.job.pending
         self.assertEqual(initial.safe_cells, ())

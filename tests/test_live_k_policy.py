@@ -20,7 +20,7 @@ ONE_SETUP = ((1, H, 1, H), (1, 1, 1, H))
 
 def initial(width=4, height=2, mines=1):
     return k.KSnapshot('a' * 32, 1, 0, width, height, mines,
-                       tuple((H,) * width for _ in range(height)), (0, 0), 0)
+                       tuple((H,) * width for _ in range(height)), (0, 0), 0, game_id="f" * 32)
 
 
 def permit(owner, proposal):

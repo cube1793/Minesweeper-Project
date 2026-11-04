@@ -1126,8 +1126,8 @@ class LiveV1UITests(unittest.TestCase):
         self.assertEqual(self.ui._live_policy, POLICY_SIMPLE)
         self.assertEqual(self.ui._replay_recorder.source_type, "human")
         self.assertTrue(self.ui.live_policy_combo.model().item(2).isEnabled())
-        for index in (3, 4):
-            self.assertFalse(self.ui.live_policy_combo.model().item(index).isEnabled())
+        self.assertTrue(self.ui.live_policy_combo.model().item(3).isEnabled())
+        self.assertFalse(self.ui.live_policy_combo.model().item(4).isEnabled())
 
     def test_initial_proposal_pause_resume_and_rate_reuse_without_simple_analysis(self):
         from live_policy import plan_snapshot

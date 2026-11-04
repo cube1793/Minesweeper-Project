@@ -1,4 +1,4 @@
-"""K-P0 Live public protocol and a worker-only persistent decision owner.
+"""K-family Live public protocol and a worker-only persistent decision owner.
 
 Only primitive projections cross the wire. K inference/selection/validation
 imports occur in KOwner, never while importing Main or the default V1 worker.
@@ -7,13 +7,14 @@ The snapshot's base M is the last ACK's M; a pending decision may already own
 more M. Discarding that decision means retiring the entire owner.
 """
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from time import perf_counter_ns
 from uuid import uuid4
 
 from core_engine import Action, CellState, GameStatus
 from live_policy import (
-    ADOPT_CURRENT, CANONICAL_NEW, POLICY_K, _coordinate, _detach_grid, _grid, _identity, _integer, _object,
+    ADOPT_CURRENT, CANONICAL_NEW, POLICY_K, POLICY_K_LC0,
+    _coordinate, _detach_grid, _grid, _identity, _integer, _object,
     _require, _neighbors, supports_v1_board,
 )
 from simple_algorithm import SimpleMove
@@ -25,9 +26,13 @@ DEFINITION = "K_P0_NATIVE_DEFAULT_FIRST_INPUT_V1"
 ADOPT_DEFINITION = "K_P0_PUBLIC_ADOPT_NATIVE_DEFAULT_FIRST_INPUT_V1"
 FLAG_ADOPT = "FLAG_ADOPT"
 FLAG_ADOPT_DEFINITION = "K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
+LC0_DEFINITION = "K_LC0_DISTANCE_BAND_FIRST_INPUT_V1"
+LC0_ADOPT_DEFINITION = "K_LC0_PUBLIC_ADOPT_DISTANCE_BAND_FIRST_INPUT_V1"
+LC0_FLAG_ADOPT_DEFINITION = "K_LC0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
 PHASE_BOOTSTRAP = "K_BOOTSTRAP"
 PHASE_PREPARATION = "K_PREPARATION"
 PHASE_K = "K_P0"
+PHASE_LC0 = "K_LC0"
 MAX_K_INPUTS = 480
 MAX_VALIDATIONS_PER_INPUT = 64
 MAX_K_SEQUENCE = MAX_K_INPUTS * (MAX_VALIDATIONS_PER_INPUT + 2) + 1
@@ -35,9 +40,27 @@ MAX_FLAG_ADOPT_SEQUENCE = 2 * MAX_K_INPUTS * (MAX_VALIDATIONS_PER_INPUT + 2) + 2
 supports_board = supports_v1_board
 
 
-def definition_for_entry(entry_mode):
+def is_k_policy(policy_id):
+    return type(policy_id) is str and policy_id in (POLICY_K, POLICY_K_LC0)
+
+
+def policy_label(policy_id):
+    _require(is_k_policy(policy_id), "Invalid K policy.")
+    return "K-LC0" if policy_id == POLICY_K_LC0 else "K-P0"
+
+
+def normal_phase(policy_id):
+    _require(is_k_policy(policy_id), "Invalid K policy.")
+    return PHASE_LC0 if policy_id == POLICY_K_LC0 else PHASE_K
+
+
+def definition_for_entry(entry_mode, policy_id=POLICY_K):
+    _require(is_k_policy(policy_id), "Invalid K policy.")
     _require(type(entry_mode) is str and entry_mode in (CANONICAL_NEW, ADOPT_CURRENT, FLAG_ADOPT),
              "Invalid K entry mode.")
+    if policy_id == POLICY_K_LC0:
+        return {CANONICAL_NEW: LC0_DEFINITION, ADOPT_CURRENT: LC0_ADOPT_DEFINITION,
+                FLAG_ADOPT: LC0_FLAG_ADOPT_DEFINITION}[entry_mode]
     return {CANONICAL_NEW: DEFINITION, ADOPT_CURRENT: ADOPT_DEFINITION,
             FLAG_ADOPT: FLAG_ADOPT_DEFINITION}[entry_mode]
 
@@ -67,6 +90,7 @@ class KSnapshot:
     observation: tuple
     cursor: tuple
     input_revision: int
+    game_id: str = field(kw_only=True)
     base_m_revision: int = 0
     base_m: tuple = ()
     policy_id: str = POLICY_K
@@ -82,10 +106,12 @@ class KSnapshot:
     bootstrap: KBootstrap | None = None
 
     def __post_init__(self):
-        _require(_identity(self.run_id) and _integer(self.board_generation), "Invalid K owner identity.")
+        _require(_identity(self.game_id) and _identity(self.run_id) and _integer(self.board_generation),
+                 "Invalid K game/owner identity.")
         _require(_integer(self.width, 1, 30) and _integer(self.height, 1, 16)
                  and _integer(self.num_mines, 0, self.width * self.height - 1), "Invalid K dimensions/mines.")
-        definition = definition_for_entry(self.entry_mode)
+        definition = definition_for_entry(self.entry_mode, self.policy_id)
+        policy_phase = normal_phase(self.policy_id)
         _require(_integer(self.start_input_revision)
                  and ((self.start_input_revision == 0) if self.entry_mode == CANONICAL_NEW
                       else (self.start_input_revision > 0)), "Invalid K start input revision.")
@@ -96,7 +122,7 @@ class KSnapshot:
                  "K owner-local/global input revision mismatch.")
         base_revision = (max(0, self.input_seq - 1) if self.entry_mode == CANONICAL_NEW
                          else self.input_seq)
-        _require(type(self.phase) is str and self.phase in (PHASE_BOOTSTRAP, PHASE_PREPARATION, PHASE_K),
+        _require(type(self.phase) is str and self.phase in (PHASE_BOOTSTRAP, PHASE_PREPARATION, policy_phase),
                  "Invalid K phase.")
         if self.entry_mode == FLAG_ADOPT:
             if self.phase == PHASE_BOOTSTRAP:
@@ -111,21 +137,21 @@ class KSnapshot:
                          and self.k_start_input_revision == self.start_input_revision + len(b.removable)
                          and self.preparation_seq <= len(b.removable), "Invalid bootstrap start/counter binding.")
                 preparing = self.preparation_seq < len(b.removable)
-                _require(self.phase == (PHASE_PREPARATION if preparing else PHASE_K)
+                _require(self.phase == (PHASE_PREPARATION if preparing else policy_phase)
                          and (not preparing or self.input_seq == 0), "K preparation phase mismatch.")
                 if self.input_seq == 0:
                     _require(self.observation == b.observation_after(self.preparation_seq)
                              and self.base_m == b.mines, "K preparation observation/M mismatch.")
                 base_revision += 1
         else:
-            _require(self.phase == PHASE_K and self.preparation_seq == 0
+            _require(self.phase == policy_phase and self.preparation_seq == 0
                      and self.k_start_input_revision is None and self.bootstrap is None,
                      "Legacy K entry cannot contain a bootstrap phase.")
         _require(_integer(self.base_m_revision, 0, MAX_K_INPUTS + 1)
                  and self.base_m_revision == base_revision, "Invalid K base M revision.")
         _require(_grid(self.observation, self.width, self.height)
                  and _coordinate(self.cursor, self.width, self.height), "Invalid K public grid/cursor.")
-        for value, expected in ((self.policy_id, POLICY_K), (self.definition, definition),
+        for value, expected in ((self.definition, definition),
                                 (self.status, "PLAYING"), (self.profile_sha256, PROFILE_SHA256),
                                 (self.table_sha256, TABLE_SHA256)):
             _require(type(value) is str and value == expected, "K policy/definition/status/profile mismatch.")
@@ -135,7 +161,7 @@ class KSnapshot:
         flags = {(x, y) for y, row in enumerate(self.observation) for x, v in enumerate(row) if v == -3}
         if self.phase == PHASE_BOOTSTRAP:
             _require(bool(flags), "K flag bootstrap requires physical flags.")
-        elif self.phase == PHASE_K:
+        elif self.phase == policy_phase:
             _require(flags <= set(self.base_m), "Physical flags must belong to acknowledged K M.")
         if self.bootstrap is not None:
             _require(set(self.bootstrap.mines) <= set(self.base_m)
@@ -175,7 +201,7 @@ def after_bootstrap(start, summary):
     summary.__post_init__()
     _require(summary.original_observation == start.observation, "Bootstrap differs from START.")
     return replace(start, bootstrap=summary, base_m=summary.mines, base_m_revision=1,
-                   phase=PHASE_PREPARATION if summary.removable else PHASE_K,
+                   phase=PHASE_PREPARATION if summary.removable else normal_phase(start.policy_id),
                    k_start_input_revision=start.start_input_revision + len(summary.removable))
 
 
@@ -276,7 +302,8 @@ class KProposal:
                      and self.preinput_m == s.base_m and self.probabilities is None,
                      "Invalid K preparation UNFLAG.")
             return
-        _require(s.phase == PHASE_K and self.kind != 'prepare', "K decision requires the policy phase.")
+        _require(s.phase == normal_phase(s.policy_id) and self.kind != 'prepare',
+                 "K decision requires the policy phase.")
         if self.is_guess:
             _require(type(self.probabilities) is ExactGuessProbabilities, "Missing exact guess probabilities.")
             exact = self.probabilities
@@ -436,7 +463,7 @@ def next_snapshot(proposal, ack):
     s = proposal.snapshot
     preparation_seq = s.preparation_seq + int(proposal.is_preparation)
     phase = (PHASE_PREPARATION if proposal.is_preparation
-             and preparation_seq < len(s.bootstrap.removable) else PHASE_K)
+             and preparation_seq < len(s.bootstrap.removable) else normal_phase(s.policy_id))
     return replace(s, input_seq=s.input_seq + int(not proposal.is_preparation),
                    preparation_seq=preparation_seq, phase=phase,
                    input_revision=ack.input_revision, cursor=ack.cursor, observation=ack.observation,
@@ -492,12 +519,20 @@ class KOwner:
         validate_start_snapshot(snapshot)
         self.session = KLocalSession(snapshot.width, snapshot.height, snapshot.num_mines)
         self._select = select_policy
+        self._distance_adapter = self._validate_distance = None
+        if snapshot.policy_id == POLICY_K_LC0:
+            # Worker-only import: Main loads no native LC runtime.
+            from experiments.program_k_lc0_policy import apply_distance_band, validate_distance_selection
+            self._distance_adapter = apply_distance_band
+            self._validate_distance = validate_distance_selection
         self._validate = validate_k_p0_execution
         self._progress = _validate_progress
         self.table = validate_timing_table(table)
         self.expected = snapshot
         self.input_limit = sum(v == -2 for row in snapshot.observation for v in row)
         self.pending = self.decision = self.selection = self.permit = None
+        self.native_selection = self.distance_selection = None
+        self._original_distance_selection = None
         self.closed = False
         self._nonces = set()
         self.bootstrap_proof = None
@@ -535,7 +570,13 @@ class KOwner:
         else:
             started = perf_counter_ns()
             self.decision = self.session.analyze_decision(snapshot.observation, status=GameStatus.PLAYING)
-            self.selection = self._select(self.decision, snapshot.cursor, self.table)
+            self.native_selection = self._select(self.decision, snapshot.cursor, self.table)
+            if snapshot.policy_id == POLICY_K_LC0:
+                self.distance_selection = self._distance_adapter(self.native_selection, control=False)
+                self._original_distance_selection = self.distance_selection
+                self.selection = self.distance_selection.selected
+            else:
+                self.selection = self.native_selection
             elapsed = perf_counter_ns() - started
             move, category = self.selection.move, self.selection.category
             continuation = self.decision.continuation
@@ -564,6 +605,15 @@ class KOwner:
             self.bootstrap_proof.validate_target(request.snapshot, (p.x, p.y))
             _require(self.decision is None and self.selection is None, "Preparation has no policy graph.")
         else:
+            if not p.initial and p.snapshot.policy_id == POLICY_K_LC0:
+                choice = self.distance_selection
+                _require(choice is not None and choice is self._original_distance_selection
+                         and choice.control is False
+                         and choice.native is self.native_selection
+                         and choice.native.evidence is self.decision
+                         and choice.selected is self.selection,
+                         "LC0 requires its original native graph and distance choice.")
+                self._validate_distance(choice)
             self._validate(request.snapshot.observation, p.move, status=GameStatus.PLAYING,
                            num_mines=request.snapshot.num_mines, cursor=request.snapshot.cursor,
                            current_mines=current_mines, decision=self.decision, selection=self.selection,
@@ -589,4 +639,6 @@ class KOwner:
             self.closed = True
         self.expected = following
         self.pending = self.decision = self.selection = self.permit = None
+        self.native_selection = self.distance_selection = None
+        self._original_distance_selection = None
         return following

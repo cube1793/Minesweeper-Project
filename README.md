@@ -11,17 +11,17 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Main/Live Simple·V1·실험적 K-P0 — 현재 범위 사용자 수용
+## Main/Live Simple·V1·실험적 K-P0/K-LC0 — 현재 범위 사용자 수용
 
-2026-11-04 기준, K 현재 판 인수·기존 깃발 준비·ACK 중 수동 인계·Simple 준비와 Replay UI 보완을 마쳤습니다. 최종 독립 보충 검토는 필수 수정 0이며, 사용자는 마지막 native 확인에 “드디어! 전부 통과야.”라고 확인했습니다. 현재 사용자 환경의 수용이며 모든 OS/DPI·preset별 완주·전체 suite를 의미하지 않습니다.
+2026-11-04 기준, 기존 K 인수·Simple 준비·Replay UI에 이어 **K-LC0 Main 연결도 독립 검토 필수 수정 0·사용자 native 수용**을 마쳤습니다. 사용자는 마우스 경로 표시 조건을 재확인한 뒤 “다시 확인해보니 전부 정상같아.”라고 확인했습니다. 현재 사용자 환경의 수용이며 모든 OS/DPI·preset별 완주·전체 suite를 의미하지 않습니다.
 
-새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0는 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하며, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1/K custom과 Main LC0/LC1은 미지원입니다.
+새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0와 K-LC0는 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하며, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1/K/LC0 custom과 Main LC1은 미지원입니다.
 
 Auto OFF는 일시정지입니다. Simple/V1/K 모두 수동 입력하면 Auto와 추측 허용을 끄고 원래 클릭을 처리합니다. 다시 진행하려면 Auto를 켭니다. 별도 **추천·계산 종료** 버튼은 제거했습니다. 정책 라벨·선택·새 게임 버튼은 같은 줄에 모았습니다.
 
 K 추측 확률은 이미 계산한 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace/Replay에 합성 입력을 만들지 않습니다.
 
-현재 계약·버전별 검증·한계는 [K 인수·Simple 준비·Replay UI closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)에 정리했습니다. [이전 K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)과 [Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시의 역사입니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. **K-P0 (실험적)** 표시는 유지하며 효과성·Production K/Gate P·새 package는 미승인입니다.
+현재 계약·LC0 검증·한계는 [Main/Live LC0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)에, 이전 K 인수/UI 기록은 [기존 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)에 정리했습니다. [이전 K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)과 [Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시의 역사입니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. **K-P0/K-LC0 (실험적)** 표시는 유지하며 효과성·Production K/Gate P·새 package는 미승인입니다.
 
 ## Simple Algorithm
 
@@ -211,11 +211,10 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-03 현재 K 확정색 native 5항목 PASS 후 문서 마감·사용자 Git 준비 단계입니다.**
-main/HEAD=local origin/main=e23dec225753350738f296f742f57ce3ab86c8f5,0/0,staged0입니다.
-이번 source/tests 6개 + 문서 6개의 12경로(M10/U2)가 미커밋입니다. 이전 K 첫 연결의24경로는e23dec2에서 완료됐습니다.
-NEXT는 이번 12경로 plan 확인 → 사용자 일괄 Git → 실제 receipt/SHA의 recovery 교체입니다.
-후속은 같은 판 K 인수·재인수와 LC0/LC1 Main 연결이며 자동 착수하지 않습니다.
+**2026-11-04 현재 Main K-LC0도 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
+main/HEAD=local origin/main=7f15355a1d17a3fab1b4b11d85897b02a6bda5d5,0/0,staged0입니다.
+이번 source/tests21 + 문서8 =29경로(M25/U4)는 미커밋입니다.
+NEXT는 사용자 일괄 Git → 실제 receipt/SHA의 recovery 교체 → Main LC1 연결 준비입니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
@@ -302,7 +301,7 @@ Claude 검토는 두 구현 모두 PASS / REQUIRED_FIXES 없음입니다. 새 �
 위 새 앱을 사용합니다. 기존 저장3보드의 CONTROL/K-LC0 trace와 새 앱의 실제 실행/저장
 pair는 별도 work unit의 evidence이며 같은 기록으로 취급하지 않습니다.
 
-이 비교 앱 수용 당시 K-P0/K-LC0는 별도 entry였습니다. 현재 Main에는 K-P0만 추가 연결됐고 K-LC0는 미연결입니다. 이 비교 앱 source 수용은
+이 비교 앱 수용 당시 K-P0/K-LC0는 별도 entry였습니다. 현재 Main에는 K-P0와 K-LC0가 연결됐습니다. 이 비교 앱 source 수용은
 K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
 다음 작업은 사용자 선택이며 영상/정책 개선이 Main 통합의 무조건적인 선행 gate는 아닙니다.
 
@@ -382,7 +381,7 @@ Qualified implementation/package SHA는 `e32145fa5c114e1ce500ad2e837ef6000cc49cc
 - 종료된 Human 판 또는 trace가 있는 Replay에서 **마우스 경로 표시**를 선택합니다.
   Replay v2는 별도 Mouse Trace 모델을 attachment로 저장하며 marker의 action 의미는
   실제 `ReplayEvent` index가 제공합니다. v1은 계속 읽을 수 있는 trace-free 형식입니다.
-- 실제 Auto action이 실행되면 그 판의 Human trace 자격을 잃습니다. Committed human
+- 플레이 중에는 경로 표시가 비활성입니다. 정책 선택·분석·Auto ON만으로는 기록을 잃지 않으며, **실제 Auto 입력이 한 번이라도 실행되면** 그 판의 Human trace 자격을 잃습니다. 이후 수동으로 전환해도 새 판 전까지 복구되지 않습니다. Committed human
   action의 Replay append 실패도 전체 trace를 무효화합니다.
 
 물리 입력은 UI 정책이며 Engine은 semantic OPEN / FLAG / CHORD만 받습니다.

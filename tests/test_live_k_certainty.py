@@ -230,7 +230,7 @@ class KCertaintyProjectionTests(unittest.TestCase):
                         'EXACT_SAFE', 1, 1, 1, (), safe_cells=safes)
         ack = k.make_ack(k.KPermit(p, 'c' * 32), 'WON')
         envelope = transport.message(state.run_id, k.MAX_K_SEQUENCE, 'FINISHED', k.to_dict(ack))
-        self.assertEqual(envelope['version'], 7)
+        self.assertEqual(envelope['version'], 8)
         with TemporaryDirectory() as directory:
             path = transport.write_once(Path(directory), 'worker', k.MAX_K_SEQUENCE, envelope)
             self.assertLess(path.stat().st_size, transport.MAX_MESSAGE_BYTES)

@@ -1,5 +1,7 @@
 # Main/Live K 현재 판 인수·Simple 준비·Replay UI closeout
 
+> **7f15355까지 완료된 이전 checkpoint.** 여기의 wirev7·source107·미커밋32경로·LC0후속은 당시 상태다. 2026-11-04 현재 LC0 연결·wirev8·source111의 독립 검토/사용자 수용과 최신 NEXT는 [Main/Live LC0 closeout](STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)을 따른다. 원 검증·실패 기록을 소급 변경하지 않는다.
+
 기준일: **2026-11-04 (Asia/Seoul)**. 상태: **범위 한정 독립 검토 완료, 필수 수정 0, 사용자 native 수용 / 문서 마감·사용자 commit·push 준비**.
 
 이 문서는 a992892의 K 확정색 이후 누적된 현재 판 인수, 기존 FLAG 준비, ACK 중 수동 인계, Simple 준비, Replay UI와 단축키 보완의 최종 상태다. [이전 K-P0 closeout](STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)과 [Simple/V1 closeout](STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시 bytes·수용·실패 이력을 보존하는 역사 문서다. 현재 계약은 이 문서와 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 우선한다.

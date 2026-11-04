@@ -1,33 +1,34 @@
 # Current Project Handoff
 
-Updated: **2026-11-04 (Asia/Seoul)** — K 현재 판 인수·기존 FLAG 준비·ACK 수동 인계·Simple 준비·Replay UI/단축키 보완의 범위 한정 독립 검토와 사용자 native 수용 완료. 문서 마감·사용자 Git 준비 상태다.
+Updated: **2026-11-04 (Asia/Seoul)** — Main/Live K-LC0 Unit1 구현·독립 검토 필수 수정0·사용자 native 수용 완료. 문서 마감·사용자 Git 준비.
 
-## 현재 계약과 수용
+## 현재 기능과 수용
 
-현재 authority는 [K 인수·Simple 준비·Replay UI closeout](stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)이다. [이전 K v3–v5](stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)와 [Simple/V1](stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 역사다. 최신 사용자 확인은 “드디어! 전부 통과야.”이며 마지막 native 안내 5항목과 이전 주요 기능 수용에 결속한다. 모든 옛 체크리스트의 최종 bytes 재실행·preset별 완주·모든 OS/DPI·전체 suite를 추정하지 않는다.
+현재 authority는 [LC0 Main closeout](stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)이다. [K 인수/UI closeout](stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)은7f15355까지의 이전 checkpoint다. 사용자는 LC0 native 확인 후 마우스 경로 활성 조건을 재확인하고 **“내가 잘못 판단한것 같네, 다시 확인해보니 전부 정상같아.”**라고 수용했다. 이는 현재 환경·안내 경로에 한정하며 모든OS/DPI·preset완주·전체suite를 뜻하지 않는다.
 
-K는 세 preset에서 새 판과 수동/Simple/V1 현재 판을 인수·재인수한다. 기존 FLAG를 사용자가 모두 해제할 필요는 없다. native session의 공개 FLAG-masked local proof로 확인된 지뢰만 유지하고 나머지를 실제 해제한 뒤 같은 session으로 진행한다. 미확인은 오답/안전 판정이 아니며 실제 지뢰도 해제될 수 있다. 공통 wire v7, K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1, 원 M/decision graph, VALIDATE→ADMITTED→무yield 최종 비교/token/step1→원 입력 ACK 경계를 유지한다.
+K-P0/K-LC0는 세 preset의 새 판, FLAG-free 현재 판, 기존 FLAG 준비, 정상 수동 인계 뒤 재인수를 지원한다. LC0는 native K-LC0/DISTANCE_BAND_V1 control=False이며 원 survivors105% band의 전체 route D→E→L→tie로 선택한다. 원 graph/DistanceSelection과 물리 검증을 모두 결속하고 실제 첫 입력1회만 실행한다. native g를 LC0로 대체 표기하지 않는다.
 
-ACK 중 수동 입력은 정상 인계로 처리하며 원 K 입력 receipt만 확인한 후 옛 owner를 정리한다. 현재 수동 판을 덮어쓰거나 NEXT를 보내지 않는다. 진짜 이력/ACK/정리 실패는 최초 원인 fail-closed로 잠근다. Simple/V1/K 모두 수동 클릭 시 Auto와 guess OFF이며 재개는 명시 Auto ON이다. Auto OFF만으로는 일시정지한다. 추천·계산 종료 버튼은 제거했다.
+공통 wirev8과 필수 game_id, 정책별 정의/normal phase, 시작·M revision/token/nonce/정확 ACK가 이어진다. bootstrap은 동일 native session의 공개 local proof며 M 외부 주입이 없다. 수동ACK인계는 옛 receipt만 처리하고 현재판을 덮어쓰거나NEXT를 보내지 않는다. 새owner는reap/tree0/cleanup뒤 시작한다. 실제 오류의 fail-closed는 유지한다.
 
-Simple 준비는 직접 공개 증명으로 기존 FLAG를 확인한다. planner/Model C는 그대로다. 표 밖 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled count로 남기며 0비용·완전 합계로 취급하지 않는다. 원 확률/확정색/V1·K 가상 원형은 표시 전용이다.
+Simple/V1/P0/LC0 모두 수동 첫press에Auto/guess OFF, Auto OFF만으로는pause다. 기존 확률/확정색/가상원형, Replay 사용기록·Space/Enter/editorfocus를 유지한다. 마우스 경로 표시는 기록을 켠 수동판 종료 후에만 가능하다. 실제자동입력1회가있으면그판trace는무효이며 단순정책선택/분석/AutoON은해당하지않는다.
 
-정책 줄 간격, Replay의 기존 source_type 기반 알고리즘 사용 기록과 키 동작을 수용했다. Live Space/Return/Enter 새 게임, Replay Space 재생/일시정지, Replay Enter/reset 무동작이다. 비편집 정책 콤보 focus를 보존하면서 키가 동작하고 편집 입력은 유지한다. 종료 정리 실패는 잠금을 유지한 채 이유와 비활성 제어로 알린다. **K-P0 (실험적)** 표시와 Main LC0/LC1 disabled, V1/K custom 미지원은 유지한다.
+K-P0/K-LC0의(실험적)표시는유지한다. LC1연결/native이후UI정리에서검토할수있으나라벨삭제자체가Production승인은아니다. Main LC1 disabled, V1/K/LC0 custom 미지원. 별도 LC1 저장viewer는 Main 실행과다르다.
 
-## 최종 검증과 이력
+## 검증과 남은 한계
 
-- 현재 source107 manifest SHA256: **848cbdc1423479fa2f65b2da5c915b033b5af075b111bef78007c3cd2077e5b2**. 최종 Codex R02 345 method/479 subtest, 독립 review_claude_02 345/479와 probe4/4, worker0. R1/O1/O2/O3 CLOSED; O3는 offscreen fake 예외 한정이다. 옛 340/476 PASS에서 놓친 R1은 옛 bytes의 실패로 보존한다.
-- 앞선 버전별 선택 검사: FLAG-free353/481+실제5사례6owner, FLAG Unit2 413/677+6사례7owner, Native Feedback443/731+6사례7owner. 각각의 Codex/Claude 실행과 원장/정리 근거다. 이를 합산하거나 최종 bytes의 새 worker 실행으로 표현하지 않는다.
-- 독립 실행 중단/보충, fixture·helper·probe 실패와 정정, 전역 TEMP/scratch 등 절차 이탈은 원 evidence에 보존한다. 기술 적합성은 모든 절차 무결점 판정이 아니다.
-- 마지막 S1/S2와 이전 낮은 우선순위 OPTIONAL은 보류한다. Simple의 유한 재FLAG, terminal 기록/문구·guess 초기화·긴 이력 성능 등 알려진 한계는 새 closeout을 따른다. 이번에 새 수정 루프를 열지 않는다.
-- **F02 NOT_VERIFIED / 과거 Qt FileDialog FAIL / 과거 중단 focused temp 정리 NOT_VERIFIED** 유지. 옛 runner 복구·재검증을 재개하지 않으며 제한 registry/private INI를 사용자 전체 설정 보존으로 확대하지 않는다.
+- source111 manifest SHA256 **fd58110b2dba907560767ddab1d9e6d0899411cff534cb68a1ec0549df76b629**.
+- Codex555/794는동일bytes의536/788+19/6합성, Claude555/794는단일실행이다. 각실worker6사례/8owner/Auto10. Claude는최초환경실패시도1/Popen0후복구1회로누적시도9다. 각campaign의24소유PID기록·reap/tree0/private/handle정리가있다.
+- Claude probe49중48PASS,1개는MAX_INPUTS를480으로기대한오류다. 현재/HEAD는480+480=960. 원FAIL을보존하고재실행하지않는다. no-yield는Python수준관찰과정적근거다. 모든수는선택범위·해당버전근거다.
+- TMPDIR상속으로최초process와focused가쓴전역TEMP잔여물은이번추가NOT_VERIFIED다. 복구campaign의전용tmp정리와구분한다. 이후wrapper는TMP/TEMP/TMPDIR모두고정한다. 원evidence를고치거나전역TEMP검색/삭제루프를열지않는다.
+- 옛mouse기대2개는HEAD에서도실패한기존기대값문제로독립확인했다. 현재Qt첫press/release계약은검증됐고, 해당test갱신·개행/측정차이는보류권고다.
+- 과거F02 NOT_VERIFIED, Qt shared FileDialog FAIL, 과거중단temp NOT_VERIFIED, 이전OPTIONAL/실패/절차정정은유지한다. 제한INI/registry와native수용으로덮지않는다.
 
 ## Git / NEXT
 
-문서 작성 기준 **main / HEAD = local origin/main = a9928921e873f11c72283d35a6d0d9847eacd8e3 / ahead·behind 0·0 / staged 0**. 수용된 미커밋 source/tests24(M15/U9)와 문서8(기존7·신규1), 합계 **32경로(M22/U10)**다. a992892까지는 이전 Git/recovery 완료본이고 이번 32경로의 push는 아직 아니다. raw 실행 bytes와 정규화 Git blob을 구분한다.
+문서작성기준 **main / HEAD = local origin/main =7f15355a1d17a3fab1b4b11d85897b02a6bda5d5 / ahead·behind0·0 / staged0**. LC0 source/tests21 + 문서8 = **29경로(M25/U4)** 미커밋이다. 이전7f15355의32경로Git/recovery는완료이력이다. 원실행raw와정규화Gitblob을구분한다.
 
-현재 산출물은 MAIN_LIVE_K_ADOPTION_UI_DOC_CLOSEOUT_2026-11-04/coordinator_01이다. **NEXT: 정확한 plan의 사용자 일괄 stage·commit·push → 실제 receipt/SHA 확인 → postcommit recovery 두 파일 교체본 → 사용자 Desktop 교체 → Main/Live LC0 다음 LC1 연결 단위 확정.** 이 문서의 precommit snapshot 대신 완료 후 실제 receipt/recovery를 Git authority로 삼으며 같은 내용을 위해 추가 문서 commit을 만들지 않는다. 옛 사용자 Git helper를 다시 실행하지 않는다. 이 마감에서는 LC 구현/추가 독립 실행 검토를 시작하지 않는다.
+이번root는 MAIN_LIVE_K_LC0_DOC_CLOSEOUT_2026-11-04/coordinator_01. **NEXT: 사용자29경로일괄stage/commit/push→실제receipt/SHA확인→postcommit recovery두사본→사용자Desktop교체→Main LC1 연결단위준비.** postcommit문구만위한추가문서commit은하지않고완료SHA는실제receipt/recovery/liveGit을따른다. 옛Githelper재실행,LC0재구현,추가독립검증은하지않는다.
 
 ## 영구 경계
 
-D0–D5 CLOSED / FINAL ACCEPTANCE PASS, PHASE1_INCONCLUSIVE_TRANSFER, effectiveness NOT ESTABLISHED, Production K/Gate P 미승인, V1 CLOSED/FROZEN, Extended ACTIVE. Phase2와 R0-B/ActualE2 미승인/미실행. frozen 정책·Model C·holdout 2,010,000..2,010,099·공식/formal evidence를 유지한다. 별도 K-LC0 실제 비교 앱과 LC1의 저장 trace4개 viewer 수용을 Main 연결·새 package·Stage4 승인으로 확대하지 않는다.
+D0–D5 CLOSED/FINAL ACCEPTANCE PASS, PHASE1_INCONCLUSIVE_TRANSFER, effectiveness NOT ESTABLISHED, Production K/Gate P 미승인, V1 CLOSED/FROZEN, Extended ACTIVE. Phase2/R0-B/ActualE2 미승인/미실행. frozen정책·ModelC·holdout2,010,000..2,010,099·공식/formal evidence유지. 새package/Stage4/연구자동시작권한은아니다.

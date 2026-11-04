@@ -38,7 +38,7 @@ def serve(directory, run_id):
             if sequence == 0:
                 if kind != "START":
                     raise LivePolicyError("First command must be START.")
-                if payload.get("policy_id") == k_live.POLICY_K:
+                if k_live.is_k_policy(payload.get("policy_id")):
                     snapshot = k_live.from_dict(payload, k_live.KSnapshot)
                     if snapshot.run_id != run_id:
                         raise LivePolicyError("K START run identity mismatch.")

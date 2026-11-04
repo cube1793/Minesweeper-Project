@@ -10,7 +10,7 @@ from live_policy import LivePolicyError, MAX_INPUTS, _identity, _integer, _requi
 from live_k_policy import MAX_K_SEQUENCE, MAX_FLAG_ADOPT_SEQUENCE
 
 
-PROTOCOL_VERSION = 7
+PROTOCOL_VERSION = 8
 MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 # At most 480 preparation toggles plus 480 normal V1 inputs per owner.
 # This bound is independent of global game revision and board overlay size.

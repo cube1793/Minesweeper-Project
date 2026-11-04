@@ -146,8 +146,8 @@ class LiveKUITests(unittest.TestCase):
         self.assertEqual(self.ui._live_action_count, 0)
         self.assertEqual(self.ui._replay_recorder.source_type, 'human')
         self.assertEqual(set(self.ui._analysis_result.overlays), {(0, 0)})
-        for index in (3, 4):
-            self.assertFalse(self.ui.live_policy_combo.model().item(index).isEnabled())
+        self.assertTrue(self.ui.live_policy_combo.model().item(3).isEnabled())
+        self.assertFalse(self.ui.live_policy_combo.model().item(4).isEnabled())
 
     def test_display_toggles_never_start_native_owner(self):
         self.ui.analysis_checkbox.setChecked(True)
