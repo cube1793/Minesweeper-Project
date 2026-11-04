@@ -96,7 +96,7 @@ class ReplayUIPolishTests(unittest.TestCase):
                     self.assertGreaterEqual(edit_rect.width(), controls[1].fontMetrics().horizontalAdvance(
                         controls[1].itemText(index)))
                 self.assertTrue(controls[1].model().item(controls[1].findData('K_LC0')).isEnabled())
-                self.assertFalse(controls[1].model().item(controls[1].findData('K_LC1')).isEnabled())
+                self.assertTrue(controls[1].model().item(controls[1].findData('K_LC1')).isEnabled())
                 frames.append((self.ui.width(), tuple((r.x(), r.width()) for r in rects)))
                 evidence = os.environ.get('REPLAY_POLISH_EVIDENCE')
                 if evidence:

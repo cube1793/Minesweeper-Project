@@ -40,6 +40,7 @@ engine.get_observation() 결과로 보드를 렌더링하며, Replay 재생 상�
 
 import os
 import time
+from hashlib import sha256
 from bisect import bisect_right
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -64,7 +65,7 @@ from live_analysis import (
     present_v1_proposal, present_k_proposal, present_flag_preparation,
 )
 from live_policy import (
-    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, CANONICAL_NEW, ADOPT_CURRENT, PHASE_FLAG_REVIEW, PHASE_V1,
+    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, CANONICAL_NEW, ADOPT_CURRENT, PHASE_FLAG_REVIEW, PHASE_V1,
     admit_proposal, make_ack, make_snapshot, supports_v1_board, validate_ack,
 )
 from live_flag_review import report_to_dict
@@ -79,6 +80,8 @@ from replay_json import load_replay_json, save_replay_json
 from replay_player import ReplayPlayer
 from replay_model import SOURCE_HUMAN, SOURCE_ALGORITHM, SOURCE_AI
 from replay_analysis import ReplayStepAnalysis, analyze_replay_step
+from replay_display import recorded_input, reference_text, reference_overlays
+from live_display_state import CertaintyFrame, DisplayContext
 from replay_recorder import ReplayRecorder
 from replay_statistics import ReplayStatisticsAnalyzer
 from mouse_trace import MouseTraceRecorder
@@ -391,16 +394,19 @@ class CellButton(QPushButton):
         self.x = x
         self.y = y
         self.analysis_overlay = None
+        self.recorded_target = False
         self.probability_text = ""
         self.setFocusPolicy(Qt.NoFocus)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setMouseTracking(True)
 
-    def set_analysis_overlay(self, overlay: CellOverlay | None, show_probability=True):
+    def set_analysis_overlay(self, overlay: CellOverlay | None, show_probability=True,
+                             *, recorded_target=False):
         """Presentation only: leave button text, style and mouse behavior intact."""
-        self.analysis_overlay = overlay
-        self.probability_text = ""
+        probability_text = ""
         tooltip = []
+        if recorded_target:
+            tooltip.append("녹화된 다음 입력 셀")
         if overlay is not None:
             if overlay.recommended:
                 tooltip.append("추천 셀")
@@ -411,15 +417,23 @@ class CellButton(QPushButton):
             elif overlay.probability is not None:
                 tooltip.append(f"지뢰 확률: {format_mine_probability(overlay.probability)}")
             if overlay.probability is not None and show_probability:
-                self.probability_text = format_mine_probability(overlay.probability, compact=True)
-        self.setToolTip(" · ".join(tooltip))
+                probability_text = format_mine_probability(overlay.probability, compact=True)
+        text = " · ".join(tooltip)
+        if (self.analysis_overlay == overlay and self.probability_text == probability_text
+                and self.recorded_target == recorded_target and self.toolTip() == text):
+            return
+        self.analysis_overlay = overlay
+        self.recorded_target = recorded_target
+        self.probability_text = probability_text
+        self.setToolTip(text)
         self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
         overlay = self.analysis_overlay
-        if overlay is None:
+        if overlay is None and not self.recorded_target:
             return
+        overlay = overlay or CellOverlay()
         painter = QPainter(self)
         colors = {
             OverlayKind.SAFE: QColor(35, 185, 85, 105),
@@ -447,7 +461,7 @@ class CellButton(QPushButton):
                              text_width + 1, text_height + 1,
                              Qt.AlignCenter, self.probability_text)
             painter.restore()
-        if overlay.recommended:
+        if overlay.recommended or self.recorded_target:
             pen = painter.pen()
             pen.setWidth(2 if self.width() >= 20 else 1)
             pen.setColor(QColor("#ffffff"))
@@ -526,6 +540,8 @@ class MinesweeperUI(QWidget):
         self._mouse_trace_recording_locked = False
         self._mouse_trace_display_data = None
         self._analysis_result: LiveAnalysis | None = None
+        self._certainty_frame = None
+        self._replay_reference_error = None
         self._replay_analysis_result: ReplayStepAnalysis | None = None
         self._replay_view_index = None
         self._analysis_observation = None
@@ -1123,11 +1139,7 @@ class MinesweeperUI(QWidget):
         self.live_policy_combo.addItem("Stage3 V1", POLICY_V1)
         self.live_policy_combo.addItem("K-P0 (실험적)", POLICY_K)
         self.live_policy_combo.addItem("K-LC0 (실험적)", POLICY_K_LC0)
-        for label, policy in (("K-LC1", "K_LC1"),):
-            self.live_policy_combo.addItem(f"{label} — 이번 단계 미지원", policy)
-            item = self.live_policy_combo.model().item(self.live_policy_combo.count() - 1)
-            item.setEnabled(False)
-            item.setToolTip("다음 구현 단위에서 연결할 실험적 정책입니다.")
+        self.live_policy_combo.addItem("K-LC1 (실험적)", POLICY_K_LC1)
         self.live_policy_combo.setToolTip("정책 변경은 Auto를 멈춥니다. 다음 Auto ON부터 현재 판에 적용합니다.")
         self.live_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.live_policy_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -2135,6 +2147,7 @@ class MinesweeperUI(QWidget):
         if (changed and self.analysis_checkbox.isChecked()
                 and self._replay_player.engine.status == GameStatus.PLAYING):
             self.on_analyze_current()
+        self._render_live_analysis()
 
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
         """ReplayPlayer의 초기 상태를 UI에 표시한다."""
@@ -2783,7 +2796,7 @@ class MinesweeperUI(QWidget):
         if auto_observation is None:
             self._reset_simple_preparation()
             self._retire_v1_for_manual("수동 입력으로 인계")
-            if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+            if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
                 blocked = self.allow_guess_checkbox.blockSignals(True)
                 self.allow_guess_checkbox.setChecked(False)
                 self.allow_guess_checkbox.blockSignals(blocked)
@@ -2869,7 +2882,7 @@ class MinesweeperUI(QWidget):
     def on_reset(self):
         if self._replay_mode or self._live_closing:
             return
-        if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._stop_simple_auto()
             self._clear_live_analysis("선택한 정책은 이번 단계에서 지원하지 않습니다.")
             return
@@ -2979,7 +2992,7 @@ class MinesweeperUI(QWidget):
 
     def _on_live_policy_changed(self, *_args):
         selected = self.live_policy_combo.currentData()
-        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             blocked = self.live_policy_combo.blockSignals(True)
             self.live_policy_combo.setCurrentIndex(self.live_policy_combo.findData(self._live_policy))
             self.live_policy_combo.blockSignals(blocked)
@@ -2996,12 +3009,12 @@ class MinesweeperUI(QWidget):
             return
         if hasattr(self, "auto_cursor_overlay"):
             self.auto_cursor_overlay.set_available(
-                self._v1_owned and self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0)
+                self._v1_owned and self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
                 and not self._replay_mode and not self._live_closing
                 and not self._live_input_uncertain and not self._v1_manual_only
                 and not (k_live.is_k_policy(self._live_policy) and self._k_retired))
             self.auto_cursor_checkbox.setEnabled(
-                self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode and not self._live_closing)
+                self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode and not self._live_closing)
         live_available = not self._replay_mode and not self._live_closing
         self.reset_button.setEnabled(live_available)
         self.difficulty_combo.setEnabled(live_available)
@@ -3021,7 +3034,7 @@ class MinesweeperUI(QWidget):
             "Replay 현재 보드의 참고 분석입니다. 저장된 플레이 정책을 나타내지 않습니다."
             if self._replay_mode else "현재 보드를 분석하고 사용자 액션 후 자동 갱신")
         self.analyze_button.setToolTip(
-            "Stage2 Simple로 한 번 참고 분석합니다. 저장된 플레이 정책과는 무관합니다."
+            "참고 분석 표시가 켜져 있을 때 현재 보드를 Stage2 Simple로 분석합니다."
             if self._replay_mode else "한 번 분석하여 표시 (추천 액션은 실행하지 않음)")
         self.simple_auto_checkbox.setToolTip(
             "Auto OFF는 추천·추측 선택을 보관하는 일시정지입니다. 보드를 클릭하면 수동으로 전환하며 추측 선택을 해제합니다.")
@@ -3094,7 +3107,7 @@ class MinesweeperUI(QWidget):
             checkbox.blockSignals(blocked)
         self.allow_guess_checkbox.setEnabled(False)
         selected = self.live_policy_combo.currentData()
-        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             selected = self._live_policy
             blocked = self.live_policy_combo.blockSignals(True)
             self.live_policy_combo.setCurrentIndex(self.live_policy_combo.findData(selected))
@@ -3177,7 +3190,7 @@ class MinesweeperUI(QWidget):
         self._k_preparation_seq = 0
         self._k_normal_start = None
         self._k_bootstrap = None
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._v1_status = reason
         if cancel and not waiting and self._v1_job.active_run_id is not None:
             self._v1_job.cancel(reason)
@@ -3292,6 +3305,9 @@ class MinesweeperUI(QWidget):
         self._analysis_observation = proposal.snapshot.observation
         self._analysis_first_click = proposal.kind == "initial"
         self.analysis_status_label.setText(self._analysis_result.status_text)
+        preparing = (proposal.is_preparation if k_live.is_k_policy(self._live_policy)
+                     else proposal.is_flag_review)
+        self._remember_live_certainty(preparing=preparing)
         self._render_live_analysis()
         self._schedule_v1_step()
 
@@ -3425,7 +3441,7 @@ class MinesweeperUI(QWidget):
 
     def _on_v1_proposal(self, proposal):
         if (self._live_closing or self._replay_mode or not self._v1_owned
-                or self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0)
+                or self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
                 or proposal.snapshot.run_id != self._live_run_id):
             return
         try:
@@ -3836,7 +3852,7 @@ class MinesweeperUI(QWidget):
             self._clear_live_analysis(f"이전 Auto 오류 - {record.get('error') or record.get('status')}")
             self._update_policy_controls()
             return
-        if self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._update_policy_controls()
             return
         if (record.get("status") == "SUCCEEDED" and record.get("cleanup_complete") is True
@@ -3861,21 +3877,76 @@ class MinesweeperUI(QWidget):
                                    else "수동 · 정리 완료 · Auto ON으로 다시 인수")
             self._update_policy_controls()
 
-    def _clear_live_analysis(self, status="분석 대기"):
+    def _invalidate_analysis_state(self):
         self._cancel_simple_auto_step()
         self._analysis_result = None
         self._replay_analysis_result = None
         self._analysis_observation = None
         self._analysis_first_click = False
-        for button in self._buttons.values():
-            button.set_analysis_overlay(None)
+
+    def _clear_live_analysis(self, status="분석 대기", *, keep_certainty=False):
+        self._invalidate_analysis_state()
+        if not keep_certainty:
+            self._certainty_frame = None
+        self._replay_reference_error = status if status.startswith("분석 불가") else None
         self.analysis_status_label.setText(status)
+        self._render_live_analysis()
+
+    def _display_context(self, *, previous_observation=None):
+        """Read-only display epoch; never consulted by input/ACK validation."""
+        if (self._replay_mode or self._live_closing or self._live_input_uncertain
+                or self._live_first_failure is not None or self._v1_manual_only
+                or not self.analysis_checkbox.isChecked()
+                or self.engine.status != GameStatus.PLAYING or not self._known_live_history()):
+            return None
+        worker = self._live_policy != POLICY_SIMPLE
+        if worker and (not self._v1_owned or self._v1_job.active_run_id != self._live_run_id):
+            return None
+        records = self.live_input_records
+        events = self._replay_recorder.events
+        revision = self._live_action_count
+        observation = self.engine.get_observation()
+        if previous_observation is not None:
+            if not records or not records[-1]['automatic']:
+                return None
+            records, events = records[:-1], events[:-1]
+            revision -= 1
+            observation = previous_observation
+        history = (tuple(tuple(sorted(row.items())) for row in records), tuple(events))
+        digest = lambda value: sha256(repr(value).encode('utf-8')).hexdigest()
+        return DisplayContext(self._live_game_id, self._live_policy, self._live_run_id,
+                              self._live_board_generation, id(self._v1_job) if worker else 0,
+                              revision, digest(history),
+                              digest(tuple(tuple(row) for row in observation)))
+
+    def _remember_live_certainty(self, *, preparing=False):
+        context = None if preparing else self._display_context()
+        self._certainty_frame = (CertaintyFrame.capture(
+            context, self._analysis_result.overlays, self.engine.get_observation())
+            if context is not None else None)
 
     def _render_live_analysis(self):
         result = self._analysis_result
+        target = None
+        overlays = result.overlays if result is not None else {}
+        if self._replay_mode and self._replay_player is not None:
+            player = self._replay_player
+            text, target = recorded_input(player.replay_data.events, player.current_index,
+                                          player.get_observation(), player.engine.status)
+            overlays = {}
+            if self.analysis_checkbox.isChecked():
+                text += "\n" + reference_text(result, player.engine.status, self._replay_reference_error)
+                overlays = reference_overlays(result)
+            self.analysis_status_label.setText(text)
+        elif result is None and self._certainty_frame is not None:
+            if (type(self._certainty_frame) is CertaintyFrame
+                    and self._certainty_frame.context == self._display_context()):
+                overlays = self._certainty_frame.overlays()
+            else:
+                self._certainty_frame = None
         for coordinate, button in self._buttons.items():
-            overlay = result.overlays.get(coordinate) if result is not None else None
-            button.set_analysis_overlay(overlay, self.probability_checkbox.isChecked())
+            button.set_analysis_overlay(overlays.get(coordinate), self.probability_checkbox.isChecked(),
+                                        recorded_target=coordinate == target)
 
     def on_analysis_toggled(self, enabled: bool):
         if enabled and self._mouse_buttons and not self._replay_mode:
@@ -3905,7 +3976,7 @@ class MinesweeperUI(QWidget):
         if self._replay_mode:
             self._analyze_current_replay()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._v1_display_requested = True
             self._analyze_v1_current()
             return
@@ -3923,7 +3994,7 @@ class MinesweeperUI(QWidget):
             self._stop_simple_auto()
             self._clear_live_analysis("게임 종료")
             return
-        self._clear_live_analysis()
+        self._invalidate_analysis_state()
         try:
             observation = self.engine.get_observation()
             binding = self._simple_binding()
@@ -3966,6 +4037,8 @@ class MinesweeperUI(QWidget):
         self._analysis_first_click = first_click
         self._simple_analysis_binding = binding
         self.analysis_status_label.setText(result.status_text)
+        self._remember_live_certainty(preparing=(preparation is not None
+            and self._simple_preparation_seq < len(preparation.removable)))
         self._render_live_analysis()
         self._schedule_simple_auto_step()
 
@@ -3973,7 +4046,7 @@ class MinesweeperUI(QWidget):
         """Read only public replay state; never schedule/execute a solver action."""
         self._stop_simple_auto()
         self._clear_live_analysis()
-        if self._replay_player is None:
+        if self._replay_player is None or not self.analysis_checkbox.isChecked():
             return
         try:
             player = self._replay_player
@@ -3984,7 +4057,6 @@ class MinesweeperUI(QWidget):
             )
             self._replay_analysis_result = result
             self._analysis_result = result.presentation
-            self.analysis_status_label.setText("Simple 참고 분석 | " + result.status_text)
             self._render_live_analysis()
         except InconsistentObservationError:
             self._clear_live_analysis("분석 불가 - 공개 상태가 모순됩니다.")
@@ -3994,7 +4066,13 @@ class MinesweeperUI(QWidget):
 
     def _refresh_live_board(self, info=None, *, auto_observation=None):
         """After each physical action: invalidate, render, analyze fresh, overlay."""
-        self._clear_live_analysis()
+        frame = self._certainty_frame
+        self._certainty_frame = (frame.advance(
+            self._display_context(previous_observation=auto_observation),
+            self._display_context(), self.engine.get_observation())
+            if type(frame) is CertaintyFrame and auto_observation is not None else None)
+        self._clear_live_analysis("다음 수 계산 중" if self._certainty_frame else "분석 대기",
+                                  keep_certainty=True)
         self.render_board()
         if info is not None:
             self._apply_stats_from_info(info)
@@ -4002,7 +4080,7 @@ class MinesweeperUI(QWidget):
         if self._replay_mode or self.engine.status != GameStatus.PLAYING:
             self._set_auto_off(clear_guess=True)
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._update_policy_controls()
             return
         if auto_observation is not None:
@@ -4140,7 +4218,7 @@ class MinesweeperUI(QWidget):
             self._update_policy_controls()
 
     def _fail_simple_auto(self, message):
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._fail_v1(message)
             return
         self._set_auto_off(clear_guess=True)
@@ -4159,7 +4237,7 @@ class MinesweeperUI(QWidget):
         # Qt restarts an active timer when its interval changes. Keep the same
         # pending step and analysis; even 0 waits for event-loop dispatch.
         self._simple_auto_timer.setInterval(interval)
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             self._schedule_v1_step()
 
     def on_simple_auto_toggled(self, enabled):
@@ -4169,7 +4247,7 @@ class MinesweeperUI(QWidget):
         if enabled and self._mouse_buttons and not self._replay_mode:
             self._stop_simple_auto()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             if (not enabled or self._live_closing or self._v1_manual_only
                     or self._live_input_uncertain or self._mouse_buttons
                     or self.engine.status != GameStatus.PLAYING):
@@ -4197,7 +4275,7 @@ class MinesweeperUI(QWidget):
             self.on_analyze_current()
 
     def on_allow_guess_toggled(self, _enabled):
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             self._schedule_v1_step()
             return
         if not self.simple_auto_checkbox.isChecked() or self._replay_mode:
@@ -4255,7 +4333,7 @@ class MinesweeperUI(QWidget):
         return self.simple_auto_checkbox.isChecked()
 
     def _schedule_simple_auto_step(self):
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             self._schedule_v1_step()
             return
         self._cancel_simple_auto_step()
@@ -4279,7 +4357,7 @@ class MinesweeperUI(QWidget):
     def _on_simple_auto_timeout(self, nonce=None):
         if nonce is not None and nonce != self._v1_timer_nonce:
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             # A generic Simple timeout may have been queued before selection.
             # Only the captured V1 reservation is authorized to execute V1.
             return

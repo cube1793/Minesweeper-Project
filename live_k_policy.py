@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from core_engine import Action, CellState, GameStatus
 from live_policy import (
-    ADOPT_CURRENT, CANONICAL_NEW, POLICY_K, POLICY_K_LC0,
+    ADOPT_CURRENT, CANONICAL_NEW, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
     _coordinate, _detach_grid, _grid, _identity, _integer, _object,
     _require, _neighbors, supports_v1_board,
 )
@@ -29,10 +29,14 @@ FLAG_ADOPT_DEFINITION = "K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
 LC0_DEFINITION = "K_LC0_DISTANCE_BAND_FIRST_INPUT_V1"
 LC0_ADOPT_DEFINITION = "K_LC0_PUBLIC_ADOPT_DISTANCE_BAND_FIRST_INPUT_V1"
 LC0_FLAG_ADOPT_DEFINITION = "K_LC0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
+LC1_DEFINITION = "K_LC1_SINGLETON_BAND_FIRST_INPUT_V1"
+LC1_ADOPT_DEFINITION = "K_LC1_PUBLIC_ADOPT_SINGLETON_BAND_FIRST_INPUT_V1"
+LC1_FLAG_ADOPT_DEFINITION = "K_LC1_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
 PHASE_BOOTSTRAP = "K_BOOTSTRAP"
 PHASE_PREPARATION = "K_PREPARATION"
 PHASE_K = "K_P0"
 PHASE_LC0 = "K_LC0"
+PHASE_LC1 = "K_LC1"
 MAX_K_INPUTS = 480
 MAX_VALIDATIONS_PER_INPUT = 64
 MAX_K_SEQUENCE = MAX_K_INPUTS * (MAX_VALIDATIONS_PER_INPUT + 2) + 1
@@ -41,17 +45,17 @@ supports_board = supports_v1_board
 
 
 def is_k_policy(policy_id):
-    return type(policy_id) is str and policy_id in (POLICY_K, POLICY_K_LC0)
+    return type(policy_id) is str and policy_id in (POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
 
 
 def policy_label(policy_id):
     _require(is_k_policy(policy_id), "Invalid K policy.")
-    return "K-LC0" if policy_id == POLICY_K_LC0 else "K-P0"
+    return {POLICY_K: "K-P0", POLICY_K_LC0: "K-LC0", POLICY_K_LC1: "K-LC1"}[policy_id]
 
 
 def normal_phase(policy_id):
     _require(is_k_policy(policy_id), "Invalid K policy.")
-    return PHASE_LC0 if policy_id == POLICY_K_LC0 else PHASE_K
+    return {POLICY_K: PHASE_K, POLICY_K_LC0: PHASE_LC0, POLICY_K_LC1: PHASE_LC1}[policy_id]
 
 
 def definition_for_entry(entry_mode, policy_id=POLICY_K):
@@ -61,6 +65,9 @@ def definition_for_entry(entry_mode, policy_id=POLICY_K):
     if policy_id == POLICY_K_LC0:
         return {CANONICAL_NEW: LC0_DEFINITION, ADOPT_CURRENT: LC0_ADOPT_DEFINITION,
                 FLAG_ADOPT: LC0_FLAG_ADOPT_DEFINITION}[entry_mode]
+    if policy_id == POLICY_K_LC1:
+        return {CANONICAL_NEW: LC1_DEFINITION, ADOPT_CURRENT: LC1_ADOPT_DEFINITION,
+                FLAG_ADOPT: LC1_FLAG_ADOPT_DEFINITION}[entry_mode]
     return {CANONICAL_NEW: DEFINITION, ADOPT_CURRENT: ADOPT_DEFINITION,
             FLAG_ADOPT: FLAG_ADOPT_DEFINITION}[entry_mode]
 
@@ -520,11 +527,16 @@ class KOwner:
         self.session = KLocalSession(snapshot.width, snapshot.height, snapshot.num_mines)
         self._select = select_policy
         self._distance_adapter = self._validate_distance = None
+        self._singleton_adapter = self._validate_singleton = None
         if snapshot.policy_id == POLICY_K_LC0:
             # Worker-only import: Main loads no native LC runtime.
             from experiments.program_k_lc0_policy import apply_distance_band, validate_distance_selection
             self._distance_adapter = apply_distance_band
             self._validate_distance = validate_distance_selection
+        elif snapshot.policy_id == POLICY_K_LC1:
+            from experiments.program_k_lc1_policy import apply_singleton_band, validate_singleton_selection
+            self._singleton_adapter = apply_singleton_band
+            self._validate_singleton = validate_singleton_selection
         self._validate = validate_k_p0_execution
         self._progress = _validate_progress
         self.table = validate_timing_table(table)
@@ -533,6 +545,8 @@ class KOwner:
         self.pending = self.decision = self.selection = self.permit = None
         self.native_selection = self.distance_selection = None
         self._original_distance_selection = None
+        self.singleton_selection = self._original_singleton_selection = None
+        self._singleton_binding = self._original_singleton_pending = None
         self.closed = False
         self._nonces = set()
         self.bootstrap_proof = None
@@ -575,6 +589,21 @@ class KOwner:
                 self.distance_selection = self._distance_adapter(self.native_selection, control=False)
                 self._original_distance_selection = self.distance_selection
                 self.selection = self.distance_selection.selected
+            elif snapshot.policy_id == POLICY_K_LC1:
+                # This adapter itself computes actual LC0 once. Its baseline is
+                # never a DistanceSelection for the potentially >105% final.
+                choice = self._singleton_adapter(self.native_selection)
+                self.singleton_selection = self._original_singleton_selection = choice
+                self.distance_selection = choice.baseline
+                self.selection = choice.selected
+                self._singleton_binding = (
+                    self.decision, self.native_selection, choice.baseline, self.selection,
+                    self.native_selection.candidates, self.native_selection.survivors,
+                    self.native_selection.plan, self.native_selection.move,
+                    choice.baseline.selected, choice.baseline.selected.plan,
+                    choice.baseline.selected.move, self.selection.plan, self.selection.move,
+                    choice.assessments,
+                )
             else:
                 self.selection = self.native_selection
             elapsed = perf_counter_ns() - started
@@ -588,6 +617,8 @@ class KOwner:
                                  elapsed, snapshot.base_m_revision + (not initial), _ordered(self.session.M),
                                  project_exact_guess(self.decision, self.selection) if kind == 'guess' else None,
                                  () if initial else _ordered(self.decision.selection_safe_cells))
+        if snapshot.policy_id == POLICY_K_LC1 and not initial:
+            self._original_singleton_pending = self.pending
         self.expected = None
         self._nonces.clear()
         return self.pending
@@ -605,6 +636,26 @@ class KOwner:
             self.bootstrap_proof.validate_target(request.snapshot, (p.x, p.y))
             _require(self.decision is None and self.selection is None, "Preparation has no policy graph.")
         else:
+            if not p.initial and p.snapshot.policy_id == POLICY_K_LC1:
+                choice = self.singleton_selection
+                _require(choice is not None and choice is self._original_singleton_selection
+                         and p is self._original_singleton_pending
+                         and choice.native is self.native_selection
+                         and choice.native.evidence is self.decision
+                         and choice.baseline is self.distance_selection
+                         and choice.selected is self.selection,
+                         "LC1 requires its original singleton, baseline, graph and pending.")
+                current = (
+                    self.decision, self.native_selection, choice.baseline, self.selection,
+                    self.native_selection.candidates, self.native_selection.survivors,
+                    self.native_selection.plan, self.native_selection.move,
+                    choice.baseline.selected, choice.baseline.selected.plan,
+                    choice.baseline.selected.move, self.selection.plan, self.selection.move,
+                    choice.assessments,
+                )
+                _require(all(now is original for now, original in zip(current, self._singleton_binding)),
+                         "LC1 original selection identity changed.")
+                self._validate_singleton(choice)
             if not p.initial and p.snapshot.policy_id == POLICY_K_LC0:
                 choice = self.distance_selection
                 _require(choice is not None and choice is self._original_distance_selection
@@ -641,4 +692,6 @@ class KOwner:
         self.pending = self.decision = self.selection = self.permit = None
         self.native_selection = self.distance_selection = None
         self._original_distance_selection = None
+        self.singleton_selection = self._original_singleton_selection = None
+        self._singleton_binding = self._original_singleton_pending = None
         return following

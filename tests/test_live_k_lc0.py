@@ -1,4 +1,4 @@
-"""LC0 Live identity, original-graph/ranking and strict v8 boundary tests."""
+"""LC0 Live identity, original-graph/ranking and strict wire boundary tests."""
 import ast
 from copy import deepcopy
 from dataclasses import replace
@@ -258,10 +258,10 @@ class LiveLC0OwnerTests(unittest.TestCase):
         self.assertIsNone(owner.distance_selection)
         permit(owner,p)
 
-    def test_wire_v8_rejects_all_old_versions_and_missing_game_id(self):
-        self.assertEqual(PROTOCOL_VERSION,8)
+    def test_wire_v9_rejects_all_old_versions_and_missing_game_id(self):
+        self.assertEqual(PROTOCOL_VERSION,9)
         envelope=message('a'*32,0,'START',k.to_dict(lc0(initial())))
-        for version in (True,1,2,3,4,5,6,7,9):
+        for version in (True,1,2,3,4,5,6,7,8,10):
             with self.subTest(version=version),self.assertRaises(ValueError):
                 validate_message(dict(envelope,version=version))
         data=deepcopy(envelope['payload'])

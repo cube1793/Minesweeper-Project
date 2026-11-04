@@ -496,7 +496,7 @@ Model C time-to-win 차이는 양쪽 WON일 때만 정의한다.
 
 2026-11-02 source checkpoint다. 계보는 frozen V1 → K-P0 → 실험적 K-LC0이며
 V1-LC0 구현은 생략했다. V1도 CHORD를 사용하고 Stage2 Simple과 구별한다.
-이2026-11-02 checkpoint에서 K-P0/K-LC0는 별도 policy/entry였다. 현재 Main에는 실험적 K-P0만 추가 연결됐고 LC0/LC1은 미연결이다.
+이2026-11-02 checkpoint에서 K-P0/K-LC0는 별도 policy/entry였다. 이후 Main에는 K-P0/K-LC0/K-LC1이 연결됐으며 현재 계약은 [최신 Main closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따른다.
 기존 V1/K-P0 앱의 `3e9f3935...` 뒤 K-LC0 4개·비교 앱9개와 문서7개의20경로는
 `496fab0fc8829af7a255c403346985be7ae6a005`로 commit/push 완료됐다.
 그 이전 실행은 당시 raw hash/dirty identity를 따르며 새 HEAD로 소급 식별하지 않는다.
@@ -575,7 +575,7 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 사용자 확인은 두 저장 경로에 한정된다. native Qt 렌더 확인/offscreen tests/미확인 CU 제스처를
 분리하며 자세한 수치·알려진 한계·실행 안내는
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)을 따른다.
-현재 Main 실험적 K-P0는 [K closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md), 기존 Simple/V1은 [이전 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)을 따른다. LC0/LC1 Main 연결·production·새 package/Stage4는 미진행이다.
+위 내용은 별도 저장 viewer의 역사적 범위다. 현재 Main은 K-P0/K-LC0/K-LC1을 연결했으며 [LC1 및 표시 개선 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따른다. 기존 비교 앱에 LC1이 추가됐다는 뜻은 아니다. Production·새 package/Stage4는 미승인이다.
 
 ### Replay
 
@@ -585,7 +585,9 @@ reader는 저장 manifest/TRACE_INDEX/trace·historical launch/review R2 identit
 | `replay_recorder.py` | 메모리에 실제 이벤트를 누적하고 확정된 snapshot을 한 번 capture하도록 호출자가 관리 |
 | `replay_json.py` | JSON 구조 변환, UTF-8 파일 입출력. 도메인 검증은 model에 위임 |
 | `replay_player.py` | 저장된 fixed board를 독립 engine에 복원하고 action 순서대로 재생 |
-| `replay_analysis.py` | 현재 공개 position의 추천을 구한 후 다음 event와 비교. 읽기 전용 |
+| `replay_analysis.py` | 현재 공개 position의 Simple 추천과 내부 비교 데이터. 읽기 전용 |
+| `replay_display.py` | 녹화된 다음 입력의 문구/테두리와 별도 Simple 참고 표시. 비교 판정은 화면에 노출하지 않음 |
+| `live_display_state.py` | 동일 Auto context의 HIDDEN 확정색만 다음 계산까지 보관하는 immutable frame. 입력 권한 없음 |
 | `replay_statistics.py` | 별도 player로 counter timeline을 만들고 위치·재생 시간·ZiNi에 따른 Counters 반환 |
 
 Replay 재생, Replay Analysis, Replay Statistics는 서로 다른 책임이다. 재생은 기록을 engine에 적용하고, Analysis는 현재 position의 추천을 설명하며, Statistics는 과거 행동의 통계를 집계한다. Analysis는 플레이 평가 점수를 계산하지 않는다.
@@ -681,21 +683,23 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
-2026-11-04 현재 K 인수·FLAG 준비·수동 인계·Simple 준비·Replay UI에 이어 K-LC0 Main 연결의 독립 검토와 사용자 native 수용을 마쳤다. 현재 [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)을 우선하고, [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)은 이전 checkpoint이며, [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)과 [K v3–v5](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)는 버전별 역사다.
+2026-11-04 현재 K-LC1 Main 연결과 Replay/확정색 표시 개선의 독립 검토 및 사용자 native 수용을 마쳤다. 현재 [LC1 및 표시 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 우선한다. [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md), [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md), [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 버전별 역사다.
 
-새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
+새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 계열 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
 
-K-P0와 K-LC0는 세 preset에서 canonical 새 판과 현재 판 ADOPT/재인수를 지원한다. FLAG-free ADOPT는 빈 M과 현재 global revision·실제 입력 이력에 결속한다. FLAG 인수는 K_P0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1이며, native KLocalSession이 detached FLAG-masked 공개 관측을 한 번 local 분석한다. 원 FLAG와 증명 M의 교집합만 유지하고 나머지를 row-major로 실제 해제한다. 같은 session/proof를 이어 실제 판 검증·정상 분석/선택을 수행한다. M 외부 주입, V1 proof 재사용, masked graph의 실제 입력 승인은 없다.
+K-P0/K-LC0/K-LC1은 세 preset의 canonical 새 판과 현재 판 ADOPT/재인수를 지원한다. FLAG-free ADOPT는 빈 M과 현재 global revision·실제 입력 이력에 결속한다. FLAG 인수는 각 정책의 PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1 정의를 사용한다. native KLocalSession이 detached FLAG-masked 공개 관측을 한 번 local 분석하고 원 FLAG와 증명 M의 교집합만 유지하며 나머지는 row-major로 실제 해제한다. 같은 session/proof를 이어 실제 판 검증·정상 분석/선택을 수행한다. M 외부 주입, V1 proof 재사용, masked graph의 실제 입력 승인은 없다.
 
 worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환한다. GUI는 yield 없이 최종 비교→token 소비→step1을 수행하고 정확한 원 입력의 ACK 뒤 NEXT로 간다. ACK 중 수동 인계는 불변 _KInputReceipt로 기존 입력/game/Replay prefix를 확인하며 현재 수동 판을 과거 상태로 되돌리거나 NEXT를 보내지 않는다. 실제 ACK/이력/정리 오류의 fail-closed와 최초 원인 기록은 유지한다.
 
-현재 공통 wire v8이며 KSnapshot에 필수 game_id가 있다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
+현재 공통 wire v9이며 KSnapshot에 필수 game_id가 있다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
 
 Simple Main 준비는 live_simple_preparation.py에서 공개 FLAG-masked 직접 zero/all·전체 지뢰 수로 기존 FLAG를 확인한다. 기존 Simple planner는 불변이다. 수동 입력은 준비 epoch를 폐기하고 Auto를 끈다. 실제 준비 입력은 event를 남긴다. Model C 표 밖(dx≥30 또는 dy≥16) 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled 입력 수로 기록하며 0비용이나 완전 합계로 표현하지 않는다.
 
-K_LC0는 같은 normal DecisionAnalysis와 native select_policy를 각 한 번 얻고 원 apply_distance_band(control=False)를 한 번 적용한다. 원 survivors의105% 정수 band와 전체 exact_route D→Fraction E→L→frozen tie를 유지하며, 원 DistanceSelection identity/graph/rank와 기존 K 물리 검증을 VALIDATE에서 함께 확인한다. 첫 입력만 실행하고 suffix는 폐기한다. canonical/FLAG-free/FLAG_ADOPT 모두 지원하며 원 native/LC 정책·bootstrap·Model C를 바꾸지 않았다. 자세한 정의/실행 근거와 한계는 LC0 closeout을 따른다.
+K_LC0는 같은 normal DecisionAnalysis와 native select_policy를 각 한 번 얻고 원 apply_distance_band(control=False)를 한 번 적용한다. 원 survivors의105% 정수 band와 전체 exact_route D→Fraction E→L→frozen tie를 유지한다. K_LC1은 같은 native 선택에 원 apply_singleton_band를 한 번 적용하며 내부에서 실제 LC0 baseline b를 한 번 구한다. HIDDEN8 성분에서 M을 뺀 집합이 target 하나인 원 survivor의 direct safe OPEN만 105% 초과·110% 이하 및 D(p)<D(b) 조건으로 예외 선택한다. 원 graph/selection/native·물리 검증에 결속하며 첫 입력1회만 실행한다. guess/initial과 native 정책·Model C는 불변이다. 110%는 전체 게임 비용 상한이 아니다.
 
-K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selection_safe_cells/preinput_m의 HIDDEN 셀 표시다. 표시를 위한 추가 추론·선택·FLAG·ACK 승격은 없다. 확률 OFF에도 확정색이 남고 V1/K 가상 원형은 OS 마우스·Model C와 분리된다. 최종 source111과 LC0 검증·실패 이력·사용자 수용의 정확한 범위는 현재 closeout에 기록한다.
+K exact 확률은 원 phase_e의 primitive projection, 확정색은 원 selection_safe_cells/preinput_m의 HIDDEN 셀 표시다. 확률 OFF에도 확정색은 남고 V1/K 가상 원형은 OS 마우스·Model C와 분리된다. 표시를 위한 추가 추론·선택·FLAG·ACK 승격은 없다.
+
+live_display_state의 DisplayContext는 game/policy/run/generation/owner/revision/이력·관측 digest에 결속된다. CertaintyFrame은 SAFE/MINE만 저장한다. 같은 context에서 Auto 입력1회 후 다음 계산을 기다릴 때 여전히 HIDDEN인 색만 유지한다. 열린/FLAG 칸은 즉시 제외하고 이전 추천·확률은 보관하지 않는다. 새 분석이 있으면 새 frame으로 교체하며 합집합을 누적하지 않는다. pause는 유효 frame을 유지하고, 수동 첫 press·정책·새 게임·Replay·종료·분석 OFF·오류·owner 폐기는 frame을 지운다. 실행 분석의 무효화와 표시는 분리되므로 frame이 token/입력/다음 선택을 승인하지 못한다. CellButton은 overlay/확률 문구/테두리/tooltip이 모두 같을 때만 중복 update를 생략한다.
 
 Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일시정지 한 번이다. Replay Return/Enter/reset은 상태를 바꾸지 않는다. 비편집 정책 콤보의 focus에서도 Live 키가 동작하며 편집 가능한 콤보·line/text/spinbox, popup/modal, auto-repeat 방어를 유지한다. 종료 정리 예외는 기존 closing/job 잠금을 유지하면서 한 줄 이유·전체 tooltip/접근성 설명과 비활성 제어로 표시한다. 강제 종료/추가 worker/자동 복구를 만들지 않는다.
 
@@ -704,7 +708,7 @@ Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일
 → UI의 단일 action 경로
 → engine.step(x, y, action) 한 번
 → step 이후 경과 시간으로 Replay event 기록
-→ 기존 분석 무효화 → 보드·통계 갱신
+→ 실행 분석 무효화 → 같은 Auto context의 HIDDEN 확정색만 보관 → 보드·통계 갱신
 → 분석 표시 ON이면 fresh observation으로 분석 → overlay
 → Auto ON이고 실행 가능한 추천이면 다음 timeout 예약
 ```
@@ -786,22 +790,17 @@ Live UI와 runner 모두 확정 보드를 recorder에 한 번 전달하고 실�
 
 ### 4.4 Replay Analysis 갱신
 
-```text
-현재 Replay observation + num_mines + status + index
-→ FIRST_CLICK presentation 또는 (analyze_position() → present_decision())
-→ 추천 완성 후 다음 event 조회
-→ compare_replay_action() → ReplayStepAnalysis → UI
-```
+녹화 표시와 참고 분석은 분리된다. replay_display는 현재 index의 저장 event를 읽어 첫 줄과 테두리를 표시한다. 참고 분석 OFF·오류에서도 유지한다. PLAYING의 FLAGGED 대상 FLAG만 UNFLAG로 해석하고, WON/LOST 뒤 저장 FLAG는 자동 종료 깃발 때문에 UNFLAG로 바꾸지 않는다. CHORD는 열린 anchor를 표시하며, 끝·빈 기록·범위 밖 좌표는 안전하게 처리한다.
 
-`analyze_replay_step(observation, num_mines, *, current_index, events, status)`는 추천·presentation과 next event, 비교 kind/text를 묶는다. 비교 의미는 [비교 규칙](#replay-comparison)에 정의한다.
+참고 분석 ON일 때만 현재 공개 observation의 Simple 분석을 수행한다. analyze_replay_step은 먼저 presentation을 완성한 뒤 다음 event를 읽으므로 녹화 입력이 후보 선택에 영향을 주지 않는다. 내부 ReplayStepAnalysis와 비교 API는 유지하지만 UI는 비교 kind/text를 읽지 않고 “Simple 참고 분석 / 참고 후보”와 확정색·이미 계산한 확률만 표시한다. Simple 추천 테두리는 제거한다.
 
-- 분석 ON: Replay 진입 및 index 변경 시 이전 분석 제거 → fresh board render → 현재 position 분석.
-- 분석 OFF: 수동 1회 분석 가능. 다음 index 변경 시 결과 제거.
-- Time autoplay: 한 tick에서 도래한 event들을 적용한 뒤 최종 index를 한 번 분석한다. Event가 없는 tick, 같은 index의 time seek, slider 동기화에서는 재분석하지 않는다.
-- 마지막 index가 PLAYING이면 다음 event가 없어도 추천을 표시한다. WON/LOST에서는 solver를 호출하지 않고 overlay를 지우며 “게임 종료”를 표시한다. 저장된 terminal 이후 이벤트의 탐색은 유지한다.
-- Replay에서는 Live Auto와 추측 허용이 OFF/disabled다. 분석 자체는 어느 engine에도 action을 실행하지 않는다.
+- 참고 분석 OFF: index 이동·분석 버튼·확률/Reduction 토글에서 solver 호출0. 녹화된 다음 입력은 계속 표시한다.
+- ON: 진입·index 변경 뒤 fresh 공개 상태를 분석한다. 같은 index의 단순 표시 토글은 재분석하지 않는다.
+- Time autoplay: 도래한 event를 적용한 뒤 최종 index를 한 번 분석한다. event가 없는 tick과 slider 동기화는 재분석하지 않는다.
+- WON/LOST에서는 solver를 호출하지 않고 참고 overlay를 지운다. 저장된 종료 후 event의 탐색/녹화 표시는 유지한다.
+- Live Auto와 추측 허용은 OFF/disabled다. 분석은 action을 실행하거나 저장된 Replay를 수정하지 않는다.
 
-공개 상태 모순과 validation/runtime 오류는 UI slot에서 처리해 overlay를 제거한다. 분석 오류가 Replay의 index·engine·counter timeline·data 또는 Live engine을 변경하지 않으며, 이동/자동 재생을 계속 허용하고 다음 위치에서 다시 분석한다.
+공개 상태 모순·validation/runtime 오류는 참고 overlay만 제거하며 Replay의 index·engine·통계·녹화 입력을 바꾸지 않는다. 이동/재생과 다음 위치의 분석을 계속 허용한다.
 
 ### 4.5 Replay Statistics
 
@@ -928,7 +927,7 @@ Runner는 이번 호출의 실제 행동만 기록하고 가짜 초기화 클릭
 | `UNSUPPORTED_ACTUAL` | CHORD, FLAGGED에 FLAG(UNFLAG), 이미 열린/깃발 칸 대상 행동 등 solver의 행동 계약 밖. Terminal로 presentation이 없는 경우도 포함 |
 | `NO_NEXT_ACTION` | 다음 event가 없음 |
 
-GLOBAL_CERTAINTY의 다른 0% OPEN/100% FLAG도 동등 후보다. FIRST_CLICK에는 SAFE evidence가 없으므로 다른 첫 OPEN은 DIFFERENT다. **DIFFERENT는 “추천과 다름”이며 오답·실수·나쁜 수의 판정이 아니다.** 다음 실제 행동은 status text로만 표시하고 별도 board overlay를 추가하지 않는다.
+GLOBAL_CERTAINTY의 다른 0% OPEN/100% FLAG도 동등 후보다. FIRST_CLICK에는 SAFE evidence가 없으므로 다른 첫 OPEN은 DIFFERENT다. **DIFFERENT는 내부 비교 분류이며 오답·실수·나쁜 수의 판정이 아니다.** 현재 UI는 이 비교 문구를 노출하지 않는다. 녹화된 다음 입력의 첫 줄·테두리와 Simple 참고 표시를 분리하며, 내부 비교 데이터는 그대로 유지한다.
 
 ### 5.6 Reduction / Probability 표시
 

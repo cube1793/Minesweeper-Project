@@ -21,7 +21,8 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Experimental K-LC1 / SINGLETON_BAND_V1 | Accepted limited saved8191/97 viewer at d1201e4; not frozen |
 | Main Simple/V1, K connection/probability/cursor/colours | Earlier accepted commits98203e8/e23dec2/a992892; historical F02 NOT_VERIFIED |
 | Main K current-board/FLAG adoption, ACK handoff, Simple preparation, Replay UI | Accepted and committed at7f15355; historical source107 |
-| Main K-LC0 integration, all three entries and manual handoff | Independent required fixes0 and user native accepted; source111,29-path source/tests/docs Git preparation |
+| Main K-LC0 integration, all three entries and manual handoff | Accepted and committed at4f34a96; historical source111 |
+| Main K-LC1 and Replay/certainty display stability | Independent required fixes0 and user native accepted; source314,30-path source/tests/docs Git preparation |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It establishes no
 effectiveness or aggregate superiority. The scientific disposition is not PHASE1_NO_GO
@@ -30,46 +31,45 @@ with package root results/program-k-trace-demo-final-acceptance/20261031-230251/
 Earlier05920abeaec541a52fd22753dadec66f5cb98bca and technical48f6ebc97e6c4d3ed4a746a92a8d169783803bf9
 are historical anchors, distinct from later Main source and E1/R0 execution identities.
 
-Current precommit main == local origin/main ==7f15355a1d17a3fab1b4b11d85897b02a6bda5d5,
-ahead/behind0/0, staged0. Source/tests21 + documents8 are **29 uncommitted paths (M25/U4)**.
-After the user executes the prepared Git script, the actual receipt and replaced recovery
-provide the resulting SHA; this dated snapshot is not a claim that push has already happened.
+Current precommit main == local origin/main ==4f34a9690fd913f8702404a3c1c6122c078bd4d0,
+ahead/behind0/0, staged0. LC1+display source/tests22 + documents8 are **30 uncommitted paths (M21/U9)**.
+After the user executes the prepared script, the actual receipt and replaced recovery give the resulting SHA.
+The earlier LC0 29-path Git/recovery procedure is complete and must not be repeated.
 
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [current LC0 Main closeout](STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)
-are current authority. [D0–D5 closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md) and generated
-PENDING USER evidence retain their original timestamps and dispositions.
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [LC1/display Main closeout](STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)
+are current authority. Older PENDING/FAIL records and D0–D5 evidence retain their original dispositions.
 
-**CURRENT NEXT (2026-11-04): user one-shot stage/commit/push → verify receipt/actual SHA →
-postcommit recovery replacement → specify Main/Live LC1 connection.**
-No LC1 implementation or research starts in this documentation unit. Global Extended closure/Stage4 remains undecided.
+**CURRENT NEXT: user one-shot stage/commit/push → verify actual receipt/SHA → postcommit recovery
+replacement → choose the next bounded task.** Global Extended closure, Stage4, new package and research remain separate decisions.
 
 ## Main/Live current accepted scope
 
-The [current LC0 closeout](STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md) and prior [K adoption closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md) supersede current-behaviour
-statements in the [Simple/V1 history](STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md) and [K v3–v5 history](STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md).
-K-P0 and K-LC0 now adopt/readopt existing manual/Simple/V1 preset boards, including existing FLAGs after
-native public-proof preparation. Persistent session/M and VALIDATE→ADMITTED→atomic input1→exact ACK
-remain; LC0 uses the unchanged DISTANCE_BAND_V1 selection/validator, with native analysis/select once and actual first input only. Normal manual input during ACK retires the old owner without overwriting the manual board.
-Real ACK/history/cleanup failures remain fail-closed. Common wire is v8 with explicit game_id.
+Simple/V1/K-P0/K-LC0/K-LC1 are available. K-family policies adopt/readopt manual/Simple/V1 preset boards,
+including existing FLAGs after native public-proof preparation. Persistent session/M,
+VALIDATE→ADMITTED→atomic input1→exact ACK and cleanup-before-new-owner remain.
+LC0 retains DISTANCE_BAND_V1; LC1 uses SINGLETON_BAND_V1 with the same native graph and actual LC0 baseline.
+Neither extra inference nor a renamed native-g substitution is used. Common wire is v9.
 
-All three policies stop Auto/guess on manual input; Auto OFF alone pauses. The old recommendation-stop
-button is removed. Simple has public FLAG preparation with frozen-table outside costs explicitly null,
-not zero. K exact probability/certainty colours and V1/K virtual cursor remain display-only.
-Replay shows recorded algorithm use from existing source_type without adding policy-name history.
-Live Space/Return/Enter starts one new game even with noneditable policy-combo focus; Replay Space
-plays/pauses and Return/Enter/reset does nothing. Editors retain their own key handling.
+All policies stop Auto/guess on manual first press; Auto OFF alone pauses. The old recommendation-stop
+button is removed. Simple public FLAG preparation keeps outside-table costs explicitly null.
+K exact probability and V1/K virtual cursor remain display-only. A separate context-bound frame retains
+only still-HIDDEN certainty colors between Auto inputs; a new result replaces the frame, and invalidation clears it.
+Replay shows the recorded next input/outline separately from Simple reference analysis. Reference OFF means no
+analysis calls. UI comparison verdict text is removed; internal comparison API and Replay JSON remain unchanged.
+Replay algorithm use still comes from source_type, with no new policy-name history. Keyboard/editor behavior remains.
 
-Current source111 SHA256 is fd58110b2dba907560767ddab1d9e6d0899411cff534cb68a1ec0549df76b629.
-Codex555/794 is a536+19 same-byte composite; Claude555/794 is one focused run. Each has6 real-worker
-cases/8owners/Auto10. Claude also preserved a pre-Popen TMPDIR failure and one repair, combined attempts9.
-Its probe is48/49 with a wrong480 expectation (MAX_INPUTS remains960); do not turn this into49PASS.
-Global TEMP residue from the first/focused review runs is NOT_VERIFIED; repaired private cleanup is separate.
-Old mouse expectations2 fail on baseline; current press/release behaviour was independently checked.
-The user confirmed native operation after understanding manual-trace end-of-game eligibility. No universal
-DPI/OS/full-preset/effectiveness/production acceptance is inferred. Older versions and failures remain history.
+Current source314 manifest SHA256: 61d96678759c04f38f4931cc0bd5b465a10953b2b6c78f82c03d99691138bb3d.
+LC1 independent review ran625/905 once on source310,6 real-worker cases/8owners/Auto10 and24 probe checks.
+The later display review ran263/355 once on source314,2 cases/2owners/Auto4 and9 probe checks.
+Counts are version-bound selected checks, not a combined full suite. Both reviews found required fixes0.
+The user accepted the LC1 flow and then the display changes in the current native environment.
 
-F02 NOT_VERIFIED, Qt FileDialog FAIL, older temp/OPTIONAL/procedural records remain. K-P0/K-LC0 retain
-their experimental labels. Main LC1 and V1/K/LC0 custom remain disabled/unsupported.
+Known display OPTIONALs remain: Replay tooltip's Live legend, paused-after-input calculation wording,
+and theoretical object-id reuse already guarded by run/generation. The kit's missing EXECUTION_LEDGER was
+initialized before any failing run, counted as preparation rather than recovery; future kit copies are corrected.
+Older LC0 probe48/49, inherited TMPDIR cleanup NOT_VERIFIED, F02 NOT_VERIFIED, Qt FileDialog FAIL and previous
+OPTIONAL/failure records remain history. No global TEMP scan or old rerun loop is opened.
+K-P0/K-LC0/K-LC1 keep their experimental labels; V1/K-family custom boards remain unsupported.
 
 ## Post-D5 bounded source exhibition and pacing analysis
 
@@ -108,7 +108,7 @@ The user's 2026-11-02 statement, “확인했고 다 괜찮은 것 같아.”, a
 native paths just presented, without invented run counts/index/DPI/OS receipts.
 This is not general effectiveness, production approval or a K-LC0 freeze.
 V1 also uses CHORD and differs from Stage2 Simple. This comparison app keeps separate K-P0/K-LC0 entries.
-Main later added experimental K-P0 and K-LC0; K-LC1 stays unconnected. No new package acceptance is implied.
+Main later added experimental K-P0/K-LC0/K-LC1; the comparison app remains a separate K-P0/K-LC0 tool. No new package acceptance is implied.
 
 K-LC0 is available in the separate comparison app and Main/Live; K-P0/LC0 also support current-board adoption. Original stored3-board CONTROL/K-LC0
 traces and new actual-run pairs remain different evidence. The historical codex_20261102_02
@@ -116,7 +116,7 @@ plan superseded _01 and its20 paths were committed/pushed at496fab0. Preserve bo
 do not repeat that Git procedure. The later K-LC1 10-path procedure also completed at d1201e4.
 
 Later policy research and distance-linked reference CPS remain separate user-selected work. Main Simple/V1
-is accepted; the later K-P0 connection owns persistent session/M/ACK, while readoption/FLAG handling remains a separate future contract.
+is accepted; the K-family Main connection now owns persistent session/M/ACK and current-board/FLAG readoption.
 Large video analysis or re-evaluation is not a new mandatory gate. Nothing starts automatically here.
 
 ## K-LC1 limited saved-path confirmation / separate experimental checkpoint
@@ -138,8 +138,8 @@ rendering, offscreen tests and the failed Computer Use initialization are separa
 97 is unchanged. LC1 run wall was longer. This is not general effectiveness, win-rate,
 native-g optimality or production approval. LC1 is not frozen and does not replace LC0.
 The external viewer only reads four saved traces; the existing k_lc0_exhibition app still
-runs actual K-P0/K-LC0. Main later added experimental K-P0 and K-LC0. Main LC1, new package/EXE and Stage4 remain unimplemented/unaccepted.
-Current Main contracts and the29-path LC0 document/Git/recovery sequence are in the LC0 Main closeout and current handoff.
+runs actual K-P0/K-LC0. Main now also supports LC1; that does not expand the saved viewer or comparison app. New package/EXE and Stage4 remain unapproved.
+Current Main contracts and the30-path LC1/display document/Git/recovery sequence are in the latest Main closeout and current handoff.
 Further implementation does not start automatically.
 
 ## Foundation — closed / integrated
@@ -282,7 +282,7 @@ results retain their original identity and meaning.
     [Detailed demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md).
     Gate P is not passed and production integration has not started.
 
-**CURRENT NEXT:** follow the 2026-11-04 LC0 Main29-path preparation/recovery sequence in Status and
+**CURRENT NEXT:** follow the 2026-11-04 LC1/display Main30-path preparation/recovery sequence in Status and
 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md); older Git/NEXT snapshots are historical.
 No milestone 11+ or research reopening is frozen/authorized by this roadmap.
 
@@ -664,7 +664,7 @@ CONTROL ↔ K-P0 pairs and independent playheads; it does not include K-CONTROL 
 Human/S2 universal comparison. The [final demo closeout](STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)
 records those boundaries and the user's package acceptance.
 
-**CURRENT NEXT:** the 2026-11-04 Status/current handoff controls; current LC0 Main29-path document/Git
+**CURRENT NEXT:** the 2026-11-04 Status/current handoff controls; current LC1/display Main30-path document/Git
 preparation and postcommit recovery do not reopen this research chain.
 Any later effectiveness reopening requires new evidence, bounded
 scope and separate authorization. Frozen R0 adjudication, final envelope selection

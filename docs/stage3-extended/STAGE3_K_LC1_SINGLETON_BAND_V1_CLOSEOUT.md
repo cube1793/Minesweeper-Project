@@ -1,5 +1,7 @@
 # K-LC1 / SINGLETON_BAND_V1 — 별도 실험적 source checkpoint
 
+> **현재 상태 안내 (2026-11-04):** 아래 별도 LC1 source4+문서6의 10경로 commit/push는 **d1201e4**에서 완료됐다. 저장8191/97 viewer와 원 정책·pilot은 역사로 보존한다. 이후 **Main/Live LC1 연결 및 표시 개선도 사용자 수용 완료**했으며 [현재 Main closeout](STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따른다. 아래 “현재 HEAD”·미커밋·Main 미연결 표기는 2026-11-02 당시의 범위다. Main 수용이 이 viewer의 실험 결과나 효과성·Production 판정을 확장하지 않는다.
+
 작성 기준: **2026-11-02 (Asia/Seoul)**. 구현·복구 pilot·독립 검토·저장 viewer를 완료했고,
 아래 두 저장 경로에 대한 제한된 사용자 확인을 반영한다. 이번 문서 갱신 자체는 정적 작업만
 수행했다. K-LC1은 frozen이 아니며 원 K-LC0 교체·일반 효과성·production 승인이 아니다.

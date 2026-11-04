@@ -230,7 +230,7 @@ class KCertaintyProjectionTests(unittest.TestCase):
                         'EXACT_SAFE', 1, 1, 1, (), safe_cells=safes)
         ack = k.make_ack(k.KPermit(p, 'c' * 32), 'WON')
         envelope = transport.message(state.run_id, k.MAX_K_SEQUENCE, 'FINISHED', k.to_dict(ack))
-        self.assertEqual(envelope['version'], 8)
+        self.assertEqual(envelope['version'], 9)
         with TemporaryDirectory() as directory:
             path = transport.write_once(Path(directory), 'worker', k.MAX_K_SEQUENCE, envelope)
             self.assertLess(path.stat().st_size, transport.MAX_MESSAGE_BYTES)
@@ -324,6 +324,18 @@ class KCertaintyUITests(unittest.TestCase):
         self.assertTrue(all(b.analysis_overlay is None and not b.probability_text
                             for b in self.ui._buttons.values()))
 
+    def assert_waiting_certainty(self, proposal):
+        self.assertIsNone(self.ui._analysis_result)
+        self.assertIsNone(self.ui._analysis_observation)
+        observation = self.engine.get_observation()
+        expected = {c: OverlayKind.SAFE for c in proposal.safe_cells if observation[c[1]][c[0]] == -2}
+        expected.update({c: OverlayKind.MINE for c in proposal.preinput_m if observation[c[1]][c[0]] == -2})
+        actual = {c: b.analysis_overlay.kind for c, b in self.ui._buttons.items() if b.analysis_overlay}
+        self.assertEqual(actual, expected)
+        self.assertTrue(all(not b.probability_text and (b.analysis_overlay is None or
+                            (not b.analysis_overlay.recommended and b.analysis_overlay.probability is None))
+                            for b in self.ui._buttons.values()))
+
     def test_colors_are_visible_without_fake_probabilities_or_input_changes(self):
         p = self.certain_pending()
         self.ui.simple_auto_checkbox.setChecked(False)
@@ -388,7 +400,7 @@ class KCertaintyUITests(unittest.TestCase):
         self.tick()
         self.assertNotEqual(self.ui._k_validation_nonce, old_nonce)
         permit = self.job.deliver_admission()
-        self.assert_empty()
+        self.assert_waiting_certainty(p)
         self.assertEqual(self.ui._live_action_count, before + 1)
         self.assertEqual(self.ui.live_auto_totals['k_modeled_us'], cost + p.modeled_action_us)
         self.assertEqual(len(self.ui._replay_recorder.events), before + 1)
@@ -456,11 +468,13 @@ class KCertaintyUITests(unittest.TestCase):
             total += p.modeled_action_us
             self.tick()
             self.job.deliver_admission()
-            self.assert_empty()
             if index < 2:
+                self.assert_waiting_certainty(p)
                 self.job.deliver_ack()
                 self.job.compute()
                 p = self.job.pending
+            else:
+                self.assert_empty()
         self.assertEqual(self.engine.status, GameStatus.WON)
         self.assertIsNone(self.job.acks[-1].observation)
         self.assertEqual(self.ui.live_auto_totals['k_modeled_us'], total)

@@ -1,5 +1,7 @@
 # Main/Live K-LC0 Unit1 closeout
 
+> **현재 상태 안내 (2026-11-04):** 아래 LC0 단위의 29경로 commit/push 및 recovery 교체는 **4f34a9690fd913f8702404a3c1c6122c078bd4d0**에서 완료됐다. 이후 Main LC1과 표시 개선도 사용자 수용했으며 현재 계약/Git 절차는 [LC1 및 표시 개선 closeout](STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)과 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 아래 wire v8·Main LC1 미지원·Git/NEXT 표기는 당시 snapshot이다. 원 검증 수치·실패·한계는 보존하며 이전 Git script를 다시 실행하지 않는다.
+
 기준일: **2026-11-04 (Asia/Seoul)**. 상태: **구현·범위 한정 독립 검토·사용자 native 수용 완료 / 문서 마감·사용자 Git 준비**.
 
 기준 commit은 `7f15355a1d17a3fab1b4b11d85897b02a6bda5d5`다. 이 문서는 그 위에 추가된 Main/Live LC0 연결을 기록한다. 이전 [K 인수·Simple 준비·Replay UI closeout](STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)과 [별도 LC0 정책 closeout](STAGE3_K_LC0_DISTANCE_BAND_V1_CLOSEOUT.md)은 당시의 계약·검증·수용 이력이다. 현재 복구는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 함께 읽는다.

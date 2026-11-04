@@ -1,27 +1,27 @@
 # Minesweeper Project
 
-Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 실험적 K-P0로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 실험적 K-P0/K-LC0/K-LC1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
 
 ## 핵심 기능
 
 - **게임:** 초급·중급·상급·사용자 지정 난이도, OPEN·FLAG·CHORD, 화음 입력 방식과 셀 크기 조절
 - **플레이 통계:** Time, Est Time, 3BV, 3BV/s, Ops, 클릭별 active/wasted 집계, CPS, Efficiency, IOE, Thrp, Corr, ZiNi, ZNE, ZNT
 - **Simple Algorithm:** 확정 수와 최소 지뢰 확률 후보 표시, 확정 수 자동 진행, 선택적인 추측 실행
-- **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 추천과 실제 다음 수 비교
+- **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 녹화된 다음 입력과 별도 Simple 참고 분석
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Main/Live Simple·V1·실험적 K-P0/K-LC0 — 현재 범위 사용자 수용
+## Main/Live Simple·V1·실험적 K-P0/K-LC0/K-LC1 — 현재 범위 사용자 수용
 
-2026-11-04 기준, 기존 K 인수·Simple 준비·Replay UI에 이어 **K-LC0 Main 연결도 독립 검토 필수 수정 0·사용자 native 수용**을 마쳤습니다. 사용자는 마우스 경로 표시 조건을 재확인한 뒤 “다시 확인해보니 전부 정상같아.”라고 확인했습니다. 현재 사용자 환경의 수용이며 모든 OS/DPI·preset별 완주·전체 suite를 의미하지 않습니다.
+2026-11-04 기준 **K-LC1 Main 연결과 Replay/확정색 표시 개선까지 독립 검토 필수 수정 0·사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
 
-새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0와 K-LC0는 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하며, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1/K/LC0 custom과 Main LC1은 미지원입니다.
+새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0/K-LC0/K-LC1은 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하고, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1과 K 계열의 사용자 지정 보드는 미지원입니다.
 
-Auto OFF는 일시정지입니다. Simple/V1/K 모두 수동 입력하면 Auto와 추측 허용을 끄고 원래 클릭을 처리합니다. 다시 진행하려면 Auto를 켭니다. 별도 **추천·계산 종료** 버튼은 제거했습니다. 정책 라벨·선택·새 게임 버튼은 같은 줄에 모았습니다.
+Auto OFF는 일시정지입니다. 모든 정책은 수동 첫 입력에서 Auto와 추측 허용을 끄고 원래 클릭을 처리합니다. 다시 진행하려면 Auto를 켭니다. 별도 **추천·계산 종료** 버튼은 제거했으며 정책 라벨·선택·새 게임 버튼은 같은 줄에 있습니다.
 
-K 추측 확률은 이미 계산한 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace/Replay에 합성 입력을 만들지 않습니다.
+K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. 같은 Auto 세션의 다음 계산을 기다리는 동안 유효한 확정색만 유지하고, 열린 칸과 깃발 칸의 색은 즉시 지웁니다. 새 결과가 오면 통째로 교체하며 이전 추천·확률을 다음 입력으로 재사용하지 않습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 실제 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace에 합성 경로를 만들지 않습니다.
 
-현재 계약·LC0 검증·한계는 [Main/Live LC0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)에, 이전 K 인수/UI 기록은 [기존 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)에 정리했습니다. [이전 K-P0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_P0_CLOSEOUT.md)과 [Simple/V1 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 당시의 역사입니다. F02 NOT_VERIFIED와 과거 Qt FileDialog 보존 FAIL은 유지합니다. **K-P0/K-LC0 (실험적)** 표시는 유지하며 효과성·Production K/Gate P·새 package는 미승인입니다.
+현재 계약·검증·알려진 문구 한계는 [LC1 및 표시 개선 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)에 정리했습니다. [LC0 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md)과 [K 인수/UI closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)은 이전 checkpoint입니다. **K-P0/K-LC0/K-LC1 (실험적)** 표시는 유지하며, F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
 
 ## Simple Algorithm
 
@@ -34,13 +34,13 @@ K 추측 확률은 이미 계산한 exact 수치이며, 확정 안전은 초록�
 | UI 항목 | 동작 |
 | --- | --- |
 | 현재 상태 분석 | 현재 보드를 한 번 분석해 추천만 표시 |
-| 분석 표시 | Live에서는 행동 후, Replay에서는 위치 변경 후 분석 갱신 |
+| 분석 표시 | Live에서는 행동 후 분석 갱신. Replay에서는 Simple 참고 분석을 켜고 끔 |
 | 확정 수 자동 진행 | Live에서 한 번에 한 행동을 실행하고 새 observation으로 다시 분석 |
 | 추측 허용 | 자동 진행이 guess도 실행하도록 허용. OFF이면 추측 직전에 대기 |
 | 확률 표시 | 이미 계산된 확률의 표시만 전환. Local 추론만 한 경우 확률을 추가 계산하지 않음 |
 | Reduction | 화면의 열린 숫자를 `N − 인접 깃발 수`로 표시. 원본 observation은 유지 |
 
-초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 위험 후보이며 테두리는 선택된 추천을 뜻합니다. 여러 추천을 queue해서 실행하지 않습니다. 새 게임의 첫 수는 별도 [FIRST_CLICK 정책](ARCHITECTURE.md#first-click)을 따릅니다.
+Live에서 초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 위험 후보이며 테두리는 선택된 추천을 뜻합니다. Replay의 테두리는 녹화된 다음 입력입니다. 여러 추천을 queue해서 실행하지 않습니다. 새 게임의 첫 수는 별도 [FIRST_CLICK 정책](ARCHITECTURE.md#first-click)을 따릅니다.
 
 ## Replay / Replay Analysis
 
@@ -54,9 +54,9 @@ K 추측 확률은 이미 계산한 exact 수치이며, 확정 안전은 초록�
 - 완료된 Replay는 현재 위치에 맞는 Counters를 표시하고, 미완료 Replay의 Counters는 마스킹합니다.
 - Replay 종료는 이전 Live 판을 이어가는 대신 저장해 둔 Live 난이도로 **새 게임**을 시작합니다.
 
-**Replay Analysis**는 재생 중인 현재 position에서 Simple Algorithm의 추천을 구한 뒤 실제 다음 이벤트와 비교합니다. `현재 상태 분석`으로 한 번 분석하거나 `분석 표시`로 이동에 따라 갱신할 수 있습니다. 확률·Reduction 표시도 사용할 수 있습니다.
+**Replay Analysis**는 현재 공개 position의 Simple 결과를 참고용으로 보여 줍니다. **녹화된 다음 입력**은 별도 첫 줄과 테두리로 표시하며, 참고 분석 OFF나 분석 오류에도 남습니다. CHORD는 열린 중심 칸, UNFLAG는 해제할 깃발 칸을 가리킵니다. 끝·빈 기록에는 다음 입력이 없다고 표시합니다.
 
-비교 결과는 추천과 일치, 동등 후보, 추천과 다름, 비교 대상 아님, 다음 실제 수 없음으로 구분합니다. **“추천과 다름”은 오답이나 실수 판정이 아닙니다.** 분석은 행동을 실행하지 않으며 Replay에서는 자동 진행·추측 허용이 비활성화됩니다. 위치와 비교의 정확한 의미는 [Replay index](ARCHITECTURE.md#replay-index)와 [비교 규칙](ARCHITECTURE.md#replay-comparison)을 참고하세요.
+참고 분석 ON에서는 Simple의 확정색·이미 계산한 확률·참고 후보를 별도 줄에 표시합니다. OFF에서는 위치 이동이나 분석 버튼으로 Simple을 호출하지 않습니다. 화면의 “추천과 다름”·“비교 대상 아님” 등 비교 판정 문구는 제거했습니다. 내부 비교 API는 유지하며 분석이 녹화 입력을 바꾸거나 행동을 실행하지 않습니다. 확률·Reduction 표시도 사용할 수 있습니다. 위치 의미와 내부 데이터 계약은 [Replay index](ARCHITECTURE.md#replay-index)와 [비교 규칙](ARCHITECTURE.md#replay-comparison)을 참고하세요.
 
 ## ZiNi / 보드 분석
 
@@ -211,10 +211,10 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
-**2026-11-04 현재 Main K-LC0도 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
-main/HEAD=local origin/main=7f15355a1d17a3fab1b4b11d85897b02a6bda5d5,0/0,staged0입니다.
-이번 source/tests21 + 문서8 =29경로(M25/U4)는 미커밋입니다.
-NEXT는 사용자 일괄 Git → 실제 receipt/SHA의 recovery 교체 → Main LC1 연결 준비입니다.
+**2026-11-04 현재 Main K-LC1과 Replay/확정색 개선까지 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
+main/HEAD=local origin/main=4f34a9690fd913f8702404a3c1c6122c078bd4d0,0/0,staged0입니다.
+이번 source/tests22 + 문서8 =30경로(M21/U9)는 미커밋입니다.
+NEXT는 사용자 일괄 Git → 실제 receipt/commit 검증 → recovery 교체 → 다음 작업 범위 선정입니다.
 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)와 [Extended roadmap](docs/stage3-extended/README.md)을 따르세요.
 
 Timeline Analytics는 **FINAL ACCEPTANCE PASS / CLOSED**입니다.
@@ -252,7 +252,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 관람 속도와 synthetic 직선 커서는 실제 인간 시간·mouse trace가 아니며 Model C를 바꾸지 않습니다.
 양쪽 WON이 아니면 Model C 승리 시간 차이는 N/A입니다.
 
-**이 외부 전시의 source-only 수용**입니다. 이 수용은 새 package/EXE·Main/Live 통합·효과성 승인이 아닙니다. 현재 Main Simple/V1과 이후 실험적 K-P0 연결의 수용은 위 두 Main/Live closeout을 따릅니다.
+**이 외부 전시의 source-only 수용**입니다. 이 수용은 새 package/EXE·Main/Live 통합·효과성 승인이 아닙니다. 현재 Main Simple/V1/K-P0/K-LC0/K-LC1 수용은 위의 최신 Main/Live closeout을 따릅니다.
 RF lifecycle/transport 독립 재감사 PASS와 후속 UI의 사용자 수용을 구분합니다.
 [전시 기능 closeout](docs/stage3-extended/STAGE3_RANDOM_EXPERT_EXHIBITION_V1_CLOSEOUT.md)에
 단계별 검증·실행 identity·한계를, [Human pacing 분석 closeout](docs/stage3-extended/STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md)에
@@ -301,7 +301,7 @@ Claude 검토는 두 구현 모두 PASS / REQUIRED_FIXES 없음입니다. 새 �
 위 새 앱을 사용합니다. 기존 저장3보드의 CONTROL/K-LC0 trace와 새 앱의 실제 실행/저장
 pair는 별도 work unit의 evidence이며 같은 기록으로 취급하지 않습니다.
 
-이 비교 앱 수용 당시 K-P0/K-LC0는 별도 entry였습니다. 현재 Main에는 K-P0와 K-LC0가 연결됐습니다. 이 비교 앱 source 수용은
+이 비교 앱 수용 당시 K-P0/K-LC0는 별도 entry였습니다. 현재 Main에는 K-P0/K-LC0/K-LC1이 연결됐습니다. 이 비교 앱 source 수용은
 K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
 다음 작업은 사용자 선택이며 영상/정책 개선이 Main 통합의 무조건적인 선행 gate는 아닙니다.
 
@@ -317,12 +317,13 @@ K-LC0 freeze·일반 효과성·production·새 package 승인이 아닙니다.
 native g 대비105% 밖/110% 이내·엄격한 거리 감소만 허용합니다. K-LC1은 frozen이 아니며
 원 K-LC0 교체, 일반 효과성·승률·production 승인이 아닙니다.
 
-현재 확인 도구는 외부 `K_LC1_USER_PATH_REVIEW_2026-11-02\codex_20261102_01\review_viewer.py`입니다.
+아래 별도 저장 경로의 확인 도구는 외부 `K_LC1_USER_PATH_REVIEW_2026-11-02\codex_20261102_01\review_viewer.py`입니다.
 8191/97 저장 LC0/LC1 네 trace만 재생합니다. 기존 `experiments.k_lc0_exhibition`은
 actual K-P0/K-LC0 앱 그대로이며 LC1 실행은 통합되지 않았습니다.
 [K-LC1 closeout](docs/stage3-extended/STAGE3_K_LC1_SINGLETON_BAND_V1_CLOSEOUT.md)에
 실행 명령,145→153/97 확인 순서, 복구 pilot·검토·viewer 기록과 알려진 한계를 정리했습니다.
 당시 source4·문서6의10경로는 d1201e4에서 commit/push 완료됐습니다. 외부 viewer는 그 commit 대상이 아닙니다.
+이후 Main/Live LC1 연결·표시 개선도 사용자 수용했으며 현재 상태는 [최신 Main closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)을 따릅니다.
 
 ## Same-board Human / Stage-2 / Stage-3 Comparison — CLOSED
 

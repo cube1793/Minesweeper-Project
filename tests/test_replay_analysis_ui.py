@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
 from replay_analysis import analyze_replay_step
+from replay_display import reference_overlays, recorded_input
 from replay_model import ReplayBoard, ReplayData, ReplayEvent
 from replay_player import ReplayPlayer
 from simple_decision import analyze_position
@@ -64,7 +65,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
         for button in self.ui._buttons.values():
             self.assertIsNone(button.analysis_overlay)
             self.assertEqual(button.probability_text, "")
-            self.assertEqual(button.toolTip(), "")
+            self.assertEqual(button.toolTip(), "녹화된 다음 입력 셀" if button.recorded_target else "")
 
     def assert_auto_off(self):
         self.assertFalse(self.ui._simple_auto_timer.isActive())
@@ -93,7 +94,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
         replay_step.assert_not_called()
 
     def test_manual_analysis_is_read_only_and_clears_on_navigation(self):
-        self.enter(1)
+        self.enter(1, continuous=True)
         engine = self.player.engine
         timeline = self.ui._replay_counter_timeline
         before = deepcopy((engine.get_observation(), engine.get_counter_snapshot(),
@@ -112,7 +113,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
                 self.ui.analyze_button.click()
             self.assertEqual(analyze.call_count, 3)
             self.assertIsNotNone(self.ui._analysis_result)
-            self.assertIn("실제 다음 수: FLAG (1, 1)", self.ui.analysis_status_label.text())
+            self.assertIn("녹화된 다음 입력: FLAG (1, 1)", self.ui.analysis_status_label.text())
         replay_step.assert_not_called()
         live_step.assert_not_called()
         self.assertIs(self.player.engine, engine)
@@ -122,6 +123,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
         self.assertEqual((engine.get_observation(), engine.get_counter_snapshot(),
                           self.engine.get_observation(), self.engine.get_counter_snapshot(),
                           self.player.replay_data, timeline), before)
+        self.ui.analysis_checkbox.setChecked(False)
         with patch("ui_manager.analyze_replay_step") as analyze:
             self.ui.replay_next_button.click()
             analyze.assert_not_called()
@@ -136,8 +138,9 @@ class ReplayAnalysisUITests(unittest.TestCase):
         ):
             self.ui.analysis_checkbox.setChecked(True)
         analyze.assert_not_called()
-        self.assertIn("첫 클릭 추천: OPEN (0, 0)", self.ui.analysis_status_label.text())
-        self.assertIn("추천과 일치", self.ui.analysis_status_label.text())
+        self.assertIn("첫 클릭 참고 후보: OPEN (0, 0)", self.ui.analysis_status_label.text())
+        self.assertNotIn("추천과 일치", self.ui.analysis_status_label.text())
+        self.assertIn("추천과 일치", self.ui._replay_analysis_result.comparison_text)
 
     def test_continuous_navigation_analyzes_fresh_after_render_exactly_once(self):
         self.enter(continuous=True)
@@ -176,7 +179,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
                                   if expected < 4 else None)
                     self.assert_auto_off()
 
-    def test_analysis_off_clears_and_manual_can_resume_without_continuous(self):
+    def test_analysis_off_clears_reference_and_button_does_not_analyze(self):
         self.enter(1, continuous=True)
         self.ui.analysis_checkbox.setChecked(False)
         self.assert_clear()
@@ -184,9 +187,9 @@ class ReplayAnalysisUITests(unittest.TestCase):
             self.ui.replay_next_button.click()
             analyze.assert_not_called()
             self.ui.analyze_button.click()
-            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(analyze.call_count, 0)
             self.ui.replay_prev_button.click()
-            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(analyze.call_count, 0)
         self.assert_clear()
 
     def test_index_autoplay_refreshes_analysis_once_per_tick(self):
@@ -198,7 +201,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
                 self.assertEqual(analyze.call_count, expected)
                 self.assertEqual(self.ui._replay_analysis_result.current_index, expected)
         self.assertFalse(self.ui._replay_autoplay_timer.isActive())
-        self.assertIn("다음 실제 수 없음", self.ui.analysis_status_label.text())
+        self.assertIn("녹화된 다음 입력: 없음", self.ui.analysis_status_label.text())
         self.assert_auto_off()
 
     def test_time_autoplay_batches_due_events_and_skips_idle_ticks(self):
@@ -239,7 +242,7 @@ class ReplayAnalysisUITests(unittest.TestCase):
             self.assertEqual(analyze.call_count, 1)
             self.assertEqual(self.ui._replay_analysis_result.current_index, 2)
 
-    def test_probability_toggle_reuses_result_and_has_no_actual_action_overlay(self):
+    def test_probability_toggle_reuses_result_and_keeps_independent_actual_mark(self):
         self.enter(3, continuous=True)
         result = self.ui._analysis_result
         step_result = self.ui._replay_analysis_result
@@ -251,15 +254,19 @@ class ReplayAnalysisUITests(unittest.TestCase):
         self.assertIs(self.ui._analysis_result, result)
         self.assertIs(self.ui._replay_analysis_result, step_result)
         self.assertTrue(any(button.probability_text for button in self.ui._buttons.values()))
+        reference = reference_overlays(result)
+        _, target = recorded_input(self.player.replay_data.events, self.player.current_index,
+                                   self.player.get_observation())
         for coordinate, button in self.ui._buttons.items():
-            self.assertEqual(button.analysis_overlay, result.overlays.get(coordinate))
+            self.assertEqual(button.analysis_overlay, reference.get(coordinate))
+            self.assertEqual(button.recorded_target, coordinate == target)
 
     def test_reduction_only_changes_display_and_solver_receives_original(self):
         self.player = ReplayPlayer(ReplayData(ReplayBoard(3, 3, 1, {(1, 1)}), (
             ReplayEvent(1, 0, 0, "OPEN"), ReplayEvent(2, 1, 1, "FLAG"),
             ReplayEvent(3, 1, 0, "FLAG"),
         )))
-        self.enter(1)
+        self.enter(1, continuous=True)
         self.ui.reduction_checkbox.setChecked(True)
         self.assertEqual(self.ui._buttons[(0, 0)].text(), "1")
         self.ui.replay_next_button.click()
@@ -294,7 +301,8 @@ class ReplayAnalysisUITests(unittest.TestCase):
                     self.ui.replay_last_button.click()
                 analyze.assert_not_called()
                 self.assertEqual(self.player.current_index, 2)
-                self.assertEqual(self.ui.analysis_status_label.text(), "게임 종료")
+                self.assertEqual(self.ui.analysis_status_label.text(),
+                                 "녹화된 다음 입력: 없음\nSimple 참고 분석: 게임 종료 (현재 화면)")
                 self.assert_clear()
                 self.assert_auto_off()
 

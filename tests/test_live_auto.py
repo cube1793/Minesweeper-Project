@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from core_engine import Action, CellState, GameStatus, MinesweeperEngine
+from live_analysis import OverlayKind
 from replay_model import ReplayBoard, ReplayData, ReplayEvent
 from replay_player import ReplayPlayer
 from simple_algorithm import InconsistentObservationError, InferenceResult, SimpleMove
@@ -432,7 +433,18 @@ class LiveAutoUITests(unittest.TestCase):
         update_stats = self.ui._apply_stats_from_info
 
         def render_fresh():
-            self.assert_clear()
+            # Execution evidence expires; only current HIDDEN certainty may bridge.
+            self.assertIsNone(self.ui._analysis_result)
+            self.assertIsNone(self.ui._analysis_observation)
+            self.assertFalse(self.ui._analysis_first_click)
+            observation = self.engine.get_observation()
+            for (x, y), button in self.ui._buttons.items():
+                overlay = button.analysis_overlay
+                if overlay is not None:
+                    self.assertEqual(observation[y][x], CellState.HIDDEN)
+                    self.assertIn(overlay.kind, (OverlayKind.SAFE, OverlayKind.MINE))
+                    self.assertFalse(overlay.recommended)
+                    self.assertIsNone(overlay.probability)
             render()
             order.append("render")
 
@@ -1127,7 +1139,7 @@ class LiveV1UITests(unittest.TestCase):
         self.assertEqual(self.ui._replay_recorder.source_type, "human")
         self.assertTrue(self.ui.live_policy_combo.model().item(2).isEnabled())
         self.assertTrue(self.ui.live_policy_combo.model().item(3).isEnabled())
-        self.assertFalse(self.ui.live_policy_combo.model().item(4).isEnabled())
+        self.assertTrue(self.ui.live_policy_combo.model().item(4).isEnabled())
 
     def test_initial_proposal_pause_resume_and_rate_reuse_without_simple_analysis(self):
         from live_policy import plan_snapshot
