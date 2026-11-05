@@ -717,6 +717,8 @@ Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일
 
 성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이는 아래 계약으로 수용했다. burst 처리량 보장·거리별 추가 관람 프로필은 구현하지 않았으며 B1 측정 조건은 미충족이다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
 
+[고속 CPS 제한 진단](docs/stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)은 source333/cd8ee2e에서 V1/K-LC1의 고정0ms·하네스 MIN/TRACE/MIN 여섯 run을 독립 수용했다. 실제 입력 후 `_apply_live_action`의 Replay·render·통계 갱신이 ACK 게시 앞에 있고, 정확 ACK 뒤 NEXT가 이어진다. 부모 단일 process anchor만 gap을 비중첩 분할하며 worker 계산/검증·transport·UI 소계는 중첩 설명이다. 성공 read_next와 render_board가 후속 분해 후보지만 순수 poll/IPC 원인·안정 상한은 미확정이고 최적화는 미수행이다. setup timerType1을 실행 중 Auto timer의 관측으로 쓰지 않으며 고정 모드 PreciseTimer 계약은 유지한다.
+
 ```text
 사용자 입력 / Live Auto timeout
 → UI의 단일 action 경로
@@ -1030,7 +1032,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 
 ## 7. 현재 한계와 기술 부채
 
-- **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Live/Replay 분석은 현재 UI thread에서 동기 실행하며 background analysis worker나 전체 Replay 추천 사전 계산은 없다.
+- **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Simple Live와 Replay 참고 분석은 UI thread에서 동기 실행한다. Main V1/K의 원 추론은 기존 contained worker에서 수행하고 부모의 검증·입력·표시는 UI thread에 남는다. 전체 Replay 추천 사전 계산은 없다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
 - **Stage-3 후속 범위:** Milestones 1–9와 Program K 연구 데모 D0–D5는 CLOSED다. Effectiveness는 NOT ESTABLISHED, Phase-1은 PHASE1_INCONCLUSIVE_TRANSFER이며 현재 de-dup timing path는 STOP / DEFER다. Extended 전체는 명시적 project-closeout 판정 전까지 ACTIVE다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 Foundation Run/결과 열기 라벨 개선은 DEFER이며 Foundation F-2도 OPTIONAL / DEFER를 유지한다.

@@ -86,6 +86,15 @@ ACK and cleanup finish in Live before one Replay-entry commit; cancellation/fail
 Final source333 and49/143,2real owners,28probe checks are version-bound; user native accepted both choices.
 B1 same-owner60-per-setting remains unsatisfied. C OOF log/bands differ by0.792ms and sensitivity subsets reverse their ranking; frozen Model C is unchanged.
 
+The [Main/Live high-CPS bounded diagnostic closeout](STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)
+records six accepted V1/K-LC1 fixed 0ms runs on source333/cd8ee2e, each with 62 actual/Replay/ACK inputs.
+RESUME used 10/12 Python attempts, 7/8 owners and 2/2 helper corrections; previous failures and the P01 startup gap remain.
+The bundled independent raw review required no evidence fixes and found no product defect, with no new product runtime.
+Observed TRACE mean-gap changes were +1.938511%/+0.740295%; MIN includes common harness seams and is not a bare-product upper bound.
+Successful read_next/render_board and an offline reconstruction of existing poll traces are follow-up candidates, not established causes.
+No optimization, stable-CPS guarantee, B1 repair, frozen-policy change or research approval followed from this diagnostic.
+Small helper/environment corrections stay within their scoped budgets; independent review is batched after a substantial unit.
+
 ## Post-D5 bounded source exhibition and pacing analysis
 
 - [HUMAN_PACING_JSON_V1 closeout](STAGE3_HUMAN_PACING_JSON_V1_CLOSEOUT.md): canonical

@@ -5,7 +5,9 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live 같은 보드·기록·Replay 종료 선택 closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md): 2026-11-05 최종 source333, 기본 canonical 종료/기록 초기화와 명시적 fixed 재플레이/기록 보존. 독립49/143·실제2owner·probe28 및 최종 사용자 native 수용. B40행 산술 재현/B1 미충족, C거리 OOF·민감도 한계를 함께 기록한 현재 문서/Git authority.
+- [Main/Live 고속 CPS 제한 진단 closeout](stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md): 2026-11-05 source333/cd8ee2e, V1/K-LC1 고정0ms 여섯 run과 원시 자료의 묶음 독립 수용, 필수 수정0·제품 결함0. 하네스 MIN/TRACE·중첩 비용·실패 이력·후속 분해 후보를 기록한 현재 성능 근거다. 안정 CPS 상한·단독 병목·최적화는 확정하지 않았다.
+
+- [Main/Live 같은 보드·기록·Replay 종료 선택 closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md): 2026-11-05 최종 source333, 기본 canonical 종료/기록 초기화와 명시적 fixed 재플레이/기록 보존. 독립49/143·실제2owner·probe28 및 최종 사용자 native 수용. B40행 산술 재현/B1 미충족, C거리 OOF·민감도 한계를 함께 기록한 기능 checkpoint다. 실제26경로 commit/push는 cd8ee2e에서 완료됐다.
 
 - [Main/Live 관람 속도·정밀 CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md): 2026-11-05 최종 source327, 고정 주기/Model C 분리·정확한 CPS 입력·기본200ms·K 라벨 정리. 최종 독립105/1084 및 real3owner/96입력, 사용자 native 수용·28경로 commit/push는4c10217에서 완료된 이전 checkpoint다.
 
