@@ -23,7 +23,10 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Main K current-board/FLAG adoption, ACK handoff, Simple preparation, Replay UI | Accepted and committed at7f15355; historical source107 |
 | Main K-LC0 integration, all three entries and manual handoff | Accepted and committed at4f34a96; historical source111 |
 | Main K-LC1 and Replay/certainty display stability | Accepted and committed at68c272e; historical source314 |
-| Main pacing, bounded fixed-rate and exact CPS input | Limited independent review + user native accepted; source327,28-path source/tests/docs Git preparation |
+| Main pacing, bounded fixed-rate and exact CPS input | Accepted and committed at4c10217; historical source327 |
+| Main same-board replay, layout history and Replay entry/exit choices | Final source333,49/143 +2owner +28probe, user native accepted;26-path Git preparation |
+| Burst/fixed-rate measurement B |40-row arithmetic reproduced; B1 same-owner60-per-setting NOT_SATISFIED; no function profiling/optimization |
+| Distance analysis C |30games/5035transitions/24player OOF arithmetic reproduced; sensitivity limits; no product profile applied |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It establishes no
 effectiveness or aggregate superiority. The scientific disposition is not PHASE1_NO_GO
@@ -32,15 +35,16 @@ with package root results/program-k-trace-demo-final-acceptance/20261031-230251/
 Earlier05920abeaec541a52fd22753dadec66f5cb98bca and technical48f6ebc97e6c4d3ed4a746a92a8d169783803bf9
 are historical anchors, distinct from later Main source and E1/R0 execution identities.
 
-Current precommit main == local origin/main ==68c272e7272032cdfe9774a36d41c3686a8f375e,
-ahead/behind0/0, staged0. Pacing source/tests22 + documents6 are **28 uncommitted paths (M14/U14)**.
-The earlier LC1/display30-path commit/push/recovery is complete. Do not repeat its script.
+Current precommit main == local origin/main ==4c1021711e53e45a29450da9fa3bebee54e80887,
+ahead/behind0/0, staged0. Same-board source/tests20 + documents6 are **26 uncommitted paths (M19/U7)**.
+The earlier pacing28-path commit/push/recovery is complete. Do not repeat its script.
 
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [pacing/CPS closeout](STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)
-are current authority. Older PENDING/FAIL records and D0–D5 evidence retain their original dispositions.
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [same-board/Replay closeout](STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)
+are current authority; the [pacing/CPS closeout](STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md) retains the preceding contract.
+Older PENDING/FAIL records and D0–D5 evidence retain their original dispositions.
 
 **CURRENT NEXT: user one-shot stage/commit/push → actual receipt/SHA verification → postcommit recovery
-replacement.** Then define same-board replay, burst measurement or distance-based viewing work separately.
+replacement.** Then decide any B1 evidence extension, needed profiling or separate distance-based viewing profile.
 Global Extended closure, Stage4, new package and research remain separate decisions.
 
 ## Main/Live current accepted scope
@@ -49,7 +53,7 @@ Simple/V1/K-P0/K-LC0/K-LC1 are available. K-family policies adopt/readopt manual
 including existing FLAGs after native public-proof preparation. Persistent session/M,
 VALIDATE→ADMITTED→atomic input1→exact ACK and cleanup-before-new-owner remain.
 LC0 retains DISTANCE_BAND_V1; LC1 uses SINGLETON_BAND_V1 with the same native graph and actual LC0 baseline.
-Neither extra inference nor a renamed native-g substitution is used. Common wire is v9.
+Neither extra inference nor a renamed native-g substitution is used. Common wire is v10 with fixed-board provenance.
 
 All policies stop Auto/guess on manual first press; Auto OFF alone pauses. The old recommendation-stop
 button is removed. Simple public FLAG preparation keeps outside-table costs explicitly null.
@@ -59,7 +63,7 @@ Replay shows the recorded next input/outline separately from Simple reference an
 analysis calls. UI comparison verdict text is removed; internal comparison API and Replay JSON remain unchanged.
 Replay algorithm use still comes from source_type, with no new policy-name history. Keyboard/editor behavior remains.
 
-Current pacing source327 manifest SHA256: a700d67dfabc6df4a9ed597c2bf0e4d228a7f4ed830bcd8a0f6495c7d78fc228.
+Prior accepted pacing source327 manifest SHA256: a700d67dfabc6df4a9ed597c2bf0e4d228a7f4ed830bcd8a0f6495c7d78fc228.
 Final independent precision review:105 methods/1084 subtests,3owners/96Auto inputs,32probe assertions,
 no required fixes. LC1 default5CPS over60inputs measured4.903573 using(N-1)/Auto-span. Counts are selected
 version-bound checks, not a full suite or a guarantee for all loads. User native acceptance is separate.
@@ -74,7 +78,13 @@ The older source310/314 LC1/display checks, coarse-clock FAIL/repair, strict-cad
 PreciseTimer LC1 performance FAIL and bounded-rate PASS retain their individual histories in the closeouts.
 Editor API/harness coupling and load sensitivity remain optional limitations. Historical F02 NOT_VERIFIED,
 FileDialog FAIL and TEMP NOT_VERIFIED remain; no global TEMP scan or old revalidation loop is opened.
-V1/K custom boards remain unsupported. Same-board Main replay and calibrated burst/distance pacing are future work.
+V1/K custom boards remain unsupported. Main same-board replay/history is accepted; calibrated burst/distance pacing remains future work.
+
+The default Replay exit now builds a canonical unplaced board with the current Replay dimensions and clears the history group.
+The explicit same-board button builds its fixed original layout and preserves the existing same-layout group, without fabricating imported completions.
+ACK and cleanup finish in Live before one Replay-entry commit; cancellation/failure keeps the original state and reason.
+Final source333 and49/143,2real owners,28probe checks are version-bound; user native accepted both choices.
+B1 same-owner60-per-setting remains unsatisfied. C OOF log/bands differ by0.792ms and sensitivity subsets reverse their ranking; frozen Model C is unchanged.
 
 ## Post-D5 bounded source exhibition and pacing analysis
 

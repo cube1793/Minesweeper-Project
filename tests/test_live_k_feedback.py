@@ -166,8 +166,8 @@ class KProbabilityFeedbackTests(unittest.TestCase):
 
     def test_v9_rejects_old_versions_and_retains_legacy_sequence_bound(self):
         valid = transport.message('a' * 32, 0, 'START', {})
-        self.assertEqual(valid['version'], 9)
-        for old_version in (3, 4, 5, 6, 7, 8):
+        self.assertEqual(valid['version'], 10)
+        for old_version in (3, 4, 5, 6, 7, 8, 9):
             with self.subTest(version=old_version), self.assertRaises(LivePolicyError):
                 transport.validate_message({**valid, 'version': old_version})
         self.assertEqual(transport.MAX_V1_SEQUENCE, 1921)

@@ -473,6 +473,8 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
     def _ui_with_live_engine(self, live_engine):
         def init_ui_stub(ui):
             ui.same_board_comparison_action = Mock()
+            ui.same_board_history_menu = Mock()
+            ui.same_board_history_menu.actions.return_value = []
 
         with (
             patch.object(ui_manager, "QTimer", _TimerProbe),
@@ -620,11 +622,21 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         self.assertEqual(live_engine.get_observation(), before_observation)
         self.assertEqual(live_engine.get_counter_snapshot(), before_counters)
 
-    def test_exit_replay_resets_same_live_engine_to_saved_config(self):
+    def test_exit_replay_resets_same_live_engine_to_replay_dimensions_canonical(self):
+        from tests.ui_settings import isolate_ui_settings
+        from tests.test_live_same_board_ui import MixedFakeJob
+
+        isolate_ui_settings(self)
+        worker_patch = patch.object(MinesweeperUI, "_ensure_zini_metric_job", return_value=None)
+        worker_patch.start()
+        self.addCleanup(worker_patch.stop)
         live_engine = self._live_engine()
         live_engine.step(2, 1, Action.FLAG)
-        ui = self._prepare_lifecycle_ui(live_engine)
+        with patch.object(ui_manager, "LivePolicyJob", MixedFakeJob):
+            ui = MinesweeperUI(live_engine)
+        self.addCleanup(ui.close)
         token_before_replay = ui._zini_job_token
+        previous_game = ui._live_game_id
         player = self._enter_replay(ui)
         self.assertEqual(ui._zini_job_token, token_before_replay + 1)
         player.go_to(player.event_count)
@@ -632,12 +644,12 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
 
         with patch.object(
             live_engine,
-            "configure",
-            wraps=live_engine.configure,
-        ) as configure:
+            "reset_with_mines",
+            wraps=live_engine.reset_with_mines,
+        ) as fixed_reset:
             ui._exit_replay_mode()
 
-        configure.assert_called_once_with(width=4, height=3, num_mines=2)
+        fixed_reset.assert_not_called()
         self.assertIs(ui.engine, live_engine)
         self.assertIs(ui._engine_for_current_mode(), live_engine)
         self.assertFalse(ui._replay_mode)
@@ -645,9 +657,15 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         self.assertEqual(ui._zini_job_token, token_before_replay + 2)
         self.assertEqual(
             (live_engine.width, live_engine.height, live_engine.num_mines),
-            (4, 3, 2),
+            (2, 2, 1),
         )
         self.assertFalse(live_engine.get_board_snapshot().mines_placed)
+        self.assertEqual(live_engine.get_board_snapshot().mines, frozenset())
+        self.assertEqual(ui._normal_game_config, (2, 2, 1))
+        self.assertEqual(ui.difficulty_combo.currentText(), "커스텀")
+        self.assertNotEqual(ui._live_game_id, previous_game)
+        self.assertFalse(ui._fixed_board_start())
+        self.assertIsNone(ui._live_fixed_origin)
         self.assertTrue(
             all(
                 value == CellState.HIDDEN.value
@@ -664,7 +682,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
                 ui._replay_recorder.height,
                 ui._replay_recorder.num_mines,
             ),
-            (4, 3, 2),
+            (2, 2, 1),
         )
 
     def test_rebuild_game_configures_same_live_engine(self):

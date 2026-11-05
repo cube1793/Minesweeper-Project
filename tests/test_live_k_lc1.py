@@ -40,7 +40,7 @@ class LiveLC1OwnerTests(unittest.TestCase):
                 for value in (state, p, request, admitted, ack):
                     self.assertEqual(k.from_dict(k.to_dict(value), type(value)), value)
                     wire = message(state.run_id, 0, 'START', k.to_dict(value))
-                    self.assertEqual(validate_message(wire)['version'], 9)
+                    self.assertEqual(validate_message(wire)['version'], 10)
                 self.assertEqual(p.snapshot.policy_id, k.POLICY_K_LC1)
                 self.assertEqual(p.snapshot.game_id, state.game_id)
                 self.assertEqual(p.snapshot.phase, k.PHASE_PREPARATION if p.is_preparation else k.PHASE_LC1)
@@ -49,9 +49,9 @@ class LiveLC1OwnerTests(unittest.TestCase):
 
     def test_strict_wire_rejects_old_unknown_versions_fields_and_wrong_definition(self):
         data = k.to_dict(singleton_start())
-        self.assertEqual(PROTOCOL_VERSION, 9)
+        self.assertEqual(PROTOCOL_VERSION, 10)
         envelope = message(data['run_id'], 0, 'START', data)
-        for version in (True, 0, 1, 7, 8, 10, '9', 9.0):
+        for version in (True, 0, 1, 7, 8, 9, 11, '10', 10.0):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 validate_message(dict(envelope, version=version))
         for key, value in (('policy_id', 'K-LC1'), ('definition', k.LC0_ADOPT_DEFINITION),

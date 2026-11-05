@@ -488,8 +488,11 @@ class LivePolicyJob(QObject):
         return {
             "run_id": self._active_run_id, "status": status, "intent_reason": self._intent_reason,
             "policy_id": self._start_snapshot.policy_id if self._start_snapshot else None,
-            "game_id": self._start_snapshot.game_id if self._is_k else None,
-            "definition": self._start_snapshot.definition if self._is_k else "STAGE3_V1",
+            "game_id": (self._start_snapshot.game_id if self._is_k else
+                        self._start_snapshot.fixed_game_id if self._start_snapshot else None),
+            "definition": (self._start_snapshot.definition if self._is_k else
+                           "STAGE3_V1_PUBLIC_FIXED_BOARD_V1" if self._start_snapshot
+                           and self._start_snapshot.fixed_game_id is not None else "STAGE3_V1"),
             "entry_mode": self._start_snapshot.entry_mode if self._start_snapshot else None,
             "start_phase": self._start_snapshot.phase if self._start_snapshot else None,
             "start_input_revision": self._start_snapshot.input_revision if self._start_snapshot else None,

@@ -8,12 +8,13 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **플레이 통계:** Time, Est Time, 3BV, 3BV/s, Ops, 클릭별 active/wasted 집계, CPS, Efficiency, IOE, Thrp, Corr, ZiNi, ZNE, ZNT
 - **Simple Algorithm:** 확정 수와 최소 지뢰 확률 후보 표시, 확정 수 자동 진행, 선택적인 추측 실행
 - **Replay:** JSON 저장·불러오기, 위치 이동과 자동 재생, 시점별 통계, 녹화된 다음 입력과 별도 Simple 참고 분석
+- **같은 보드 재플레이:** 종료판의 동일 배치로 새 판 시작, 같은 배치 완료 기록 보관, Replay 기본 종료와 원 배치 재플레이 선택
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 현재 범위 사용자 수용
 
-2026-11-05 기준 **K-LC1 연결·표시 개선에 이어 관람 속도·고정 CPS·정밀 입력 UI까지 범위 한정 독립 검토 및 사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
+2026-11-05 기준 **같은 보드 재플레이·동일 배치 기록·ACK/정리 후 Replay 진입·기본/명시 종료 선택까지 범위 한정 독립 검토 및 최종 사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
 
 새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0/K-LC0/K-LC1은 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하고, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1과 K 계열의 사용자 지정 보드는 미지원입니다.
 
@@ -21,7 +22,7 @@ Auto OFF는 일시정지입니다. 모든 정책은 수동 첫 입력에서 Auto
 
 K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. 같은 Auto 세션의 다음 계산을 기다리는 동안 유효한 확정색만 유지하고, 열린 칸과 깃발 칸의 색은 즉시 지웁니다. 새 결과가 오면 통째로 교체하며 이전 추천·확률을 다음 입력으로 재사용하지 않습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 실제 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace에 합성 경로를 만들지 않습니다.
 
-현재 속도 계약·검증·실패 이력은 [관람 속도/CPS closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)에 정리했습니다. [LC1 및 표시 개선](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)과 [K 인수/UI](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)는 이전 checkpoint입니다. Main의 세 K 정책에서 “(실험적)”을 제거했지만 F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
+현재 기능·버전별 검증·실패 이력과 B/C 근거는 [같은 보드/Replay closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)에 정리했습니다. [관람 속도/CPS closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)은 이전 수용 checkpoint이며 원 속도 계약은 유지합니다. [LC1 및 표시 개선](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)과 [K 인수/UI](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)는 이전 checkpoint입니다. Main의 세 K 정책에서 “(실험적)”을 제거했지만 F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
 
 ### 자동 진행 속도
 
@@ -31,7 +32,15 @@ K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN
 
 **Model C 기반**은 기존 거리별 행동 비용을 배속으로 나눈 관람 지연입니다. 고정 CPS와 다른 방식이며 원 정책·비용 표는 바꾸지 않습니다. 현재 창에서 바꾼 간격·배속은 reset/정책 변경/Replay 왕복 후에도 유지합니다.
 
-같은 보드를 새 판으로 **다시 플레이**하는 Main 기능은 아직 없습니다. Replay 시청과 별도 Same-board Comparison은 기존 기능으로 유지합니다.
+### 같은 보드 재플레이와 기록
+
+종료한 Live 판에서 정리가 끝나면 **같은 보드 다시 플레이**로 지뢰 배치를 유지한 새 판을 시작합니다. 모든 칸을 닫고 시간·클릭·Replay 기록을 초기화하며 Auto/추측은 OFF입니다. 정책·속도·표시 선호는 유지합니다. 고정 배치에서는 첫 클릭도 지뢰일 수 있고, Auto는 수동 첫 수 없이 추측 허용 설정에 따라 진행합니다.
+
+**재플레이 전 기록**은 첫 Live 재플레이 뒤 활성화됩니다. 같은 전체 배치의 완료판을 보관하고 메뉴나 Replay를 열 때 방금 끝난 판도 중복 없이 포함합니다. 진행 중인 판이나 외부 파일을 완료 Live로 위장하지 않습니다. 새 게임·난이도 변경·다른 배치의 성공한 Replay 진입은 묶음을 비우고, 불러오기 취소·오류와 같은 배치 재플레이는 유지합니다.
+
+Replay에서는 **Replay 종료**가 기본 새 게임입니다. 보고 있던 Replay의 크기·지뢰 수를 유지한 일반 미배치 판으로 초기화하고 기록 묶음을 비웁니다. 별도 **같은 보드 다시 플레이**를 누르면 원 배치의 닫힌 새 판과 기존 같은 배치 기록을 유지합니다. 저장해 둔 파일은 지우지 않으며 이전 Live 진행 상황을 이어가는 기능은 아닙니다.
+
+Auto 중 Replay 요청은 원 입력 확인과 worker 정리가 끝날 때까지 Live에서 기다린 뒤 한 번만 전환합니다. 실패하면 Live에 구체적인 사유가 남습니다. 사용자에게 새 선택을 요구하는 재선택이나 강제 실패 해제는 하지 않습니다. 별도 Same-board Comparison은 기존 기능으로 유지합니다.
 
 ## Simple Algorithm
 
@@ -62,7 +71,7 @@ Live에서 초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 �
 - Replay의 Space는 재생/일시정지이며 끝·빈 기록을 자동으로 되감지 않습니다. Return/Enter는 새 게임을 만들지 않습니다. Live에서는 Space/Return/Enter가 새 게임이며 편집 중인 입력 위젯의 키는 보존합니다.
 - 처음·이전·다음·마지막 위치와 slider 이동, Index/Time 자동 재생을 지원합니다. Time 모드는 기록된 이벤트 시간을 사용하며 0.25배속부터 8배속까지 조절합니다.
 - 완료된 Replay는 현재 위치에 맞는 Counters를 표시하고, 미완료 Replay의 Counters는 마스킹합니다.
-- Replay 종료는 이전 Live 판을 이어가는 대신 저장해 둔 Live 난이도로 **새 게임**을 시작합니다.
+- 기본 **Replay 종료**는 보고 있던 Replay의 크기·지뢰 수로 일반 새 게임을 시작하고 기록 묶음을 비웁니다. **같은 보드 다시 플레이**는 원 배치의 고정 새 판과 기존 같은 배치 기록을 유지합니다. 이전 Live position의 재개가 아닙니다.
 
 **Replay Analysis**는 현재 공개 position의 Simple 결과를 참고용으로 보여 줍니다. **녹화된 다음 입력**은 별도 첫 줄과 테두리로 표시하며, 참고 분석 OFF나 분석 오류에도 남습니다. CHORD는 열린 중심 칸, UNFLAG는 해제할 깃발 칸을 가리킵니다. 끝·빈 기록에는 다음 입력이 없다고 표시합니다.
 

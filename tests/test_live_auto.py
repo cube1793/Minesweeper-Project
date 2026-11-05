@@ -977,7 +977,7 @@ class LiveAutoUITests(unittest.TestCase):
         ))
         before = self.engine.get_observation()
         with (
-            patch("ui_manager.analyze_position") as analyze,
+            patch("ui_manager.analyze_position", wraps=analyze_position) as analyze,
             patch.object(self.engine, "step") as live_step,
             patch.object(player.engine, "step", wraps=player.engine.step) as replay_step,
         ):
@@ -995,13 +995,17 @@ class LiveAutoUITests(unittest.TestCase):
             self.ui.on_replay_next()
             replay_step.assert_called_once_with(0, 0, Action.OPEN)
             self.assertEqual(self.engine.get_observation(), before)
+            analyze.assert_not_called()
             self.ui.on_exit_replay()
             self.tick()
-        analyze.assert_not_called()
+        analyze.assert_not_called()  # Canonical safe first-click presentation.
         live_step.assert_not_called()
         self.assertIs(self.ui.engine, self.engine)
         self.assertTrue(self.ui.simple_auto_checkbox.isEnabled())
         self.assertFalse(self.engine.get_board_snapshot().mines_placed)
+        self.assertEqual(self.engine.get_board_snapshot().mines, frozenset())
+        self.assertFalse(self.ui._fixed_board_start())
+        self.assertIsNone(self.ui._live_fixed_origin)
         self.assert_stopped()
 
 
@@ -1354,6 +1358,11 @@ class LiveV1UITests(unittest.TestCase):
         job.proposal_ready.emit(proposal)
         self.assertIsNone(self.ui._v1_pending)
         self.assertFalse(self.ui.simple_auto_checkbox.isEnabled())
+        self.assertFalse(self.ui._replay_mode)
+        self.assertIsNotNone(self.ui._replay_entry_pending)
+        job.complete_cancel()
+        self.app.processEvents()
+        self.assertTrue(self.ui._replay_mode)
         self.assertEqual(self.ui.live_policy_status_label.text(), "알고리즘 사용 기록: 없음")
 
     def test_all_new_game_policy_pairs_clear_guess_without_old_owner_signals(self):
@@ -1412,11 +1421,22 @@ class LiveV1UITests(unittest.TestCase):
                 self.ui.allow_guess_checkbox.setChecked(True)
                 player = ReplayPlayer(ReplayData(ReplayBoard(3, 3, 1, {(1, 1)}), ()))
                 self.ui._enter_replay_mode(player)
+                if self.ui._v1_job.state == "cancelling":
+                    self.assertFalse(self.ui._exit_replay_mode())
+                    self.assertFalse(self.ui._replay_mode)
+                    self.assertIsNotNone(self.ui._replay_entry_pending)
+                    self.ui._v1_job.complete_cancel()
+                    self.app.processEvents()
+                    self.assertTrue(self.ui._replay_mode)
                 self.ui.on_exit_replay()
                 self.assertFalse(self.ui._replay_mode)
                 self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
                 self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
                 self.assertFalse(self.engine.get_board_snapshot().mines_placed)
+                self.assertEqual(self.engine.get_board_snapshot().mines, frozenset())
+                self.assertFalse(self.ui._fixed_board_start())
+                self.assertIsNone(self.ui._live_fixed_origin)
+                self.assertEqual(self.ui._replay_recorder.events, ())
                 self.assertEqual(self.ui._replay_recorder.source_type, "human")
 
     def test_v1_pause_keeps_guess_pending_but_selector_retires_owner(self):

@@ -65,10 +65,11 @@ from live_analysis import (
     present_v1_proposal, present_k_proposal, present_flag_preparation,
 )
 from live_policy import (
-    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, CANONICAL_NEW, ADOPT_CURRENT, PHASE_FLAG_REVIEW, PHASE_V1,
+    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, CANONICAL_NEW, ADOPT_CURRENT, FIXED_BOARD, PHASE_FLAG_REVIEW, PHASE_V1,
     admit_proposal, make_ack, make_snapshot, supports_v1_board, validate_ack,
 )
 from live_flag_review import report_to_dict
+from live_same_board import FixedLayout, FixedOrigin, CompletedLiveGame
 from live_simple_preparation import prepare_flags
 from stage3_physical import action_cost, load_timing_table, PROFILE_SHA256, TABLE_SHA256
 from live_policy_job import LivePolicyJob
@@ -124,6 +125,20 @@ class _KInputReceipt:
     events: tuple
     action: tuple
     acknowledged: bool = False
+
+
+@dataclass(frozen=True)
+class _ReplayEntryRequest:
+    """GUI-only reservation; no layout or old observation reaches a policy."""
+    token: str
+    replay: object
+    binding: tuple
+    job: object
+    run_id: object
+    expected_ack: object
+    ack_confirmed: bool
+    cleanup_confirmed: bool
+    drained: bool = False
 
 
 _K_RECEIPT_FIELDS = (
@@ -705,6 +720,11 @@ class MinesweeperUI(QWidget):
         self._live_board_generation = 0
         self._live_run_id = uuid4().hex
         self._live_game_id = uuid4().hex
+        self._live_fixed_origin = None
+        self._same_board_history_layout = None
+        self._same_board_completed_games = []
+        self._replay_entry_pending = None
+        self._replay_entry_notice = None
         self._live_action_count = 0
         self._live_fresh_reset = (engine.status == GameStatus.PLAYING
                                   and is_all_hidden(engine.get_observation())
@@ -843,6 +863,8 @@ class MinesweeperUI(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, watched, event):
+        if watched is self and event.type() == QEvent.Close:
+            self._cancel_replay_entry()
         if (event.type() == QEvent.ShortcutOverride
                 and event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter)
                 and not self._game_shortcut_available()):
@@ -1202,6 +1224,9 @@ class MinesweeperUI(QWidget):
 
         self.exit_replay_button = QPushButton("Replay 종료")
         self.exit_replay_button.setFocusPolicy(Qt.NoFocus)
+        self.exit_replay_button.setToolTip(
+            "같은 크기·지뢰 수의 새 게임으로 초기화합니다. 지뢰는 새로 배치되며 재플레이 전 기록은 비워집니다. "
+            "원 배치와 기록을 유지하려면 '같은 보드 다시 플레이'를 선택하세요.")
         self.exit_replay_button.clicked.connect(self.on_exit_replay)
         self.exit_replay_button.setVisible(False)
 
@@ -1291,6 +1316,22 @@ class MinesweeperUI(QWidget):
         policy_bar.addWidget(self.live_policy_new_game_button)
         policy_bar.addStretch()
         main_layout.addLayout(policy_bar)
+        retry_bar = QHBoxLayout()
+        self.same_board_retry_button = QPushButton("같은 보드 다시 플레이")
+        self.same_board_retry_button.setFocusPolicy(Qt.NoFocus)
+        self.same_board_retry_button.clicked.connect(self.on_same_board_retry)
+        self.same_board_history_button = QToolButton()
+        self.same_board_history_button.setFocusPolicy(Qt.NoFocus)
+        self.same_board_history_button.setText("재플레이 전 기록")
+        self.same_board_history_button.setPopupMode(QToolButton.InstantPopup)
+        self.same_board_history_menu = QMenu(self.same_board_history_button)
+        self.same_board_history_menu.aboutToShow.connect(self._capture_completed_for_history)
+        self.same_board_history_button.setMenu(self.same_board_history_menu)
+        self.same_board_history_button.setToolTip("같은 배치로 플레이한 완료판 Replay를 확인하거나 저장합니다. 새 게임에서는 비워집니다.")
+        retry_bar.addWidget(self.same_board_retry_button)
+        retry_bar.addWidget(self.same_board_history_button)
+        retry_bar.addStretch()
+        main_layout.addLayout(retry_bar)
         # A full-width fixed status row keeps the state readable on narrow
         # windows instead of competing with the policy selection buttons.
         main_layout.addWidget(self.live_policy_status_label)
@@ -2112,8 +2153,8 @@ class MinesweeperUI(QWidget):
         self._enter_replay_mode(replay_player)
 
     def on_exit_replay(self):
-        """리플레이 모드를 끝내고 현재 선택된 난이도로 새 일반 게임을 시작한다."""
-        self._exit_replay_mode()
+        """기본 종료는 같은 크기의 일반 새 게임이며 기록 묶음을 비운다."""
+        return self._exit_replay_mode()
 
     def _replay_playback_mode(self) -> str:
         return self.replay_playback_mode_combo.currentText()
@@ -2321,8 +2362,167 @@ class MinesweeperUI(QWidget):
         self._render_live_analysis()
 
     def _enter_replay_mode(self, replay_player: ReplayPlayer):
-        """ReplayPlayer의 초기 상태를 UI에 표시한다."""
-        self._invalidate_v1_run("Replay 진입")
+        """Reserve one target; remain Live until its original owner is clean."""
+        pending = self._replay_entry_pending
+        if pending is not None:
+            self._update_policy_controls()
+            return pending.replay == replay_player.replay_data
+        if (self._live_closing or self._live_close_error is not None
+                or self._live_input_uncertain or self._live_first_failure is not None):
+            self._update_policy_controls()
+            return False
+        if self._replay_mode:
+            return self._commit_replay_entry(replay_player)
+        self._replay_entry_notice = None
+        # Already retired K input retains its sealed receipt during manual handoff.
+        receipt = self._k_retiring or self._k_ack_receipt
+        if any(value is not None and type(value) is not _KInputReceipt
+               for value in (self._k_retiring, self._k_ack_receipt)):
+            return self._replay_entry_refused("Replay 준비 실패: 원 입력 ACK 증명을 확인할 수 없습니다.")
+        expected = receipt.ack if type(receipt) is _KInputReceipt else self._v1_expected_ack
+        if (expected is not None and not hasattr(expected, 'run_id')):
+            return self._replay_entry_refused("Replay 준비 실패: 원 입력 ACK 증명을 확인할 수 없습니다.")
+        job = self._v1_job
+        if job.state in ('blocked', 'closed'):
+            return self._replay_entry_refused("Replay 준비 실패: 이전 worker 정리를 확인할 수 없습니다.")
+        if ((expected is not None and job.active_run_id != expected.run_id)
+                or (job.state != 'idle' and job.active_run_id is None)):
+            return self._replay_entry_refused("Replay 준비 실패: 원 입력과 worker identity를 확인할 수 없습니다.")
+        request = _ReplayEntryRequest(
+            uuid4().hex, replay_player.replay_data, self._replay_entry_binding(),
+            job, job.active_run_id, expected,
+            expected is None or (type(receipt) is _KInputReceipt and receipt.acknowledged),
+            job.state == 'idle' and job.active_run_id is None and not self._v1_owned)
+        self._replay_entry_pending = request
+        self._set_auto_off(clear_guess=True)
+        # V1's original ACK validator needs its generation/owner until ACK arrives.
+        # Auto is OFF and all input timers/permits are revoked in either branch.
+        if expected is None or type(expected) is k_live.KAck or request.ack_confirmed:
+            self._drain_replay_entry(request.token)
+        self._advance_replay_entry(request.token, replay_player)
+        return self._replay_mode or self._replay_entry_pending is not None
+
+    def _replay_entry_binding(self):
+        snapshot = self.engine.get_board_snapshot()
+        return (self._simple_binding(), self._live_policy, self.engine.status,
+                snapshot.mines_placed, frozenset(snapshot.mines),
+                self._replay_recorder.source_type, self._same_board_history_layout,
+                tuple(item.game_id for item in self._same_board_completed_games))
+
+    def _cancel_replay_entry(self):
+        self._replay_entry_pending = None
+        self._replay_entry_notice = None
+
+    def _replay_entry_refused(self, message):
+        self._replay_entry_pending = None
+        self._replay_entry_notice = message
+        self._update_policy_controls()
+        return False
+
+    def _drain_replay_entry(self, token):
+        request = self._replay_entry_pending
+        if request is None or request.token != token or request.drained:
+            return
+        # Only this declared generation increment may change the captured binding.
+        simple = request.binding[0]
+        binding = ((simple[0], simple[1] + 1, *simple[2:]), *request.binding[1:])
+        self._replay_entry_pending = replace(request, binding=binding, drained=True)
+        self._invalidate_v1_run("Replay 준비 · 입력 확인/worker 정리 대기", drain_ack=True)
+
+    def _on_replay_entry_ack(self, job, ack):
+        request = self._replay_entry_pending
+        if (request is None or request.job is not job or request.expected_ack != ack
+                or self._live_first_failure is not None):
+            return
+        # Connected after the existing validator. A receipt is not an approval.
+        confirmed = (self._k_retiring is not None and self._k_retiring.acknowledged
+                     if type(ack) is k_live.KAck else self._v1_expected_ack is None)
+        if confirmed:
+            self._replay_entry_pending = replace(request, ack_confirmed=True)
+        QTimer.singleShot(0, lambda token=request.token: self._advance_replay_entry(token))
+
+    def _on_replay_entry_finished(self, job, record):
+        request = self._replay_entry_pending
+        if request is not None and request.job is job and request.run_id == record.get('run_id'):
+            # Defer beyond all ACK/finished slots, including synchronous cancel.
+            QTimer.singleShot(0, lambda token=request.token, result=dict(record):
+                              self._finish_replay_entry(token, result))
+
+    def _guard_replay_entry_finish(self, job, record):
+        """Keep a specific failure before the legacy generic finish presentation."""
+        request = self._replay_entry_pending
+        if request is None or request.job is not job or request.run_id != record.get('run_id'):
+            return
+        clean = (record.get('cleanup_complete') is True and record.get('reaped') is True
+                 and record.get('tree_active_count') == 0)
+        cause = record.get('error') or (None if clean else "worker 정리 실패")
+        if (cause is None and request.expected_ack is not None and not request.ack_confirmed
+                and type(request.expected_ack) is not k_live.KAck
+                and record.get('status') != 'SUCCEEDED'):
+            cause = "원 입력 ACK 미확인"
+        if cause:
+            self._record_live_failure(cause, stage='Replay entry')
+
+    def _finish_replay_entry(self, token, record):
+        request = self._replay_entry_pending
+        if request is None or request.token != token:
+            return
+        clean = (record.get('cleanup_complete') is True and record.get('reaped') is True
+                 and record.get('tree_active_count') == 0 and not record.get('error')
+                 and record.get('status') in ('CANCELLED', 'SUCCEEDED'))
+        ack = request.expected_ack
+        confirmed = request.ack_confirmed
+        if ack is not None and type(ack) is k_live.KAck:
+            confirmed = confirmed or any(
+                action.get('run_id') == ack.run_id and action.get('token') == ack.token
+                and action.get('ack_state') == 'ACKED'
+                for action in self.live_action_records)
+        if not confirmed and clean and record.get('status') == 'SUCCEEDED' and ack.status in ('WON', 'LOST'):
+            confirmed = (record.get('last_k_ack') == k_live.to_dict(ack)
+                         if type(ack) is k_live.KAck else record.get('terminal') ==
+                         dict(token=ack.token, input_seq=ack.input_seq, status=ack.status))
+        if not clean or not confirmed:
+            self._record_live_failure(record.get('error') or
+                ("worker 정리 실패" if not clean else "원 입력 ACK 미확인"), stage='Replay entry')
+        self._replay_entry_pending = replace(request, ack_confirmed=confirmed, cleanup_confirmed=clean)
+        self._advance_replay_entry(token)
+
+    def _advance_replay_entry(self, token, immediate_player=None):
+        request = self._replay_entry_pending
+        if request is None or request.token != token:
+            return
+        if self._live_first_failure is not None or self._live_input_uncertain or self._live_close_error:
+            self._replay_entry_refused(self._live_failure_text())
+            return
+        if (self._live_closing or self._replay_mode or request.job is not self._v1_job
+                or request.binding != self._replay_entry_binding()):
+            self._replay_entry_refused("Replay 예약 취소: 원 Live 판 또는 입력 이력이 변경되었습니다.")
+            return
+        if request.ack_confirmed and not request.drained:
+            self._drain_replay_entry(token)
+            request = self._replay_entry_pending
+            if request is None:
+                return
+        if (request.ack_confirmed and request.cleanup_confirmed and self._same_board_transition_ready()):
+            self._replay_entry_pending = None  # Consume once, before capture/UI callbacks.
+            # Preserve the caller's player for an immediate entry. Async requests
+            # retain only the frozen ReplayData and construct their player here.
+            self._commit_replay_entry(immediate_player if immediate_player is not None
+                                      else ReplayPlayer(request.replay))
+        else:
+            self._update_policy_controls()
+
+    def _commit_replay_entry(self, replay_player):
+        if not self._same_board_transition_ready():
+            return False
+        layout = FixedLayout.from_replay_board(replay_player.replay_data.board)
+        # Capture only after ACK and cleanup, before any history/mode mutation.
+        if not self._capture_completed_for_history():
+            return False
+        if self._same_board_history_layout != layout:
+            self._clear_same_board_history()
+        self._stop_replay_autoplay()
+        self._replay_entry_notice = None
         self._invalidate_mouse_input()
         self._mouse_trace_recorder.invalidate()
         self._mouse_trace_observation = None
@@ -2353,36 +2553,38 @@ class MinesweeperUI(QWidget):
 
         self._update_same_board_comparison_action()
         self._update_policy_controls()
+        return True
 
-    def _exit_replay_mode(self):
-        """일반 플레이 모드로 돌아가 현재 선택 난이도로 새 게임을 시작한다."""
-        self._invalidate_v1_run("Replay 종료")
-        self._invalidate_mouse_input()
-        self._stop_simple_auto()
-        self._clear_live_analysis()
+    def _exit_replay_mode(self, *, same_board=False):
+        """Default to canonical reset; fixed layout requires an explicit choice."""
+        if type(same_board) is not bool:
+            raise TypeError("Replay exit choice must be an explicit bool keyword.")
+        if (not self._replay_mode or self._replay_player is None
+                or not self._same_board_transition_ready()):
+            return False
+        board = self._replay_player.replay_data.board
+        config = (board.width, board.height, board.num_mines)
+        layout = FixedLayout.from_replay_board(board) if same_board else None
         self._stop_replay_autoplay()
-        self._reset_counter_metrics_for_board_change()
         self._replay_mode = False
         self._replay_player = None
         self._replay_view_index = None
         self._replay_data = None
         self._clear_replay_display_time_override()
         self._clear_replay_counter_state()
+        if same_board:
+            return self._start_fixed_live(layout, "Replay 종료 · 같은 배치", rebuild_grid=True)
+        # Replay is already detached, so canonical rebuild cannot hit on_reset's
+        # Replay no-op. Only dimensions/count enter the normal engine reset.
+        self._rebuild_game(*config)
+        self.live_owner_records = []
+        label = next((name for name, preset in DIFFICULTY_PRESETS.items()
+                      if preset == config), "커스텀")
+        blocked = self.difficulty_combo.blockSignals(True)
+        self.difficulty_combo.setCurrentText(label)
+        self.difficulty_combo.blockSignals(blocked)
         self._update_replay_controls()
-
-        width, height, mines = self._normal_game_config
-        self.engine.configure(width=width, height=height, num_mines=mines)
-        self._prepare_live_policy_game()
-        self._game_over = False
-        self.reset_button.setText("🙂")
-        self._reset_timer()
-        self._reset_replay_recorder()
-        self._build_grid()
-        self._apply_initial_window_size()
-        self._refresh_live_board()
-        self._update_statistics_panel(self.engine.get_stats())
-
-        self._update_same_board_comparison_action()
+        return True
 
     def _update_replay_status_label(self):
         """현재 리플레이 index/time을 표시한다."""
@@ -2568,6 +2770,7 @@ class MinesweeperUI(QWidget):
         self.render_board()
 
     def on_difficulty_changed(self, text: str):
+        self._cancel_replay_entry()
         self._invalidate_v1_run("난이도 변경")
         self._invalidate_mouse_input()
         self._mouse_trace_recorder.break_segment()
@@ -2610,11 +2813,13 @@ class MinesweeperUI(QWidget):
 
     def _rebuild_game(self, width: int, height: int, mines: int):
         """새 난이도로 엔진과 그리드를 재구성한다."""
+        self._cancel_replay_entry()
         self._invalidate_v1_run("새 보드")
         self._invalidate_mouse_input()
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._reset_counter_metrics_for_board_change()
+        self._clear_same_board_history()
         self.engine.configure(width=width, height=height, num_mines=mines)
         self._prepare_live_policy_game()
         self._normal_game_config = (width, height, mines)
@@ -3066,6 +3271,7 @@ class MinesweeperUI(QWidget):
     def on_reset(self):
         if self._replay_mode or self._live_closing:
             return
+        self._cancel_replay_entry()
         if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
             self._stop_simple_auto()
             self._clear_live_analysis("선택한 정책은 이번 단계에서 지원하지 않습니다.")
@@ -3075,6 +3281,7 @@ class MinesweeperUI(QWidget):
         self._stop_simple_auto()
         self._clear_live_analysis()
         self._reset_counter_metrics_for_board_change()
+        self._clear_same_board_history()
         self.engine.reset()
         self._prepare_live_policy_game()
         self._game_over = False
@@ -3085,6 +3292,153 @@ class MinesweeperUI(QWidget):
         # 리셋 직후에는 PLAYING 상태이므로 마스킹/초기 값이 표시된다.
         self._update_statistics_panel(self.engine.get_stats())
         self._update_same_board_comparison_action()
+
+    def _same_board_transition_ready(self):
+        return (not self._live_closing and self._live_close_error is None
+                and not self._live_input_uncertain and self._live_first_failure is None
+                and self._v1_job.state == "idle" and not self._v1_owned
+                and self._v1_expected_ack is None and self._k_ack_receipt is None
+                and self._k_retiring is None)
+
+    def _same_board_retry_layout(self):
+        if (self._replay_mode or not self._same_board_transition_ready()
+                or self.engine.status not in (GameStatus.WON, GameStatus.LOST)
+                or not self._known_live_history()):
+            return None
+        try:
+            return FixedLayout.from_finished_engine(self.engine)
+        except (TypeError, ValueError):
+            return None
+
+    def _update_same_board_retry_controls(self):
+        if not hasattr(self, "same_board_retry_button"):
+            return
+        replay_ready = (self._replay_mode and self._replay_player is not None
+                        and self._same_board_transition_ready())
+        self.same_board_retry_button.setEnabled(
+            replay_ready if self._replay_mode else self._same_board_retry_layout() is not None)
+        self.same_board_retry_button.setToolTip(
+            ("보고 있는 Replay의 원 배치로 모두 닫힌 새 Live 판을 시작합니다. 기존 같은 배치 기록은 유지합니다. "
+             if self._replay_mode else "종료한 Live 판의 지뢰 배치를 그대로 숨겨 새 판을 시작합니다. ")
+            + "첫 클릭도 지뢰일 수 있습니다. Auto는 처음부터 사용하며 추측 허용을 따릅니다.")
+        self.exit_replay_button.setEnabled(replay_ready)
+        self.same_board_history_button.setEnabled(
+            bool(self._same_board_completed_games) and self._same_board_group_matches_current()
+            and self._same_board_transition_ready())
+
+    def _same_board_group_matches_current(self):
+        layout = self._same_board_history_layout
+        if layout is None:
+            return False
+        if self._replay_mode:
+            return (self._replay_player is not None
+                    and layout == FixedLayout.from_replay_board(self._replay_player.replay_data.board))
+        return layout.matches(self.engine.get_board_snapshot())
+
+    def _clear_same_board_history(self):
+        self._same_board_history_layout = None
+        self._same_board_completed_games.clear()
+        for action in self.same_board_history_menu.actions():
+            action.triggered.disconnect()
+        self.same_board_history_menu.clear()
+        self._update_same_board_retry_controls()
+
+    def _remember_completed_live(self, layout, *, activate=False):
+        if not activate and self._same_board_history_layout != layout:
+            return None
+        for completed in self._same_board_completed_games:
+            if completed.game_id == self._live_game_id and completed.layout == layout:
+                return completed
+        replay = self._build_current_replay_data("같은 배치 기록", require_finished=True)
+        if replay is None:
+            self._replay_entry_refused("완료판 기록 보존 실패: 원 Replay를 구성할 수 없습니다.")
+            return None
+        try:
+            completed = CompletedLiveGame.capture(self, layout, replay)
+        except (TypeError, ValueError) as exc:
+            self._replay_entry_refused(f"완료판 기록 보존 실패: {exc}")
+            return None
+        if self._same_board_history_layout != layout:
+            self._clear_same_board_history()
+            self._same_board_history_layout = layout
+        self._same_board_completed_games.append(completed)
+        action = self.same_board_history_menu.addAction(
+            f"{len(self._same_board_completed_games)} · {completed.status} · {completed.game_id[:8]}")
+        action.triggered.connect(lambda _checked=False, item=completed: self._view_completed_live_game(item))
+        self._update_same_board_retry_controls()
+        return completed
+
+    def _capture_completed_for_history(self):
+        if (self._same_board_history_layout is None or self._replay_mode
+                or self.engine.status == GameStatus.PLAYING):
+            return True
+        if self._replay_entry_pending is not None:
+            self._update_policy_controls()
+            return False
+        if not self._same_board_transition_ready():
+            if self._live_first_failure is not None or self._live_input_uncertain:
+                return self._replay_entry_refused(self._live_failure_text())
+            return self._replay_entry_refused("완료판 기록 대기: 입력 확인/worker 정리가 아직 끝나지 않았습니다.")
+        if not self._known_live_history():
+            return self._replay_entry_refused("완료판 기록 보존 실패: 실제 입력 이력을 확인할 수 없습니다.")
+        layout = self._same_board_retry_layout()
+        if layout is None or layout != self._same_board_history_layout:
+            return self._replay_entry_refused("완료판 기록 보존 실패: 현재 동일 배치를 확인할 수 없습니다.")
+        return self._remember_completed_live(layout) is not None
+
+    def _view_completed_live_game(self, completed):
+        if (not self._same_board_group_matches_current()
+                or completed.layout != self._same_board_history_layout
+                or not any(completed is item for item in self._same_board_completed_games)):
+            return
+        self._enter_replay_mode(ReplayPlayer(completed.replay))
+
+    def on_same_board_retry(self):
+        if self._replay_mode:
+            return self._exit_replay_mode(same_board=True)
+        layout = self._same_board_retry_layout()
+        if layout is None:
+            return
+        if self._remember_completed_live(layout, activate=True) is None:
+            return
+        self._start_fixed_live(layout, "같은 보드 다시 플레이")
+
+    def _start_fixed_live(self, layout, reason, *, rebuild_grid=False):
+        if not self._same_board_transition_ready():
+            return False
+        if self._same_board_history_layout != layout:
+            self._clear_same_board_history()
+        self._invalidate_v1_run(reason)
+        self._invalidate_mouse_input()
+        self._stop_simple_auto()
+        self._clear_live_analysis()
+        self._reset_counter_metrics_for_board_change()
+        layout.reset_engine(self.engine)
+        self._normal_game_config = (layout.width, layout.height, layout.num_mines)
+        label = next((name for name, config in DIFFICULTY_PRESETS.items()
+                      if config == self._normal_game_config), "커스텀")
+        blocked = self.difficulty_combo.blockSignals(True)
+        self.difficulty_combo.setCurrentText(label)
+        self.difficulty_combo.blockSignals(blocked)
+        self._prepare_live_policy_game()
+        self.live_owner_records = []
+        self._live_fresh_reset = False
+        self._k_reset_ready = False
+        self._live_fixed_origin = FixedOrigin(self._live_game_id, layout)
+        self._game_over = False
+        self.reset_button.setText("🙂")
+        self._reset_timer()
+        self._reset_replay_recorder()
+        self._capture_replay_board_if_ready()
+        self._v1_status = "같은 배치 · 첫 클릭도 지뢰일 수 있음 · Auto OFF"
+        if rebuild_grid:
+            self._build_grid()
+            self._apply_initial_window_size()
+        self._refresh_live_board()
+        self._update_statistics_panel(self.engine.get_stats())
+        self._update_same_board_comparison_action()
+        self._update_replay_controls()
+        return True
 
     def _apply_stats_from_info(self, info: dict):
         """
@@ -3106,7 +3460,10 @@ class MinesweeperUI(QWidget):
         job.admitted.connect(self._on_k_admitted)
         job.bootstrapped.connect(self._on_k_bootstrapped)
         job.acknowledged.connect(self._on_v1_acknowledged)
+        job.finished.connect(lambda record: self._guard_replay_entry_finish(job, record))
         job.finished.connect(self._on_v1_finished)
+        job.acknowledged.connect(lambda ack: self._on_replay_entry_ack(job, ack))
+        job.finished.connect(lambda record: self._on_replay_entry_finished(job, record))
         return job
 
     def _restore_after_auxiliary_close_refusal(self):
@@ -3142,6 +3499,15 @@ class MinesweeperUI(QWidget):
                 and is_all_hidden(self.engine.get_observation())
                 and not self.engine.get_board_snapshot().mines_placed)
 
+    def _fixed_board_start(self):
+        origin = self._live_fixed_origin
+        return (type(origin) is FixedOrigin and origin.game_id == self._live_game_id
+                and not self._live_fresh_reset and not self._k_reset_ready
+                and self._live_action_count == 0 and self._known_live_history()
+                and self.engine.status == GameStatus.PLAYING and self._v1_cursor == (0, 0)
+                and is_all_hidden(self.engine.get_observation())
+                and origin.layout.matches(self.engine.get_board_snapshot()))
+
     def _known_live_history(self):
         """Attest this UI's input ledger, never reconstruct history from a grid."""
         if not self._live_history_known or self._live_input_uncertain:
@@ -3170,7 +3536,7 @@ class MinesweeperUI(QWidget):
             return "초급·중급·상급만 지원합니다. 커스텀 보드는 지원하지 않습니다."
         if not self._known_live_history():
             return "실제 입력 이력·기록을 확인할 수 없습니다. 새 게임이 필요합니다."
-        if self._live_action_count == 0 and not self._k_fresh_start():
+        if self._live_action_count == 0 and not (self._k_fresh_start() or self._fixed_board_start()):
             return f"{k_live.policy_label(self._live_policy)} 첫 시작은 선택 정책으로 새 게임을 눌러 주세요."
         return None
 
@@ -3182,6 +3548,7 @@ class MinesweeperUI(QWidget):
             self.live_policy_combo.blockSignals(blocked)
             return
         if selected != self._live_policy:
+            self._cancel_replay_entry()
             self._invalidate_v1_run("Auto 정책 변경", drain_ack=True)
             self._live_policy = selected
             self._v1_status = "수동 · 다음 Auto ON에 현재 판 인수"
@@ -3191,6 +3558,11 @@ class MinesweeperUI(QWidget):
     def _update_policy_controls(self, *_args):
         if not hasattr(self, "live_policy_combo") or not hasattr(self, "simple_auto_checkbox"):
             return
+        if (self._replay_entry_pending is not None
+                and (self._live_first_failure is not None or self._live_input_uncertain
+                     or self._live_close_error is not None)):
+            self._replay_entry_pending = None
+        self._update_same_board_retry_controls()
         if hasattr(self, "auto_cursor_overlay"):
             self.auto_cursor_overlay.set_available(
                 self._v1_owned and self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
@@ -3273,6 +3645,11 @@ class MinesweeperUI(QWidget):
         if self._live_first_failure is not None or self._live_input_uncertain or self._v1_manual_only:
             text = self._live_failure_text()
             runnable = False
+        elif self._replay_entry_pending is not None:
+            text = "Replay 준비 중 · 입력 확인/worker 정리 대기"
+            runnable = False
+        elif self._replay_entry_notice is not None:
+            text = self._replay_entry_notice
         elif self._k_retiring is not None:
             text = "수동 인계 정리 중 · 이전 입력 확인/worker 정리 대기"
         elif self.engine.status != GameStatus.PLAYING:
@@ -3286,6 +3663,7 @@ class MinesweeperUI(QWidget):
 
     def _prepare_live_policy_game(self):
         # A new Live board is manual with fresh guess permission required.
+        self._live_fixed_origin = None
         for checkbox in (self.simple_auto_checkbox, self.allow_guess_checkbox):
             blocked = checkbox.blockSignals(True)
             checkbox.setChecked(False)
@@ -3381,6 +3759,7 @@ class MinesweeperUI(QWidget):
             self._v1_job.cancel(reason)
 
     def _retire_v1_for_manual(self, reason):
+        self._cancel_replay_entry()
         if self._replay_mode:
             return
         if self._live_policy == POLICY_SIMPLE:
@@ -3396,6 +3775,11 @@ class MinesweeperUI(QWidget):
         self._update_policy_controls()
 
     def _v1_snapshot(self):
+        if self._v1_entry_mode == FIXED_BOARD:
+            origin = self._live_fixed_origin
+            if (type(origin) is not FixedOrigin or origin.game_id != self._live_game_id
+                    or (self._live_action_count == 0 and not self._fixed_board_start())):
+                raise ValueError("고정판 시작 identity/배치/빈 이력이 달라졌습니다.")
         if k_live.is_k_policy(self._live_policy):
             return k_live.make_snapshot(
                 run_id=self._live_run_id, board_generation=self._live_board_generation,
@@ -3416,6 +3800,7 @@ class MinesweeperUI(QWidget):
             entry_mode=self._v1_entry_mode, input_revision=self._live_action_count,
             phase=self._v1_phase, initial_flag_count=self._v1_initial_flag_count,
             review_inputs=self._v1_review_inputs,
+            fixed_game_id=self._live_game_id if self._v1_entry_mode == FIXED_BOARD else None,
         )
 
     def _admit_live_proposal(self, proposal):
@@ -3497,6 +3882,10 @@ class MinesweeperUI(QWidget):
         self._schedule_v1_step()
 
     def _analyze_v1_current(self):
+        if self._replay_entry_pending is not None:
+            self._set_auto_off(clear_guess=True)
+            self._update_policy_controls()
+            return
         if (self._live_closing or self._replay_mode or self._v1_manual_only
                 or self._live_input_uncertain or self.engine.status != GameStatus.PLAYING):
             self._stop_simple_auto()
@@ -3541,12 +3930,13 @@ class MinesweeperUI(QWidget):
                         and is_all_hidden(observation)
                         and not self.engine.get_board_snapshot().mines_placed
                         and self._v1_cursor == (0, 0))
-            if self._live_action_count == 0 and not pristine:
+            fixed_start = self._fixed_board_start()
+            if self._live_action_count == 0 and not (pristine or fixed_start):
                 raise ValueError("마지막 실제 입력을 확인할 수 없습니다. 새 게임이 필요합니다.")
             self._live_run_id = uuid4().hex
             self._v1_input_seq = self._v1_review_inputs = 0
             self._v1_expected_ack = None
-            self._v1_entry_mode = CANONICAL_NEW if pristine else ADOPT_CURRENT
+            self._v1_entry_mode = FIXED_BOARD if fixed_start else CANONICAL_NEW if pristine else ADOPT_CURRENT
             self._k_start_input_revision = self._live_action_count
             self._k_base_m = ()
             self._k_m_revision = 0
@@ -3565,7 +3955,8 @@ class MinesweeperUI(QWidget):
             self.live_owner_records.append({
                 "game_id": self._live_game_id, "run_id": self._live_run_id,
                 "policy_id": self._live_policy,
-                "definition": snapshot.definition if k_live.is_k_policy(self._live_policy) else "STAGE3_V1",
+                "definition": (snapshot.definition if k_live.is_k_policy(self._live_policy) else
+                               "STAGE3_V1_PUBLIC_FIXED_BOARD_V1" if fixed_start else "STAGE3_V1"),
                 "board_generation": self._live_board_generation,
                 "entry_mode": self._v1_entry_mode,
                 "phase": self._k_phase if k_live.is_k_policy(self._live_policy) else self._v1_phase,
@@ -4641,6 +5032,10 @@ class MinesweeperUI(QWidget):
             self._start_auto_pacing()
 
     def on_simple_auto_toggled(self, enabled):
+        if enabled and self._replay_entry_pending is not None:
+            self._set_auto_off(clear_guess=True)
+            self._update_policy_controls()
+            return
         if not enabled:
             self._stop_simple_auto(pause=True)
             return
@@ -4926,3 +5321,4 @@ class MinesweeperUI(QWidget):
             self.render_board()
         if status in (GameStatus.WON, GameStatus.LOST):
             self._update_same_board_comparison_action()
+            self._update_same_board_retry_controls()

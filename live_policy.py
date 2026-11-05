@@ -22,6 +22,7 @@ V1_PRESETS = frozenset({(9, 9, 10), (16, 16, 40), (30, 16, 99)})
 PUBLIC_GLYPHS = frozenset({-2, -3, *range(9)})
 CANONICAL_NEW = "CANONICAL_NEW"
 ADOPT_CURRENT = "ADOPT_CURRENT"
+FIXED_BOARD = "FIXED_BOARD"
 PHASE_FLAG_REVIEW = "FLAG_REVIEW"
 PHASE_V1 = "V1"
 MAX_BOARD_CELLS = 480
@@ -91,13 +92,22 @@ class PublicSnapshot:
     phase: str = PHASE_V1
     initial_flag_count: int = 0
     review_inputs: int = 0
+    fixed_game_id: str | None = None
 
     def __post_init__(self):
         _require(_identity(self.run_id), "Invalid run identity.")
         _require(_integer(self.board_generation), "Invalid board generation.")
         _require(_integer(self.input_seq, 0, MAX_INPUTS), "Invalid input sequence.")
-        _require(type(self.entry_mode) is str and self.entry_mode in (CANONICAL_NEW, ADOPT_CURRENT),
+        _require(type(self.entry_mode) is str and self.entry_mode in (CANONICAL_NEW, ADOPT_CURRENT, FIXED_BOARD),
                  "Invalid entry mode.")
+        _require((_identity(self.fixed_game_id) and self.input_revision == self.input_seq
+                  and self.phase == PHASE_V1 and self.initial_flag_count == self.review_inputs == 0)
+                 if self.entry_mode == FIXED_BOARD else self.fixed_game_id is None,
+                 "Invalid fixed-board game/revision/phase binding.")
+        if self.entry_mode == FIXED_BOARD and self.input_seq == 0:
+            _require(self.cursor == (0, 0)
+                     and all(v == CellState.HIDDEN for row in self.observation for v in row),
+                     "Fixed-board origin must be entirely HIDDEN with origin cursor.")
         _require(_integer(self.input_revision) and self.input_revision >= self.input_seq,
                  "Invalid global input revision.")
         _require(type(self.phase) is str and self.phase in (PHASE_FLAG_REVIEW, PHASE_V1),
@@ -125,14 +135,14 @@ class PublicSnapshot:
 def make_snapshot(*, run_id, board_generation, input_seq, width, height, num_mines,
                   observation, cursor, policy_id=POLICY_V1, status="PLAYING",
                   entry_mode=CANONICAL_NEW, input_revision=None, phase=PHASE_V1,
-                  initial_flag_count=0, review_inputs=0):
+                  initial_flag_count=0, review_inputs=0, fixed_game_id=None):
     if type(status) is GameStatus:
         status = status.name
     _require(type(cursor) in (tuple, list), "Cursor must be a coordinate.")
     return PublicSnapshot(run_id, board_generation, input_seq, width, height, num_mines,
                           _detach_grid(observation), tuple(cursor), policy_id, status, entry_mode,
                           input_seq if input_revision is None else input_revision, phase,
-                          initial_flag_count, review_inputs)
+                          initial_flag_count, review_inputs, fixed_game_id)
 
 
 def validate_start_snapshot(snapshot):
@@ -144,7 +154,7 @@ def validate_start_snapshot(snapshot):
     snapshot.__post_init__()
     _require(snapshot.input_seq == snapshot.review_inputs == 0, "START requires owner input zero.")
     flags = sum(value == CellState.FLAGGED for row in snapshot.observation for value in row)
-    if snapshot.entry_mode == CANONICAL_NEW:
+    if snapshot.entry_mode in (CANONICAL_NEW, FIXED_BOARD):
         _require(snapshot.input_revision == 0 and snapshot.cursor == (0, 0)
                  and all(value == CellState.HIDDEN for row in snapshot.observation for value in row),
                  "Canonical START requires pristine all-HIDDEN origin.")
@@ -250,7 +260,7 @@ class Proposal:
                      and all(glyph == CellState.HIDDEN for row in state.observation for glyph in row),
                      "Initial policy requires canonical all-HIDDEN origin.")
         else:
-            _require(state.entry_mode == ADOPT_CURRENT or state.input_seq > 0,
+            _require(state.entry_mode in (ADOPT_CURRENT, FIXED_BOARD) or state.input_seq > 0,
                      "A planned decision cannot replace canonical initial policy.")
             _require(state.input_seq - state.review_inputs < MAX_V1_INPUTS,
                      "V1 input bound exhausted.")
@@ -417,7 +427,7 @@ class Ack:
     def __post_init__(self):
         _require(_identity(self.run_id) and _identity(self.token), "Invalid ACK identity.")
         _require(_integer(self.board_generation) and _integer(self.input_seq, 0, MAX_INPUTS), "Invalid ACK sequence.")
-        _require(type(self.entry_mode) is str and self.entry_mode in (CANONICAL_NEW, ADOPT_CURRENT)
+        _require(type(self.entry_mode) is str and self.entry_mode in (CANONICAL_NEW, ADOPT_CURRENT, FIXED_BOARD)
                  and _integer(self.input_revision, 1)
                  and type(self.phase) is str and self.phase in (PHASE_FLAG_REVIEW, PHASE_V1),
                  "Invalid ACK entry/revision/phase.")

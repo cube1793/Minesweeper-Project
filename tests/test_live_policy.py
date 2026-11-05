@@ -72,7 +72,7 @@ class PublicValueTests(unittest.TestCase):
         self.assertEqual(policy.snapshot_from_dict(wire), state)
         self.assertEqual(set(wire), {"run_id", "board_generation", "input_seq", "width", "height",
                                     "num_mines", "observation", "cursor", "policy_id", "status",
-                                    "entry_mode", "input_revision", "phase", "initial_flag_count", "review_inputs"})
+                                    "entry_mode", "input_revision", "phase", "initial_flag_count", "review_inputs", "fixed_game_id"})
 
 
 class FrozenDecisionTests(unittest.TestCase):

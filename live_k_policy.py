@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from core_engine import Action, CellState, GameStatus
 from live_policy import (
-    ADOPT_CURRENT, CANONICAL_NEW, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
+    ADOPT_CURRENT, CANONICAL_NEW, FIXED_BOARD, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
     _coordinate, _detach_grid, _grid, _identity, _integer, _object,
     _require, _neighbors, supports_v1_board,
 )
@@ -60,8 +60,12 @@ def normal_phase(policy_id):
 
 def definition_for_entry(entry_mode, policy_id=POLICY_K):
     _require(is_k_policy(policy_id), "Invalid K policy.")
-    _require(type(entry_mode) is str and entry_mode in (CANONICAL_NEW, ADOPT_CURRENT, FLAG_ADOPT),
+    _require(type(entry_mode) is str and entry_mode in (CANONICAL_NEW, ADOPT_CURRENT, FLAG_ADOPT, FIXED_BOARD),
              "Invalid K entry mode.")
+    if entry_mode == FIXED_BOARD:
+        return {POLICY_K: "K_P0_PUBLIC_FIXED_BOARD_NATIVE_V1",
+                POLICY_K_LC0: "K_LC0_PUBLIC_FIXED_BOARD_DISTANCE_BAND_V1",
+                POLICY_K_LC1: "K_LC1_PUBLIC_FIXED_BOARD_SINGLETON_BAND_V1"}[policy_id]
     if policy_id == POLICY_K_LC0:
         return {CANONICAL_NEW: LC0_DEFINITION, ADOPT_CURRENT: LC0_ADOPT_DEFINITION,
                 FLAG_ADOPT: LC0_FLAG_ADOPT_DEFINITION}[entry_mode]
@@ -120,7 +124,7 @@ class KSnapshot:
         definition = definition_for_entry(self.entry_mode, self.policy_id)
         policy_phase = normal_phase(self.policy_id)
         _require(_integer(self.start_input_revision)
-                 and ((self.start_input_revision == 0) if self.entry_mode == CANONICAL_NEW
+                 and ((self.start_input_revision == 0) if self.entry_mode in (CANONICAL_NEW, FIXED_BOARD)
                       else (self.start_input_revision > 0)), "Invalid K start input revision.")
         _require(_integer(self.input_seq, 0, self.width * self.height)
                  and _integer(self.input_revision)
@@ -158,6 +162,9 @@ class KSnapshot:
                  and self.base_m_revision == base_revision, "Invalid K base M revision.")
         _require(_grid(self.observation, self.width, self.height)
                  and _coordinate(self.cursor, self.width, self.height), "Invalid K public grid/cursor.")
+        if self.entry_mode == FIXED_BOARD and self.input_seq == 0:
+            _require(self.cursor == (0, 0) and all(v == -2 for row in self.observation for v in row),
+                     "Fixed-board origin must be entirely HIDDEN with origin cursor.")
         for value, expected in ((self.definition, definition),
                                 (self.status, "PLAYING"), (self.profile_sha256, PROFILE_SHA256),
                                 (self.table_sha256, TABLE_SHA256)):
@@ -191,7 +198,7 @@ def validate_start_snapshot(state):
         _require(state.phase == PHASE_BOOTSTRAP, "Flag adoption must start before bootstrap.")
         return state
     _require(any(v == -2 for row in state.observation for v in row), "K START has no HIDDEN input.")
-    if state.entry_mode == CANONICAL_NEW:
+    if state.entry_mode in (CANONICAL_NEW, FIXED_BOARD):
         _require(state.input_revision == 0 and state.cursor == (0, 0)
                  and all(v == -2 for row in state.observation for v in row),
                  "K canonical START requires fresh origin.")
@@ -334,7 +341,7 @@ class KProposal:
                      == ("OPEN", 0, 0, "POLICY_INITIAL_OPEN", "INITIAL")
                      and not self.preinput_m and self.compute_ns == 0, "Invalid K initial policy.")
             return
-        _require((s.entry_mode in (ADOPT_CURRENT, FLAG_ADOPT) or s.input_seq > 0)
+        _require((s.entry_mode in (ADOPT_CURRENT, FLAG_ADOPT, FIXED_BOARD) or s.input_seq > 0)
                  and self.continuation in ("LOCAL_SAFE", "EXACT_SAFE", "EXACT_GUESS"),
                  "Invalid K continuation.")
         _require(self.is_guess == (self.continuation == "EXACT_GUESS"), "K guess continuation mismatch.")

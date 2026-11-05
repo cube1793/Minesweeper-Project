@@ -5,7 +5,9 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live 관람 속도·정밀 CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md): 2026-11-05 최종 source327, 고정 주기/Model C 분리·정확한 CPS 입력·기본200ms·K 라벨 정리. 최종 독립105/1084 및 real3owner/96입력, 사용자 native 수용. 현재 문서/Git authority.
+- [Main/Live 같은 보드·기록·Replay 종료 선택 closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md): 2026-11-05 최종 source333, 기본 canonical 종료/기록 초기화와 명시적 fixed 재플레이/기록 보존. 독립49/143·실제2owner·probe28 및 최종 사용자 native 수용. B40행 산술 재현/B1 미충족, C거리 OOF·민감도 한계를 함께 기록한 현재 문서/Git authority.
+
+- [Main/Live 관람 속도·정밀 CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md): 2026-11-05 최종 source327, 고정 주기/Model C 분리·정확한 CPS 입력·기본200ms·K 라벨 정리. 최종 독립105/1084 및 real3owner/96입력, 사용자 native 수용·28경로 commit/push는4c10217에서 완료된 이전 checkpoint다.
 
 - [Main/Live K-LC1 및 표시 개선 closeout](stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md): 2026-11-04 LC1 연결·Replay 녹화 입력/참고 분석 분리·Auto 확정색 유지, 독립 필수 수정0 및 사용자 native 수용. 이전 source314와30경로 commit/push는68c272e에서 완료됐다. 속도 변경 전 checkpoint다.
 

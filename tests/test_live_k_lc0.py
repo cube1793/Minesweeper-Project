@@ -259,9 +259,9 @@ class LiveLC0OwnerTests(unittest.TestCase):
         permit(owner,p)
 
     def test_wire_v9_rejects_all_old_versions_and_missing_game_id(self):
-        self.assertEqual(PROTOCOL_VERSION,9)
+        self.assertEqual(PROTOCOL_VERSION,10)
         envelope=message('a'*32,0,'START',k.to_dict(lc0(initial())))
-        for version in (True,1,2,3,4,5,6,7,8,10):
+        for version in (True,1,2,3,4,5,6,7,8,9,11):
             with self.subTest(version=version),self.assertRaises(ValueError):
                 validate_message(dict(envelope,version=version))
         data=deepcopy(envelope['payload'])

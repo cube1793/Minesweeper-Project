@@ -29,6 +29,7 @@ main.py ── engine 생성 → UI에 주입
                          │                               ├─ live_flag_review.py (준비 검토)
                          │                               ├─ frozen stage3_planner / runner validator
                          │                               └─ live_k_policy.KOwner → K session/policy
+                         ├─ GUI fixed layout/history ▶ live_same_board.py (policy 입력 아님)
                          ├─ Draw-only Auto cursor ▶ live_auto_cursor.py
                          ├─ Simple analysis ─────▶ simple_decision.py
                          │  / presentation ─────▶ live_analysis.py
@@ -103,7 +104,8 @@ Ops는 8방향으로 연결된 0 영역의 수이고, 3BV는 Ops에 고립 숫�
 | `simple_runner.py` | 현재 engine을 동기 실행하고 guess 전 중단 또는 종료, 실제 행동의 Replay 기록 |
 | `live_analysis.py` | 계산된 Simple/V1/K 증거를 `LiveAnalysis`/overlay/status로 변환, exact 확률 포맷과 Reduction |
 | `live_k_policy.py` | K snapshot/proposal/permit/ACK·safe_cells DTO, exact 추측/확정색 투영, worker-only persistent KOwner |
-| `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v5 wire·검증·ACK·정리 소유권 |
+| `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v10 wire·고정판 provenance·검증·ACK·정리 소유권 |
+| `live_same_board.py` | GUI-only 불변 FixedLayout/FixedOrigin/CompletedLiveGame, 원 배치 재설정과 분리된 완료판 근거 |
 | `live_auto_cursor.py` | mouse-transparent/NoFocus 가상 셀 좌표 보간, 논리 cursor/Model C와 분리 |
 
 Local inference는 열린 숫자 `N`, 인접 깃발 수 `F`, 인접 HIDDEN 집합 `H`로 `N-F` 제약을 만든다.
@@ -685,7 +687,7 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 ### 4.1 Live 입력과 분석·자동 진행
 
-2026-11-05 현재 K-LC1 연결·Replay/확정색에 이어 관람 속도와 정밀 CPS 입력의 범위 한정 독립 검토 및 사용자 native 수용을 마쳤다. 현재 [속도/CPS 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)을 우선한다. [LC1 및 표시 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)은 이전 checkpoint다. [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md), [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md), [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 버전별 역사다.
+2026-11-05 현재 같은 보드 재플레이·그룹 기록·ACK 정리 뒤 Replay 진입과 기본/명시 종료 선택까지 범위 한정 독립 검토 및 사용자 native 수용을 마쳤다. 현재 [같은 보드/Replay 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)과 기존 [속도/CPS 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)을 따른다. [LC1 및 표시 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)은 이전 checkpoint다. [LC0 Main 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC0_CLOSEOUT.md), [K 인수/UI 계약](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md), [이전 Simple/V1](docs/stage3-extended/STAGE3_MAIN_LIVE_SIMPLE_V1_CLOSEOUT.md)은 버전별 역사다.
 
 새 판은 수동 가능·Auto OFF·guess OFF다. Simple/V1/K 계열 모두 수동 board press에서 Auto와 guess를 끄고 원 gesture를 이어간다. Auto OFF만으로는 유효 pending을 보관한다. 별도 추천·계산 종료 버튼은 제거했다. 정책 변경은 옛 owner retire 뒤 다음 명시 ON에 적용하고 판·기록을 보존한다. 재인수 전에는 옛 owner의 exit/reap/tree0/private cleanup을 확인한다.
 
@@ -693,7 +695,7 @@ K-P0/K-LC0/K-LC1은 세 preset의 canonical 새 판과 현재 판 ADOPT/재인�
 
 worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 반환한다. GUI는 yield 없이 최종 비교→token 소비→step1을 수행하고 정확한 원 입력의 ACK 뒤 NEXT로 간다. ACK 중 수동 인계는 불변 _KInputReceipt로 기존 입력/game/Replay prefix를 확인하며 현재 수동 판을 과거 상태로 되돌리거나 NEXT를 보내지 않는다. 실제 ACK/이력/정리 오류의 fail-closed와 최초 원인 기록은 유지한다.
 
-현재 공통 wire v9이며 KSnapshot에 필수 game_id가 있다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
+현재 공통 wire v10이며 KSnapshot의 game_id와 V1 fixed_game_id/고정판 정의를 entry provenance에 결속한다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
 
 Simple Main 준비는 live_simple_preparation.py에서 공개 FLAG-masked 직접 zero/all·전체 지뢰 수로 기존 FLAG를 확인한다. 기존 Simple planner는 불변이다. 수동 입력은 준비 epoch를 폐기하고 Auto를 끈다. 실제 준비 입력은 event를 남긴다. Model C 표 밖(dx≥30 또는 dy≥16) 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled 입력 수로 기록하며 0비용이나 완전 합계로 표현하지 않는다.
 
@@ -713,7 +715,7 @@ Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일
 
 고정 모드는 PreciseTimer, Model C는 기존 timer type이다. deadline은 time.perf_counter_ns(QPC), 원형은 perf_counter 초를 쓴다. timer의 조기 callback은 남은 시간을 재대기한다. Model C는 원 행동 비용/배속(0.05–8)의 ceil-ms 관람 지연이며 고정 위상 보정을 적용하지 않는다. frozen 비용 기록·원 추론·worker/job/transport는 바꾸지 않는다.
 
-성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이·burst 보장·거리별 추가 보정은 아직 구현하지 않았다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
+성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이는 아래 계약으로 수용했다. burst 처리량 보장·거리별 추가 관람 프로필은 구현하지 않았으며 B1 측정 조건은 미충족이다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
 
 ```text
 사용자 입력 / Live Auto timeout
@@ -756,6 +758,20 @@ Engine은 physical press/release/origin 정책을 모르며 semantic OPEN/FLAG/C
 
 추측 허용이 OFF이면 guess 추천과 overlay를 유지한 채 대기한다. 사용자가 직접 행동하면 Auto/guess를 끄고 예약을 취소한 뒤 새 상태에서 표시를 갱신한다. Reset·난이도 변경·Replay 진입·창 닫기·게임 종료·분석 오류도 예약을 취소한다. 행동을 여러 개 queue하지 않으며 비종료 Auto 행동 후 HIDDEN 수가 줄지 않으면 중단한다.
 
+#### Main/Live 같은 보드 기록과 Replay 전환
+
+`live_same_board.py`의 FixedLayout/FixedOrigin/CompletedLiveGame은 GUI 전용 불변 모델이다. Live WON/LOST·원 입력 확인·owner 정리 후 원 dimensions/지뢰 수/전체 mine 좌표로 모두 닫힌 새 판을 만든다. 새 game_id·세대·시간/입력/Replay/M과 Auto/guess를 초기화하되 정책·속도·표시 선호는 유지한다. layout은 engine 재설정에만 쓰고 public worker snapshot에는 넣지 않는다.
+
+고정판은 FIXED_BOARD provenance로 시작하며 CANONICAL_NEW 안전 첫 수를 재사용하지 않는다. revision0/all-HIDDEN에서도 첫 proposal부터 공개 관측의 정상 분석·선택, guess gate를 거친다. 첫 OPEN 지뢰 LOST는 정상이다. 공통 wirev10과 game/entry/definition/세대 결속으로 고정판을 canonical로 위장하지 못하게 한다. V1/K preset/custom 지원 경계는 기존과 같다.
+
+기록은 첫 Live 재플레이로 활성화된 동일 FixedLayout 묶음이다. 현재 완료판은 메뉴/Replay 진입 전 원 Live engine·이력·정리 근거로 캡처하고 game_id로 중복을 제거한다. detached Replay/evidence/source_type은 보존한다. 새 게임/난이도/다른 배치의 성공한 진입/기본 Replay 종료는 그룹·메뉴를 비운다. 같은 배치 재플레이·취소·invalid load는 유지하며 옛 QAction/closure는 무효다. imported/진행 중 Replay를 완료 Live로 만들지 않는다.
+
+Replay 진입은 _ReplayEntryRequest에 원 game/세대/정책/전체 이력·상태/owner와 frozen ReplayData를 결속한다. Auto/guess·입력 예약을 회수한 뒤 Live에서 ACK/cleanup을 기다린다. 원 ACK validator 뒤 observer, 원 finished handler 앞 구체적 실패 guard, finished 뒤 queued commit 순서다. V1은 ACK 검증에 필요한 owner/세대를 유지하고 K는 봉인 receipt drain을 쓴다. 정상 정리 후 단 한 번 전환하며 실패하면 Live와 최초 구체 사유를 유지한다. reset/난이도/정책/수동 첫 press/close는 예약을 폐기한다.
+
+기본 _exit_replay_mode()는 Replay 크기/지뢰 수로 일반 canonical 미배치 새 게임을 만들고 기록을 비운다. keyword-only same_board=True 또는 명시적 같은 보드 버튼은 Replay 원 배치의 fixed 새 판과 기존 동일 배치 기록을 유지한다. 두 경로 모두 가드를 mutation 전에 확인하고 저장 파일을 지우지 않는다. NoFocus 버튼/키 규칙을 유지하며 기존 on_reset의 Replay no-op를 기본 종료 경로로 잘못 호출하지 않는다.
+
+최종 독립49/143·실제 V1 canonical/K-LC1 fixed2owner·probe28과 사용자 native 수용은 [같은 보드 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)에 결속한다. 기존 보호 메서드 본문과 바뀐 호출 경로/signal을 구분한다. B 측정40행은 산술 재현됐으나 B1 동일 owner별60입력은 미충족, C30판/24player의 거리 적합은 민감도 순위 역전이 있어 제품 관람 프로필을 확정하지 않았다. frozen 정책·Model C와 효과성/Production 판정은 유지한다.
+
 ### 4.2 UI 없는 동기 runner
 
 `run_simple(engine, *, accept_guesses=False)`는 pure analyzer와 달리 engine을 변경하는 실행 계층이다. [첫 수 정책](#first-click)을 적용한 뒤 **physical action 한 번 → fresh observation → 다시 분석**을 반복한다.
@@ -768,6 +784,8 @@ Engine은 physical press/release/origin 정책을 모르며 semantic OPEN/FLAG/C
 결과 `SimpleRunResult`는 frozen dataclass로, `status`, `stop_reason`(`WON`, `LOST`, `GUESS_REQUIRED`), 이번 호출의 `moves`, `replay_data`, 미실행 `pending_decision`, `started_from_hidden`을 담는다. Guess 대기 중 engine status는 PLAYING이다. 중간 합류 기록의 범위는 [schema v1 한계](#replay-schema-v1)를 따른다.
 
 ### 4.3 Replay 기록과 재생
+
+Replay 진입은 원 ACK와 owner 정리를 마친 뒤 한 번만 commit한다. 기본 종료는 현재 Replay 크기의 canonical 미배치 새 게임과 기록 초기화, 명시적 같은 보드 버튼은 fixed 원 배치와 기존 그룹 보존이다. 위 Main/Live 계약과 [최종 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)을 따른다.
 
 ```text
 Live UI / simple_runner
@@ -869,7 +887,7 @@ Explorer는 처음·이전·다음·마지막, slider와 간격을 조절하는 
 - `step()`의 반환은 `(observation, reward, terminated, truncated, info)`이며 `info`에는 기본 통계가 들어간다. Gymnasium 스타일이지만 Gymnasium environment 자체는 구현하지 않았다.
 - 게임 중 범위 내 지원 action은 해당 category의 active 또는 wasted 한쪽에 한 번만 집계한다. Terminal 이후 입력과 범위 밖 입력은 클릭으로 세지 않는다.
 - UI의 `self.engine`은 주입된 Live engine을 계속 유지한다. ReplayPlayer는 별도 engine을 소유하며 seek 때 교체할 수 있어 UI는 현재 모드의 engine을 매번 선택한다.
-- Replay 종료는 같은 Live engine을 저장한 난이도로 reset한다. 이전 Live position의 재개 기능은 아니다.
+- Replay 종료의 기본은 같은 Live engine을 현재 Replay 크기의 canonical 새 판으로 재구성하고 그룹을 비우는 것이다. 명시적 같은 보드 선택만 원 layout의 fixed 새 판과 그룹을 유지한다. 이전 Live position의 재개 기능은 아니다.
 
 <a id="public-information"></a>
 
@@ -895,7 +913,7 @@ Simple/Replay 및 일반 frozen planner는 깃발을 지뢰로 가정한다. V1 
 
 Engine은 **미배치 상태의 첫 OPEN 한 칸만** 지뢰 후보에서 제외한다. 주변 8칸의 안전이나 첫 숫자 0은 보장하지 않는다. 먼저 FLAG하면 안전지대 없이 지뢰를 배치하며, 이를 해제해도 배치는 유지된다. `reset_with_mines()`도 지정된 배치를 그대로 사용한다.
 
-아래는 기존 Simple/runner/Replay의 PLAYING 정책이다. V1은 별도로 CANONICAL_NEW의 fresh provenance·placement 전·all-HIDDEN·revision0·cursor(0,0)·owner seq0만 canonical 예외로 인정한다. 수동 입력/FLAG→UNFLAG 뒤 all-HIDDEN도 ADOPT_CURRENT seq0이며 guess gate를 따른다.
+아래는 기존 Simple/runner/Replay의 PLAYING 정책이다. V1/K의 CANONICAL_NEW는 fresh provenance·placement 전·all-HIDDEN·revision0·cursor(0,0)·owner seq0에 결속된다. 기본 Replay 종료는 이 일반 새 판 규약으로 돌아간다. 명시적 FIXED_BOARD는 이미 배치된 공개 all-HIDDEN 상태로 정상 분석/guess gate를 거치며 initial 안전 예외가 아니다. 수동 입력/FLAG→UNFLAG 뒤 all-HIDDEN도 ADOPT_CURRENT seq0이며 guess gate를 따른다.
 
 | 상황 | 분석·실행 정책 |
 | --- | --- |

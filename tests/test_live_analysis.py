@@ -557,7 +557,7 @@ class LiveAnalysisUITests(unittest.TestCase):
         ))
         controls = (self.ui.analysis_checkbox, self.ui.probability_checkbox,
                     self.ui.reduction_checkbox, self.ui.analyze_button)
-        with patch("ui_manager.analyze_position") as analyze:
+        with patch("ui_manager.analyze_position", wraps=analyze_position) as analyze:
             self.ui._enter_replay_mode(player)
             self.assertIn("첫 클릭 참고 후보", self.ui.analysis_status_label.text())
             self.assertTrue(all(control.isEnabled() for control in controls))
@@ -573,10 +573,14 @@ class LiveAnalysisUITests(unittest.TestCase):
             self.assertEqual(player.current_index, 0)
             self.assertEqual(self.engine.get_observation(), before)
             self.assertIn("첫 클릭 참고 후보", self.ui.analysis_status_label.text())
+            analyze.assert_not_called()
             self.ui.on_exit_replay()
             self.assertIs(self.ui.engine, self.engine)
             self.assertTrue(all(control.isEnabled() for control in controls))
-            self.assertIn("첫 클릭 추천", self.ui.analysis_status_label.text())
+            self.assertTrue(self.ui._analysis_first_click)
+            self.assertFalse(self.ui._fixed_board_start())
+            self.assertIsNone(self.ui._live_fixed_origin)
+            self.assertFalse(self.engine.get_board_snapshot().mines_placed)
         analyze.assert_not_called()
         self.ui.analysis_checkbox.setChecked(False)
         self.ui.on_right_click(1, 1)
