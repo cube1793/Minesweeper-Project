@@ -100,6 +100,48 @@ class LivePolicyJobTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.job.start(initial_snapshot("b" * 32))
 
+    def test_directory_hint_only_dispatches_the_current_published_reply_once(self):
+        _, _, directory, _ = self.launch()
+        self.job.timer.start()
+        proposal = plan_snapshot(initial_snapshot())
+        with patch.object(self.job, "poll", wraps=self.job.poll) as poll:
+            self.job._on_channel_changed(str(directory))  # only our own START exists
+            self.publish("PROPOSAL", proposal_to_dict(proposal))
+            self.job._on_channel_changed(str(directory.parent / "retired"))
+            poll.assert_not_called()
+            self.job._on_channel_changed(str(directory))
+            self.job._on_channel_changed(str(directory))
+            poll.assert_called_once_with()
+        self.assertEqual(self.job.pending, proposal)
+        self.assertEqual(len(self.proposals), 1)
+
+    def test_directory_hint_cannot_rescue_a_reply_at_its_original_deadline(self):
+        _, process, directory, _ = self.launch()
+        self.job.timer.start()
+        self.publish("PROPOSAL", proposal_to_dict(plan_snapshot(initial_snapshot())))
+        self.now = self.job._deadline
+        self.job._on_channel_changed(str(directory))
+        self.assertFalse(self.proposals)
+        self.exit(process, 1)
+        self.assertEqual(self.job.last_record["status"], "TIMEOUT")
+        self.assertTrue(self.job.last_record["cleanup_complete"])
+        self.assertIsNone(self.job._reply_watcher)
+        self.assertFalse(directory.exists())
+        self.job._on_channel_changed(str(directory))
+        self.assertFalse(self.proposals)
+
+    def test_unavailable_directory_watch_keeps_the_periodic_poll(self):
+        with patch.object(jobs, "QFileSystemWatcher") as watcher:
+            watcher.return_value.addPath.return_value = False
+            self.launch()
+        self.assertIsNone(self.job._reply_watcher)
+        watcher.return_value.deleteLater.assert_called_once_with()
+        self.assertEqual(self.job.timer.interval(), 25)
+        proposal = plan_snapshot(initial_snapshot())
+        self.publish("PROPOSAL", proposal_to_dict(proposal))
+        self.job.poll()
+        self.assertEqual(self.job.pending, proposal)
+
     def test_pending_has_no_deadline_and_does_not_plan_again(self):
         proposal, _, directory, _ = self.ready_proposal()
         self.now = 100000

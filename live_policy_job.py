@@ -8,14 +8,14 @@ import sys
 import tempfile
 from time import monotonic, sleep
 
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PyQt5.QtCore import QFileSystemWatcher, QObject, QTimer, pyqtSignal
 
 from experiments.random_expert_exhibition_process import CREATE_SUSPENDED, create_scope
 from live_policy import (
     PublicSnapshot, ack_from_dict, ack_to_dict, make_ack, proposal_from_dict,
     snapshot_from_dict, snapshot_to_dict, validate_ack, validate_start_snapshot,
 )
-from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, write_once
+from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, worker_reply_exists, write_once
 import live_k_policy as k_live
 
 
@@ -49,6 +49,7 @@ class LivePolicyJob(QObject):
         self.records = []
         self._active_run_id = None
         self._process = self._scope = self._directory = self._temp_parent = None
+        self._reply_watcher = None
         self._pending = self._sent_ack = self._expected_snapshot = None
         self._start_snapshot = None
         self._sequence = 0
@@ -117,6 +118,12 @@ class LivePolicyJob(QObject):
         try:
             self._temp_parent = Path(tempfile.gettempdir()).resolve()
             self._directory = Path(tempfile.mkdtemp(prefix=PREFIX, dir=self._temp_parent)).resolve()
+            watcher = QFileSystemWatcher(self)
+            if watcher.addPath(str(self._directory)):
+                self._reply_watcher = watcher
+                watcher.directoryChanged.connect(self._on_channel_changed)
+            else:
+                watcher.deleteLater()  # The periodic poll also handles missed notifications.
             write_once(self._directory, "parent", 0,
                        message(snapshot.run_id, 0, "START", self._snapshot_dict(snapshot)))
             env = os.environ.copy()
@@ -139,6 +146,17 @@ class LivePolicyJob(QObject):
             self._request_stop()
         self.timer.start()  # Do not emit before start returns its run identity.
         return snapshot.run_id
+
+    def _on_channel_changed(self, directory):
+        if (self._directory != Path(directory) or self._awaiting is None
+                or not self.timer.isActive() or self._intent or self._failure or self._shutting_down):
+            return
+        try:
+            published = worker_reply_exists(self._directory, self._sequence)
+        except (OSError, ValueError):
+            return  # The periodic poll reports channel failures through the usual path.
+        if published:
+            self.poll()
 
     def request(self, snapshot):
         snapshot = (k_live.from_dict(k_live.to_dict(snapshot), k_live.KSnapshot)
@@ -463,6 +481,13 @@ class LivePolicyJob(QObject):
         if self._directory is None:
             return
         directory = self._directory
+        if self._reply_watcher is not None:
+            watcher, self._reply_watcher = self._reply_watcher, None
+            watcher.directoryChanged.disconnect(self._on_channel_changed)
+            paths = watcher.directories()
+            if paths:
+                watcher.removePaths(paths)
+            watcher.deleteLater()
         if (directory.resolve() != directory or directory.parent != self._temp_parent
                 or not directory.name.startswith(PREFIX) or directory.is_symlink()):
             raise RuntimeError(f"Private cleanup path failed containment: {directory}")

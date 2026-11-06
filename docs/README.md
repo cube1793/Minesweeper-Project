@@ -5,6 +5,10 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
+- [Main/Live 고정 6 CPS 최적화·사용자 확인](stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md): 검토된 결합 후보 4경로 반영, 직접 3쌍의 간격 개선 중앙값 12.484226%, H1 완료, 별도 R2 56개 통과. 이번 PC의 세 모드·Replay native 수용 완료, 전시 노트북은 대기. 원 PARTIAL/증분 FAIL/index 이력과 목표 10 CPS의 비정형 사용자 관측을 구분한다. 문서·Git·Desktop 마감 준비 중이다.
+
+- [Main/Live 거리 관람·성능 진단·실행 도구 보완](stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md): 2026-11-06 source335, 거리 모드와 T1/T2 및 새 helper의 범위 한정 독립 수용. 원 main PARTIAL 이력은 유지한다. 이후 성능 보완과 이번 PC native 수용은 위의 고정 6 CPS closeout에 결속하며 전시 노트북 확인은 별도다.
+
 - [Main/Live 고속 CPS 제한 진단 closeout](stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md): 2026-11-05 source333/cd8ee2e, V1/K-LC1 고정0ms 여섯 run과 원시 자료의 묶음 독립 수용, 필수 수정0·제품 결함0. 하네스 MIN/TRACE·중첩 비용·실패 이력·후속 분해 후보를 기록한 현재 성능 근거다. 안정 CPS 상한·단독 병목·최적화는 확정하지 않았다.
 
 - [Main/Live 같은 보드·기록·Replay 종료 선택 closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md): 2026-11-05 최종 source333, 기본 canonical 종료/기록 초기화와 명시적 fixed 재플레이/기록 보존. 독립49/143·실제2owner·probe28 및 최종 사용자 native 수용. B40행 산술 재현/B1 미충족, C거리 OOF·민감도 한계를 함께 기록한 기능 checkpoint다. 실제26경로 commit/push는 cd8ee2e에서 완료됐다.
@@ -148,7 +152,9 @@ Program K effectiveness is **NOT ESTABLISHED**. This is not PHASE1_NO_GO, an E2
 failure or proof of ineffectiveness. Production K integration is **NOT STARTED**;
 Gate P is **NOT PASSED**. Frozen specifications remain unchanged historical authorities.
 
-**CURRENT NEXT (2026-11-05): 속도/CPS 문서28경로 plan → 사용자 일괄 stage·commit·push → 실제 receipt 검증 → recovery 교체.**
+아래는 2026-11-05 작성 당시의 Git 준비 snapshot이다. 현재 다음 단계는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)와 [거리 관람 closeout](stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md)을 따른다.
+
+**이전 NEXT (2026-11-05): 속도/CPS 문서28경로 plan → 사용자 일괄 stage·commit·push → 실제 receipt 검증 → recovery 교체.**
 현재 작성 기준 main/HEAD=local origin/main=68c272e7272032cdfe9774a36d41c3686a8f375e,0/0,staged0이다. source/tests22+문서6(M14/U14)이 미커밋이다. 이전 LC1/표시30경로는68c272e에서 완료됐으며 옛 script는 반복하지 않는다. 새 output/계약/향후 같은 보드 재플레이·burst 측정은 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따른다.
 
 K 확정색은 원 safe의 초록/HIDDEN M의 빨강 표시이며, 표시를 위해 실제 FLAG·원 추론·M·Model C를 바꾸지 않습니다. 독립 검토 302 method/356 subtest + worker 2개와 사용자의 직전 native 5항목 “모두 통과야.”를 별도 기록합니다. 모든 DPI/OS·preset별 완주·전체 suite·효과성 승인은 아닙니다. 위302/356 검증은 당시 확정색 snapshot의 역사입니다. 이후 같은 판 K 인수/재인수·LC0/LC1 Main 연결·표시 개선도 완료했으며 현재 계약은 최신 closeout을 따릅니다.

@@ -12,9 +12,11 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 현재 범위 사용자 수용
+## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 
 2026-11-05 기준 **같은 보드 재플레이·동일 배치 기록·ACK/정리 후 Replay 진입·기본/명시 종료 선택까지 범위 한정 독립 검토 및 최종 사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
+
+2026-11-06 추가한 **거리 기반 관람 모드**와 후속 **고정 6 CPS 성능 보완**은 독립 검토와 이번 PC의 사용자 native 확인을 마쳤습니다. 사용자 확인은 세 속도 방식의 진행·중단과 Replay 두 종료 뒤 설정 보존에 한정하며, 전시 노트북 확인은 별도 대기입니다. 원 본작업의 실행계약 PARTIAL은 [거리 관람 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md), 후속 최적화·검토·반영은 [고정 6 CPS 최적화 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md)에서 구분합니다.
 
 새 판은 수동 가능·Auto OFF·추측 허용 OFF입니다. K-P0/K-LC0/K-LC1은 초급·중급·상급에서 새 판과 수동/Simple/V1로 진행한 현재 판을 인수하고, 정상 수동 인계 뒤 재인수할 수 있습니다. 기존 깃발은 공개 정보로 확인·정리하므로 사용자가 모두 해제할 필요는 없습니다. 미확인 깃발은 오답/안전 판정이 아니며 실제 지뢰의 깃발도 해제될 수 있습니다. V1과 K 계열의 사용자 지정 보드는 미지원입니다.
 
@@ -26,13 +28,17 @@ K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN
 
 ### 자동 진행 속도
 
-새 창은 **고정 간격 200ms / 목표 CPS 5**입니다. 고정 모드에서는 간격과 목표 CPS를 서로 환산하고, Model C 모드에서는 배속만 표시합니다. CPS 6을 입력하면 6을 유지하며 내부 주기는 약166.667ms입니다. 화면에 반올림된 값이 실행 주기를 덮어쓰지 않습니다.
+새 창은 **고정 간격 200 ms / 목표 CPS 5**입니다. 고정 모드에서는 간격과 목표 CPS를 서로 환산하고, Model C와 거리 기반 모드에서는 각 배속을 조절합니다. CPS 6을 입력하면 6을 유지하며 내부 주기는 약 166.667 ms입니다. 화면에 반올림된 값이 실행 주기를 덮어쓰지 않습니다.
 
 고정 속도는 예정 입력 주기를 유지하되 작은 지연만 보정합니다. 200ms에서 일부 간격은180ms까지 짧아질 수 있고, 큰 지연 후에는 새 주기로 시작해 밀린 입력을 몰아 실행하지 않습니다. 계산이 늦으면 목표 CPS에 미달할 수 있습니다. 왼쪽 Counters CPS는 실제 클릭/게임 시간이고 목표 설정과 별도입니다.
 
 **Model C 기반**은 기존 거리별 행동 비용을 배속으로 나눈 관람 지연입니다. 고정 CPS와 다른 방식이며 원 정책·비용 표는 바꾸지 않습니다. 현재 창에서 바꾼 간격·배속은 reset/정책 변경/Replay 왕복 후에도 유지합니다.
 
+**거리 기반**은 이미 정해진 다음 입력까지의 거리에 따라 관람 대기를 조절하는 별도 모드입니다. 배속은 0.05–8배이며 고정값·Model C 배속과 각각 보존됩니다. 1배의 기본 대기는 약 91.7–550 ms이고, 0.05배에서는 관람 대기만 최대 11초입니다. 다음 입력을 고른 뒤 대기하므로 실제 간격에는 계산·통신 시간도 포함됩니다. **배속 2배가 실측 CPS 2배를 보장하지 않습니다.** 기존 정책 선택, Model C 비용, Replay 시계는 바꾸지 않습니다.
+
 V1/K-LC1의 0ms 저부하 [고속 CPS 제한 진단](docs/stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)은 여섯 측정과 원시 자료의 독립 검토를 마쳤습니다. 계산·통신·화면 갱신의 시간을 일부 구분했으며, 일반 처리량 상한이나 단독 병목을 확정한 결과는 아닙니다. 최적화와 원 정책·속도 계약 변경은 수행하지 않았습니다.
+
+후속 [성능·거리 관람 작업](docs/stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md)의 당시 22회 측정에서는 렌더 후보를 사전 기준 미달로 되돌렸습니다. 이후 별도 실전 보드 검증에서 동일 스타일시트 재설정 생략과 worker 응답 알림을 결합한 후보를 독립 수용하고 정확히 반영했습니다. 원본 대비 평균 입력 간격 개선율 중앙값은 12.484226%, 결합본은 약 5.77–5.80 CPS였으며 해당 기계·보드·세션의 결과입니다. 일반 안정 상한·모든 부하·노트북 성능의 보장이 아닙니다. 사용자가 별도로 보고한 목표 10 CPS에서의 약 8–9 CPS도 측정 방식·구간이 미확인인 참고 관측으로 남깁니다.
 
 ### 같은 보드 재플레이와 기록
 
@@ -232,6 +238,8 @@ python -B -m experiments.program_k_trace_comparison_demo
 [Program K 연구 데모 closeout](docs/stage3-extended/STAGE3_PROGRAM_K_RESEARCH_DEMO_CLOSEOUT.md)에
 기록했습니다. 후속 새 실행 전시는 아래 별도 source 기능입니다.
 Extended 전체는 **ACTIVE**이며 전체 종료나 Stage 4 전환을 결정하지 않았습니다.
+아래는 **2026-11-05 문서 작성 당시의 snapshot**입니다. 이후 마감과 현재 거리 관람 상태는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 우선합니다.
+
 **2026-11-05 현재 Main K-LC1·표시 개선에 이어 속도/CPS 입력까지 범위 한정 독립 검토·사용자 native 수용을 마쳤고 문서/Git 준비 중입니다.**
 작성 기준 main/HEAD=local origin/main=68c272e7272032cdfe9774a36d41c3686a8f375e,0/0,staged0입니다.
 이번 source/tests22 + 문서6 =28경로(M14/U14)는 미커밋입니다. 이전 LC1/표시30경로는68c272e에서 완료됐습니다.
@@ -462,8 +470,9 @@ Minesweeper-Project/
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
 ├─ live_policy_worker.py        # public-only V1/K worker dispatch
-├─ live_policy_transport.py     # v4 strict wire·sequence·payload 경계
+├─ live_policy_transport.py     # v10 strict wire·sequence·payload 경계
 ├─ live_auto_cursor.py          # 입력과 분리된 가상 원형 커서
+├─ live_distance_pacing.py      # 별도 거리 관람 수식·배속·정확한 대기 deadline
 ├─ stage3_identity.py           # 동결 Stage-3 알고리즘 identity
 ├─ stage3_physical.py           # Model C/profile/table identity·인증·비용
 ├─ stage3_execution.py          # 고정 expert 보드 identity + 완료된 V1 실행

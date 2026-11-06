@@ -52,6 +52,11 @@ def _path(directory, direction, seq):
     return directory / f"{direction}-{seq:08d}.json"
 
 
+def worker_reply_exists(directory, seq):
+    """Cheap wake-up hint. Only read_next validates a published reply."""
+    return _path(directory, "worker", seq).exists()
+
+
 def write_once(directory, direction, seq, envelope):
     """Publish a closed file atomically without replacing any existing message."""
     validate_message(envelope, seq=seq)

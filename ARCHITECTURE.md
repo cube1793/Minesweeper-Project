@@ -709,15 +709,29 @@ Live Space/Return/Enter는 새 게임 한 번, Replay Space는 기존 재생/일
 
 #### Main/Live 관람 속도
 
+2026-11-06의 추가 거리 모드는 [거리 관람 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md), 후속 성능 보완은 [고정 6 CPS 최적화 closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md)을 따른다. 검토된 최적화 bytes 반영 뒤 이번 PC의 사용자 native 수용을 마쳤고 전시 노트북은 별도 대기다. 기존 고정/Model C의 실행 계약과 회계는 유지한다.
+
 기본은 고정200ms/목표5CPS다. 고정 모드의 실행 권위는 FixedPeriod.period_ns 하나다. 정확한 Fraction 입력을 ns로 올림하고 표시 반올림을 되먹이지 않는다. 6CPS는166,666,667ns이며 사용자가 입력한6을 유지한다. 같은 주기 재확정은 timer/phase/nonce를 바꾸지 않고 실제 주기 변경만 drain 후 재예약한다. 고정 간격·목표 CPS와 Model C 배속은 모드별로 표시하며 숨긴 편집기의 늦은 commit을 막는다.
 
 고정 목표 T와 실제 입력 A를 분리한다. 0<=10*(A-T)<=P이면 다음 목표는T+P, 그 밖에는A+P로 재시작한다. 각 입력은 자기 목표 이전에 실행하지 않으며 작은 보정의 최소 간격은0.9P다. Auto/owner/수동/모드 전환의 위상 수명을 따로 관리하고 밀린 입력을 몰아 실행하지 않는다. K의 현재 proposal은 먼저 VALIDATE할 수 있지만 permit은 목표까지 보관한다. due 시 재검증→token→step의 기존 무yield 구간과 정확ACK 뒤 NEXT는 유지한다.
 
-고정 모드는 PreciseTimer, Model C는 기존 timer type이다. deadline은 time.perf_counter_ns(QPC), 원형은 perf_counter 초를 쓴다. timer의 조기 callback은 남은 시간을 재대기한다. Model C는 원 행동 비용/배속(0.05–8)의 ceil-ms 관람 지연이며 고정 위상 보정을 적용하지 않는다. frozen 비용 기록·원 추론·worker/job/transport는 바꾸지 않는다.
+고정 모드와 새 거리 모드는 PreciseTimer, Model C는 기존 timer type이다. deadline은 time.perf_counter_ns(QPC), 원형은 perf_counter 초를 쓴다. timer의 조기 callback은 남은 시간을 재대기한다. Model C는 원 행동 비용/배속(0.05–8)의 ceil-ms 관람 지연이며 고정 위상 보정을 적용하지 않는다. 거리 모드 추가 자체는 frozen 비용 기록·원 추론·worker/job/transport를 바꾸지 않았다. 아래 후속 최적화도 비용·정책·wire·deadline 계약은 유지한다.
 
-성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이는 아래 계약으로 수용했다. burst 처리량 보장·거리별 추가 관람 프로필은 구현하지 않았으며 B1 측정 조건은 미충족이다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
+`live_distance_pacing.py`의 `DistanceWait`는 이미 선택된 target과 public/actual cursor 사이의 Euclidean 칸 거리로 version 고정된 `distance_view_log_v1` 관람 시간을 만든다. Decimal precision 50의 sqrt/ln, 정확한 Fraction 배속, ns 올림을 사용한다. 1배의 대기는 약 91.7–550 ms이며 배속 0.05–8은 원 Model C 배속과 독립이다. 제품은 사용자 outputs를 읽지 않고 상수와 provenance hash만 포함한다. 이 수식은 기존 descriptive fit의 관람 기본안이며 원 연구 Model C나 정책 비용을 대체하지 않는다.
+
+`_fixed_pacing_active()`는 고정/Model C/거리 모드를 명시적으로 구분한다. 거리 관람은 proposal 이후 시작하고 종료된 뒤 K VALIDATE→ADMITTED로 진행한다. 최대 11초 대기 동안 permit을 미리 보관하거나 원 cap을 늘리지 않는다. 원형은 동일 기간을 사용한다. 취소·모드/배속 변경·수동 인계·보드/Replay 전환은 기존 nonce·reservation·permit 폐기 경로를 따른다.
+
+거리 metadata는 `live_input_records.distance_view`에만 추가되며 원 action/Model C/compute/Replay 회계는 유지한다. Simple의 내부 UI Live UUID와 policy owner가 없는 입력의 null run_id를 같은 owner로 결합하지 않는다. 미지원 보드에서는 실효 고정 모드이며 지원 복귀와 Replay 두 종료 후에도 세 모드의 선호를 보존한다.
+
+성능 주 지표는 Auto 입력 사이 (N-1)/Δt다. UI 왼쪽의 전체 클릭/게임 경과 CPS는 별도 통계다. 같은 보드 재플레이는 아래 계약으로 수용했다. 거리 관람은 추가됐지만 burst 처리량 보장·B1 동일 owner별 60입력·일반 안정 상한은 미확정이다. 실제 거리 간격은 관람 대기에 계산·통신·검증 시간이 더해지므로 배속과 CPS는 비례하지 않는다. 세 K 정책의 Main 라벨에서 “(실험적)”을 제거했지만 연구/Production 판정은 그대로다.
 
 [고속 CPS 제한 진단](docs/stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)은 source333/cd8ee2e에서 V1/K-LC1의 고정0ms·하네스 MIN/TRACE/MIN 여섯 run을 독립 수용했다. 실제 입력 후 `_apply_live_action`의 Replay·render·통계 갱신이 ACK 게시 앞에 있고, 정확 ACK 뒤 NEXT가 이어진다. 부모 단일 process anchor만 gap을 비중첩 분할하며 worker 계산/검증·transport·UI 소계는 중첩 설명이다. 성공 read_next와 render_board가 후속 분해 후보지만 순수 poll/IPC 원인·안정 상한은 미확정이고 최적화는 미수행이다. setup timerType1을 실행 중 Auto timer의 관측으로 쓰지 않으며 고정 모드 PreciseTimer 계약은 유지한다.
+
+후속 22회 진단 당시의 렌더 후보는 미채택·복원했다. 원 main의 outer Job 미적용 PARTIAL은 보존하며, 외부 측정 helper 보완과 T1/T2는 별도 독립 수용이다. 이후 실전 고정 6 CPS 작업의 G01에서 실제 owner/worker graph를 검증해 해당 helper 재사용 조건을 채웠다. 이 외부 controller는 일반 Main의 제품 worker 구조를 교체하지 않는다.
+
+현재 `_render_cell`은 목표 스타일시트와 widget의 실제 `styleSheet()` 문자열이 다를 때만 setter를 호출한다. font/text 경로와 외부 스타일 변경의 복구는 유지한다. `LivePolicyJob`은 private 채널의 `QFileSystemWatcher` 알림에서 기대 worker 파일의 존재를 확인하고 기존 `poll()`만 호출한다. 힌트는 입력 승인이 아니며 25ms fallback, 원 deadline, strict read/seq/nonce/token/ACK 검증을 유지한다. watcher는 채널 삭제 전에 disconnect/remove/deleteLater하며 늦은 알림은 기존 상태 가드로 거부한다.
+
+이 결합본의 원본 대비 직접 3쌍은 간격 개선 중앙값 12.484226%, CPU/입력 +3.856749%로 사전 기준 안이었다. 앞선 C2의 C1 대비 추가 효과 4.820778% < 5% 및 CPU +13.17%는 별도 비교 결과로 유지한다. Git 보호 도구에는 `diff.autoRefreshIndex=false`와 모든 Git 읽기 뒤 최종 index 해시 기록을 적용했다. 과거 index raw-byte gate FAIL을 소급 수정하지 않는다.
 
 ```text
 사용자 입력 / Live Auto timeout

@@ -2,7 +2,7 @@
 
 ## Status
 
-Current state: **2026-11-05 (Asia/Seoul)**.
+Current state: **2026-11-06 (Asia/Seoul)**.
 **Stage-3 Extended: ACTIVE pending explicit project-closeout adjudication.**
 Stage-3 V1 remains CLOSED / FROZEN; ZiNi Improvement remains CLOSED / V1 RETAINED,
 with its final holdout unopened. This roadmap is not automatic execution authority.
@@ -24,9 +24,11 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Main K-LC0 integration, all three entries and manual handoff | Accepted and committed at4f34a96; historical source111 |
 | Main K-LC1 and Replay/certainty display stability | Accepted and committed at68c272e; historical source314 |
 | Main pacing, bounded fixed-rate and exact CPS input | Accepted and committed at4c10217; historical source327 |
-| Main same-board replay, layout history and Replay entry/exit choices | Final source333,49/143 +2owner +28probe, user native accepted;26-path Git preparation |
+| Main same-board replay, layout history and Replay entry/exit choices | Historical source333,49/143 +2owner +28probe, user native accepted; committed at cd8ee2e |
+| Main distance viewing and bounded performance diagnosis | Source335; functionality/helper/T1/T2 accepted; subsequent current-PC user native accepted; original main PARTIAL retained |
+| Main fixed6 optimization | Reviewed C1+C2 bytes applied; direct-pair median gap improvement 12.484226%; H1 complete and separate 56-test R2 PASS; current-PC native accepted; exhibition laptop pending |
 | Burst/fixed-rate measurement B |40-row arithmetic reproduced; B1 same-owner60-per-setting NOT_SATISFIED; no function profiling/optimization |
-| Distance analysis C |30games/5035transitions/24player OOF arithmetic reproduced; sensitivity limits; no product profile applied |
+| Distance analysis C |30games/5035transitions/24player OOF arithmetic reproduced; sensitivity limits retained. Later distance_view_log_v1 is presentation-only, not a refit of the frozen research model |
 
 D4 exact CONTROL ↔ K-P0 comparison was implemented and accepted. It establishes no
 effectiveness or aggregate superiority. The scientific disposition is not PHASE1_NO_GO
@@ -35,16 +37,16 @@ with package root results/program-k-trace-demo-final-acceptance/20261031-230251/
 Earlier05920abeaec541a52fd22753dadec66f5cb98bca and technical48f6ebc97e6c4d3ed4a746a92a8d169783803bf9
 are historical anchors, distinct from later Main source and E1/R0 execution identities.
 
-Current precommit main == local origin/main ==4c1021711e53e45a29450da9fa3bebee54e80887,
-ahead/behind0/0, staged0. Same-board source/tests20 + documents6 are **26 uncommitted paths (M19/U7)**.
-The earlier pacing28-path commit/push/recovery is complete. Do not repeat its script.
+Current main == local origin/main ==dc711a7917edf3f00bbad26f710b5240c08d7f13,
+ahead/behind0/0, staged0 before this document closeout. Distance and optimization source/tests 6 plus documentation 7 are prepared as one 13-path commit. Actual Git receipts take precedence over this precommit snapshot.
+The earlier same-board and high-CPS document commit/push/recovery steps are complete. Do not repeat their scripts.
 
-[CURRENT_HANDOFF](../CURRENT_HANDOFF.md) and the [same-board/Replay closeout](STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)
-are current authority; the [pacing/CPS closeout](STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md) retains the preceding contract.
+[CURRENT_HANDOFF](../CURRENT_HANDOFF.md), the [fixed6 optimization closeout](STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md), and the [distance-view closeout](STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md)
+are current authority; the [same-board/Replay closeout](STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md) and [pacing/CPS closeout](STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md) retain the preceding contracts.
 Older PENDING/FAIL records and D0–D5 evidence retain their original dispositions.
 
-**CURRENT NEXT: user one-shot stage/commit/push → actual receipt/SHA verification → postcommit recovery
-replacement.** Then decide any B1 evidence extension, needed profiling or separate distance-based viewing profile.
+**CURRENT NEXT: documentation finalization → one-shot source/tests/document commit and push → receipt verification → postcommit recovery replacement.** Current-PC user native is accepted. Exhibition-laptop acceptance remains a separate pending condition.
+The new viewing profile is implemented; B1 evidence extension, further profiling and stable throughput claims remain separate decisions.
 Global Extended closure, Stage4, new package and research remain separate decisions.
 
 ## Main/Live current accepted scope
@@ -78,7 +80,7 @@ The older source310/314 LC1/display checks, coarse-clock FAIL/repair, strict-cad
 PreciseTimer LC1 performance FAIL and bounded-rate PASS retain their individual histories in the closeouts.
 Editor API/harness coupling and load sensitivity remain optional limitations. Historical F02 NOT_VERIFIED,
 FileDialog FAIL and TEMP NOT_VERIFIED remain; no global TEMP scan or old revalidation loop is opened.
-V1/K custom boards remain unsupported. Main same-board replay/history is accepted; calibrated burst/distance pacing remains future work.
+V1/K custom boards remain unsupported. Main same-board replay/history is accepted. The new distance viewing mode is independently accepted in scope; calibrated burst throughput and human timing claims remain unestablished.
 
 The default Replay exit now builds a canonical unplaced board with the current Replay dimensions and clears the history group.
 The explicit same-board button builds its fixed original layout and preserves the existing same-layout group, without fabricating imported completions.
@@ -94,6 +96,8 @@ Observed TRACE mean-gap changes were +1.938511%/+0.740295%; MIN includes common 
 Successful read_next/render_board and an offline reconstruction of existing poll traces are follow-up candidates, not established causes.
 No optimization, stable-CPS guarantee, B1 repair, frozen-policy change or research approval followed from this diagnostic.
 Small helper/environment corrections stay within their scoped budgets; independent review is batched after a substantial unit.
+
+The later [distance-view closeout](STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md) records 22 bounded timing runs, the render candidate rejected at that stage, and the opt-in viewing mode. The original outer-launcher contract remains a historical PARTIAL. Its new helper plus three added tests/ten subcases received supplemental independent acceptance. The subsequent fixed6 G01 validated actual owner reuse. The [fixed6 closeout](STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md) records the separately accepted combined optimization, current-PC user native, remaining laptop condition and preserved failures. No new package, Stage4 or effectiveness work began.
 
 ## Post-D5 bounded source exhibition and pacing analysis
 

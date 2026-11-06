@@ -75,6 +75,7 @@ from stage3_physical import action_cost, load_timing_table, PROFILE_SHA256, TABL
 from live_policy_job import LivePolicyJob
 from live_auto_cursor import LiveAutoCursorOverlay
 from live_fixed_cadence import FixedCadence
+from live_distance_pacing import DISTANCE, DistanceWait
 from live_pacing import (FIXED, MODEL_C, PacingRate, PacingWait, decimal_display,
                          exact_value, FixedPeriod)
 import live_k_policy as k_live
@@ -701,6 +702,8 @@ class MinesweeperUI(QWidget):
         self._simple_timing_table = None
         self._pacing_mode = FIXED
         self._pacing_rate = PacingRate()
+        self._distance_rate = PacingRate()
+        self._last_distance_view = None
         self._pacing_wait = None
         self._pacing_clock_ns = time.perf_counter_ns
         self._fixed_period = FixedPeriod("ms", SIMPLE_AUTO_STEP_INTERVAL_MS)
@@ -1376,6 +1379,7 @@ class MinesweeperUI(QWidget):
         self.pacing_mode_combo = QComboBox()
         self.pacing_mode_combo.addItem("고정 간격", FIXED)
         self.pacing_mode_combo.addItem("Model C 기반", MODEL_C)
+        self.pacing_mode_combo.addItem("거리 기반", DISTANCE)
         self.pacing_mode_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.pacing_mode_combo.currentIndexChanged.connect(self._on_pacing_mode_changed)
         self.pacing_rate_edit = PacingValueEditor()
@@ -3209,7 +3213,7 @@ class MinesweeperUI(QWidget):
         after = self.engine.get_counter_snapshot()
         committed = (after["active_clicks"] + after["wasted_clicks"]
                      > before["active_clicks"] + before["wasted_clicks"])
-        if committed and auto_observation is not None and not self._model_c_pacing_active():
+        if committed and auto_observation is not None and self._fixed_pacing_active():
             # Publish before refresh can calculate/reserve the next proposal.
             self._fixed_cadence = (
                 cadence.after_input(input_started_ns)
@@ -3247,6 +3251,8 @@ class MinesweeperUI(QWidget):
             "action": action.name, "x": x, "y": y,
             "automatic": auto_observation is not None, "status": status_after.name,
         })
+        if committed and auto_observation is not None and self._distance_pacing_active():
+            self.live_input_records[-1]["distance_view"] = dict(self._last_distance_view)
         if committed and auto_observation is None and observation is not None:
             recorder, position, cell_size, observed_ns = observation
             if (recorder is self._mouse_trace_recorder
@@ -4041,7 +4047,7 @@ class MinesweeperUI(QWidget):
             self._fail_v1(str(exc))
 
     def _schedule_v1_step(self):
-        if (not self._model_c_pacing_active() and k_live.is_k_policy(self._live_policy)
+        if (self._fixed_pacing_active() and k_live.is_k_policy(self._live_policy)
                 and self._k_validation_nonce is not None
                 and self._v1_job.state in ("validating", "admitted")
                 and self._v1_pending is not None and self._v1_owned
@@ -4073,11 +4079,12 @@ class MinesweeperUI(QWidget):
                            self._live_action_count, self._v1_pending.token, self._v1_timer_nonce)
             self._v1_timer_reservation = reservation
             self._connect_auto_timeout(lambda reservation=reservation: self._on_v1_auto_timeout(reservation))
-            self._start_auto_pacing(self._v1_pending.modeled_action_us)
+            self._start_auto_pacing(self._v1_pending.modeled_action_us,
+                                    (self._v1_pending.x, self._v1_pending.y))
             self.auto_cursor_overlay.reserve(
                 reservation, self._v1_cursor, (self._v1_pending.x, self._v1_pending.y),
-                self._simple_auto_timer.interval())
-            if k_live.is_k_policy(self._live_policy) and not self._model_c_pacing_active():
+                self._view_interval_ms())
+            if k_live.is_k_policy(self._live_policy) and self._fixed_pacing_active():
                 self._k_validation_nonce = uuid4().hex
                 self._v1_job.validate_pending(self._v1_snapshot(), self._k_validation_nonce)
                 self._v1_status = "현재 K 입력 검증 중"
@@ -4093,7 +4100,7 @@ class MinesweeperUI(QWidget):
         if self._defer_early_pacing_timeout():
             return
         scheduled = self._simple_auto_pending
-        if k_live.is_k_policy(self._live_policy) and not self._model_c_pacing_active():
+        if k_live.is_k_policy(self._live_policy) and self._fixed_pacing_active():
             # Due is not a revocation. Keep the nonce and the job's unconsumed
             # permit; a late ADMITTED can still authorize this one input.
             self._stop_auto_pacing_timer()
@@ -4203,7 +4210,7 @@ class MinesweeperUI(QWidget):
                 or (permit.proposal.is_guess and not self.allow_guess_checkbox.isChecked())):
             self._cancel_simple_auto_step()
             return
-        if (not self._model_c_pacing_active() and self._fixed_cadence is not None
+        if (self._fixed_pacing_active() and self._fixed_cadence is not None
                 and self._fixed_cadence.remaining_ms(self._pacing_clock_ns())):
             # Hold before entering the final full comparison/consumption
             # section. Due calls this method again and repeats every check.
@@ -4844,8 +4851,22 @@ class MinesweeperUI(QWidget):
     def _model_c_pacing_active(self):
         return self._pacing_mode == MODEL_C and self._model_c_pacing_available()
 
+    def _distance_pacing_active(self):
+        return self._pacing_mode == DISTANCE and self._model_c_pacing_available()
+
+    def _fixed_pacing_active(self):
+        return not (self._model_c_pacing_active() or self._distance_pacing_active())
+
+    def _view_interval_ms(self):
+        if self._distance_pacing_active() and self._pacing_wait is not None:
+            return self._pacing_wait.duration_ns / 1_000_000
+        return self._simple_auto_timer.interval()
+
     def _sync_pacing_editors(self):
         model_c = self._model_c_pacing_active()
+        distance = self._distance_pacing_active()
+        viewing = model_c or distance
+        self._pacing_editor_mode = DISTANCE if distance else MODEL_C if model_c else FIXED
         self._pacing_cps_model_c = model_c
         fixed = self._fixed_period
         cps = fixed.target_cps
@@ -4858,16 +4879,17 @@ class MinesweeperUI(QWidget):
         cps_explanation = ("목표 CPS 범위: 0.5–1000. 입력 주기는 1초 / 목표 CPS입니다.\n"
                            "주기는 1 ns 단위로 올림하며 목표 입력값은 유지합니다.\n"
                            "계산·통신·일시정지 때문에 왼쪽 실측 CPS와 다를 수 있습니다.")
-        if model_c:
+        if viewing:
             cps_explanation = "Model C 기반에서는 배속을 조절합니다. CPS는 고정 간격에서만 편집합니다."
         elif cps is None:
             cps_explanation += "\n0 ms는 최대 속도입니다. 숫자 CPS를 입력하면 유한 간격으로 돌아갑니다."
         for editor, value, explanation in (
-                (self.pacing_rate_edit, self._pacing_rate.rate,
-                 "0.05–8배 · 1배는 원본 Model C 입력 1회의 관람 시간입니다."),
-                (self.pacing_cps_edit, None if model_c else cps, cps_explanation)):
+                (self.pacing_rate_edit, (self._distance_rate if distance else self._pacing_rate).rate,
+                 "0.05–8배 · 선택된 다음 입력까지의 거리에 따라 관람 간격이 달라집니다."
+                 if distance else "0.05–8배 · 1배는 원본 Model C 입력 1회의 관람 시간입니다."),
+                (self.pacing_cps_edit, None if viewing else cps, cps_explanation)):
             text, approximate = decimal_display(value) if value is not None else (
-                "—" if model_c else "최대", False)
+                "—" if viewing else "최대", False)
             blocked = editor.blockSignals(True)
             editor.setText(text)
             editor.setModified(False)
@@ -4883,29 +4905,34 @@ class MinesweeperUI(QWidget):
         live = not self._replay_mode and not self._live_closing
         available = self._model_c_pacing_available()
         model_c = self._model_c_pacing_active()
+        distance = self._distance_pacing_active()
+        viewing = model_c or distance
+        active_mode = DISTANCE if distance else MODEL_C if model_c else FIXED
         self.pacing_bar.setVisible(not self._replay_mode)
         self.pacing_bar.setEnabled(live)
         self.pacing_mode_combo.setEnabled(live)
         self.pacing_mode_combo.model().item(self.pacing_mode_combo.findData(MODEL_C)).setEnabled(available)
+        self.pacing_mode_combo.model().item(self.pacing_mode_combo.findData(DISTANCE)).setEnabled(available)
         blocked = self.pacing_mode_combo.blockSignals(True)
-        self.pacing_mode_combo.setCurrentIndex(self.pacing_mode_combo.findData(MODEL_C if model_c else FIXED))
+        self.pacing_mode_combo.setCurrentIndex(self.pacing_mode_combo.findData(active_mode))
         self.pacing_mode_combo.blockSignals(blocked)
-        self.simple_auto_interval_spin.setEnabled(live and not model_c)
-        self.pacing_rate_edit.setEnabled(live and model_c)
-        self.pacing_cps_edit.setEnabled(live and not model_c)
-        self.pacing_fixed_group.setVisible(not model_c)
-        self.pacing_rate_group.setVisible(model_c)
-        if self._pacing_cps_model_c != model_c:
+        self.simple_auto_interval_spin.setEnabled(live and not viewing)
+        self.pacing_rate_edit.setEnabled(live and viewing)
+        self.pacing_cps_edit.setEnabled(live and not viewing)
+        self.pacing_fixed_group.setVisible(not viewing)
+        self.pacing_rate_group.setVisible(viewing)
+        self.pacing_rate_label.setText("관람 배속:" if distance else "Model C 배속:")
+        if self._pacing_editor_mode != active_mode:
             self._sync_pacing_editors()
         self.pacing_status_label.setVisible(not self._replay_mode and not available)
         self.pacing_status_label.setText(
-            "Model C 기반: 30×16 이하 보드에서 사용 가능 · 현재 고정 간격" if self._live_policy == POLICY_SIMPLE
-            else "Model C 기반: 초급·중급·상급에서 사용 가능")
+            "Model C·거리 기반: 30×16 이하 보드에서 사용 가능 · 현재 고정 간격" if self._live_policy == POLICY_SIMPLE
+            else "Model C·거리 기반: 초급·중급·상급에서 사용 가능")
 
     def _on_pacing_mode_changed(self, _index):
         selected = self.pacing_mode_combo.currentData()
-        if (self._replay_mode or self._live_closing or selected not in (FIXED, MODEL_C)
-                or (selected == MODEL_C and not self._model_c_pacing_available())):
+        if (self._replay_mode or self._live_closing or selected not in (FIXED, MODEL_C, DISTANCE)
+                or (selected in (MODEL_C, DISTANCE) and not self._model_c_pacing_available())):
             self._update_pacing_controls()
             return
         changed = selected != self._pacing_mode
@@ -4940,8 +4967,12 @@ class MinesweeperUI(QWidget):
         if from_cps:
             self._set_fixed_period(fixed)
             return
-        changed = rate != self._pacing_rate
-        self._pacing_rate = rate
+        distance = self._distance_pacing_active()
+        changed = rate != (self._distance_rate if distance else self._pacing_rate)
+        if distance:
+            self._distance_rate = rate
+        else:
+            self._pacing_rate = rate
         self._sync_pacing_editors()
         if changed:
             self._restart_pacing_pending()
@@ -4965,16 +4996,24 @@ class MinesweeperUI(QWidget):
     def _restart_fixed_cadence(self):
         self._fixed_cadence = (
             FixedCadence.from_period_ns(self._fixed_period.period_ns, self._pacing_clock_ns())
-            if self.simple_auto_checkbox.isChecked() and not self._model_c_pacing_active() else None)
+            if self.simple_auto_checkbox.isChecked() and self._fixed_pacing_active() else None)
         self._fixed_cadence_context = self._fixed_cadence_binding() if self._fixed_cadence is not None else None
 
-    def _start_auto_pacing(self, modeled_action_us=None):
+    def _start_auto_pacing(self, modeled_action_us=None, target=None):
         self._simple_auto_timer.stop()
         self._simple_auto_timer.setTimerType(
             self._model_c_timer_type if self._model_c_pacing_active() else Qt.PreciseTimer)
         self._pacing_wait = None
         if self._model_c_pacing_active():
             self._pacing_wait = PacingWait(modeled_action_us, self._pacing_rate, self._pacing_clock_ns())
+            delay = self._pacing_wait.delay_ms
+        elif self._distance_pacing_active():
+            self._pacing_wait = DistanceWait.from_targets(
+                self._v1_cursor, target, self._distance_rate, self._pacing_clock_ns())
+            self._last_distance_view = dict(self._pacing_wait.metadata(),
+                cursor=self._v1_cursor, target=target, game_id=self._live_game_id,
+                run_id=self._live_run_id, generation=self._live_board_generation,
+                revision=self._live_action_count, reservation_nonce=self._v1_timer_nonce)
             delay = self._pacing_wait.delay_ms
         else:
             binding = self._fixed_cadence_binding()
@@ -4994,7 +5033,7 @@ class MinesweeperUI(QWidget):
         self._simple_auto_timer.start(delay)
 
     def _defer_early_pacing_timeout(self):
-        wait = self._pacing_wait if self._model_c_pacing_active() else self._fixed_cadence
+        wait = self._fixed_cadence if self._fixed_pacing_active() else self._pacing_wait
         if self._simple_auto_pending and wait is not None:
             remaining = wait.remaining_ms(self._pacing_clock_ns())
             if remaining:
@@ -5003,7 +5042,7 @@ class MinesweeperUI(QWidget):
         return False
 
     def on_simple_auto_interval_changed(self, interval):
-        if self._replay_mode or self._live_closing or self._model_c_pacing_active():
+        if self._replay_mode or self._live_closing or not self._fixed_pacing_active():
             self._sync_pacing_editors()
             return
         try:
@@ -5067,7 +5106,7 @@ class MinesweeperUI(QWidget):
         if not self.analysis_checkbox.isChecked():
             # The toggled signal performs exactly one fresh analysis.
             self.analysis_checkbox.setChecked(True)
-        elif (self._model_c_pacing_active() and self._analysis_result is not None
+        elif (not self._fixed_pacing_active() and self._analysis_result is not None
               and self._simple_analysis_binding == self._simple_binding()):
             self._schedule_simple_auto_step()
         else:
@@ -5156,7 +5195,7 @@ class MinesweeperUI(QWidget):
         nonce = self._v1_timer_nonce
         self._connect_auto_timeout(lambda nonce=nonce: self._on_simple_auto_timeout(nonce))
         try:
-            self._start_auto_pacing(cost)
+            self._start_auto_pacing(cost, (move.x, move.y))
         except Exception as error:
             self._fail_simple_auto(str(error))
 
@@ -5225,27 +5264,29 @@ class MinesweeperUI(QWidget):
 
         if value == CellState.HIDDEN.value:
             btn.setText("")
-            btn.setStyleSheet(self._style_hidden(border))
+            style = self._style_hidden(border)
         elif value == CellState.FLAGGED.value:
             btn.setText("🚩")
-            btn.setStyleSheet(self._style_hidden(border))
+            style = self._style_hidden(border)
         elif value == CellState.FALSE_FLAG.value:
             # 패배 시 오답 깃발: 연한 빨강 배경으로 명확히 구분
             btn.setText("🚩")
-            btn.setStyleSheet(self._style_false_flag())
+            style = self._style_false_flag()
         elif value == CellState.EXPLODED.value:
             btn.setText("💥")
-            btn.setStyleSheet(self._style_exploded())
+            style = self._style_exploded()
         elif value == CellState.MINE.value:
             btn.setText("💣")
-            btn.setStyleSheet(self._style_revealed())
+            style = self._style_revealed()
         elif value == 0:
             btn.setText("")
-            btn.setStyleSheet(self._style_revealed())
+            style = self._style_revealed()
         else:  # 1 ~ 8
             btn.setText(str(value))
             color = NUMBER_COLORS.get(value, "#000000")
-            btn.setStyleSheet(self._style_revealed(color=color))
+            style = self._style_revealed(color=color)
+        if btn.styleSheet() != style:
+            btn.setStyleSheet(style)
 
     # 스타일 헬퍼 (셀 크기 단계별 고정 테두리 적용) ---------------------
     @staticmethod

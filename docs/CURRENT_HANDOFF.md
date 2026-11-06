@@ -1,12 +1,14 @@
 # Current Project Handoff
 
-Updated: **2026-11-05 (Asia/Seoul)** — 같은 보드/Replay 기능은 cd8ee2e에서 마감됐다. 후속 고속 CPS 제한 진단은 여섯 측정·산술 및 묶음 독립 검토 수용을 마쳤고 문서6경로의 Git 마감을 준비한다. 제품 source/tests 변경은 없다.
+Updated: **2026-11-06 (Asia/Seoul)** — 거리 관람과 후속 고정 6 CPS 최적화의 독립 검토·정확 반영·이번 PC 사용자 native 수용을 마쳤다. 제품 필수 수정 0, 후속 helper H1은 완료했고 R2 56개를 별도 실행했다. **문서·Git·Desktop 마감은 준비 중이며 전시 노트북 확인은 PENDING**이다. 원 본작업과 보완 실행의 PARTIAL·실패 이력은 유지한다.
 
 ## 현재 authority와 기능
 
-현재 기능·실패 이력·B/C 근거는 [같은 보드/Replay closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)을 따른다. [관람 속도/CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)은 완료 commit **4c10217**까지의 이전 checkpoint이며 원 속도 계약은 유지한다.
+기존 같은 보드 기능·실패 이력·당시 B/C 근거는 [같은 보드/Replay closeout](stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)을 따른다. [관람 속도/CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)은 완료 commit **4c10217**까지의 이전 checkpoint이며 원 속도 계약은 유지한다.
 
-현재 후속 성능 근거는 [고속 CPS 제한 진단 closeout](stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)이다. 실제 실행 HEAD는 **cd8ee2ef23a2753f858f8945d7a9bff1580369fb/source333**이며 이후 문서 commit을 그 실행 HEAD로 소급하지 않는다.
+2026-11-05의 진단 근거는 [고속 CPS 제한 진단 closeout](stage3-extended/STAGE3_MAIN_LIVE_HIGH_CPS_DIAGNOSTIC_CLOSEOUT.md)이다. 실제 실행 HEAD는 **cd8ee2ef23a2753f858f8945d7a9bff1580369fb/source333**이며 이후 문서 commit을 그 실행 HEAD로 소급하지 않는다.
+
+현재 추가 기능은 [거리 관람 closeout](stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md), 최신 최적화·native·검토는 [고정 6 CPS closeout](stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md)을 따른다. 출발 HEAD는 **dc711a7917edf3f00bbad26f710b5240c08d7f13**이고 source 335개다. 현재 변경 source/tests는 `ui_manager.py`, `live_distance_pacing.py`, `tests/test_live_distance_pacing.py`, `live_policy_job.py`, `live_policy_transport.py`, `tests/test_live_policy_job.py`의 6경로다. 거리 테스트 hash는 **3a1c2be377f552b6af4792954bb5c0641af84716c41b773f1c91275f134d434a**로 유지되며 현재 전체 source는 고정 6 CPS `codex_02/SOURCE_COMBINED.json`과 같다. 이전 333개 목록을 현재 335개 목록으로 오인하지 않는다.
 
 - Live WON/LOST와 worker 정리 뒤 같은 배치의 새 판을 시작한다. 새 game_id/세대·시간/입력/Replay/M 초기화, Auto/guess OFF, 정책·속도·표시 선호 유지. V1/K는 세 preset, custom은 기존 Simple/수동 범위다.
 - 고정판은 **FIXED_BOARD/wire v10**의 공개 관측 기반 정상 추론을 사용한다. all-HIDDEN이어도 canonical 안전 첫 수가 아니며 guess OFF 대기, ON에서 첫 지뢰면 LOST가 정상이다. 숨은 layout은 GUI의 배치 복원에만 쓰고 정책에 넘기지 않는다.
@@ -16,11 +18,12 @@ Updated: **2026-11-05 (Asia/Seoul)** — 같은 보드/Replay 기능은 cd8ee2e�
 - Replay 요청은 Auto/guess·입력 예약을 회수하고 Live에서 원 ACK·worker 정리를 기다린다. 정리 뒤 queued commit 1회, 실패 시 Live와 최초 구체 사유 유지. reset/정책/난이도/수동 첫 press/close는 예약을 폐기한다. 보관 불가 완료판이 있으면 구체 사유로 파일 진입도 거부한다.
 - Simple/V1/K-P0/K-LC0/K-LC1의 인수/FLAG 준비·수동 인계, 원 session/M/decision identity, VALIDATE→ADMITTED→무yield token→step1→정확 ACK→NEXT는 유지한다. old owner 정리 전 새 owner는 시작하지 않는다.
 - 기본 고정200ms/목표5 CPS, FixedPeriod.period_ns·정확 Fraction·QPC/PreciseTimer·bounded fixed-rate를 유지한다. 6 CPS=166,666,667ns, 작은 지연은 위상 유지, 큰 지연은 실제 입력+P, 최소0.9P다. Model C는 원 행동 비용/배속이며 frozen 표를 바꾸지 않는다.
+- 새 **거리 기반** 모드는 이미 선택된 target까지의 public/actual cursor 거리를 관람 대기로 변환한다. 배속 0.05–8, 기본 1이며 고정값·Model C 배속과 독립 보존한다. 관람 대기는 target 선택 뒤 시작하고 K VALIDATE는 대기 완료 뒤 수행한다. 실제 간격에는 계산·통신도 포함되므로 배속과 실측 CPS는 비례하지 않는다.
 - 확률·확정색·가상 원형/녹화입력·Simple 참고분석/키보드·human trace 경계는 이전 수용대로다. K 라벨에서 실험적 접미사를 뺀 것은 Production 승인이 아니다.
 
 ## 검증과 사용자 수용
 
-최종 source333 manifest SHA256: **07feed55cdfd2979c4022efd3c90b5b6fe1a541de175df13f2965ced729676e5**.
+이전 같은 보드 마감의 source333 manifest SHA256: **07feed55cdfd2979c4022efd3c90b5b6fe1a541de175df13f2965ced729676e5**. 현재 source335와 별도의 역사적 authority다.
 
 - overnight A: 최종 독립119/299, owner14, probe118; B/C는 별도 산술 검토다.
 - history flow: 최종 독립33/52, owner2, fixture 실패 수정 후 probe67.
@@ -29,7 +32,31 @@ Updated: **2026-11-05 (Asia/Seoul)** — 같은 보드/Replay 기능은 cd8ee2e�
 
 버전별 숫자를 합쳐 전체 suite로 쓰지 않는다. 사용자는 source332 기능을 수용한 뒤 기본 종료를 새 판으로 바꾸도록 요구했고, 최종 source333의 두 종료 선택을 안내한 뒤 **“이제 통과야.”**라고 수용했다. 현재 사용자 환경/항목에 한정하며 모든 OS/DPI·부하·전체 suite를 뜻하지 않는다.
 
-## 고속 CPS 제한 진단 — 묶음 독립 수용
+## 거리 모드와 보완분 — 독립 수용, 이번 PC native 수용
+
+로컬 묶음 root는 `outputs/MAIN_LIVE_PERFORMANCE_DISTANCE_IMPLEMENTATION_2026-11-06`이다.
+
+- `codex_01`: 22회 timing, 실제 policy 입력 1369 + Simple 1, 거리 모드 구현. 원 outer launcher의 suspended 생성과 helper 소유 Job은 **NOT_APPLIED**, ambient Job은 **NOT_SAMPLED**, outer conhost는 **NOT_IDENTIFIED**다. 원 전체 **PARTIAL**은 유지하지만 기능·산술은 `review_claude_01`에서 ACCEPT_BOUNDED, 제품 필수 수정 0으로 수용했다.
+- `codex_02`: 새 outer helper의 P1 정상/P2 timeout/P3 resume 전 중단. `codex_03`: 동일 helper로 T1/T2의 새 메서드 3개, 하위 사례 10개. 기존 테스트 줄 삭제는 없고 제품 두 파일은 그대로다.
+- `review_claude_02`: 새 helper/T1/T2는 **ACCEPT_BOUNDED**, CR01-F03 라벨 정정은 **ACCEPT**. 필수 보완 0, 선택 6. CROSSCHECK 38 = MATCH 34 / MISMATCH 0 / NOT_VERIFIED 3 / NOT_SAMPLED 1이다. 원 검토의 incident 6/6과 새 검토의 incident 0/3을 구분한다.
+- 렌더 후보는 V1 16.19% 개선, LC1 9.57%로 사전 기준 미달해 미채택·복원했다. TRACE 영향과 drift의 인과 분리는 INSUFFICIENT이고 안정 CPS 상한을 확정하지 않았다. LC1 fixed6의 약 5.724 CPS는 해당 조건의 관측이다.
+- 이 거리 단위 당시 새 controller는 owner 없는 graph와 offscreen test driver에 한정됐다. 후속 고정 6 CPS의 G01에서 **CR02-F04의 실제 owner 사례**를 확인했고 이후 같은 controller의 정리 근거를 독립 대조했다. 과거 기록을 실제 owner 검증으로 소급하지 않는다.
+
+이후 검토된 최적화 반영 상태에서 사용자가 세 모드 진행·중단과 두 Replay 종료 후 선호 보존을 “모두 통과”로 수용했다. 전시 노트북은 별도로 PENDING이다. 선택 6건과 이전 선택 권고는 closeout의 개별 disposition을 유지한다.
+
+## 고정 6 CPS 최적화 — 정확 반영 및 사용자 수용
+
+외부 root는 `outputs/MAIN_LIVE_NATIVE_FIXED6_OPTIMIZATION_2026-11-06`이다. 원 `codex_01`의 C1은 원본 대비 8.796620% 개선했으나 목표 미달, C2의 C1 대비 추가 효과 4.820778%는 5% 기준 미달이었다. 두 미채택 판정과 focused FAIL, incident 9/8은 그대로다.
+
+새 `codex_02`의 원본 대 결합본 직접 3쌍은 5.788274/5.765701/5.796701 CPS, gap 개선 중앙값 12.484226%, CPU/입력 +3.856749% 및 +6.966561 ms로 사전 기준을 충족했다. 실제 Auto 157 / Replay 158(수동 prefix 1) / ACK 157, 동일 행동·좌표·M·원 Model C 누계와 WON·정리를 독립 재계산했다. 최소0.9P와 자기 deadline, 고정/관람 모드 계약은 유지한다. 이 수치는 해당 기계·보드·세션에 한정한다.
+
+`review_claude_01`은 A ACCEPT_BOUNDED, B ACCEPT/제품 필수0, C CONDITIONS_REMAIN으로 수용했다. `codex_03`이 동일 스타일시트 재설정 생략·worker 응답 알림과 테스트의 네 파일을 정확히 반영했고, source335 전체가 COMBINED와 같다. 별도 R2 mock 56개 PASS, owner 0이며 과거 28개/표시 126개/S01 1개와 단일 suite로 합산하지 않는다.
+
+H1은 Git 읽기에 `diff.autoRefreshIndex=false`와 optional-locks0을 적용하고 모든 읽기 뒤 최종 index 해시를 기록해 완료했다. 과거6a59→f0ff→bf95의 stat-cache 변화와 raw-byte FAIL/작성 PID 미확정은 유지한다. R1/R2 완료, R3/R5 보류, R4 전시 노트북 PENDING이다. 원 S03의 CUA 승인 시간 초과·외부 click0·보완 PARTIAL/incident5/3도 유지한다.
+
+사용자는 후보 반영 확인 뒤 **“좋아, 모두 통과야.”**라고 이번 PC native를 수용했다. 별도로 목표 10 CPS에서 약 8–9 CPS를 보았다고 보고했으나 원시 기록·관측 구간·metric 종류는 미확인이다. 안정 상한이나 별도 측정 PASS로 쓰지 않는다.
+
+## 이전 고속 CPS 제한 진단 — 묶음 독립 수용
 
 **COMPLETE_BOUNDED_DIAGNOSTIC / 독립 수용**, 필수 증거 수정0·제품 결함0이다. V1/K-LC1, 기존 30×16/99 합성 공개 저부하 fixture, fixed0ms의 MIN1/TRACE/MIN2 여섯 run이다. 각 actual/Replay/ACK62/62/62, 총 Auto372, steady60/59gap이다.
 
@@ -43,17 +70,17 @@ Updated: **2026-11-05 (Asia/Seoul)** — 같은 보드/Replay 기능은 cd8ee2e�
 
 **B1 NOT_SATISFIED**: 기존40행 속도/burst 산술은 재현됐지만 동일 owner·설정별60입력 조건은 미충족이다. 설정별 별도 owner60과 동일 owner12를 혼동하지 않는다. 당시 함수별 NOT_MEASURED/최적화 NOT_TRIGGERED를 후속 진단으로 소급 변경하지 않는다. B1은 이번 진단의 선행 조건이 아니며 OUT_OF_SCOPE다. V1 target8→7.914/10→9.183 및 특정 상급0ms 값은 관측일 뿐 일반 상한이 아니다. window peak의 이산 경계 편향도 보존한다.
 
-C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/log129.389/bands128.597ms, log와 bands 차이는0.792ms이며 긴 gap 제외 시 순위가 뒤집힌다. d>16은3표본/비정상 장거리 전이가 있어 해석하지 않는다. action UNKNOWN·직선 target 거리로 판단/운동 시간을 분리할 수 없다. 새 거리 보정식은 제품 미적용, 원 Model C는 불변이다.
+C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/log129.389/bands128.597ms, log와 bands 차이는0.792ms이며 긴 gap 제외 시 순위가 뒤집힌다. d>16은3표본/비정상 장거리 전이가 있어 해석하지 않는다. action UNKNOWN·직선 target 거리로 판단/운동 시간을 분리할 수 없다. 당시 제품 미적용이던 descriptive fit을 2026-11-06 별도 관람 기본안으로 사용했으며, 원 Model C와 연구 판정은 불변이다.
 
 과거 overnight helper5/3 위반, history2/2와 probe fixture 실패, entry F01 수정 이력, exit helper2/2를 보존한다. 최종 OPTIONAL0이 과거 유지보수/그래프/측정/harness 권고 전체의 CLOSED를 뜻하지 않는다. **F02 NOT_VERIFIED / 과거 Qt shared FileDialog FAIL / 이전 TEMP NOT_VERIFIED** 유지. 재검증 루프나 전역 TEMP 검색을 열지 않는다.
 
 ## Git / 다음 단계
 
-작성 출발 main/HEAD=local origin/main=**cd8ee2ef23a2753f858f8945d7a9bff1580369fb**, ahead/behind0/0, staged0, index e7825f54f9a94d806e50d86bbf6186fedf2672286b924eff5f01f505113ed4ba. source/tests 변경0에 이번 **문서6경로(M5/U1)**만 묶는다. 조율 root는 **MAIN_LIVE_HIGH_CPS_REVIEW_CLOSEOUT_2026-11-05/coordinator_01**이다. 이전 같은 보드26경로 commit/push·Desktop 교체는 이미 완료됐다.
+이번 문서 마감 준비 시 main/HEAD=local origin/main=**dc711a7917edf3f00bbad26f710b5240c08d7f13**, ahead/behind 0/0, staged 0, index **bf95a31d39a9bd7d1b8c9ec2249a18d8a6ea85fa7d2e197a6e42bf81933c8c10**다. 이전 같은 보드 26경로와 고속 CPS 문서 6경로의 commit/push·Desktop 교체는 완료됐다. 이전 스크립트를 재실행하지 않는다.
 
-**NEXT: 이번 새 USER_GIT_STEPS_KO.ps1 한 번 → 실제 receipt/parent/문서6경로/blob/push/clean 확인 → 실제 새 authority에 결속한 recovery2개 → 사용자 Desktop 교체/hash 확인.** coordinator는 Git 쓰기와 Desktop 교체를 실행하지 않는다. 완료 SHA는 실제 receipt/recovery/live Git을 따르며 postcommit 문구만의 추가 commit은 만들지 않는다.
+현재는 거리·최적화 source/tests 6개와 관련 문서 7개, 총 13경로를 한 번에 마감할 준비 단계다. 이번 PC native는 수용됐고 노트북은 별도 조건으로 남긴다. 정확한 경로·source335 manifest·index·출발 HEAD를 결속한 새 사용자 스크립트로 commit/push한 뒤 실제 receipt 확인과 Desktop recovery 교체를 진행한다. coordinator는 Git 쓰기와 Desktop 교체를 실행하지 않는다. postcommit 문구만을 위한 추가 commit은 만들지 않는다.
 
-그 뒤 우선 후보는 성공 read_next의 외부 세부 구간 또는 render_board 내부의 작은 분해다. 원시 poll 구간 보충도 함께 사용하되 원인 확인 전 최적화를 시작하지 않는다. 새 측정/프로필/연구를 자동 승인하지 않는다. 새 성능 측정 범위는 새 Codex 채팅/GPT-6 Astra/Max/**Standard**를 기본으로 하며 Ultrafast OFF다. Claude는 큰 단위 뒤 새 세션/Opus5.5/Max/Auto/Fast OFF, 같은 범위 보충은 기존 세션을 사용할 수 있고 실제 미노출 설정은 UNCONFIRMED로 기록한다.
+추가 연구·프로파일링은 자동 시작하지 않는다. Codex 모델은 사용자 지정 Astra/Max를 기준으로 하며 실행 속도는 사용자가 당시 선택한 값을 따른다. 미노출 실제 설정은 UNCONFIRMED다. Claude는 큰 작업 단위 뒤 묶어서 검토하고 같은 범위 보충은 기존 세션을 사용할 수 있다. 원 오류/예산과 새 보충 범위의 예산을 구분한다.
 
 ## 역할과 영구 경계
 
