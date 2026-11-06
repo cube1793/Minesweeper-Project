@@ -1015,9 +1015,13 @@ Min-ties의 `exact=True`는 **그 동점 탐색 범위**를 완료했다는 의�
 
 S는 안전 조건 안에서, M은 추측 설정 안에서 완주 성과 E[X]를 최대화한다. R은 명시적인 목표 IOE 도달 확률을 최대화한다. X는 WON의 3BV/C이며 LOST와 추측 OFF의 `GUESS_BLOCKED`는 0으로 평가하되 별도 집계한다. S의 불가피한 추측은 HIDDEN과 FLAGGED 전체의 최소 위험 OPEN이며, 해제 비용도 포함한다.
 
-한 번에 최대 한 입력만 반환한다. 수순 score는 선언 후보군의 준비 수순 평가값이다. 모든 후속 호출이 exact이면 매 입력 재계획 정책의 **주 목적값에 대한 하한**이며 일반적인 동등성은 미증명이다. 한도 때문에 준비 도중 다음 호출이 실패할 수 있으므로 향후 harness는 이를 `UNRESOLVED`로 기록한다. 부분 trace는 진단용이며 전체 행동 권한이 아니다.
+한 번에 최대 한 입력만 반환한다. 수순 score는 선언 후보군의 준비 수순 평가값이다. 모든 후속 호출이 exact이면 매 입력 재계획 정책의 **주 목적값에 대한 하한**이며 일반적인 동등성은 미증명이다. 한도 때문에 준비 도중 다음 호출이 실패할 수 있으며, Unit 3 평가기는 이를 `UNRESOLVED`로 기록한다. 부분 trace는 진단용이며 전체 행동 권한이 아니다.
 
 지원 상한은 전체 64칸, 닫힘/깃발 8칸, 배치 256개, 원자 깊이 12, 전개 50,000개, 호출 10초다. 미완료는 action/score/terminal이 없는 `INSUFFICIENT`이며 Main/Live에 fallback이나 실행 권한을 연결하지 않았다. 현 단계의 native/UI 검증은 해당하지 않는다. 상세 범위와 9개 비차단 권고는 [Stage 4 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md)을 따른다.
+
+`stage4_evaluation`은 `PublicCase`/`prepare_case`로 전체 공개 posterior와 실제 prefix 재생을 결속하고, `Settings`/`plan_trials`/`Budget`/`run_attempt`/`aggregate`로 한 입력씩 실행·집계한다. 실제 배치와 3BV는 평가기만 소유하며 `public_request`는 공개 필드만 받는다. WON/LOST/GUESS_BLOCKED/UNRESOLVED와 NOT_STARTED를 구분한다. 미완료 질량을 분모에서 없애지 않고 완전 평균 null·coverage·정확한 유리수 구간을 기록한다. `aggregate`는 전달된 완전 등록과 Attempt를 신뢰하는 API이며 임의 외부 입력 검증기로 주장하지 않는다.
+
+Unit 3은 신규 17개 시험과 독립 실제 정책 174시도 재생으로 한정 수용됐다. 최종 36설정 MATCH, 123건은 신규 113 + 동결 전 재사용 10이고 4설정은 전량 재사용이다. 낮춘 depth 3/5의 8사례는 FLAG 뒤 미완료를 재현했고, 기본 12의 28배치는 모두 종결했다. 이는 일반적인 재계획 연속성 증명이 아니다. 제품 필수 수정은 0이며, 응답 형식·emit 실패의 일부 예외 경로는 기록된 UNRESOLVED 대신 예외로 나갈 수 있다는 비차단 한계가 있다. 상세 처분과 U3-H01 영구 공백은 [평가기 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md)을 따른다.
 
 ## 6. 테스트 전략
 
@@ -1037,6 +1041,7 @@ S는 안전 조건 안에서, M은 추측 설정 안에서 완주 성과 E[X]를
 | Probability oracle | `test_simple_probability_oracle.py` | Production helper와 독립적인 작은 complete-board 전수 열거와 비교. 작은 grid의 exhaustive 상태 및 seeded public observation |
 | Stage 4 opening | `test_stage4_opening.py` | exact D/M/Z, 공개 관측/깃발 정규화, 상관·전역 지뢰 수, 모순/실패, 작은 독립 배치 oracle |
 | Stage 4 bounded planning | `test_stage4_planning.py`, `stage4_planning_oracle.py` | S/M/R, 공개 원장/누설 차단, 공개 분기·원자 비용, GUESS_BLOCKED/한도, 1,017개 주입 전이와 45개 실제 경로의 구분 |
+| Stage 4 evaluator | `test_stage4_evaluation.py` | 공개 prefix 전수 재생, 한 입력 후 재계획, 미완료/미시작·분모·구간·정확 산술, 실제 planner 연결. 별도 17개 시험 |
 | Decision analyzer | `test_simple_decision.py` | local 우선과 probability 생략, 세 decision 종류, mine budget, 불변 입력·공개 API 경계 |
 | Runner | `test_simple_runner.py` | 첫 수/guess 정책, 한 행동 후 재분석, 진행 검사·오류, 실제 event 순서, partial/continuation 재생과 정보 격리 |
 | Live Analysis | `test_live_analysis.py` | 순수 presentation, 정확한 후보·확률 포맷, 실제 Qt 표시·갱신·Reduction·오류·첫 수 정책 |
@@ -1083,7 +1088,7 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
-위 Program K 후속 연구의 재개와 별개로, 사용자 승인에 따른 Stage 4의 공개 정보 오프닝·작은 상태 계획 기반은 한정 수용됐다. 다음 Stage 4 구현 후보는 Main 연결 전의 평가 harness이며, Extended 전역 종료 판정은 하지 않았다.
+위 Program K 후속 연구의 재개와 별개로, 사용자 승인에 따른 Stage 4 공개 정보 기반과 Main 연결 전 평가기 Unit 3이 한정 수용됐다. 다음은 일반 보드 지원에 필요한 계산 범위와 검증을 설계하는 일이며 Main 통합과 Extended 전역 종료는 별도다.
 현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
 재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
 향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,

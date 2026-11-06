@@ -5,7 +5,8 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1 오프닝 근거와 Unit 2 S/M/R 작은 상태 계획 기반의 한정 수용, 현재 미통합 범위와 다음 평가 단계.
+- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1·2 기반과 Unit 3 평가기의 한정 수용, 현재 미통합 범위와 다음 설계 단계.
+- [Stage 4 평가기 Unit 3 closeout](stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md): 신규 17개 시험, 최종 36 MATCH와 신규 113/재사용 10 구분, 독립 174시도 재생, 미완료·세 목적 차이, U3-H01 및 비차단 처분.
 - [Stage 4 오프닝·계획 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md): Unit 1 27개와 Unit 2 18개 테스트를 별도 기록하고, oracle/주입 전이/실제 경로·C01 공백·9개 권고를 구분한다.
 
 - [Main/Live 고정 6 CPS 최적화·사용자 확인](stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md): 검토된 결합 후보 4경로 반영, 직접 3쌍의 간격 개선 중앙값 12.484226%, H1 완료, 별도 R2 56개 통과. 이번 PC의 세 모드·Replay native 수용과 dc740e2 commit/push·Desktop 검증 완료, 전시 노트북은 대기. 원 PARTIAL/증분 FAIL/index 이력과 목표 10 CPS의 비정형 사용자 관측을 구분한다.
