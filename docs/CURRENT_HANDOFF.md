@@ -1,10 +1,17 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 7 색인 P0와 제한 모델 평가가 독립 수용됐다. 제품/helper 필수 수정 0, source 357개이며 source/tests 4 + 문서 6 = 10경로 마감을 준비한다. 기본 10M은 6/18 완료·모두 전 후보 점수 0, 확대 30M은 18/18 완료·9건 전 후보 점수 0이다. 속도·실제 효율 개선은 미확립이며 Unit 6 PARTIAL/U6-R02 및 U7-R01을 보존한다.
+Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 8 제품 축 ACCEPT_BOUNDED, 제품 필수 0. 구현자 PARTIAL/U8-H05·원 OUTPUT_MANIFEST 부재·R02/R03 공백은 유지한다. source 362개, 신규 source/tests 5 + 문서 6 = 11경로 마감 준비다. 기본 0/18·확대 3/18 완료이며 effectiveness NOT ESTABLISHED다.
 
-Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
+Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit 8 정밀 후속 closeout](stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md): Q의 정확 안전/최소 위험, G의 후보 뒤 Q 모델과 실제 반복 G를 구분해 한정 수용했다. Main/Live 미연결이다.
+- Q 15/G 14 별도 시험 PASS, 작은 G 102건·1,718행·475점수·102선택과 엔진 24 trial(13 WON/11 LOST, 94입력, G 48호출)이 독립 재현됐다. 24건은 세 witness의 전체 모집단이며 일반 표본이 아니다. G009 S 2/5·M 1/2, G001 M/R 12/35, G010 M 7/15·목표0 / R 23/60·목표1/5다.
+- 큰 기본 0/18(합계 local 12, 개별 exact 6), 확대 3/18(부모 시간 8+잔여 시간 1, 개별 exact 6)이다. 완료 3건은 snapshot_128 S/M/R이며 0→비영 0·순위 변화1·다음 입력 변화0이다. 미완료 33건의 개선 여부는 null로 해석한다.
+- 실제 Q 92,545 + reference P0 6 = q_calls 92,551. local 340,613,800+21,871=340,635,671. 큰 Q는 저장 base와의 계약 정합성 확인이며 큰 base 자체는 NOT_INDEPENDENTLY_RECOUNTED다. G CPU 71/97은 바깥 call_cpu_ns이고 15.625ms는 process CPU 회계 tick이다.
+- RV8-H1 원 finalizer는 재사용 금지다. 별도 합산 보정본을 PS 5.1/7.6.9 각 5사례로 확인했으나 원 실행/전체 manifest 발행을 재수행하지 않았다. 원 613+추가9=622파일은 조율 외부 manifest로 결속하고 원 manifest 부재/PARTIAL/U8-H05 및 U8-R02/R03 공백을 보존한다. W1~W5·O1~O4·U1~U6는 상세 closeout의 개별 처분을 따른다.
+- 다음 후보는 개별 cap·반복 계산·캐시 수명과 전체 시간 예산을 구분한 완료율 개선 설계다. 총 한도 자동 인상, 실전 효율 평가·UI·패키징·Stage 3 50/50/오프닝/표시 후속은 시작하지 않는다. 이번 순수 계산 모듈 마감에 추가 native는 해당하지 않는다.
 
 - [Unit 7 색인 P0 closeout](stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md): 등록된 색인 P0 의미·work와 제한 모델 평가를 수용했다. 제품/helper 필수 수정 0, source 357개다. 실행 속도·실제 효율 개선은 미확립이다.
 - **U7RV-W1:** 같은 코드가 실행되는 timing 8입력의 비율 산포 0.7684~1.0245 안에 변경 경로 4개가 들어간다. 46/96 CPU=0, 15.625ms 양의 해상도를 보존한다. 속도 향상으로 쓰지 않는다.
@@ -40,7 +47,7 @@ Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destina
 - 독립 모델이 고유 실제 정책 174시도와 생성 전이(총 1,704전이)를 재생했다. 낮은 depth 3/5의 8사례/28배치에서 FLAG 뒤 미완료를 재현했고, 기본 depth 12는 28배치 모두 종결·8 MATCH다. 일반 연속성 증명은 아니다.
 - S/M 및 M/R의 엄격한 목적값 차이가 작은 witness에서 확인됐다. E[X]는 실패 0을 포함한 무조건부 효용이며 승리판 평균과 다르다. 일반 효율 우위·세계기록·추천 τ로 확대하지 않는다.
 - [Unit 1·2 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md)의 수용·실패 이력을 유지한다. Unit 2 C01 최초 Git 전 기록 공백, Unit 2 H01 집계 오류, Unit 3 U3-H01은 서로 다르다. 이후 성공으로 과거 PASS를 만들지 않는다.
-- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했고 Unit 6가 제한 rollout 선택기를 구현했다. Unit 7에서 색인 P0 의미와 확대 profile의 완료를 확인했다. 다음은 정밀 확률과 S/M/R별 후속 선택 계약이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
+- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했고 Unit 6가 제한 rollout 선택기를 구현했다. Unit 7에서 색인 P0 의미와 확대 profile의 완료를 확인했다. 그 후 Unit 8이 별도 Q/G 프로토타입을 추가했다. 현재 한계는 큰 보드 계산 완료율이며 일반 효율은 미확립이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
 - 이번 평가는 UI/Live 입력 경로를 바꾸지 않아 추가 사용자 native 확인은 해당하지 않는다. 향후 화면/입력 연결과 전시 노트북 수용은 별도다.
 
 ## 현재 authority와 기능

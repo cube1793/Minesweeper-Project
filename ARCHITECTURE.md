@@ -1059,6 +1059,16 @@ Phase B의 12입력 중 8개는 같은 코드를 실행하며 비율이 0.7684~1
 
 [Unit 7 closeout](docs/stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md)에 W1~W4, N1~N5, U1~U8와 U7-R01 공백을 남겼다. 공통 P0의 정확 확률 보완과 S/M/R별 후속 목적은 새 계약/모델 버전으로 검증할 다음 범위이며 이번 변경에 포함되지 않는다.
 
+### Unit 8 공개 정밀 확률 Q / 목적별 평가 G
+
+`stage4_exact_pilot.ExactPilot`는 공개 grid·지뢰 수·counted C·guess·prior·limits만 받는다. P0 V2의 guess=False 안전 경로 뒤에 Unit 4의 정확 D/M을 사용한다. FLAG는 미지수이고 정확 안전/지뢰 집합으로 OPEN·해제·CHORD 준비의 전체 비용을 비교한다. 안전 부재가 증명된 때만 최소 위험 추측이나 GUESS_BLOCKED가 가능하다. 완료 base만 최대 256개 FIFO 캐시에 보관하며 새 요청의 0한도·시간·취소 검사를 우선한다.
+
+`stage4_objective_pilot.choose_objective`의 G는 Unit 5 후보와 공통 posterior bank로 후보 뒤 Q를 평가한다. 실제 B와 배치는 가상 평가자만 보유하며 Q에는 주지 않는다. S/M/R의 목적을 유지하고 모든 N16×K6 행이 완료돼야 점수와 수순을 발행한다. 미완료는 null이며 fallback을 추가하지 않았다. 실제 입력마다 G를 다시 호출한 값과 후보 뒤 Q 모델값은 다를 수 있다.
+
+개별 Q는 local 20,000/exact 200,000/최대 2초와 G 잔여 한도 중 작은 값을 받는다. 등록된 G 기본 exact20M/local10M/30초는 0/18, 확대 exact60M/local30M/30초는 3/18 완료다. 기본 local 12건은 합계 cap, exact 6+6건은 개별 cap, 확대 8+1건은 부모 30초 또는 남은 시간에 막혔다. 일반 성능·효율·실전 정책 수용이 아니다.
+
+제품 축 ACCEPT_BOUNDED, 원 전체 PARTIAL/U8-H05·원 manifest 부재·R02/R03 공백을 유지한다. Q 15/G 14 시험은 별도 실행, 작은 G 102건·엔진 24 trial이 독립 재현됐다. 큰 Q 92,545건의 결정은 각 저장 base와 대조했으며 큰 base 자체를 전수 재계수한 것은 아니다. [Unit 8 상세](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md)에 W1~W5, O1~O4, U1~U6와 helper의 좁은 보정 범위를 기록한다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.
@@ -1082,6 +1092,7 @@ Phase B의 12입력 중 8개는 같은 코드를 실행하며 비율이 0.7684~1
 | Stage 4 candidate evidence | `test_stage4_candidates.py`, `stage4_candidates_oracle.py` | 정준 수순·전체 비용·공동 생존/0 사건·eligibility·미완료·engine macro. A 25/B 1 별도 실행과 6 snapshot 대조 |
 | Stage 4 rollout policy | `test_stage4_posterior.py`, `test_stage4_rollout.py`, `test_stage4_policy.py`, `stage4_policy_oracle.py` | A 13/B 11(v01)+추가 B 4(v02) 별도 실행. 정수 rank·공개 P0·원자 선택·fallback·continuation·작은 25시도/큰 첫 선택 18회 |
 | Stage 4 indexed P0 | `test_stage4_rollout_indexed.py`, `stage4_rollout_reference.py` | 기존 P0 의미·새 work·한도·fixture. 고유 PASS 34=5+29 별도 실행, 독립 재구현 354건, 10M/30M profile 구분. reference는 사본 |
+| Stage 4 exact/objective pilot | `test_stage4_exact_pilot.py`, `test_stage4_objective_pilot.py`, `stage4_pilot_oracle.py` | 공개 확률 후속·S/M/R·한도/캐시·원자적 null; Q 15/G 14 별도 실행, 작은 engine 24 trial; 큰 base 전수 재계수 없음 |
 | Decision analyzer | `test_simple_decision.py` | local 우선과 probability 생략, 세 decision 종류, mine budget, 불변 입력·공개 API 경계 |
 | Runner | `test_simple_runner.py` | 첫 수/guess 정책, 한 행동 후 재분석, 진행 검사·오류, 실제 event 순서, partial/continuation 재생과 정보 격리 |
 | Live Analysis | `test_live_analysis.py` | 순수 presentation, 정확한 후보·확률 포맷, 실제 Qt 표시·갱신·Reduction·오류·첫 수 정책 |
@@ -1128,7 +1139,7 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
-위 Program K 후속 연구의 재개와 별개로 Stage 4 Unit 1~6 기반과 Unit 7 색인 P0가 각각 한정 수용됐다. 다음은 P0의 정밀 확률과 S/M/R별 후속 선택 계약이다. 기본 모델 한계·실제 일반 상급판 효율·Main 통합과 Extended 전역 종료는 별도다.
+위 Program K 후속 연구의 재개와 별개로 Stage 4 Unit 1~7과 Unit 8의 공개 정밀 후속 프로토타입이 각각 범위 한정 수용됐다. 현재 후속 후보는 개별 Q cap·반복 계산·캐시와 완료율 진단이다. 일반 효율 평가와 UI 연결은 별도 결정한다.
 현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
 재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
 향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,
