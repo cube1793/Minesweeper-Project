@@ -18,9 +18,11 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 
 Unit 1·2의 기반에 이어, `stage4_evaluation.py`로 실제 한 입력마다 다시 계획하는 평가기를 추가했습니다. Unit 3은 등록된 작은 사례에서 독립 한정 수용됐고 필수 수정은 0건입니다. 최종 36설정의 점수 비교가 일치했으며, 123건은 동결 후 신규 113건과 동결 전 완료 기록 재사용 10건입니다. 세 방식이 평균 효율과 목표 도달 확률에 따라 다르게 선택하는 사례도 확인했습니다.
 
-계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. Main 메뉴와 일반 상급판에는 아직 연결하지 않았습니다. Unit 2 C01과 Unit 3 U3-H01, 각 구현자의 PARTIAL은 별도로 보존합니다.
+Unit 4의 `stage4_belief.py`는 공개 관측과 전체 지뢰 수로 배치 수 D, 칸별 지뢰 배치 수 M, 여러 칸의 공동 사건 수 W를 정확히 계산합니다. 새 시험 21개와 독립 재계산을 거쳐 한정 수용됐습니다. 기존 Replay의 상급 크기 6관측에서도 값이 일치했으며, 시간·작업 한도 안에서 완료하지 못한 값은 미확정으로 남깁니다. 행동을 고르는 정책이나 일반 상급판 전체의 실용성 검증은 아직 아닙니다.
 
-현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
+작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
+
+현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
 
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 
@@ -479,6 +481,7 @@ Minesweeper-Project/
 ├─ stage4_opening.py            # 공개 관측의 exact D/M/Z와 오프닝 질의 근거
 ├─ stage4_planning.py           # 작은 상태의 비용·공개 분기 계획과 S/M/R 선택
 ├─ stage4_evaluation.py         # 공개 prefix 재생·매 입력 재계획·미완료/정확 집계
+├─ stage4_belief.py             # 한도·취소를 갖춘 공개 D/M/공동 사건 W의 정확 계수
 ├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
@@ -529,7 +532,7 @@ Repository 루트에서 실행합니다.
 python -m unittest discover -s tests -v
 ```
 
-Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조와 Unit 3 평가기의 입력·미완료·집계 경계를 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
+Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조, Unit 3 평가기의 입력·미완료·집계, Unit 4 계수기의 D/M/W·한도·취소·원자적 확정을 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
 
 Qt UI 테스트는 기본적으로 `offscreen` 플랫폼을 사용합니다. Windows에서 플랫폼 플러그인 탐색 오류가 발생하면 `QT_QPA_PLATFORM_PLUGIN_PATH`를 해당 Python의 실제 PyQt5 설치 경로 아래 `Qt5/plugins/platforms` 또는 `Qt/plugins/platforms`로 지정합니다.
 

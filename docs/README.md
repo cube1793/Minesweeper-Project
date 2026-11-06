@@ -5,7 +5,8 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1·2 기반과 Unit 3 평가기의 한정 수용, 현재 미통합 범위와 다음 설계 단계.
+- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1·2 기반, Unit 3 평가기와 Unit 4 공개 계수기의 한정 수용, 미통합 범위와 다음 설계 단계.
+- [Stage 4 공개 계수기 Unit 4 closeout](stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md): 새 시험 21개, 작은/분석해/상급 크기 6관측의 D/M/W 독립 재계산, 공동 사건 구성·한도·취소·시계 해상도와 5개 비차단 처분.
 - [Stage 4 평가기 Unit 3 closeout](stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md): 신규 17개 시험, 최종 36 MATCH와 신규 113/재사용 10 구분, 독립 174시도 재생, 미완료·세 목적 차이, U3-H01 및 비차단 처분.
 - [Stage 4 오프닝·계획 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md): Unit 1 27개와 Unit 2 18개 테스트를 별도 기록하고, oracle/주입 전이/실제 경로·C01 공백·9개 권고를 구분한다.
 
