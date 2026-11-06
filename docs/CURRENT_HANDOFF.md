@@ -1,16 +1,24 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 6 rollout 선택기가 독립 **ACCEPT_BOUNDED**, 제품/helper 필수 수정 0으로 수용됐다. 구현자 전체 **PARTIAL**과 첫 Git 4건의 원시 공백 U6-R02는 보존한다. 현재 source 355개이며 신규 source/tests 7개와 문서 6개, 총 13경로 마감을 준비한다. 큰 공개 관측 18회는 모두 fallback이고 큰 보드 모델 선택·일반 효율·Main/UI는 미확인이다.
+Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 7 색인 P0와 제한 모델 평가가 독립 수용됐다. 제품/helper 필수 수정 0, source 357개이며 source/tests 4 + 문서 6 = 10경로 마감을 준비한다. 기본 10M은 6/18 완료·모두 전 후보 점수 0, 확대 30M은 18/18 완료·9건 전 후보 점수 0이다. 속도·실제 효율 개선은 미확립이며 Unit 6 PARTIAL/U6-R02 및 U7-R01을 보존한다.
 
-Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
+Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit 7 색인 P0 closeout](stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md): 등록된 색인 P0 의미·work와 제한 모델 평가를 수용했다. 제품/helper 필수 수정 0, source 357개다. 실행 속도·실제 효율 개선은 미확립이다.
+- **U7RV-W1:** 같은 코드가 실행되는 timing 8입력의 비율 산포 0.7684~1.0245 안에 변경 경로 4개가 들어간다. 46/96 CPU=0, 15.625ms 양의 해상도를 보존한다. 속도 향상으로 쓰지 않는다.
+- **U7RV-W2:** 기본 10M은 6/18 완료·12 fallback이고 완료 6건 모두 전 후보 점수 0이다. EXPANDED 30M은 18/18 완료·9건 전 후보 점수 0이며 12요청이 10M을 넘는다. root exact 생존/동률 선택은 가능하지만 기본값의 비영 모델 비교 근거는 없다.
+- **U7RV-W3:** 30.0과 int 30의 exact_json 문자열 "30" 때문에 policy request_id가 36/36 다르다. seed/root/bank/shortlist/선택 의미의 동등성과 요청 identity를 구분한다.
+- **U7RV-W4:** 34 PASS는 run02/v01 5(+FAIL 1) + run03/v02 29의 별도 실행이다. v02 일괄 34 실행은 없다. fixture 실패와 보정은 보존했다.
+- 354건(고유 150)의 의미와 work, 가상 3,456행, 실제 10경로(6 WON/3 LOST/1 GUESS_BLOCKED, 47입력)가 독립 재현됐다. 6관측은 같은 Replay에서 왔고 모델 점수는 후보 뒤 공통 P0의 결과다. 실제 S/M/R 반복 정책의 승률로 쓰지 않는다.
+- U7-R01 최초 기록 공백, U7-R02/H01/P01/H02, N1~N5/U1~U8와 Unit 6 PARTIAL/U6-R02를 유지한다. 후속은 정밀 확률 및 목적별 P0 설계이며 기본값 자동 인상·새 실전 평가·UI 통합은 이번 마감 범위가 아니다.
 
 - [Unit 6 rollout 선택 정책 closeout](stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md): 정확 posterior 표본·공개 P0·S/M/R·원자 입력과 같은 인스턴스의 continuation을 한정 수용했다. 기존 source 348개는 불변이다.
 - **W1:** READY 104 = MODEL_SELECTED 69 + 실제 fallback 29 + continuation 6. 비READY 35 중 3개의 잔존 fallback basis를 선택으로 세지 않는다.
 - **W2:** MODEL_SELECTED 69 = 합성 주입 4 + 실제 가상 rollout 65, 그중 실제 소보드 폐루프 43. **W3:** A 13/B 11(v01)과 추가 B 4(v02)는 별도 실행이며 v02 28개 일괄 PASS가 아니다.
 - 작은 실제 25시도는 WON 13 / LOST 10 / GUESS_BLOCKED 1 / UNRESOLVED 1. 전체 평균 null, G001 세 모드 12/35, G009 S 2/5·M/R 1/2. 실제 M/R 차이는 확보하지 못했고 target 변경 차이는 합성 시험이다.
-- 큰 18호출은 root/sampler COMPLETE이지만 모두 fallback. 예정 1,728행 중 미완료 18/가상 WON 3/미시작 1,707을 보존한다. P0 추측의 칸별 전체 제약 순회가 20,000 work cap에 닿았으며 다음 계산량 개선 범위다.
+- Unit 6 당시 큰 18호출은 root/sampler COMPLETE이지만 모두 fallback. 예정 1,728행 중 미완료 18/가상 WON 3/미시작 1,707을 보존한다. P0 추측의 칸별 전체 제약 순회가 20,000 work cap에 닿았으며 다음 계산량 개선 범위다.
 - N1~N9와 U1~U8, U6-R02의 복구 불가능한 과거 기록 공백은 closeout 처분을 따른다. 현재 모듈에는 추가 native가 필요 없으며 UI/worker·큰 보드 모델 선택·전시 노트북은 후속이다.
 
 - [Unit 5 후보 수순 근거 closeout](stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md): OPEN·해제·FLAG 준비 CHORD의 전체 비용, 공동 생존 Ws와 0 사건 Zt, S/M/R 위험 eligibility를 계산한다. 최종 선택이나 전체 효율 점수는 반환하지 않는다.
@@ -32,7 +40,7 @@ Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destina
 - 독립 모델이 고유 실제 정책 174시도와 생성 전이(총 1,704전이)를 재생했다. 낮은 depth 3/5의 8사례/28배치에서 FLAG 뒤 미완료를 재현했고, 기본 depth 12는 28배치 모두 종결·8 MATCH다. 일반 연속성 증명은 아니다.
 - S/M 및 M/R의 엄격한 목적값 차이가 작은 witness에서 확인됐다. E[X]는 실패 0을 포함한 무조건부 효용이며 승리판 평균과 다르다. 일반 효율 우위·세계기록·추천 τ로 확대하지 않는다.
 - [Unit 1·2 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md)의 수용·실패 이력을 유지한다. Unit 2 C01 최초 Git 전 기록 공백, Unit 2 H01 집계 오류, Unit 3 U3-H01은 서로 다르다. 이후 성공으로 과거 PASS를 만들지 않는다.
-- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했고 Unit 6가 제한 rollout 선택기를 구현했다. 다음은 P0 계산량 개선과 큰 관측의 모델 선택 경로 확인이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
+- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했고 Unit 6가 제한 rollout 선택기를 구현했다. Unit 7에서 색인 P0 의미와 확대 profile의 완료를 확인했다. 다음은 정밀 확률과 S/M/R별 후속 선택 계약이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
 - 이번 평가는 UI/Live 입력 경로를 바꾸지 않아 추가 사용자 native 확인은 해당하지 않는다. 향후 화면/입력 연결과 전시 노트북 수용은 별도다.
 
 ## 현재 authority와 기능
@@ -109,13 +117,13 @@ C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/
 
 ## Git / 다음 단계
 
-작성 시 main/HEAD=local origin/main=**fa6e33aa9a02a6facff447b81862727ca4f6e216**, ahead/behind 0/0, staged 0, index **37e76e6eec79d2fb3dfe7e349533e90f6ab19c38cf46f41d8141c78d84e75983**다. Unit 5의 완료 권위는 `STAGE4_UNIT5_POSTCOMMIT_RECOVERY_2026-11-07/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
+작성 시 main/HEAD=local origin/main=**3670542ded239be34a1ef7f9de03a2d5a86d0950**, ahead/behind 0/0, staged 0, index **fc36efefc64c2cb645c2b191e554b1ecb9f742a0291ec6dc2d7fb76fb0505388**다. Unit 6 완료 권위는 `STAGE4_UNIT6_POSTCOMMIT_RECOVERY_2026-11-07/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
 
-현재 Unit 6 신규 source/tests 7 + 문서 6 = 13경로는 `outputs/STAGE4_UNIT6_CLOSEOUT_2026-11-07/coordinator_01`의 계획과 사용자 스크립트로 묶는다. commit/push 영수증 확인 뒤 Desktop recovery 2개를 별도 교체한다. 완료된 과거 스크립트를 재실행하지 않고 문구만을 위한 추가 commit을 만들지 않는다.
+Unit 7의 기존 source 변경 2 + 신규 tests 2 + 문서 6 = **10경로(A3/M7)**는 `outputs/STAGE4_UNIT7_CLOSEOUT_2026-11-07/coordinator_01`의 계획과 사용자 스크립트로 묶는다. 검토된 reference의 마지막 빈 줄 두 개는 정확한 hash에 한해 파일별 command-local 공백 예외로 보존한다. commit/push 영수증 확인 뒤 Desktop recovery 2개를 별도 교체한다. 완료 스크립트를 재실행하거나 postcommit 문구만의 추가 commit을 만들지 않는다.
 
-다음 개발은 칸별 제약 index·빈 제약 생략 등 P0 계산량 개선을 별도 계약으로 정하고, 작은 동등성 및 큰 공개 관측의 모델 선택을 검증하는 일이다. 현재 상한만 높이거나 성공 단계를 반복하지 않는다. 일반 상급판 전체 평가·Main/UI·native·패키지는 그 뒤다.
+다음은 P0 정밀 확률 보완과 S/M/R별 후속 선택 설계다. S의 막힘 보완과 M/R의 안전 수가 있는 상황의 효율 후보 비교를 구분한다. 같은 공개 상태의 정확 계수는 공유할 수 있으나 실제 배치·미공개 숫자·실제 3BV는 정책에 주지 않는다. 기존 공통 P0에서 목적별 후속 정책으로 바꾸는 것은 새 버전/예산/미완료 계약이 필요하다. 먼저 기존 실패 trace의 원인을 구분하고 검증할 범위를 정하며 구현·실제 실행은 별도 Codex에 맡긴다.
 
-Codex 모델은 사용자 지정 Astra/Max를 기준으로 하고 미노출 실제 설정은 UNCONFIRMED다. Claude는 큰 단위 뒤 묶어서 검토한다. 과거 오류/예산과 새 보완 예산은 분리한다.
+일반 상급판 전체 평가·Main/UI·native·패키지는 별도다. 현재 UI/입력 경로는 바뀌지 않아 추가 native는 필요 없다. 모델은 사용자 지정 Astra/Max를 기준으로 하고 미노출 실제 설정은 UNCONFIRMED다. Claude는 의미 있는 큰 단위 뒤 묶어 검토한다.
 
 ## 역할과 영구 경계
 

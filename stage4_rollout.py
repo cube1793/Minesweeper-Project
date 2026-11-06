@@ -17,7 +17,8 @@ from stage4_candidates import EvidenceInput
 from stage4_posterior import neighbor_indices, public_digest
 
 
-PILOT_ID = "PUBLIC_LOCAL_COST_P0_V1"
+PILOT_ID = "PUBLIC_LOCAL_COST_P0_V2_INDEXED_HINT"
+PILOT_WORK_ID = "P0_WORK_V2_RESIDUAL_CONSTRAINT_EDGES"
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,19 +232,29 @@ def pilot_p0(observation, num_mines, counted_inputs, allow_guess, *, max_work=20
             return result("PILOT_UNRESOLVED", "LOCAL_RULES_STALLED_GUESS_OFF")
         guesses = []
         residual = closed - safe - mines
+        # Safe candidates have already returned. These residual sets stay fixed
+        # throughout hint construction, and the cache belongs to this call only.
+        tick(len(residual) + 1)
+        global_hint = Fraction(num_mines - len(mines), len(residual)) if residual else Fraction(0)
+        hints = dict.fromkeys(residual, global_hint)
+        for cells, total in constraints[:-1]:
+            tick(len(cells) + 1)
+            cell_set = set(cells)
+            unknown = cell_set - safe - mines
+            if not unknown:
+                continue
+            density = Fraction(total - len(cell_set & mines), len(unknown))
+            for cell in unknown:
+                tick()
+                hints[cell] = max(hints[cell], density)
         for cell in sorted(closed - mines):
             tick()
-            hint = Fraction(num_mines - len(mines), len(residual)) if residual else Fraction(0)
-            for cells, total in constraints[:-1]:
-                tick(len(cells) + 1)
-                if cell in cells:
-                    unknown = set(cells) - safe - mines
-                    if unknown:
-                        hint = max(hint, Fraction(total - len(set(cells) & mines), len(unknown)))
+            hint = hints[cell]
             cost = 2 if flat[cell] == FLAGGED else 1
             guesses.append(((hint, cost, cell), cell))
         if not guesses:
             return result("PILOT_UNRESOLVED", "NO_VIABLE_LOCAL_OPEN")
+        tick(len(guesses))
         key, cell = min(guesses)
         prefix = (move("FLAG", cell),) if flat[cell] == FLAGGED else ()
         return result("READY", "LOCAL_DENSITY_HEURISTIC", prefix + (move("OPEN", cell),), key[0])
@@ -263,7 +274,7 @@ class RolloutLimits:
 
     def __post_init__(self):
         for name, cap in (("max_rollouts", 768), ("max_virtual_inputs", 50_000),
-                          ("max_inputs_per_rollout", 2_000), ("max_pilot_work", 10_000_000)):
+                          ("max_inputs_per_rollout", 2_000), ("max_pilot_work", 30_000_000)):
             if type(getattr(self, name)) is not int or not 0 <= getattr(self, name) <= cap:
                 raise ValueError(f"{name} must be in 0..{cap}")
         if (type(self.max_seconds) not in (int, float) or not isfinite(self.max_seconds)

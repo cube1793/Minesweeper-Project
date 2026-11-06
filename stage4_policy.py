@@ -36,7 +36,7 @@ class PolicyLimits:
     def __post_init__(self):
         for name, cap in (("max_cells", 480), ("samples", 64), ("shortlist", 12),
                           ("sampler_work", 2_000_000), ("virtual_inputs", 50_000),
-                          ("pilot_work", 10_000_000), ("rollouts", 768),
+                          ("pilot_work", 30_000_000), ("rollouts", 768),
                           ("inputs_per_rollout", 2_000)):
             value = getattr(self, name)
             if type(value) is not int or not 0 <= value <= cap:
