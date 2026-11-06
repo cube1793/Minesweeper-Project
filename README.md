@@ -20,9 +20,11 @@ Unit 1·2의 기반에 이어, `stage4_evaluation.py`로 실제 한 입력마다
 
 Unit 4의 `stage4_belief.py`는 공개 관측과 전체 지뢰 수로 배치 수 D, 칸별 지뢰 배치 수 M, 여러 칸의 공동 사건 수 W를 정확히 계산합니다. 새 시험 21개와 독립 재계산을 거쳐 한정 수용됐습니다. 기존 Replay의 상급 크기 6관측에서도 값이 일치했으며, 시간·작업 한도 안에서 완료하지 못한 값은 미확정으로 남깁니다. 행동을 고르는 정책이나 일반 상급판 전체의 실용성 검증은 아직 아닙니다.
 
+Unit 5의 `stage4_candidates.py`는 직접 OPEN, 깃발 해제와 CHORD 준비를 포함한 후보 수순의 전체 입력 비용·공동 생존·0 사건을 계산합니다. 새 시험 A 25개/B 1개, 엔진 339 macro와 큰 공개 관측 6개의 독립 재현을 거쳐 한정 수용됐습니다. S/M/R의 위험 허용을 표시하며 최종 행동은 아직 선택하지 않습니다.
+
 작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
 
-현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
+현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
 
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 
@@ -482,6 +484,7 @@ Minesweeper-Project/
 ├─ stage4_planning.py           # 작은 상태의 비용·공개 분기 계획과 S/M/R 선택
 ├─ stage4_evaluation.py         # 공개 prefix 재생·매 입력 재계획·미완료/정확 집계
 ├─ stage4_belief.py             # 한도·취소를 갖춘 공개 D/M/공동 사건 W의 정확 계수
+├─ stage4_candidates.py         # 후보 수순의 비용·공동 생존·0 사건·위험 허용 근거
 ├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
@@ -532,7 +535,7 @@ Repository 루트에서 실행합니다.
 python -m unittest discover -s tests -v
 ```
 
-Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조, Unit 3 평가기의 입력·미완료·집계, Unit 4 계수기의 D/M/W·한도·취소·원자적 확정을 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
+Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조, Unit 3 평가기의 입력·미완료·집계, Unit 4 계수기의 D/M/W·한도·취소·원자적 확정, Unit 5의 후보 비용·생존·0 사건·미완료 처리를 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
 
 Qt UI 테스트는 기본적으로 `offscreen` 플랫폼을 사용합니다. Windows에서 플랫폼 플러그인 탐색 오류가 발생하면 `QT_QPA_PLATFORM_PLUGIN_PATH`를 해당 Python의 실제 PyQt5 설치 경로 아래 `Qt5/plugins/platforms` 또는 `Qt/plugins/platforms`로 지정합니다.
 

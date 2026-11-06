@@ -1029,6 +1029,12 @@ Unit 4의 상한은 480칸/정준 사건 16개/work 200,000/협력 시간 2초�
 
 독립 검토는 작은 32관측/13,627 bitmask, 분석해 7요청과 Replay 6관측의 D/M/W를 모두 재계산했다. Replay의 M 1,956개와 공동 사건 37개가 일치했고 component M 346개는 두 번째 방법으로 확인했다. EXACT 37개 중 W=0은 19개, W=D는 7개, 중간 확률은 11개여서 일반 큰 frontier 비용 근거로 확대하지 않는다. 새 시험은 A 17개와 B 4개의 별도 실행이다. 예상 UTC의 원시 오류 등 5개 비차단 처분은 [Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md)에 남겼다. 일반 상급판 지원·효율·Main/Live 통합은 후속 범위다.
 
+`stage4_candidates.analyze_candidates(CandidateRequest, cancelled=...)`는 Unit 4의 공개 API만 사용해 `progress_preparations_evidence_v1` 후보를 만든다. 모든 닫힌 OPEN과 해제 OPEN, 양수 숫자의 최종 FLAG 조합·대칭차 편집·CHORD를 열거하고 전체 sequence 길이를 비용으로 센다. 기존 1대상 CHORD와 생존 0 후보를 보존하며 편집 1대상 CHORD는 제외한다. Ws는 모든 직접 대상 T의 공동 안전, Zt는 T와 각 대상의 이웃 전체가 안전한 공동 사건이다. S/M/R의 위험 eligibility만 표시하며 최종 선택/종단/E[X]는 반환하지 않는다.
+
+후보/사건에 하나의 한도를 적용하고 exact base와 완성된 근거만 보존한다. 상한은 생성 4,096/후보 2,048/새 사건 512/backend 33/work 500,000/협력 10초이며 각 backend는 기존 상한과 남은 예산을 따른다. 중단 뒤의 제한된 materialize는 시간 한도 밖이므로 hard real-time 보장이 아니다. S의 안전 칸 부재 규칙도 생존 가능한 최소 M의 직접 OPEN만 허용한다.
+
+새 시험은 A 25개/B 1개의 별도 실행이다. 24관측과 339 engine macro, 큰 6관측의 고유 사건 4,699개가 독립 일치했다. 국소 하한 비율과 0 대상 수를 최종 IOE나 독립 오프닝 개수로 해석하지 않는다. 코드로만 확인된 7종 응답 방어, backend 내부 취소/시간 미시험, 최초 controller 부재의 원시 공백은 [Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md)에 구분했다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.
@@ -1049,6 +1055,7 @@ Unit 4의 상한은 480칸/정준 사건 16개/work 200,000/협력 시간 2초�
 | Stage 4 bounded planning | `test_stage4_planning.py`, `stage4_planning_oracle.py` | S/M/R, 공개 원장/누설 차단, 공개 분기·원자 비용, GUESS_BLOCKED/한도, 1,017개 주입 전이와 45개 실제 경로의 구분 |
 | Stage 4 evaluator | `test_stage4_evaluation.py` | 공개 prefix 전수 재생, 한 입력 후 재계획, 미완료/미시작·분모·구간·정확 산술, 실제 planner 연결. 별도 17개 시험 |
 | Stage 4 public counts | `test_stage4_belief.py`, `stage4_belief_oracle.py` | 공개 D/M/W, 물리 FLAG, 전역 지뢰 수, 공동 사건, 한도·취소·부분 결과·원자적 확정. 새 21개 시험은 A 17/B 4로 별도 실행 |
+| Stage 4 candidate evidence | `test_stage4_candidates.py`, `stage4_candidates_oracle.py` | 정준 수순·전체 비용·공동 생존/0 사건·eligibility·미완료·engine macro. A 25/B 1 별도 실행과 6 snapshot 대조 |
 | Decision analyzer | `test_simple_decision.py` | local 우선과 probability 생략, 세 decision 종류, mine budget, 불변 입력·공개 API 경계 |
 | Runner | `test_simple_runner.py` | 첫 수/guess 정책, 한 행동 후 재분석, 진행 검사·오류, 실제 event 순서, partial/continuation 재생과 정보 격리 |
 | Live Analysis | `test_live_analysis.py` | 순수 presentation, 정확한 후보·확률 포맷, 실제 Qt 표시·갱신·Reduction·오류·첫 수 정책 |
@@ -1095,7 +1102,7 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
-위 Program K 후속 연구의 재개와 별개로, 사용자 승인에 따른 Stage 4 공개 정보 기반·평가기 Unit 3·공개 계수기 Unit 4가 한정 수용됐다. 다음은 계수기를 사용하는 후보 비교와 자원 부족 처리·검증을 설계하는 일이다. 일반 상급판 효율, Main 통합과 Extended 전역 종료는 별도다.
+위 Program K 후속 연구의 재개와 별개로, 사용자 승인에 따른 Stage 4 공개 정보 기반·평가기 Unit 3·공개 계수기 Unit 4·후보 수순 근거 Unit 5가 한정 수용됐다. 다음은 이 근거를 사용하는 S/M/R 선택 정책과 제한 탐색·평가를 설계하는 일이다. 일반 상급판 효율, Main 통합과 Extended 전역 종료는 별도다.
 현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
 재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
 향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,
