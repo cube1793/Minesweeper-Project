@@ -1035,6 +1035,20 @@ Unit 4의 상한은 480칸/정준 사건 16개/work 200,000/협력 시간 2초�
 
 새 시험은 A 25개/B 1개의 별도 실행이다. 24관측과 339 engine macro, 큰 6관측의 고유 사건 4,699개가 독립 일치했다. 국소 하한 비율과 0 대상 수를 최종 IOE나 독립 오프닝 개수로 해석하지 않는다. 코드로만 확인된 7종 응답 방어, backend 내부 취소/시간 미시험, 최초 controller 부재의 원시 공백은 [Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md)에 구분했다.
 
+### Unit 6 posterior / rollout / 실제 선택
+
+`stage4_policy.RolloutPolicy.select_next(PolicyRequest)`는 공개 grid·총 지뢰 수·counted 합 C·S/M/R·guess·target·공개 seed·episode·limits·continuation으로 원자 입력 하나를 반환한다. Main/Live와 연결하지 않은 순수 계산 API다.
+
+`stage4_posterior`는 component histogram과 suffix/binomial의 정확한 정수 rank를 균등 추출한다. D≤N은 전체 배치, 그 외 복원추출이며 중복 slot과 공통 bank를 유지한다. 실제 배치나 board seed는 입력하지 않는다.
+
+`stage4_rollout`의 가상 layout/B는 evaluator만 소유한다. 고정 P0는 공개 grid/지뢰 수/C/guess와 자원 제한만 받는다. 모든 후보×동일 bank가 종결된 경우에만 mean/win/hit를 비교한다. 이 값은 고정 P0 모델의 값이며 실제 재계획 정책의 정확한 성과가 아니다. 미완료는 null이다.
+
+root의 위험 허용은 Unit 5 exact 근거를 따른다. S/M은 모델 평균, R은 양의 target 달성률을 우선한다. 모델 한도에는 완전한 root를 가진 명시적 fallback을 허용하지만 global timeout/cancel·root incomplete·model error는 입력을 내지 않는다. basis는 READY와 함께 해석한다. 32개 fallback 표기 중 실제 입력 반환은 29개이고 나머지 3개는 오류/취소의 잔존 필드다.
+
+FLAG 준비 continuation은 같은 RolloutPolicy 인스턴스의 공개 발행·소비 상태와 예상 grid/C에 결속된다. 매 입력 뒤 현재 exact 후보로 재검증한다. 미적용 입력 후 같은 위치는 계속 STALE이므로 인스턴스 수명·복구는 이후 UI/worker 계약에서 다룬다.
+
+독립 ACCEPT_BOUNDED, 필수 수정 0이다. 큰 18호출은 모두 P0 추측의 전체 제약 재순회가 20,000 work에 닿아 fallback이며 큰 보드 model-selected는 UNVERIFIED다. 먼저 칸별 제약 index·빈 제약 생략과 work 계약을 별도 검토한다. [Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md)에 W1~W3, N1~N9, U1~U8과 U6-R02 영구 공백을 기록했다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.
@@ -1056,6 +1070,7 @@ Unit 4의 상한은 480칸/정준 사건 16개/work 200,000/협력 시간 2초�
 | Stage 4 evaluator | `test_stage4_evaluation.py` | 공개 prefix 전수 재생, 한 입력 후 재계획, 미완료/미시작·분모·구간·정확 산술, 실제 planner 연결. 별도 17개 시험 |
 | Stage 4 public counts | `test_stage4_belief.py`, `stage4_belief_oracle.py` | 공개 D/M/W, 물리 FLAG, 전역 지뢰 수, 공동 사건, 한도·취소·부분 결과·원자적 확정. 새 21개 시험은 A 17/B 4로 별도 실행 |
 | Stage 4 candidate evidence | `test_stage4_candidates.py`, `stage4_candidates_oracle.py` | 정준 수순·전체 비용·공동 생존/0 사건·eligibility·미완료·engine macro. A 25/B 1 별도 실행과 6 snapshot 대조 |
+| Stage 4 rollout policy | `test_stage4_posterior.py`, `test_stage4_rollout.py`, `test_stage4_policy.py`, `stage4_policy_oracle.py` | A 13/B 11(v01)+추가 B 4(v02) 별도 실행. 정수 rank·공개 P0·원자 선택·fallback·continuation·작은 25시도/큰 첫 선택 18회 |
 | Decision analyzer | `test_simple_decision.py` | local 우선과 probability 생략, 세 decision 종류, mine budget, 불변 입력·공개 API 경계 |
 | Runner | `test_simple_runner.py` | 첫 수/guess 정책, 한 행동 후 재분석, 진행 검사·오류, 실제 event 순서, partial/continuation 재생과 정보 격리 |
 | Live Analysis | `test_live_analysis.py` | 순수 presentation, 정확한 후보·확률 포맷, 실제 Qt 표시·갱신·Reduction·오류·첫 수 정책 |
@@ -1102,7 +1117,7 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
-위 Program K 후속 연구의 재개와 별개로, 사용자 승인에 따른 Stage 4 공개 정보 기반·평가기 Unit 3·공개 계수기 Unit 4·후보 수순 근거 Unit 5가 한정 수용됐다. 다음은 이 근거를 사용하는 S/M/R 선택 정책과 제한 탐색·평가를 설계하는 일이다. 일반 상급판 효율, Main 통합과 Extended 전역 종료는 별도다.
+위 Program K 후속 연구의 재개와 별개로 Stage 4 Unit 1~5 기반과 Unit 6 제한 rollout 선택기가 각각 수용됐다. 다음은 P0 계산량 개선과 큰 공개 관측에서 모델 선택 경로를 확인하는 일이다. 실제 일반 상급판 효율, Main 통합과 Extended 전역 종료는 별도다.
 현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
 재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
 향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,

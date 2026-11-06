@@ -5,7 +5,8 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1·2 기반, Unit 3 평가기·Unit 4 계수기·Unit 5 후보 수순 근거의 한정 수용과 다음 선택 정책 설계.
+- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1~5 기반과 Unit 6 rollout 선택 정책의 한정 수용, 큰 보드 fallback과 다음 P0 개선 범위.
+- [Stage 4 rollout 선택 정책 Unit 6 closeout](stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md): 공개 posterior·P0·원자 선택, W1~W3 집계 정정, 실제 작은 25시도/큰 첫 선택 18 fallback, N1~N9·U1~U8와 U6-R02 보존.
 - [Stage 4 후보 수순 근거 Unit 5 closeout](stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md): 비용·공동 생존·0 사건, A 25/B 1, 339 macro와 4,699 사건 독립 재현, 비차단 5·미확인 4 처분.
 - [Stage 4 공개 계수기 Unit 4 closeout](stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md): 새 시험 21개, 작은/분석해/상급 크기 6관측의 D/M/W 독립 재계산, 공동 사건 구성·한도·취소·시계 해상도와 5개 비차단 처분.
 - [Stage 4 평가기 Unit 3 closeout](stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md): 신규 17개 시험, 최종 36 MATCH와 신규 113/재사용 10 구분, 독립 174시도 재생, 미완료·세 목적 차이, U3-H01 및 비차단 처분.

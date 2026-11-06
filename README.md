@@ -12,7 +12,7 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Stage 4 — 공개 정보 효율 계획 기반
+## Stage 4 — 공개 정보 효율 계획 기반과 제한 선택 정책
 
 공개 관측만으로 오프닝의 지뢰/0 확률을 계산하는 `stage4_opening.py`와, 작은 상태에서 OPEN·FLAG·CHORD 수순을 비교하는 `stage4_planning.py`를 추가했습니다. **안전성 유지(S), 평균 성과(M), 목표 기록(R)**는 공통 후보군을 서로 다른 위험 조건과 목적함수로 평가합니다. 속도·이동 거리·Model C 시간은 이 선택 목표에 들어가지 않습니다.
 
@@ -22,9 +22,11 @@ Unit 4의 `stage4_belief.py`는 공개 관측과 전체 지뢰 수로 배치 수
 
 Unit 5의 `stage4_candidates.py`는 직접 OPEN, 깃발 해제와 CHORD 준비를 포함한 후보 수순의 전체 입력 비용·공동 생존·0 사건을 계산합니다. 새 시험 A 25개/B 1개, 엔진 339 macro와 큰 공개 관측 6개의 독립 재현을 거쳐 한정 수용됐습니다. S/M/R의 위험 허용을 표시하며 최종 행동은 아직 선택하지 않습니다.
 
+Unit 6는 `stage4_posterior.py`·`stage4_rollout.py`·`stage4_policy.py`로 공개 배치 표본, 고정 P0 가상 진행과 실제 다음 입력 한 개를 반환하는 S/M/R 선택기를 추가했습니다. 독립 판정은 **ACCEPT_BOUNDED**, 제품·helper 필수 수정은 0건이며 구현자 전체 PARTIAL은 첫 Git 원시 공백과 함께 보존합니다. 큰 공개 관측 18회는 모두 연산량 한도에 따른 fallback이므로 일반 상급판에서 모델 비교가 작동한다는 근거는 아직 없습니다.
+
 작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
 
-현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
+현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md), [rollout 선택 정책 Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
 
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 
@@ -485,6 +487,9 @@ Minesweeper-Project/
 ├─ stage4_evaluation.py         # 공개 prefix 재생·매 입력 재계획·미완료/정확 집계
 ├─ stage4_belief.py             # 한도·취소를 갖춘 공개 D/M/공동 사건 W의 정확 계수
 ├─ stage4_candidates.py         # 후보 수순의 비용·공동 생존·0 사건·위험 허용 근거
+├─ stage4_posterior.py          # 공개 일관 배치의 정확한 정수 rank 표본
+├─ stage4_rollout.py            # 가상 환경과 공개 정보만 받는 고정 P0
+├─ stage4_policy.py             # S/M/R 선택·fallback·인스턴스 내 원자 입력
 ├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
@@ -535,7 +540,7 @@ Repository 루트에서 실행합니다.
 python -m unittest discover -s tests -v
 ```
 
-Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조, Unit 3 평가기의 입력·미완료·집계, Unit 4 계수기의 D/M/W·한도·취소·원자적 확정, Unit 5의 후보 비용·생존·0 사건·미완료 처리를 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
+Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조, Unit 3 평가기의 입력·미완료·집계, Unit 4 계수기의 D/M/W·한도·취소·원자적 확정, Unit 5의 후보 비용·생존·0 사건·미완료 처리, Unit 6의 posterior·가상 전이·선택·continuation을 다룹니다. Unit 6는 A 13개와 B 11개(v01), 추가 B 4개(v02)의 별도 실행이며 v02 28개 일괄 실행이 아닙니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
 
 Qt UI 테스트는 기본적으로 `offscreen` 플랫폼을 사용합니다. Windows에서 플랫폼 플러그인 탐색 오류가 발생하면 `QT_QPA_PLATFORM_PLUGIN_PATH`를 해당 Python의 실제 PyQt5 설치 경로 아래 `Qt5/plugins/platforms` 또는 `Qt/plugins/platforms`로 지정합니다.
 

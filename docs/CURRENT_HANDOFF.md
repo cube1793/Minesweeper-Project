@@ -1,10 +1,17 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 5 후보 수순 근거가 **ACCEPT_BOUNDED_CANDIDATE_EVIDENCE**, 필수 제품/helper 수정 0으로 독립 수용됐다. 현재 source 348개이며 신규 source/tests 3개와 문서 6개, 총 9경로의 마감을 준비한다. 최종 행동 선택·일반 효율·Main/UI 통합은 아직 없다.
+Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 6 rollout 선택기가 독립 **ACCEPT_BOUNDED**, 제품/helper 필수 수정 0으로 수용됐다. 구현자 전체 **PARTIAL**과 첫 Git 4건의 원시 공백 U6-R02는 보존한다. 현재 source 355개이며 신규 source/tests 7개와 문서 6개, 총 13경로 마감을 준비한다. 큰 공개 관측 18회는 모두 fallback이고 큰 보드 모델 선택·일반 효율·Main/UI는 미확인이다.
 
-Unit 4는 commit **9545f6368898d1f0679d178cd1dea5cdf8164ab9**와 Desktop 교체까지 완료됐다. Unit 3은 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2는 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 이전 거리 관람·고정 6은 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**에서 마감됐다. 전시 노트북은 PENDING이다. 아래 과거 source 수와 마감 준비 문구는 당시 snapshot이다.
+Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit 6 rollout 선택 정책 closeout](stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md): 정확 posterior 표본·공개 P0·S/M/R·원자 입력과 같은 인스턴스의 continuation을 한정 수용했다. 기존 source 348개는 불변이다.
+- **W1:** READY 104 = MODEL_SELECTED 69 + 실제 fallback 29 + continuation 6. 비READY 35 중 3개의 잔존 fallback basis를 선택으로 세지 않는다.
+- **W2:** MODEL_SELECTED 69 = 합성 주입 4 + 실제 가상 rollout 65, 그중 실제 소보드 폐루프 43. **W3:** A 13/B 11(v01)과 추가 B 4(v02)는 별도 실행이며 v02 28개 일괄 PASS가 아니다.
+- 작은 실제 25시도는 WON 13 / LOST 10 / GUESS_BLOCKED 1 / UNRESOLVED 1. 전체 평균 null, G001 세 모드 12/35, G009 S 2/5·M/R 1/2. 실제 M/R 차이는 확보하지 못했고 target 변경 차이는 합성 시험이다.
+- 큰 18호출은 root/sampler COMPLETE이지만 모두 fallback. 예정 1,728행 중 미완료 18/가상 WON 3/미시작 1,707을 보존한다. P0 추측의 칸별 전체 제약 순회가 20,000 work cap에 닿았으며 다음 계산량 개선 범위다.
+- N1~N9와 U1~U8, U6-R02의 복구 불가능한 과거 기록 공백은 closeout 처분을 따른다. 현재 모듈에는 추가 native가 필요 없으며 UI/worker·큰 보드 모델 선택·전시 노트북은 후속이다.
 
 - [Unit 5 후보 수순 근거 closeout](stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md): OPEN·해제·FLAG 준비 CHORD의 전체 비용, 공동 생존 Ws와 0 사건 Zt, S/M/R 위험 eligibility를 계산한다. 최종 선택이나 전체 효율 점수는 반환하지 않는다.
 - A 25/B 1은 별도 시험이다. 24관측/2,761 mask/168후보/3,038 profile, 339 engine macro/1,403입력, 큰 6 snapshot의 4,699 고유 사건(새 조회 1,749 포함)을 독립 재현했다.
@@ -25,7 +32,7 @@ Unit 4는 commit **9545f6368898d1f0679d178cd1dea5cdf8164ab9**와 Desktop 교체�
 - 독립 모델이 고유 실제 정책 174시도와 생성 전이(총 1,704전이)를 재생했다. 낮은 depth 3/5의 8사례/28배치에서 FLAG 뒤 미완료를 재현했고, 기본 depth 12는 28배치 모두 종결·8 MATCH다. 일반 연속성 증명은 아니다.
 - S/M 및 M/R의 엄격한 목적값 차이가 작은 witness에서 확인됐다. E[X]는 실패 0을 포함한 무조건부 효용이며 승리판 평균과 다르다. 일반 효율 우위·세계기록·추천 τ로 확대하지 않는다.
 - [Unit 1·2 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md)의 수용·실패 이력을 유지한다. Unit 2 C01 최초 Git 전 기록 공백, Unit 2 H01 집계 오류, Unit 3 U3-H01은 서로 다르다. 이후 성공으로 과거 PASS를 만들지 않는다.
-- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했다. 다음은 실제 S/M/R 선택 정책의 제한 선행 탐색·근사 목적·평가를 설계하는 일이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
+- 계획기는 전체 64칸/닫힘·깃발 8칸 이하의 선언 후보군이다. 처음 score와 재계획 결과의 일반 동등성은 미증명이다. Unit 4의 480칸 상한은 이 계획기의 지원 확대가 아니다. Unit 5가 후보 비교 근거를 추가했고 Unit 6가 제한 rollout 선택기를 구현했다. 다음은 P0 계산량 개선과 큰 관측의 모델 선택 경로 확인이다. 근사 점수를 정확한 최종 E[X]/목표 확률로 부르지 않으며 화면 연결은 별도다.
 - 이번 평가는 UI/Live 입력 경로를 바꾸지 않아 추가 사용자 native 확인은 해당하지 않는다. 향후 화면/입력 연결과 전시 노트북 수용은 별도다.
 
 ## 현재 authority와 기능
@@ -102,11 +109,13 @@ C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/
 
 ## Git / 다음 단계
 
-이 문서 작성 시 main/HEAD=local origin/main=**9545f6368898d1f0679d178cd1dea5cdf8164ab9**, ahead/behind 0/0, staged 0, index **4d70da79c35be5cab3e672f8b95fe312e7b04a8dc06b9004dac64f8e30eecb2d**다. Unit 4의 source/tests 3개+문서 6개와 Desktop 최종 확인은 `STAGE4_UNIT4_POSTCOMMIT_RECOVERY_2026-11-07/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
+작성 시 main/HEAD=local origin/main=**fa6e33aa9a02a6facff447b81862727ca4f6e216**, ahead/behind 0/0, staged 0, index **37e76e6eec79d2fb3dfe7e349533e90f6ab19c38cf46f41d8141c78d84e75983**다. Unit 5의 완료 권위는 `STAGE4_UNIT5_POSTCOMMIT_RECOVERY_2026-11-07/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
 
-현재 마감은 Unit 5 source/tests 3개와 문서 6개, 총 9경로다. `outputs/STAGE4_UNIT5_CLOSEOUT_2026-11-07/coordinator_01`의 계획과 사용자 스크립트를 따른다. 사용자 commit/push receipt 뒤 Desktop recovery 2개는 별도 단계로 교체한다. 완료된 과거 스크립트는 재실행하지 않는다. 조율은 Git 쓰기나 Desktop 교체를 실행하지 않는다. 최종 postcommit 권위는 실제 receipt와 live Git이며 문구만의 추가 commit은 만들지 않는다.
+현재 Unit 6 신규 source/tests 7 + 문서 6 = 13경로는 `outputs/STAGE4_UNIT6_CLOSEOUT_2026-11-07/coordinator_01`의 계획과 사용자 스크립트로 묶는다. commit/push 영수증 확인 뒤 Desktop recovery 2개를 별도 교체한다. 완료된 과거 스크립트를 재실행하지 않고 문구만을 위한 추가 commit을 만들지 않는다.
 
-추가 연구·프로파일링은 자동 시작하지 않는다. Codex 모델은 사용자 지정 Astra/Max를 기준으로 하며 실행 속도는 사용자가 당시 선택한 값을 따른다. 미노출 실제 설정은 UNCONFIRMED다. Claude는 큰 작업 단위 뒤 묶어서 검토하고 같은 범위 보충은 기존 세션을 사용할 수 있다. 원 오류/예산과 새 보충 범위의 예산을 구분한다.
+다음 개발은 칸별 제약 index·빈 제약 생략 등 P0 계산량 개선을 별도 계약으로 정하고, 작은 동등성 및 큰 공개 관측의 모델 선택을 검증하는 일이다. 현재 상한만 높이거나 성공 단계를 반복하지 않는다. 일반 상급판 전체 평가·Main/UI·native·패키지는 그 뒤다.
+
+Codex 모델은 사용자 지정 Astra/Max를 기준으로 하고 미노출 실제 설정은 UNCONFIRMED다. Claude는 큰 단위 뒤 묶어서 검토한다. 과거 오류/예산과 새 보완 예산은 분리한다.
 
 ## 역할과 영구 경계
 
