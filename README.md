@@ -12,6 +12,14 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
+## Stage 4 — 공개 정보 효율 계획 기반
+
+공개 관측만으로 오프닝의 지뢰/0 확률을 계산하는 `stage4_opening.py`와, 작은 상태에서 OPEN·FLAG·CHORD 수순을 비교하는 `stage4_planning.py`를 추가했습니다. **안전성 유지(S), 평균 성과(M), 목표 기록(R)**는 공통 후보군을 서로 다른 위험 조건과 목적함수로 평가합니다. 속도·이동 거리·Model C 시간은 이 선택 목표에 들어가지 않습니다.
+
+Unit 1과 Unit 2는 등록된 작은 상태와 원시 근거 범위에서 독립 수용됐습니다. Unit 2는 최대 64칸·닫힘/깃발 8칸을 지원하며, 아직 Main 메뉴나 일반 상급판 플레이에 연결되지 않았습니다. 사용자용 새 실행 메뉴는 없습니다. 구현자의 PARTIAL과 최초 Git 조회 전 기록 누락(C01)은 역사로 보존합니다.
+
+현재 범위와 수용 근거는 [Stage 4 인덱스](docs/stage4/README.md)와 [오프닝·계획 기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md)을 참고하세요. 일반 효율 향상이나 최고 기록은 아직 평가하지 않았습니다.
+
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 
 2026-11-05 기준 **같은 보드 재플레이·동일 배치 기록·ACK/정리 후 Replay 진입·기본/명시 종료 선택까지 범위 한정 독립 검토 및 최종 사용자 native 수용**을 마쳤습니다. 현재 사용자 환경에서 확인한 범위이며 모든 OS/DPI·preset별 완주·전체 suite·효과성을 뜻하지 않습니다.
@@ -94,7 +102,7 @@ Live에서 초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 �
 - Live에서는 첫 OPEN 또는 FLAG로 지뢰 배치가 확정되면 백그라운드 계산을 시작합니다. 진행 중에는 결과를 숨기고, 종료 시 계산이 끝났다면 즉시 표시합니다. 아직 계산 중이면 `-`를 유지합니다. Replay의 계산 시작은 완료 기록에 한정됩니다.
 - **ZiNi Explorer:** 종료된 Live 게임 또는 완료 Replay에서 ZiNi 결과가 준비되면 별도 창으로 최종 계산 경로를 확인합니다. 처음·이전·다음·마지막, slider와 Index 자동 재생을 지원합니다. 헤더에는 누적 Clicks를 표시하고, 좌표·새로 열린 칸/깃발 수·Premium 진단은 기본으로 접힌 **상세 정보**에서 확인합니다. 초기 창 크기는 보드와 화면 공간에 맞추며 큰 사용자 지정 보드나 작은 화면에서는 스크롤을 유지합니다. Trace는 요청 시 사후 구성하며, 실제 게임 행동을 기록한 Replay와 별도 모델입니다.
 
-2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. 현재 활성 마일스톤은 Stage-3 Extended입니다.
+2026-10-13 **ZiNi improvement CLOSED**: 의미를 보존하는 속도 최적화와 Trace/Explorer를 수용했습니다. 품질 정책은 **V1 유지**, V2 연구는 **종료·미채택**, 최종 holdout은 의도적으로 미개봉 상태입니다. [최종 판정](docs/zini-improvement/ZINI_IMPROVEMENT_FINAL_ADJUDICATION.md)을 참고하세요. Stage-3 Extended의 ACTIVE 경계를 유지하며, 별도 승인된 Stage 4의 공개 정보 계획 기반을 개발 중입니다.
 
 계산 전략과 결과 해석은 [ZiNi 설계](ARCHITECTURE.md#zini-results)에 정리되어 있습니다.
 
@@ -466,6 +474,8 @@ Minesweeper-Project/
 ├─ simple_probability.py        # exact probability와 확률 기반 선택
 ├─ simple_decision.py           # 순수 position 분석 및 decision 통합
 ├─ simple_runner.py             # UI 없이 동기 실행·중단·Replay 기록
+├─ stage4_opening.py            # 공개 관측의 exact D/M/Z와 오프닝 질의 근거
+├─ stage4_planning.py           # 작은 상태의 비용·공개 분기 계획과 S/M/R 선택
 ├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
@@ -516,7 +526,7 @@ Repository 루트에서 실행합니다.
 python -m unittest discover -s tests -v
 ```
 
-Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
+Engine, 보드 분석, Replay, Simple Algorithm, Live/Replay Analysis와 Auto, ZiNi, Stage-3 실행·재생·Visualizer와 process lifecycle을 검증합니다. Stage 4의 새 테스트는 공개 정보·작은 상태의 계획·독립 oracle·엔진 대조를 다룹니다. 구체적인 파일과 검증 범위는 [테스트 전략](ARCHITECTURE.md#test-strategy)을 참고하세요. 일부 UI 테스트는 PyQt5가 없으면 skip되므로 UI까지 검증하려면 위 의존성을 설치해야 합니다.
 
 Qt UI 테스트는 기본적으로 `offscreen` 플랫폼을 사용합니다. Windows에서 플랫폼 플러그인 탐색 오류가 발생하면 `QT_QPA_PLATFORM_PLUGIN_PATH`를 해당 Python의 실제 PyQt5 설치 경로 아래 `Qt5/plugins/platforms` 또는 `Qt/plugins/platforms`로 지정합니다.
 

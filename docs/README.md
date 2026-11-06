@@ -5,7 +5,10 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Main/Live 고정 6 CPS 최적화·사용자 확인](stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md): 검토된 결합 후보 4경로 반영, 직접 3쌍의 간격 개선 중앙값 12.484226%, H1 완료, 별도 R2 56개 통과. 이번 PC의 세 모드·Replay native 수용 완료, 전시 노트북은 대기. 원 PARTIAL/증분 FAIL/index 이력과 목표 10 CPS의 비정형 사용자 관측을 구분한다. 문서·Git·Desktop 마감 준비 중이다.
+- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1 오프닝 근거와 Unit 2 S/M/R 작은 상태 계획 기반의 한정 수용, 현재 미통합 범위와 다음 평가 단계.
+- [Stage 4 오프닝·계획 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md): Unit 1 27개와 Unit 2 18개 테스트를 별도 기록하고, oracle/주입 전이/실제 경로·C01 공백·9개 권고를 구분한다.
+
+- [Main/Live 고정 6 CPS 최적화·사용자 확인](stage3-extended/STAGE3_MAIN_LIVE_FIXED6_OPTIMIZATION_CLOSEOUT.md): 검토된 결합 후보 4경로 반영, 직접 3쌍의 간격 개선 중앙값 12.484226%, H1 완료, 별도 R2 56개 통과. 이번 PC의 세 모드·Replay native 수용과 dc740e2 commit/push·Desktop 검증 완료, 전시 노트북은 대기. 원 PARTIAL/증분 FAIL/index 이력과 목표 10 CPS의 비정형 사용자 관측을 구분한다.
 
 - [Main/Live 거리 관람·성능 진단·실행 도구 보완](stage3-extended/STAGE3_MAIN_LIVE_DISTANCE_VIEW_CLOSEOUT.md): 2026-11-06 source335, 거리 모드와 T1/T2 및 새 helper의 범위 한정 독립 수용. 원 main PARTIAL 이력은 유지한다. 이후 성능 보완과 이번 PC native 수용은 위의 고정 6 CPS closeout에 결속하며 전시 노트북 확인은 별도다.
 

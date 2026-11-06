@@ -1,6 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-06 (Asia/Seoul)** — 거리 관람과 후속 고정 6 CPS 최적화의 독립 검토·정확 반영·이번 PC 사용자 native 수용을 마쳤다. 제품 필수 수정 0, 후속 helper H1은 완료했고 R2 56개를 별도 실행했다. **문서·Git·Desktop 마감은 준비 중이며 전시 노트북 확인은 PENDING**이다. 원 본작업과 보완 실행의 PARTIAL·실패 이력은 유지한다.
+Updated: **2026-11-06 (Asia/Seoul)** — Stage 4 Unit 1 오프닝 근거와 Unit 2 작은 상태 계획기가 한정 독립 수용됐다. 제품/evidence 필수 보완은 0이다. Unit 2 구현자 PARTIAL과 C01 최초 Git 조회 전 기록 공백은 보존한다. 현재 source 340개, Stage 4 신규 source/tests 5개이며 이번 문서와 함께 Git 마감을 준비한다. Main/UI 통합과 일반 효율 평가는 아직 없다.
+
+이전 거리 관람·고정 6 CPS와 이번 PC native는 commit **dc740e222c2b913fa1697fba0f4785cfffc37c2c** 및 Desktop 교체/검증까지 완료됐다. 전시 노트북 확인은 계속 PENDING이다. 아래 Stage 3의 출발 HEAD/source 수·당시 준비 문구는 각 작업의 역사이며 현재 미커밋 경로를 뜻하지 않는다.
+
+## Stage 4 현재 상태와 다음 범위
+
+- [오프닝·계획 기반 closeout](stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md): Unit 1 ACCEPT_BOUNDED, Unit 2 A/B ACCEPT_BOUNDED, D ACCEPT_BOUNDED_WITH_C01_RETAINED. 전체 Stage 4 PASS는 아니다.
+- Unit 1은 `stage4_opening.py`와 테스트 1개, Unit 2는 `stage4_planning.py`와 테스트/oracle 2개다. 실제 배치·분리 카운터를 정책에 주지 않으며 S/M/R의 위험 조건·목적 점수를 구분한다.
+- Unit 1: 별도 27개 테스트, 공개 관측 24개/계수 86행. Unit 2 최종 run03: 18개 테스트, oracle 21건, 엔진 주입 전이 1,017건, 실제 경로 45시도(27 WON / 12 LOST / 6 GUESS_BLOCKED / 0 UNRESOLVED). 서로 다른 실행을 단일 suite로 합치지 않는다.
+- Unit 2는 전체 64칸·닫힘/깃발 8칸 이하의 선언 후보군 안에서만 exact다. 반환 score와 매 입력 재계획 정책의 일반적 동등성은 미증명이며, 모든 후속 호출이 exact일 때 주 목적값의 하한이다.
+- 다음 실행의 첫 Git 명령 전 index 샘플을 반드시 남긴다. 이미 빠진 C01 샘플/원본 스트림은 재실행으로 복구하거나 과거 PASS로 바꾸지 않는다.
+- 다음 구현 후보는 **Main 연결 전 평가 harness**다. 준비 도중 INSUFFICIENT를 UNRESOLVED로 세고, 수순 score와 실제 재계획 결과를 분리하며, 비교용 공개 상태와 시도 수를 사전 고정한다. 일반 상급판 지원/실전 효율 우위나 UI 연결은 별도 범위다.
+- 현재 단위는 UI와 입력 흐름을 바꾸지 않은 순수 모듈이다. 새로운 사용자 native 수용은 요구하지 않는다. UI/Live를 연결하는 후속 변경에는 관련 native 확인이 필요하다.
 
 ## 현재 authority와 기능
 
@@ -76,9 +88,9 @@ C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/
 
 ## Git / 다음 단계
 
-이번 문서 마감 준비 시 main/HEAD=local origin/main=**dc711a7917edf3f00bbad26f710b5240c08d7f13**, ahead/behind 0/0, staged 0, index **bf95a31d39a9bd7d1b8c9ec2249a18d8a6ea85fa7d2e197a6e42bf81933c8c10**다. 이전 같은 보드 26경로와 고속 CPS 문서 6경로의 commit/push·Desktop 교체는 완료됐다. 이전 스크립트를 재실행하지 않는다.
+이 문서 작성 시 main/HEAD=local origin/main=**dc740e222c2b913fa1697fba0f4785cfffc37c2c**, staged 0, index **df1aad8ba16811038afe66aafe8ab8536b40ffe55c6935372fba9269f15670c5**다. Stage 3의 source/tests 6개+문서 7개 마감은 이 commit에서 완료됐으며 Desktop 최종 확인은 `MAIN_LIVE_FIXED6_POSTCOMMIT_RECOVERY_2026-11-06/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
 
-현재는 거리·최적화 source/tests 6개와 관련 문서 7개, 총 13경로를 한 번에 마감할 준비 단계다. 이번 PC native는 수용됐고 노트북은 별도 조건으로 남긴다. 정확한 경로·source335 manifest·index·출발 HEAD를 결속한 새 사용자 스크립트로 commit/push한 뒤 실제 receipt 확인과 Desktop recovery 교체를 진행한다. coordinator는 Git 쓰기와 Desktop 교체를 실행하지 않는다. postcommit 문구만을 위한 추가 commit은 만들지 않는다.
+현재 새 마감은 Stage 4 source/tests 5개와 문서 6개, 총 11경로다. `outputs/STAGE4_FOUNDATION_CLOSEOUT_2026-11-06/coordinator_01`의 계획과 사용자 스크립트를 따른다. 사용자 commit/push receipt를 확인한 뒤 Desktop recovery 2개를 별도 단계로 교체한다. 기존 Git/교체 스크립트는 재실행하지 않는다. coordinator는 Git 쓰기나 Desktop 교체를 실행하지 않는다. 최종 postcommit 권위는 실제 receipt와 live Git이며 문구만 바꾸기 위한 추가 commit을 만들지 않는다.
 
 추가 연구·프로파일링은 자동 시작하지 않는다. Codex 모델은 사용자 지정 Astra/Max를 기준으로 하며 실행 속도는 사용자가 당시 선택한 값을 따른다. 미노출 실제 설정은 UNCONFIRMED다. Claude는 큰 작업 단위 뒤 묶어서 검토하고 같은 범위 보충은 기존 세션을 사용할 수 있다. 원 오류/예산과 새 보충 범위의 예산을 구분한다.
 
