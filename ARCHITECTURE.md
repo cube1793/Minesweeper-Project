@@ -1069,6 +1069,16 @@ Phase B의 12입력 중 8개는 같은 코드를 실행하며 비율이 0.7684~1
 
 제품 축 ACCEPT_BOUNDED, 원 전체 PARTIAL/U8-H05·원 manifest 부재·R02/R03 공백을 유지한다. Q 15/G 14 시험은 별도 실행, 작은 G 102건·엔진 24 trial이 독립 재현됐다. 큰 Q 92,545건의 결정은 각 저장 base와 대조했으며 큰 base 자체를 전수 재계수한 것은 아니다. [Unit 8 상세](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md)에 W1~W5, O1~O4, U1~U6와 helper의 좁은 보정 범위를 기록한다.
 
+### Unit 9 보존 후보 — 현재 제품 미적용
+
+보존된 `stage4_belief_accel`은 잔여 제약 전파·정규화·메모와 지뢰 수 histogram의 lift를 사용한 base-only 정확 계수 후보다. `stage4_exact_accel`은 G별 READY FIFO와 execution profile을 제공했다. 두 기존 파일의 작은 연결과 신규 다섯 파일은 실행 snapshot으로만 보관하고 repo는 Unit 8 bytes로 복구했다.
+
+후보 수학 CORRECT_BOUNDED, 실측 REPRODUCED, 새 Job 12개 수용, 필수 발견 0이다. 기본 완료0→3/18과 확대3→3/18로 채택 기준을 충족하지 못해 PARTIAL_IMPROVEMENT 및 원복이 정당하다. 상세는 [Unit 9 closeout](docs/stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md)을 따른다.
+
+같은 시간·명목 cap 조건이다. 후보 auxiliary는 G exact/local 합계에 미과금이며 별도 호출 cap을 사용한다. 앞으로 재사용하려면 총 auxiliary 예산/비교 단위를 먼저 정한다. 공개 cache_entries는 base만 제어하고 READY는 별도 한도다. READY miss에도 origin이 생기므로 hit는 ready_cache_hit로 판별한다. 상태 없는 choose_exact의 불필요한 cache 삽입과 단독 count_base의 오류 우선순위는 후속 설계 메모다.
+
+실제 F는 macro를 끝까지 적용한 뒤 다음 G를 부르는 24 trial이다. 각 원자 입력마다 재계획하는 구현을 검증한 것이 아니다. 완료 C/D 11 G의1,056행은 독립 재생했지만 미완료 C63/D10의 부분 행은 재생하지 않았다. 원 P01 신원 공백과 기존 PARTIAL은 유지한다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.
@@ -1139,7 +1149,7 @@ Domain Interpretation까지 milestones 1–9는 모두 CLOSED다. Stage-3 Extend
 **ACTIVE**이고 현재 milestone 10은 Program K다.
 
 Program K 연구 시각화·비교와 최종 packaged 사용자 acceptance는 완료됐다.
-위 Program K 후속 연구의 재개와 별개로 Stage 4 Unit 1~7과 Unit 8의 공개 정밀 후속 프로토타입이 각각 범위 한정 수용됐다. 현재 후속 후보는 개별 Q cap·반복 계산·캐시와 완료율 진단이다. 일반 효율 평가와 UI 연결은 별도 결정한다.
+위 Program K 후속 연구의 재개와 별개로 Stage 4 Unit 1~8은 각 범위에서 수용됐고 Unit 9 보존 후보는 검증 뒤 채택하지 않았다. 다음 후보는 정확 계수만 분리해 재사용할 수 있는지에 대한 별도 설계다. auxiliary 총예산·cache 한도를 명시하며 실전 효율이나 UI 연결은 별도 결정한다.
 현재 timing profiling은 STOP / DEFER이며 새 증거와 별도 bounded authorization 없이
 재개하지 않는다. R0-B/Actual E2는 미실행·미승인이고 production/Gate P도 미수용이다.
 향후 effectiveness 경로를 다시 열더라도 frozen R0 adjudication, operating-envelope,

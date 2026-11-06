@@ -1,10 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Stage 4 Unit 8 제품 축 ACCEPT_BOUNDED, 제품 필수 0. 구현자 PARTIAL/U8-H05·원 OUTPUT_MANIFEST 부재·R02/R03 공백은 유지한다. source 362개, 신규 source/tests 5 + 문서 6 = 11경로 마감 준비다. 기본 0/18·확대 3/18 완료이며 effectiveness NOT ESTABLISHED다.
+Updated: **2026-11-07 (Asia/Seoul)** — Unit 9 보존 후보 수학·실측 독립 재현, 필수 발견 제품/근거 0. PARTIAL_IMPROVEMENT와 원복이 정당하다. 기본0→3/18·확대3→3/18, 후보는 현재 제품에 없다. source362 그대로이며 문서6경로만 마감 준비한다.
 
-Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
+Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit 9 보존 후보 closeout](stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md): 후보 수학 CORRECT_BOUNDED, 실측 REPRODUCED, 새 Job 12개 수용. 제품/근거 필수 발견 0, 선택 11·미확인 5·정보 3을 보존한다. 확대 최소 6/18·3요청 증가·공개 시점 1개 증가 기준 미충족으로 PARTIAL_IMPROVEMENT 및 원복이 정당하다.
+- 현재 source는 Unit 8의 362개다. 후보 7경로는 codex_02/source_versions/v01 및 patch에만 있다. 기본 reference 0→combined 3/18, 확대 3→3/18이며 새 기본 완료는 snapshot_128 S/M/R이다. 확대 combined의 중단 15건은 논리 Q 5,000회 한도 10건과 30초 한도 5건이다.
+- 두 hard 상태 D=978,313,118,206,356 / 7,941,240과 M 179/142칸을 새 독립 계수기로 확인했다. work 1,104/811·aux 25,021/22,695를 재현했으나 auxiliary는 G exact/local에 미과금이다. 비교는 같은 시간·명목 cap이며 같은 총 계산량은 아니다(U9R-O01).
+- 이번 47시험과 별도 독립 364관측/194,080 bitmask, 완료 C/D 11 G/1,056행·4,516 hit 재계산을 구분한다. 전체 hit 47,325회의 전수 재계산은 아니다. oracle_masks 21,212 중 21,184는 원시로 재구성했고 28은 원시가 없다(U9R-O06). F 24 trial은 macro 뒤 G 48회, 13 WON/11 LOST, 94입력이다.
+- U9R-O03: miss 117,189건에도 origin이 있다. hit는 ready_cache_hit로 구분한다. O04: run07 TJO 호출이 있었으나 전원 exit 0으로 실제 종료 멤버는 0이다. O08: cache payload 직렬화는 Q 안, 원시 파일 직렬화는 timed 구간 밖이다. O10: A_raw는 단일 시험 이름이 붙었으나 47시험 전체 집계다. 원본은 바꾸지 않고 상세 문서에서 해석한다.
+- 원 codex_01 P01 PARTIAL과 conhost 신원 공백은 영구 유지한다. 새 12 Job은 별도 수용이고, 원 보수적 2 + 새 Python 23 = charge 25, 논리 시작 13이다. 미완료 C 63/D 10의 부분 행, 참조 work 잔여 118,307, exit 101의 OS 원인 및 owner 부재 확인 한계를 유지한다. 이번 문서 마감에는 새 native가 필요하지 않다.
+- 다음 후보는 정확 계수의 단독 재사용 설계다. auxiliary 총예산·cache 한도·단독 진입점 비용을 먼저 정한다. 결합 후보 재적용, cap 상향, 실전 효율·UI·패키지·저장 정리는 자동 시작하지 않는다.
 
 - [Unit 8 정밀 후속 closeout](stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md): Q의 정확 안전/최소 위험, G의 후보 뒤 Q 모델과 실제 반복 G를 구분해 한정 수용했다. Main/Live 미연결이다.
 - Q 15/G 14 별도 시험 PASS, 작은 G 102건·1,718행·475점수·102선택과 엔진 24 trial(13 WON/11 LOST, 94입력, G 48호출)이 독립 재현됐다. 24건은 세 witness의 전체 모집단이며 일반 표본이 아니다. G009 S 2/5·M 1/2, G001 M/R 12/35, G010 M 7/15·목표0 / R 23/60·목표1/5다.

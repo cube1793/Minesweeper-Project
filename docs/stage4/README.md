@@ -6,6 +6,9 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 현재 수용
 
+- [Unit 9 보존 후보 검증·미채택](STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md): 수학·등록 실측은 재현됐지만 확대 채택 기준 미달로 PARTIAL_IMPROVEMENT와 원복이 정당하다. 현재 제품에는 후보가 없다. 필수0·선택11·미확인5를 보존한다.
+- 기본0→3/18, 확대3→3/18이며 같은 시간·명목 cap 조건이다. 별도 auxiliary는 G 합계에 미과금이다. hard 2상태 D/M과 완료11G/1056행을 독립 재현했고 미완료부분행·전체hit 전수 재계산은 아니다.
+
 - [Unit 8 공개 정밀 후속 closeout](STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md): 제품 ACCEPT_BOUNDED, 제품 필수 0. 원 전체 PARTIAL/U8-H05·manifest 부재·R02/R03 공백을 유지한다.
 - Q 15/G 14 별도 시험, 작은 G 102건과 engine 24 trial의 독립 재현. 후보 뒤 Q 모델의 점수와 실제 매 입력 반복 G 성과는 구분한다.
 - 큰 평가는 기본 0/18·확대 3/18 완료이며 효율 향상은 미확립이다. 개별 exact cap 200,000과 부모 30초는 확대 profile에서도 남았다. 미완료를 0점이나 개선 없음으로 바꾸지 않는다.
@@ -35,6 +38,6 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 다음 작업
 
-Unit 8 문서·Git·recovery 마감 뒤 개별 Q cap, 반복 추론·정확 계산, 기존 캐시 재사용, 부모 시간 예산을 분리해 완료율 개선 범위를 정한다. 작은 상태의 정확성이나 공개 정보 경계를 약화하지 않는다. 후보 뒤 Q의 성능과 실제 반복 G의 성능, 완료 여부와 플레이 효율을 구분한다. 일반 상급판 효율 평가·추천 설정·기본값 자동 인상·UI/Live 연결은 별도 승인 범위다. Stage 3 추가 아이디어와 전시 패키지 정리도 이 단위로 자동 시작하지 않는다.
+Unit 9 문서·Git·recovery 마감 뒤 정확 계수 부분의 단독 재사용을 검토할 수 있다. 먼저 auxiliary 총예산과 비교 단위, base/READY 캐시 한도, 단독 호출의 직렬화 비용과 실패 우선순위를 명시한다. 현재 결합 후보를 재적용하거나 Q5000/30초 한도를 올리는 것은 별도 결정이다. 일반 효율·UI/Live·전시 패키지·저장 자료 정리는 자동 포함하지 않는다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.
