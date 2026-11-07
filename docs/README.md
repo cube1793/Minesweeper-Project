@@ -5,11 +5,12 @@ provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeo
 
 ## Current recovery / navigation
 
-- [Unit 10 독립 정확 계수기 수용](stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md): 합산 과금·메모·원자성, 작은28/큰8 독립 계수, 원시272와 실패·비차단 처분. Q/G 미연결.
+- [Unit 11 Q/G 합산 계수기 연결](stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 API opt-in, 연결·회계 독립 수용과 반영 뒤 A 48개 PASS를 기록한다. 기본 0/18·확대 3/18로 큰 요청 가용성은 이전과 같다.
+- [Unit 10 독립 정확 계수기 수용](stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md): 합산 과금·메모·원자성, 작은28/큰8 독립 계수, 원시 272와 실패·비차단 처분을 포함한 독립 API 검증.
 
 - [Unit 9 보존 후보 검증·미채택](stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md): hard D/M·완료 경로 독립 재현, 기본0→3/확대3→3, auxiliary 과금과 선택11건, 원복 및 원 P01 공백 유지.
 - [Unit 8 공개 정밀 후속 closeout](stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md): 제품 축 ACCEPT_BOUNDED, 원 PARTIAL/H05·manifest 부재 유지. Q 15/G 14 시험과 작은 독립 재현, 큰 0/18·3/18, W1~W5와 helper 보정 범위.
-- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1~8 한정 수용, Unit9 보존 후보 검증·미채택과 Unit10 독립 계수기 수용, 다음 연결 설계.
+- [Stage 4 공개 정보 효율 계획 인덱스](stage4/README.md): Unit 1~8 한정 수용, Unit 9 후보 검증·미채택, Unit 10 독립 계수기와 Unit 11 Q/G opt-in 연결.
 - [Unit 7 색인 P0 closeout](stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md): 354건 의미/work 재현, 10M 6/18·완료 전부 점수 0과 30M 18/18·9건 점수 0, 속도 개선 미확립, W1~W4와 과거 공백 보존.
 - [Stage 4 rollout 선택 정책 Unit 6 closeout](stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md): 공개 posterior·P0·원자 선택, W1~W3 집계 정정, 실제 작은 25시도/큰 첫 선택 18 fallback, N1~N9·U1~U8와 U6-R02 보존.
 - [Stage 4 후보 수순 근거 Unit 5 closeout](stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md): 비용·공동 생존·0 사건, A 25/B 1, 339 macro와 4,699 사건 독립 재현, 비차단 5·미확인 4 처분.

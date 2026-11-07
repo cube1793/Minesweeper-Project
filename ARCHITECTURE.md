@@ -1083,11 +1083,19 @@ Phase B의 12입력 중 8개는 같은 코드를 실행하며 비율이 0.7684~1
 
 `stage4_belief_counter.count_base(CountRequest)`는 공개 grid·전체 지뢰 수·prior·CountLimits만 받는 독립 base API다. FLAG는 identity에 남지만 추론에서는 미지수다. D/M과 기약 Fraction을 전부 준비한 뒤 마지막 취소/시간 검사까지 통과해야 발행한다. 모순만 D=0이며 미완료는 D/M=null이다. 행동·수순·공동 사건 W는 반환하지 않는다.
 
-기본 겸 최대는 480칸/합산200,000 work/협력2초/메모16,384 entry·1M scalar다. 강제·분기·DP와 준비·제약·제약칸·메모·histogram·발행을 모두 units_total에 선과금한다. component 메모만 사용하고 공간 부족은 store skip, 0 한도는 비활성이다. 호출 간·READY·전역 결과 캐시는 없고 기존 Unit8 Q/G는 변경하지 않았다. 향후 부모는 실패·취소·오류도 units_total로 차감해야 하며 sampler/root/legacy와의 작업 정의는 별도로 정한다.
+기본 겸 최대는 480칸/합산200,000 work/협력2초/메모16,384 entry·1M scalar다. 강제·분기·DP와 준비·제약·제약칸·메모·histogram·발행을 모두 units_total에 선과금한다. component 메모만 사용하고 공간 부족은 store skip, 0 한도는 비활성이다. 단독 계수기의 호출 간·READY·전역 결과 캐시는 없다. Unit 10의 부모 계약은 실패·취소·오류도 units_total로 차감하도록 요구하며 sampler/root/legacy와 작업 정의를 구분한다.
 
 제품/API·수학과 과금·중단·메모는 ACCEPT_BOUNDED, 필수 제품/근거 보완0이다. API10시험, 독립28문제/918 mask와 기존 독립 FDP 사본의 새8문제 D/M 재계수, 원시272호출 합계를 확인했다. 시험은 `tests/test_stage4_belief_counter.py`, 별도 bitmask oracle은 `tests/stage4_counter_oracle.py`다. 과금 재생200호출은 source와 원시의 일치 확인이며 독립 계수와 구별한다.
 
-재귀 깊이 극단의 ERROR 가능성은 원시 미관측이고, oversized DTO는 cell 판정 전 identity 생성 비용이 커질 수 있다. 협력 한도는 hard real-time 보장이 아니다. Unit10 auxiliary와 Unit9 auxiliary는 정의가 달라 비교하지 않는다. 원 §7C 기대표 지정 오류·PARTIAL과 콘솔 표시 보정 이력, 비차단5/정보1의 처분은 [Unit10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md)을 따른다. UI/worker·정책 선택에는 연결하지 않았다.
+재귀 깊이 극단의 ERROR 가능성은 원시 미관측이고, oversized DTO는 cell 판정 전 identity 생성 비용이 커질 수 있다. 협력 한도는 hard real-time 보장이 아니다. Unit10 auxiliary와 Unit9 auxiliary는 정의가 달라 비교하지 않는다. 원 §7C 기대표 지정 오류·PARTIAL과 콘솔 표시 보정 이력, 비차단5/정보1의 처분은 [Unit10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md)을 따른다. Unit 10의 수용 범위는 독립 계수 API다.
+
+### Unit 11 Q/G 합산 계수기 선택과 정산
+
+`ExactRequest.base_backend`와 `ObjectiveRequest.base_backend`의 기본은 `UNIT4_LEGACY`이며 `UNIT10_SUMMED`는 API에서 명시한다. 480칸 선검사와 선택 경로의 0 한도 검사를 거친다. 하위 계수기에는 공개 관측·전체 지뢰 수·prior·한도만 전달한다.
+
+G는 Q 호출의 합산 작업을 남은 `counter_units`에서 예약한다. 호출당 최대 200,000 units와 부모 기한에 남은 시간의 범위에서 실행한다. 실패·취소의 유효한 소비량도 identity 및 기한 재검사 전에 차감한다. 확정 지출과 `UNKNOWN_SPEND` 예약, 캐시 출처와 현재 호출 소비를 구분한다. `SETTLED`는 counter 정산에 한정되며 다른 usage 오류는 전체 회계의 불완전 표시와 중단으로 나타난다. 모든 후보·표본 행이 완료된 뒤에 점수와 선택을 발행한다.
+
+연결·회계 수용, 필수 제품·근거 보완 0건, 반영 뒤 A 48개 PASS다. D의 기본 0/18, 확대 3/18 READY는 Unit 8과 같다. 지역 작업, Q 호출 수와 시간 한도를 구분하며 legacy/local/counter work를 같은 단위로 환산하지 않는다. 세부 경계는 [Unit 11 closeout](docs/stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)을 따른다.
 
 ## 6. 테스트 전략
 

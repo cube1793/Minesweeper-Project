@@ -153,7 +153,8 @@ class ObjectivePilotTests(unittest.TestCase):
     def test_q_receives_only_registered_public_fields(self):
         result = g.choose_objective(request())
         self.assertTrue(result.q_calls)
-        allowed = {"observation", "num_mines", "counted_inputs", "allow_guess", "prior_id", "limits"}
+        allowed = {"observation", "num_mines", "counted_inputs", "allow_guess", "prior_id", "limits",
+                   "base_backend"}
         for call in result.q_calls:
             self.assertEqual({field.name for field in fields(call.request)}, allowed)
             self.assertEqual(call.request.allow_guess, True)
@@ -213,6 +214,209 @@ class ObjectivePilotTests(unittest.TestCase):
         self.assertNotIn("import stage4", source)
         self.assertNotIn("core_engine", source)
         self.assertNotIn("VirtualBoard", source)
+
+
+class SummedObjectivePilotTests(unittest.TestCase):
+    def query(self, **kwargs):
+        return request(base_backend=g.UNIT10_SUMMED, **kwargs)
+
+    def assert_join(self, result):
+        calls = result.q_calls
+        for name in ("counter_units_total", "counter_primary_work", "counter_auxiliary_work",
+                     "counter_backend_calls", "local_work"):
+            self.assertEqual(getattr(result.usage, name), sum(getattr(c.result, name) for c in calls))
+        self.assertEqual(result.usage.exact_work, result.usage.backend_work + result.usage.sampler_work)
+        balance = None
+        for call in calls:
+            settlement = call.counter_settlement
+            if balance is not None:
+                self.assertEqual(settlement.balance_before, balance)
+            self.assertEqual(settlement.lease_units, call.request.limits.counter_units)
+            self.assertEqual(settlement.units_total, call.result.counter_units_total)
+            balance = settlement.balance_after
+            self.assertEqual(balance, settlement.balance_before - settlement.units_total)
+            self.assertLessEqual(call.request.limits.counter_units, 200000)
+            self.assertLessEqual(call.request.limits.max_seconds, 2.0)
+
+    def test_complete_model_preserves_legacy_meaning_and_separate_accounts(self):
+        for grid, mode, target in ((G001, "M", None), (G010, "R", Fraction(6, 5))):
+            old = g.choose_objective(request(grid, mode, target))
+            new = g.choose_objective(request(grid, mode, target, base_backend=g.UNIT10_SUMMED))
+            self.assertEqual((new.status, new.sequence, new.selected_candidate_id),
+                             (old.status, old.sequence, old.selected_candidate_id))
+            self.assertEqual(new.status, "READY")
+            self.assertEqual(new.posterior.samples, old.posterior.samples)
+            self.assertEqual(new.shortlist, old.shortlist)
+            self.assertEqual(new.records, old.records)
+            self.assertEqual([(s.rollout_mean_x, s.rollout_win_rate, s.rollout_hit_rate) for s in new.scores],
+                             [(s.rollout_mean_x, s.rollout_win_rate, s.rollout_hit_rate) for s in old.scores])
+            self.assertNotEqual(new.pilot_id, old.pilot_id)
+            self.assertNotEqual(new.followup_id, old.followup_id)
+            self.assertTrue(all(s.pilot_id == new.followup_id for s in new.scores))
+            self.assertEqual(old.usage.counter_units_total, 0)
+            self.assertGreater(new.usage.counter_units_total, 0)
+            self.assertTrue(new.usage.work_accounting_complete)
+            self.assert_join(new)
+
+    def test_g_dto_precheck_and_typed_roundtrip(self):
+        self.assertEqual(fields(g.ObjectiveRequest)[-1].name, "base_backend")
+        self.assertEqual(fields(g.ObjectiveLimits)[-1].name, "counter_units")
+        grid480 = ((H,) * 30,) * 16
+        self.assertEqual(len(g.ObjectiveRequest(grid480, 99, 0, "M", True,
+                                               base_backend=g.UNIT10_SUMMED).observation), 16)
+        oversized = ((object(),) * 481,)
+        with self.assertRaisesRegex(ValueError, "CELL_LIMIT_BEFORE_ID"):
+            g.ObjectiveRequest(oversized, 1, 0, "M", True, base_backend=g.UNIT10_SUMMED)
+        payload = self.query().to_payload()
+        payload["observation"] = oversized
+        with patch.object(g, "_grid_payload", side_effect=AssertionError("decoded before size guard")):
+            with self.assertRaisesRegex(ValueError, "CELL_LIMIT_BEFORE_ID"):
+                g.ObjectiveRequest.from_payload(payload)
+        legacy = g.choose_objective(g.ObjectiveRequest(((H,) * 481,), 1, 0, "M", True))
+        self.assertEqual((legacy.status, legacy.reason), ("UNSUPPORTED", "CELL_LIMIT"))
+        for value in (True, -1, 60000001, 1.0):
+            with self.assertRaises(ValueError):
+                g.ObjectiveLimits(counter_units=value)
+        ids = set()
+        for seconds in (30, 30.0):
+            for seed in (7, "7"):
+                original = replace(self.query(), planning_seed=seed,
+                                   limits=g.ObjectiveLimits(max_seconds=seconds))
+                restored = g.ObjectiveRequest.from_payload(json.loads(json.dumps(original.to_payload())))
+                self.assertEqual(original, restored)
+                self.assertIs(type(restored.limits.max_seconds), type(seconds))
+                self.assertIs(type(restored.planning_seed), type(seed))
+                self.assertEqual(original.identity, restored.identity)
+                ids.add(original.identity)
+        self.assertEqual(len(ids), 4)
+        for name in ("active", "wasted", "actual_layout", "progress_bbbv"):
+            payload = self.query().to_payload()
+            payload[name] = 0
+            with self.assertRaises(ValueError):
+                g.ObjectiveRequest.from_payload(payload)
+
+    def test_zero_counter_precedes_root_and_small_parent_lease_stops(self):
+        with patch.object(g, "analyze_candidates", side_effect=AssertionError("zero must precede root")):
+            zero = g.choose_objective(self.query(limits=g.ObjectiveLimits(counter_units=0)))
+        self.assertEqual((zero.status, zero.reason), ("INSUFFICIENT", "ZERO_COUNTER_WORK_LIMIT"))
+        self.assertEqual(zero.usage.counter_units_total, 0)
+        self.assertFalse(zero.records)
+        small = g.choose_objective(self.query(limits=g.ObjectiveLimits(counter_units=1)))
+        self.assertEqual(small.status, "INSUFFICIENT")
+        self.assertFalse(small.sequence)
+        self.assertFalse(small.scores)
+        self.assert_join(small)
+        self.assertEqual(sum(c.result.counter_backend_calls for c in small.q_calls), 1)
+        self.assertEqual(small.q_calls[-1].request.limits.counter_units, 1)
+        self.assertLessEqual(small.usage.counter_units_total, 1)
+
+    def test_exact_lease_settles_once_and_rejects_exhausted_parent(self):
+        import stage4_exact_pilot as q
+        for cap in (114, 115):
+            parent = self.query(limits=g.ObjectiveLimits(counter_units=cap))
+            budget = g._Budget(parent, None)
+            child = q.ExactRequest(((H, 1, H),), 1, 2, True,
+                                   limits=q.ExactLimits(counter_units=cap), base_backend=q.UNIT10_SUMMED)
+            budget.reserve_q(child)
+            result = q.choose_exact(child)
+            budget.settle_q(child, result)
+            self.assertEqual(budget.counter_units_total, result.counter_units_total)
+            self.assertEqual(budget.counter_settlement.balance_after, cap - result.counter_units_total)
+            with self.assertRaisesRegex(ValueError, "already settled"):
+                budget.settle_q(child, result)
+            self.assertEqual(budget.counter_units_total, result.counter_units_total)
+            if cap == 115:
+                with self.assertRaises(g._Stop):
+                    budget.require(budget.counter_units_total, cap, "COUNTER_WORK_LIMIT")
+
+    def test_parent_cancel_callback_error_and_time_keep_child_q_g_spend(self):
+        import stage4_exact_pilot as q
+        real = q.count_base
+        for kind, status in (("cancel", "CANCELLED"), ("callback", "ERROR"), ("time", "INSUFFICIENT")):
+            returned = [False]
+            def counted(child, **kwargs):
+                raw = real(child, **kwargs)
+                returned[0] = True
+                return raw
+            def callback():
+                return (1 if kind == "callback" else kind == "cancel") if returned[0] else False
+            with patch.object(q, "count_base", counted), patch.object(g, "perf_counter",
+                    lambda: 31.0 if kind == "time" and returned[0] else 0.0):
+                result = g.choose_objective(self.query(), cancelled=callback)
+            self.assertEqual(result.status, status)
+            self.assertGreater(result.usage.counter_units_total, 0)
+            self.assertTrue(result.usage.work_accounting_complete)
+            self.assert_join(result)
+            self.assertFalse(result.sequence)
+            self.assertFalse(result.scores)
+            self.assertEqual(sum(c.result.counter_backend_calls for c in result.q_calls), 1)
+
+    def test_bounded_count_internal_error_propagates_and_stops_remaining_rows(self):
+        import stage4_belief_counter as counter
+        with patch.object(counter, "_weighted", side_effect=RecursionError("bounded injection only")):
+            result = g.choose_objective(self.query())
+        self.assertEqual((result.status, result.reason), ("ERROR", "Q_BASE_INTERNAL_ERROR"))
+        self.assertGreater(result.usage.counter_units_total, 0)
+        self.assertTrue(result.usage.work_accounting_complete)
+        self.assert_join(result)
+        self.assertEqual(sum(c.result.counter_backend_calls for c in result.q_calls), 1)
+        self.assertEqual(result.q_calls[-1].result.status, "ERROR")
+        self.assertFalse(result.sequence)
+        self.assertFalse(result.scores)
+        self.assertTrue(any(r.outcome == "NOT_STARTED" for r in result.records))
+        self.assertTrue(all(r.value_x is None for r in result.records if r.outcome in ("UNRESOLVED", "NOT_STARTED")))
+
+    def test_unknown_q_spend_stops_and_bad_identity_preserves_valid_charge(self):
+        import stage4_exact_pilot as q
+        real = q.ExactPilot.choose
+        for kind in ("type", "bool", "negative", "sum", "exception", "identity", "version"):
+            def changed(pilot, child, **kwargs):
+                result = real(pilot, child, **kwargs)
+                if not result.counter_backend_calls:
+                    return result
+                if kind == "type":
+                    return None
+                if kind == "exception":
+                    raise RuntimeError("Q response lost after work")
+                if kind == "bool":
+                    return replace(result, counter_units_total=True)
+                if kind == "negative":
+                    return replace(result, counter_primary_work=-1)
+                if kind == "sum":
+                    return replace(result, counter_units_total=result.counter_units_total + 1)
+                return replace(result, **{("request_id" if kind == "identity" else "counter_work_accounting_version"): "bad"})
+            with patch.object(q.ExactPilot, "choose", changed):
+                result = g.choose_objective(self.query())
+            self.assertEqual(result.status, "ERROR")
+            self.assertFalse(result.sequence)
+            self.assertFalse(result.scores)
+            if kind in ("identity", "version"):
+                self.assertTrue(result.usage.work_accounting_complete)
+                self.assertGreater(result.usage.counter_units_total, 0)
+                self.assert_join(result)
+            else:
+                self.assertFalse(result.usage.work_accounting_complete)
+                self.assertEqual(result.q_calls[-1].counter_settlement.status, "UNKNOWN_SPEND")
+
+    def test_new_backend_guess_off_public_equivalence_and_cache_finally_clear(self):
+        import stage4_exact_pilot as q
+        pilots = []
+        def factory(capacity):
+            pilot = q.ExactPilot(capacity)
+            pilots.append(pilot)
+            return pilot
+        with patch.object(g, "ExactPilot", factory):
+            result = g.choose_objective(request(G009, guess=False, base_backend=g.UNIT10_SUMMED))
+        self.assertEqual(result.status, "READY")
+        self.assertTrue(all(row.outcome == "GUESS_BLOCKED" and row.value_x == 0 for row in result.records))
+        self.assertEqual(len(pilots), 1)
+        self.assertFalse(pilots[0]._cache)
+        worlds = [oracle.World(G001, 1, positions) for positions in (((0, 0),), ((2, 1),))]
+        replies = [g.choose_objective(replace(self.query(), observation=w.observation)) for w in worlds]
+        self.assertEqual(replies[0].request_id, replies[1].request_id)
+        self.assertEqual(replies[0].sequence, replies[1].sequence)
+        self.assertEqual(replies[0].scores, replies[1].scores)
+        self.assertEqual(replies[0].posterior.samples, replies[1].posterior.samples)
 
 
 if __name__ == "__main__":

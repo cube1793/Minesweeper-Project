@@ -2,9 +2,13 @@
 
 Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Efficiency/IOE를 높이는 별도 개발 범위다. 실제 숨은 배치와 ZiNi 해답은 정책 입력이 아니며, 속도·이동 거리·Model C 시간도 선택 목표가 아니다.
 
-세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 작은 계획기·평가기, 공개 계수기·후보 근거, 제한 rollout 선택기, Unit7 색인 P0, Unit8 Q/G에 이어 Unit10의 독립 합산 계수기를 추가했다. 기존 Q/G와 Main 메뉴에는 새 계수기를 연결하지 않았다.
+세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 작은 계획기·평가기, 공개 계수기·후보 근거, 제한 rollout 선택기, Unit7 색인 P0, Unit 8 Q/G에 이어 Unit 10의 독립 합산 계수기를 추가했다. Unit 11은 Q/G API에 합산 계수기를 명시적 선택 옵션으로 연결했다.
 
 ## 현재 수용
+
+- [Unit 11 Q/G 합산 계수기 연결](./STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 등록 범위에서 연결·회계 수용, 필수 보완 0건이다. 기본 UNIT4_LEGACY와 API opt-in UNIT10_SUMMED를 두고 검토 네 파일 반영 뒤 A 48개 통과를 확인했다.
+- hard D/M/분수 321칸 일치, 작은 엔진 24 trial, 큰 요청 36개 반환과 READY 3개를 구분한다. READY는 기본 0/18·확대 3/18로 이전과 같다. 실전 효율은 NOT_ESTABLISHED다.
+- 원 실패·PARTIAL과 U01의 당시 판정은 별도로 기록한다. 조율의 줄 해시 36/36과 반영 A의 새 실행 1회는 추가 확인이다.
 
 - [Unit 10 독립 정확 계수기](STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md): 제품/API·수학과 과금·중단·메모 ACCEPT_BOUNDED, 제품/근거 필수0. 신규3파일·source365, 기존362는 불변이다.
 - 합산200,000 work/협력2초, component 메모와 store skip, 호출 간 캐시0. API10시험·독립28문제/918 mask·새FDP8문제 D/M·원시272합계가 일치했다. hard 각3/3과 기존6관측18/18을 확인했다.
@@ -42,6 +46,6 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 다음 작업
 
-Unit10 문서·Git·recovery 마감 뒤 새 계수기의 부모 Q/G 연결 설계를 검토한다. 실패·취소·오류의 units_total 누적 차감, sampler/root/legacy와의 작업 정의·비교 단위, oversized DTO·깊은 재귀 반환 계약을 먼저 정한다. Unit9 미채택이나 과거 미과금을 소급 변경하지 않는다. Q5000/30초·READY 결합 후보 재적용, 실전 S/M/R·UI/Live·전시 패키지·저장 정리는 자동 시작하지 않는다.
+후속 범위 후보는 큰 요청에서 지역 작업·Q 호출·시간 한도를 쓰는 구간을 분리하는 일이다. 이 문서의 수용은 Unit 11 연결·회계와 반영 확인 범위다. Unit 9 미채택과 과거 미과금은 각 당시 기록을 따른다. 실전 효율·UI/Live·전시 패키지·저장 정리는 별도 범위로 관리한다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.

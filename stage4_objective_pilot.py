@@ -12,16 +12,17 @@ from time import perf_counter, process_time_ns
 from stage4_belief import PRIOR_ID, exact_json
 from stage4_candidates import CandidateLimits, CandidateRequest, analyze_candidates
 from stage4_exact_pilot import (
-    Q_ID, ExactLimits, ExactPilot, ExactRequest, _Q_ACTIVE, _grid_payload,
+    Q_ID, ExactLimits, ExactPilot, ExactRequest, ExactResult, _Q_ACTIVE, _grid_payload,
     _integer_payload, _payload_fields, _seconds_payload, _validate_integer_limits,
-    _validate_seconds,
+    _validate_seconds, _backend_grid_check, q_pilot_id, UNIT4_LEGACY, UNIT10_SUMMED,
+    WORK_ACCOUNTING_VERSION,
 )
 from stage4_policy import ModelScore, _shortlist, _validate_root, model_order
 from stage4_posterior import PosteriorRequest, SamplerLimits, public_digest, sample_posterior
 from stage4_rollout import VirtualBoard
 
 
-G_ID = "PUBLIC_OBJECTIVE_PILOT_G_V1"
+G_ID = "PUBLIC_OBJECTIVE_PILOT_G_V2"
 MODEL_MEANING = "DECLARED_SHORTLIST_COMMON_PUBLIC_BANK_THEN_Q"
 _G_ACTIVE = ContextVar("stage4_objective_pilot_active", default=False)
 
@@ -42,6 +43,7 @@ class ObjectiveLimits:
     cache_entries: int = 256
     max_seconds: float = 30.0
     root: CandidateLimits = CandidateLimits()
+    counter_units: int = 20_000_000
 
     def __post_init__(self):
         _validate_integer_limits(self, (
@@ -49,7 +51,7 @@ class ObjectiveLimits:
             ("exact_work", 60_000_000), ("local_work", 30_000_000),
             ("sampler_work", 2_000_000), ("backend_calls", 2_000), ("q_calls", 5_000),
             ("virtual_inputs", 50_000), ("rows", 96), ("inputs_per_rollout", 2_000),
-            ("cache_entries", 256)))
+            ("cache_entries", 256), ("counter_units", 60_000_000)))
         _validate_seconds(self.max_seconds, 30)
         if type(self.root) is not CandidateLimits:
             raise TypeError("CandidateLimits required")
@@ -81,10 +83,11 @@ class ObjectiveRequest:
     planning_seed: int | str = 0
     prior_id: str = PRIOR_ID
     limits: ObjectiveLimits = ObjectiveLimits()
+    base_backend: str = UNIT4_LEGACY
 
     def __post_init__(self):
         public = ExactRequest(self.observation, self.num_mines, self.counted_inputs,
-                              self.allow_guess, self.prior_id)
+                              self.allow_guess, self.prior_id, base_backend=self.base_backend)
         object.__setattr__(self, "observation", public.observation)
         if type(self.mode) is not str or self.mode not in ("S", "M", "R"):
             raise ValueError("mode must be S, M or R")
@@ -105,12 +108,13 @@ class ObjectiveRequest:
 
     @property
     def identity(self):
-        return public_digest((G_ID, self.to_payload()))
+        return public_digest((G_ID, q_pilot_id(self.base_backend), self.to_payload()))
 
     @classmethod
     def from_payload(cls, payload):
         values = _payload_fields(payload, cls)
         if "observation" in values:
+            _backend_grid_check(values.get("base_backend", UNIT4_LEGACY), values["observation"])
             values["observation"] = _grid_payload(values["observation"])
         for name in ("num_mines", "counted_inputs"):
             if name in values:
@@ -140,6 +144,18 @@ class ObjectiveRequest:
 class QCall:
     request: ExactRequest
     result: object
+    counter_settlement: object | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class QCounterSettlement:
+    balance_before: int
+    lease_units: int
+    status: str
+    units_total: int | None
+    primary_work: int | None
+    auxiliary_work: int | None
+    balance_after: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +185,11 @@ class ObjectiveUsage:
     started_rows: int
     virtual_inputs: int
     work_accounting_complete: bool
+    counter_units_total: int = 0
+    counter_primary_work: int = 0
+    counter_auxiliary_work: int = 0
+    counter_backend_calls: int = 0
+    counter_work_accounting_version: str = WORK_ACCOUNTING_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +215,7 @@ class ObjectiveResult:
     elapsed_seconds: float
     cpu_nanoseconds: int
     error: str | None
+    base_backend: str = UNIT4_LEGACY
 
     def to_dict(self):
         return exact_json(self)
@@ -213,6 +235,10 @@ class _Budget:
         self.work_accounting_complete = True
         self.backend_work = self.sampler_work = self.local_work = 0
         self.backend_calls = self.cache_hits = self.started_rows = self.virtual_inputs = 0
+        self.counter_units_total = self.counter_primary_work = self.counter_auxiliary_work = 0
+        self.counter_backend_calls = self.counter_reserved = 0
+        self.counter_settlement = None
+        self._q_settled = True
 
     @property
     def exact_work(self):
@@ -247,10 +273,72 @@ class _Budget:
         if used >= cap:
             raise _Stop("INSUFFICIENT", reason)
 
+    def reserve_q(self, query):
+        if not self.work_accounting_complete or self.counter_reserved:
+            raise ValueError("Cannot reserve after incomplete or unsettled work")
+        balance = self.request.limits.counter_units - self.counter_units_total
+        lease = query.limits.counter_units if query.base_backend == UNIT10_SUMMED else 0
+        if not 0 <= lease <= balance:
+            raise ValueError("Counter lease exceeds parent balance")
+        self.counter_reserved = lease
+        self._q_settled = False
+        self.counter_settlement = QCounterSettlement(balance, lease, "UNKNOWN_SPEND",
+                                                     None, None, None, None)
+
+    def settle_q(self, query, decision):
+        """Consume the returned spend before invoking any parent stop checks."""
+        reservation = self.counter_settlement
+        if self._q_settled:
+            raise ValueError("Q lease already settled")
+        self._q_settled = True
+        self.work_accounting_complete = False
+        if type(decision) is not ExactResult:
+            raise ValueError("UNKNOWN_SPEND: invalid Q response type")
+        total, primary, auxiliary = (decision.counter_units_total,
+                                    decision.counter_primary_work, decision.counter_auxiliary_work)
+        if (any(type(value) is not int or value < 0 for value in (total, primary, auxiliary))
+                or total != primary + auxiliary or total > reservation.lease_units):
+            raise ValueError("UNKNOWN_SPEND: invalid Q counter usage")
+        # These validated counters remain charged even if other Q metadata is invalid.
+        self.counter_units_total += total
+        self.counter_primary_work += primary
+        self.counter_auxiliary_work += auxiliary
+        self.counter_reserved = 0
+        self.counter_settlement = QCounterSettlement(reservation.balance_before,
+            reservation.lease_units, "SETTLED", total, primary, auxiliary,
+            reservation.balance_before - total)
+        for value, cap in ((decision.exact_work, query.limits.exact_work),
+                           (decision.local_work, query.limits.local_work),
+                           (decision.backend_calls, 1), (decision.counter_backend_calls, 1)):
+            if type(value) is not int or not 0 <= value <= cap:
+                raise ValueError("UNKNOWN_SPEND: invalid Q work accounting")
+        self.backend_work += decision.exact_work
+        self.local_work += decision.local_work
+        self.backend_calls += decision.backend_calls
+        self.counter_backend_calls += decision.counter_backend_calls
+        if type(decision.cache_hit) is not bool or type(decision.work_accounting_complete) is not bool:
+            raise ValueError("UNKNOWN_SPEND: invalid Q accounting flags")
+        self.cache_hits += decision.cache_hit
+        if not decision.work_accounting_complete:
+            self.counter_settlement = replace(self.counter_settlement,
+                                               status="UNKNOWN_SPEND", balance_after=None)
+            raise ValueError("UNKNOWN_SPEND: incomplete Q work accounting; totals are lower bounds")
+        self.work_accounting_complete = True
+        if (decision.request_id != query.identity or decision.base_backend != query.base_backend
+                or decision.pilot_id != q_pilot_id(query.base_backend)
+                or decision.counter_work_accounting_version != WORK_ACCOUNTING_VERSION
+                or decision.counter_backend_calls > decision.backend_calls
+                or (query.base_backend == UNIT4_LEGACY and (total or decision.counter_backend_calls))
+                or (query.base_backend == UNIT10_SUMMED and decision.exact_work)):
+            raise ValueError("Q identity/backend/account binding mismatch")
+
     def usage(self, calls):
         return ObjectiveUsage(self.exact_work, self.backend_work, self.sampler_work,
                               self.local_work, self.backend_calls, calls, self.cache_hits,
-                              self.started_rows, self.virtual_inputs, self.work_accounting_complete)
+                              self.started_rows, self.virtual_inputs, self.work_accounting_complete,
+                              self.counter_units_total, self.counter_primary_work,
+                              self.counter_auxiliary_work, self.counter_backend_calls,
+                              WORK_ACCOUNTING_VERSION)
 
 
 def _run_row(request, candidate, sample, sample_index, budget, pilot, calls):
@@ -288,7 +376,11 @@ def _run_row(request, candidate, sample, sample_index, budget, pilot, calls):
                 raise ValueError("Q macro did not reveal a new cell")
             budget.require(len(calls), request.limits.q_calls, "Q_CALL_LIMIT")
             budget.require(budget.backend_calls, request.limits.backend_calls, "BACKEND_CALL_LIMIT")
-            budget.require(budget.exact_work, request.limits.exact_work, "EXACT_WORK_LIMIT")
+            if request.base_backend == UNIT4_LEGACY:
+                budget.require(budget.exact_work, request.limits.exact_work, "EXACT_WORK_LIMIT")
+            else:
+                budget.require(budget.counter_units_total, request.limits.counter_units,
+                               "COUNTER_WORK_LIMIT")
             budget.require(budget.local_work, request.limits.local_work, "LOCAL_WORK_LIMIT")
             query = ExactRequest(
                 board.observation, request.num_mines, request.counted_inputs + len(actions),
@@ -296,17 +388,19 @@ def _run_row(request, candidate, sample, sample_index, budget, pilot, calls):
                 ExactLimits(request.limits.max_cells,
                             min(20_000, request.limits.local_work - budget.local_work),
                             min(200_000, request.limits.exact_work - budget.exact_work),
-                            min(2.0, budget.remaining())))
-            decision = pilot.choose(query, cancelled=budget.relay)
+                            min(2.0, budget.remaining()),
+                            min(200_000, request.limits.counter_units - budget.counter_units_total)
+                            if request.base_backend == UNIT10_SUMMED else 200_000),
+                request.base_backend)
+            budget.reserve_q(query)
+            decision = None
             call_indices.append(len(calls))
-            calls.append(QCall(query, decision))
-            budget.backend_work += decision.exact_work
-            budget.local_work += decision.local_work
-            budget.backend_calls += decision.backend_calls
-            budget.cache_hits += decision.cache_hit
-            budget.work_accounting_complete &= decision.work_accounting_complete
-            if not budget.work_accounting_complete:
-                raise ValueError("Incomplete Q work accounting")
+            try:
+                budget.work_accounting_complete = False
+                decision = pilot.choose(query, cancelled=budget.relay)
+                budget.settle_q(query, decision)
+            finally:
+                calls.append(QCall(query, decision, budget.counter_settlement))
             budget.check()
             if decision.terminal_outcome == "GUESS_BLOCKED" and decision.status == "DEFER":
                 outcome, reason = "GUESS_BLOCKED", "EXACT_NO_SAFE_CELL"
@@ -342,7 +436,7 @@ def _run_row(request, candidate, sample, sample_index, budget, pilot, calls):
     return row, stopped
 
 
-def _complete_scores(chosen, samples, rows, target):
+def _complete_scores(chosen, samples, rows, target, followup_id=Q_ID):
     expected = [(candidate.candidate_id, index, sample.rank)
                 for candidate in chosen for index, sample in enumerate(samples)]
     actual = [(row.candidate_id, row.sample_index, row.rank) for row in rows]
@@ -364,7 +458,7 @@ def _complete_scores(chosen, samples, rows, target):
         mean = sum((row.value_x for row in group), Fraction(0)) / len(group)
         win = Fraction(sum(row.outcome == "WON" for row in group), len(group))
         hit = Fraction(sum(row.hit is True for row in group), len(group)) if target is not None else None
-        scores.append(ModelScore(candidate.candidate_id, mean, win, hit, len(group), len(group), Q_ID))
+        scores.append(ModelScore(candidate.candidate_id, mean, win, hit, len(group), len(group), followup_id))
     return tuple(scores)
 
 
@@ -394,6 +488,8 @@ def choose_objective(request, *, cancelled=None):
             raise _Stop("UNSUPPORTED", "PRIOR_UNSUPPORTED")
         if len(request.observation) * len(request.observation[0]) > request.limits.max_cells:
             raise _Stop("UNSUPPORTED", "CELL_LIMIT")
+        if request.base_backend == UNIT10_SUMMED and request.limits.counter_units == 0:
+            raise _Stop("INSUFFICIENT", "ZERO_COUNTER_WORK_LIMIT")
         budget.require(0, request.limits.exact_work, "EXACT_WORK_LIMIT")
         budget.require(0, request.limits.local_work, "LOCAL_WORK_LIMIT")
         budget.require(0, request.limits.backend_calls, "BACKEND_CALL_LIMIT")
@@ -463,7 +559,8 @@ def choose_objective(request, *, cancelled=None):
                 rows[candidate_index * expected_slots + sample_index] = row
                 if stopped is not None:
                     raise stopped
-        scores = _complete_scores(chosen, posterior.samples, rows, request.target)
+        scores = _complete_scores(chosen, posterior.samples, rows, request.target,
+                                  q_pilot_id(request.base_backend))
         fallback_indices = {row.candidate_id: index for index, row in enumerate(eligible)}
         by_id = {score.candidate_id: score for score in scores}
         selected = max(chosen, key=lambda row: model_order(
@@ -484,8 +581,10 @@ def choose_objective(request, *, cancelled=None):
         pilot.clear()
         if token is not None:
             _G_ACTIVE.reset(token)
-    return ObjectiveResult(G_ID, Q_ID, identity, status, reason, sequence, basis, terminal,
+    followup_id = q_pilot_id(request.base_backend)
+    return ObjectiveResult(f"{G_ID}:{followup_id}", followup_id, identity, status, reason, sequence, basis, terminal,
                            selected_id, MODEL_MEANING, root, entries, posterior, expected_rows,
                            tuple(rows), tuple(calls), scores, budget.usage(len(calls)),
-                           perf_counter() - budget.started, process_time_ns() - budget.cpu_started, error)
+                           perf_counter() - budget.started, process_time_ns() - budget.cpu_started, error,
+                           request.base_backend)
 
