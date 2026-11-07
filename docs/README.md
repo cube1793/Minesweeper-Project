@@ -3,6 +3,8 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
+최근 효율 실험은 [Units12–17 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)을 따릅니다. Units15–17 독립 검토 완료, 후보 수학·실행 보호 수용, 성과 MIXED/미채택이며 driver H1은 다음 재사용 전 PENDING입니다.
+
 ## Current recovery / navigation
 
 - [Unit 11 Q/G 합산 계수기 연결](stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 API opt-in, 연결·회계 독립 수용과 반영 뒤 A 48개 PASS를 기록한다. 기본 0/18·확대 3/18로 큰 요청 가용성은 이전과 같다.

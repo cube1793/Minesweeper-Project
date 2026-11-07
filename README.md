@@ -34,6 +34,8 @@ Unit 10은 `stage4_belief_counter.py`로 독립 base D/M 계수기를 추가했�
 
 Unit 11은 Q/G에 합산 계수기를 API 선택 옵션으로 연결했습니다. 기본은 `UNIT4_LEGACY`이며 `UNIT10_SUMMED`는 명시적으로 지정합니다. 연결·회계는 등록 범위에서 독립 수용됐고 필수 수정은 0건입니다. 검토된 네 파일을 반영한 뒤 A의 48개 메서드가 통과했습니다. 큰 요청의 READY는 기본 0/18, 확대 3/18로 이전과 같으며 실전 효율은 미확립입니다.
 
+Unit15–17은 실제 상급판 기준선, 확정0 진단과 안전한 입력의 오프닝 가치 후보를 비교했습니다. 묶음 독립 검토에서 후보 수학과 실행·보호는 수용됐지만 성과는 MIXED이며 후보는 미채택입니다. E01은163→157, E02는174→175입력이고 driver 직렬화 보완 H1은 다음 재사용 전 PENDING입니다. [효율 실험 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)에 제한과 비용 증가를 기록했습니다.
+
 작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
 
 현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md), [rollout 선택 정책 Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md), [색인 P0 Unit 7 closeout](docs/stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md), [정밀 후속 Unit 8 closeout](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md), [보존 후보 Unit 9 closeout](docs/stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md), [독립 계수기 Unit 10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md), [Q/G 합산 연결 Unit 11 closeout](docs/stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.

@@ -1097,6 +1097,12 @@ G는 Q 호출의 합산 작업을 남은 `counter_units`에서 예약한다. 호
 
 연결·회계 수용, 필수 제품·근거 보완 0건, 반영 뒤 A 48개 PASS다. D의 기본 0/18, 확대 3/18 READY는 Unit 8과 같다. 지역 작업, Q 호출 수와 시간 한도를 구분하며 legacy/local/counter work를 같은 단위로 환산하지 않는다. 세부 경계는 [Unit 11 closeout](docs/stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)을 따른다.
 
+### Units15–17 외부 효율 실험
+
+Unit15의 Q 기준선과 Unit16의20개 공개 상태 진단, Unit17의 안전 입력 점수 후보는 output 영역에서 수행했습니다. 제품 모듈은 Unit11 기준을 유지합니다. L은0확률의 union bound, gain은 직접 표적과 겹침을 제거한1단계 이웃 공개 수의 하한이며 준비 입력을 포함해 score를 계산합니다. 계획 전체 실행 시의 즉시 기대값 하한이고 최종 E[X]/IOE 보장은 별도입니다.
+
+후보 수학과 실행·보호는 독립 수용됐으며 실제 성과는 MIXED/미채택입니다. 원자 입력 후 재계획한37개 다중 입력 제안은 실제 꼬리가 유지됐고, counter 비용은 약10.3배였습니다. 출력 driver의 Fraction-safe 직렬화 H1은 다음 재사용 전 보완 대상입니다. [실험·검토 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)을 따릅니다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

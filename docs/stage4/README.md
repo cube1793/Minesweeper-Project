@@ -4,6 +4,10 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 작은 계획기·평가기, 공개 계수기·후보 근거, 제한 rollout 선택기, Unit7 색인 P0, Unit 8 Q/G에 이어 Unit 10의 독립 합산 계수기를 추가했다. Unit 11은 Q/G API에 합산 계수기를 명시적 선택 옵션으로 연결했다.
 
+## 최근 효율 실험
+
+[Units12–17 마감](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)에 Q 전체 판 기준선,20개 상태의 확정0 진단, 첫 확장 하한 점수 후보를 기록했다. Units15–17 묶음 독립 검토에서 수학과 실행·보호는 수용됐고 성과는 MIXED/미채택이다. E01은6입력 절약, E02는1입력 증가이며 counter 비용은 약10.3배였다. 최종 driver 요약 PARTIAL과 재사용 전 H1 PENDING을 유지한다.
+
 ## 현재 수용
 
 - [Unit 11 Q/G 합산 계수기 연결](./STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 등록 범위에서 연결·회계 수용, 필수 보완 0건이다. 기본 UNIT4_LEGACY와 API opt-in UNIT10_SUMMED를 두고 검토 네 파일 반영 뒤 A 48개 통과를 확인했다.
@@ -46,6 +50,6 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 다음 작업
 
-후속 범위 후보는 큰 요청에서 지역 작업·Q 호출·시간 한도를 쓰는 구간을 분리하는 일이다. 이 문서의 수용은 Unit 11 연결·회계와 반영 확인 범위다. Unit 9 미채택과 과거 미과금은 각 당시 기록을 따른다. 실전 효율·UI/Live·전시 패키지·저장 정리는 별도 범위로 관리한다.
+다음은 driver H1 직렬화를 보완한 뒤 공유 FLAG·겹치는 CHORD를 포함한 복합 수순의 총비용을 검토하는 일이다. 이 문서의 수용은 Unit 11 연결·회계와 반영 확인 범위다. Unit 9 미채택과 과거 미과금은 각 당시 기록을 따른다. 실전 효율·UI/Live·전시 패키지·저장 정리는 별도 범위로 관리한다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.

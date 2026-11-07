@@ -1,10 +1,16 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Unit 11 Q/G 합산 계수기 연결을 등록 범위에서 수용했다. 기본은 UNIT4_LEGACY, UNIT10_SUMMED는 API 선택 옵션이다. 반영 뒤 A 48개 통과, 큰 요청 가용성 UNCHANGED, 실전 효율 NOT_ESTABLISHED다.
+Updated: **2026-11-08 (Asia/Seoul)** — Units15–17 묶음 독립 검토 완료. 수학·실행 보호 수용, 제한 성과 MIXED/후보 미채택. 최종 envelope PARTIAL과 재사용 전 H1 PENDING을 유지한다.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
+현재 문서 갱신의 출발 HEAD/origin은 **ae88e5e8c6c13cff735a2cf9a55d33c9c17746fc**다. source365는 동일하며 아래 과거 실행 HEAD·실패 이력은 당시 snapshot이다. Units15–17 source/계수/게임 재실행 없이 문서6경로를 함께 마감 준비한다.
+
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units12–17 효율 실험 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md). Unit15 네 판342입력 기준선과 Unit16 20 COMPLETE/확정0없음을 보존한다. Unit17은 E01 C163→157, E02 C174→175, E03/E04 동일 패배로 MIXED/미채택이다.
+- 독립 검토는 수학·실행 보호 수용, 필수 제품0·helper H1 1건이다. H1은 다음 driver 재사용 전 Fraction/중첩 dataclass/큰 정수 직렬화 보완이며 아직 PENDING이다. 완료 판 재실행은 필요 없다. 과거 PARTIAL과 최종 envelope 실패를 그대로 둔다.
+- 다음은 H1을 실행 준비에 묶고 공유 FLAG·겹치는 CHORD의 복합 수순 비용을 검토한다. 실전 효율·S/M/R 일반 평가·UI/worker·전시 노트북은 후속이다.
 
 - [Unit 11 Q/G 합산 계수기 연결 마감](stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 연결·회계 ACCEPT_IN_REGISTERED_SCOPE, 필수 제품·근거 보완 각 0건이다. 검토된 Q/G와 시험 네 파일을 반영하고 REVIEWED_OPT_IN_APPLIED_A48_PASS를 확인했다. 새 A 실행 1회에서 START 48 / PASS 48, P3는 원 PASS 재사용이다.
 - 기본 UNIT4_LEGACY와 명시적 UNIT10_SUMMED를 구분한다. Q/G의 units_total 예약·차감, UNKNOWN_SPEND, 공개 정보와 결과의 원자성은 등록 범위에서 수용했다. Unit 11 legacy 버전과 요청 ID의 변경도 기록한다.
