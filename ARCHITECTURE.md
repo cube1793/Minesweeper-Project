@@ -1079,6 +1079,16 @@ Phase B의 12입력 중 8개는 같은 코드를 실행하며 비율이 0.7684~1
 
 실제 F는 macro를 끝까지 적용한 뒤 다음 G를 부르는 24 trial이다. 각 원자 입력마다 재계획하는 구현을 검증한 것이 아니다. 완료 C/D 11 G의1,056행은 독립 재생했지만 미완료 C63/D10의 부분 행은 재생하지 않았다. 원 P01 신원 공백과 기존 PARTIAL은 유지한다.
 
+### Unit 10 독립 정확 계수기와 합산 작업
+
+`stage4_belief_counter.count_base(CountRequest)`는 공개 grid·전체 지뢰 수·prior·CountLimits만 받는 독립 base API다. FLAG는 identity에 남지만 추론에서는 미지수다. D/M과 기약 Fraction을 전부 준비한 뒤 마지막 취소/시간 검사까지 통과해야 발행한다. 모순만 D=0이며 미완료는 D/M=null이다. 행동·수순·공동 사건 W는 반환하지 않는다.
+
+기본 겸 최대는 480칸/합산200,000 work/협력2초/메모16,384 entry·1M scalar다. 강제·분기·DP와 준비·제약·제약칸·메모·histogram·발행을 모두 units_total에 선과금한다. component 메모만 사용하고 공간 부족은 store skip, 0 한도는 비활성이다. 호출 간·READY·전역 결과 캐시는 없고 기존 Unit8 Q/G는 변경하지 않았다. 향후 부모는 실패·취소·오류도 units_total로 차감해야 하며 sampler/root/legacy와의 작업 정의는 별도로 정한다.
+
+제품/API·수학과 과금·중단·메모는 ACCEPT_BOUNDED, 필수 제품/근거 보완0이다. API10시험, 독립28문제/918 mask와 기존 독립 FDP 사본의 새8문제 D/M 재계수, 원시272호출 합계를 확인했다. 시험은 `tests/test_stage4_belief_counter.py`, 별도 bitmask oracle은 `tests/stage4_counter_oracle.py`다. 과금 재생200호출은 source와 원시의 일치 확인이며 독립 계수와 구별한다.
+
+재귀 깊이 극단의 ERROR 가능성은 원시 미관측이고, oversized DTO는 cell 판정 전 identity 생성 비용이 커질 수 있다. 협력 한도는 hard real-time 보장이 아니다. Unit10 auxiliary와 Unit9 auxiliary는 정의가 달라 비교하지 않는다. 원 §7C 기대표 지정 오류·PARTIAL과 콘솔 표시 보정 이력, 비차단5/정보1의 처분은 [Unit10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md)을 따른다. UI/worker·정책 선택에는 연결하지 않았다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

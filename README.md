@@ -30,9 +30,11 @@ Unit 8은 공개 정밀 확률 후속 Q와 목적별 평가 G의 프로토타입
 
 Unit 9는 정확 계수와 READY 캐시를 결합한 보존 후보를 독립 검토했습니다. 두 hard 상태의 D/M과 후보 수학은 재현됐고 기본 예산 완료는 0→3/18로 증가했지만, 확대 예산은 3→3/18이라 채택 기준에 미달했습니다. **PARTIAL_IMPROVEMENT와 원복이 정당하며 후보는 현재 제품에 없습니다.** 같은 시간·명목 한도를 비교했으며 별도 auxiliary 작업까지 같은 총 계산량이었다는 뜻은 아닙니다. 필수 발견은 제품/근거 모두 0, 선택 11건을 보존합니다.
 
+Unit 10은 `stage4_belief_counter.py`로 독립 base D/M 계수기를 추가했습니다. 전파·메모 계산의 보조 처리까지 합쳐 20만 작업/협력 2초를 적용하며 호출 간 캐시는 없습니다. 작은 28문제·918 mask와 큰 8관측의 D/M이 독립 재계산과 일치했고, hard 두 상태는 각 측정 3/3회 완료했습니다. 제품/API·과금·중단·메모는 **ACCEPT_BOUNDED**, 필수 수정은 제품/근거 모두 0입니다. 기존 Q/G와 Main/Live에는 연결하지 않았으며 일반 안정 시간·실전 효율은 미확립입니다.
+
 작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
 
-현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md), [rollout 선택 정책 Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md), [색인 P0 Unit 7 closeout](docs/stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md), [정밀 후속 Unit 8 closeout](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md), [보존 후보 Unit 9 closeout](docs/stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
+현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md), [rollout 선택 정책 Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md), [색인 P0 Unit 7 closeout](docs/stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md), [정밀 후속 Unit 8 closeout](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md), [보존 후보 Unit 9 closeout](docs/stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md), [독립 계수기 Unit 10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.
 
 ## Main/Live Simple·V1·K-P0/K-LC0/K-LC1 — 기존 수용과 거리 관람 추가
 

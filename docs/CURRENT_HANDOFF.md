@@ -1,10 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-07 (Asia/Seoul)** — Unit 9 보존 후보 수학·실측 독립 재현, 필수 발견 제품/근거 0. PARTIAL_IMPROVEMENT와 원복이 정당하다. 기본0→3/18·확대3→3/18, 후보는 현재 제품에 없다. source362 그대로이며 문서6경로만 마감 준비한다.
+Updated: **2026-11-07 (Asia/Seoul)** — Unit 10 독립 정확 계수기 수용, 제품/근거 필수0. source365와 신규3·문서6의 9경로 마감을 준비한다. Q/G는 Unit8 그대로이며 전체 Stage4·실전 효율은 미완료다.
 
 Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit 10 독립 정확 계수기 closeout](stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md): COMPLETE_BOUNDED_STANDALONE_COUNTS가 독립적으로 성립했다. 제품/API·수학, 합산 과금·중단·메모는 ACCEPT_BOUNDED, 측정은 이 기계의 한정 관측, 실행/보호는 ACCEPT다. 필수 제품0·근거0, 비차단5·정보1을 보존한다.
+- 신규3은 stage4_belief_counter.py와 시험/oracle2개다. 현재=v01=v02이며 기존362는 불변, 현재source365다. 480칸·합산200,000 work·협력2초·component 메모16,384 entry/1M scalar, 호출 간/READY 캐시0이다. 기존 Unit8 Q/G·UI/worker에는 미연결이다.
+- API10시험, 독립28문제/918 mask, 재사용 독립FDP의 새8문제 D/M 재계수(FDP큰431,330·작은405), COMPLETE112건/반복M21,428행, identity232건이 일치했다. source 재생200호출과 독립 계수를 구별한다. hard179/142칸 각3/3 COMPLETE, 합산49,904/44,977이고 기존6관측 A/B18/18이다.
+- 원시272=새234/reference38, 새671,560=primary18,124+aux653,436, reference legacy1,627,600이다. 실패·취소·오류와 시험 지출을 포함한다. timing_totals_ns는 시험·warm-up 포함 전체run 합이며 측정48회만의 합계가 아니다. CPU0은 무비용이 아니고 과금 overhead·일반 안정 시간은 미확인이다.
+- 4Job×3멤버/Python8, graph→release→import와 active/member0·회수 확인. run02 TJO1회, 실제 종료0은 conhost exit0≠요청238의 근거다. 기존 Unit9 접두는 검토 core bytes 보존으로 유지한다.
+- codex_01은 조율 §7C 요약/칸별 표 지정 충돌로 제품0의 PARTIAL이었다. v1.1 출처만 정정하고 원 사건2개/절대 예산을 유지했다. U10-I02 읽기EPERM1, I03 부모 콘솔 표시1줄 보정, 누적 읽기1/helper1/제품0·incident3/raw4를 보존한다.
+- O01 극단 재귀 ERROR는 원시 미관측, O02 oversized DTO identity 비용은 후속 부모 계약 항목이다. O03 TJO 근거/O04 시간합계 범위/O05 Job접두/I01 단위 정의를 문서화하고 모두 CLOSED로 바꾸지 않는다. 다음 후보는 부모 units_total 차감과 sampler/root/legacy 비교 단위·입력 크기·깊이 반환 계약의 연결 설계다. 이번 수용에 native 추가는 해당하지 않는다.
 
 - [Unit 9 보존 후보 closeout](stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md): 후보 수학 CORRECT_BOUNDED, 실측 REPRODUCED, 새 Job 12개 수용. 제품/근거 필수 발견 0, 선택 11·미확인 5·정보 3을 보존한다. 확대 최소 6/18·3요청 증가·공개 시점 1개 증가 기준 미충족으로 PARTIAL_IMPROVEMENT 및 원복이 정당하다.
 - 현재 source는 Unit 8의 362개다. 후보 7경로는 codex_02/source_versions/v01 및 patch에만 있다. 기본 reference 0→combined 3/18, 확대 3→3/18이며 새 기본 완료는 snapshot_128 S/M/R이다. 확대 combined의 중단 15건은 논리 Q 5,000회 한도 10건과 30초 한도 5건이다.
@@ -132,13 +140,13 @@ C는30판/5,035전이/24 player OOF 산술 재현 PASS다. RMSE constant152.440/
 
 ## Git / 다음 단계
 
-작성 시 main/HEAD=local origin/main=**3670542ded239be34a1ef7f9de03a2d5a86d0950**, ahead/behind 0/0, staged 0, index **fc36efefc64c2cb645c2b191e554b1ecb9f742a0291ec6dc2d7fb76fb0505388**다. Unit 6 완료 권위는 `STAGE4_UNIT6_POSTCOMMIT_RECOVERY_2026-11-07/coordinator_01/DESKTOP_REPLACEMENT_VERIFICATION.json`의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE다.
+현재 마감 출발 main/HEAD=local origin/main=**f10c4346641e7d200e83573e9cbc35554e2b09a8**, index **e996faa8892c933f774bb84773039eaca9430fe0318500734e5162db7991b03d**, staged0이다. Unit9 문서/Git/Desktop 마감은 해당 postcommit recovery의 PASS_ALL_CLOSEOUT_STEPS_COMPLETE로 완료됐다. 과거 준비 시점 문구보다 실제 receipt·현재 Git·최신 recovery가 우선한다.
 
-Unit 7의 기존 source 변경 2 + 신규 tests 2 + 문서 6 = **10경로(A3/M7)**는 `outputs/STAGE4_UNIT7_CLOSEOUT_2026-11-07/coordinator_01`의 계획과 사용자 스크립트로 묶는다. 검토된 reference의 마지막 빈 줄 두 개는 정확한 hash에 한해 파일별 command-local 공백 예외로 보존한다. commit/push 영수증 확인 뒤 Desktop recovery 2개를 별도 교체한다. 완료 스크립트를 재실행하거나 postcommit 문구만의 추가 commit을 만들지 않는다.
+Unit10의 신규source/tests3+문서6=**9경로(A4/M5)**를 `outputs/STAGE4_UNIT10_CLOSEOUT_2026-11-07/coordinator_01` 계획으로 한 번에 commit/push한다. source365는 검토 실행 bytes 그대로다. tracked439에서443이 될 예정이며 시험 HEAD를 새 commit으로 소급하지 않는다. 사용자 Git receipt 검증 뒤 Desktop recovery2개를 별도 교체·destination 검증한다. 완료 스크립트를 반복하지 않는다.
 
-다음은 P0 정밀 확률 보완과 S/M/R별 후속 선택 설계다. S의 막힘 보완과 M/R의 안전 수가 있는 상황의 효율 후보 비교를 구분한다. 같은 공개 상태의 정확 계수는 공유할 수 있으나 실제 배치·미공개 숫자·실제 3BV는 정책에 주지 않는다. 기존 공통 P0에서 목적별 후속 정책으로 바꾸는 것은 새 버전/예산/미완료 계약이 필요하다. 먼저 기존 실패 trace의 원인을 구분하고 검증할 범위를 정하며 구현·실제 실행은 별도 Codex에 맡긴다.
+다음 후보는 단독 계수기를 부모 Q/G에 연결하는 설계다. 실패·취소 포함 units_total의 누적 차감과 sampler/root/legacy 작업 단위, oversized DTO와 재귀 깊이의 반환 계약을 먼저 정한다. 기존 G 완료율·실전 S/M/R 효율·Main/UI·패키지·노트북 수용은 이번 단독 계수 성공만으로 완료되지 않는다. 구현·실측은 별도 Codex, 의미 있는 묶음 검토는 Claude로 진행한다.
 
-일반 상급판 전체 평가·Main/UI·native·패키지는 별도다. 현재 UI/입력 경로는 바뀌지 않아 추가 native는 필요 없다. 모델은 사용자 지정 Astra/Max를 기준으로 하고 미노출 실제 설정은 UNCONFIRMED다. Claude는 의미 있는 큰 단위 뒤 묶어 검토한다.
+이번 모듈은 UI/입력을 바꾸지 않아 추가 native는 해당하지 않는다. 전시 노트북은 별도 PENDING이다. 긴 프롬프트는 스크롤·전문복사·TXT로 제공한다.
 
 ## 역할과 영구 경계
 

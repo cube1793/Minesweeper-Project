@@ -2,9 +2,13 @@
 
 Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Efficiency/IOE를 높이는 별도 개발 범위다. 실제 숨은 배치와 ZiNi 해답은 정책 입력이 아니며, 속도·이동 거리·Model C 시간도 선택 목표가 아니다.
 
-세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 현재는 작은 계획기·평가기, 공개 계수기·후보 근거와 제한 rollout 선택기, Unit 7 색인 P0와 Unit 8의 공개 정밀 후속 Q/G 프로토타입을 구현했고 Main 메뉴에는 연결하지 않았다.
+세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 작은 계획기·평가기, 공개 계수기·후보 근거, 제한 rollout 선택기, Unit7 색인 P0, Unit8 Q/G에 이어 Unit10의 독립 합산 계수기를 추가했다. 기존 Q/G와 Main 메뉴에는 새 계수기를 연결하지 않았다.
 
 ## 현재 수용
+
+- [Unit 10 독립 정확 계수기](STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md): 제품/API·수학과 과금·중단·메모 ACCEPT_BOUNDED, 제품/근거 필수0. 신규3파일·source365, 기존362는 불변이다.
+- 합산200,000 work/협력2초, component 메모와 store skip, 호출 간 캐시0. API10시험·독립28문제/918 mask·새FDP8문제 D/M·원시272합계가 일치했다. hard 각3/3과 기존6관측18/18을 확인했다.
+- 원 §7C 출처 충돌 PARTIAL, v1.1 사양 정정, 콘솔 표시 보정과 누적incident3/raw4를 보존한다. 비차단5/정보1은 개별 처분이며 재귀·oversized DTO 한계와 부모 units_total 차감 조건을 유지한다. 실전 효율·G 완료율·UI는 이번 수용 범위 밖이다.
 
 - [Unit 9 보존 후보 검증·미채택](STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md): 수학·등록 실측은 재현됐지만 확대 채택 기준 미달로 PARTIAL_IMPROVEMENT와 원복이 정당하다. 현재 제품에는 후보가 없다. 필수0·선택11·미확인5를 보존한다.
 - 기본0→3/18, 확대3→3/18이며 같은 시간·명목 cap 조건이다. 별도 auxiliary는 G 합계에 미과금이다. hard 2상태 D/M과 완료11G/1056행을 독립 재현했고 미완료부분행·전체hit 전수 재계산은 아니다.
@@ -38,6 +42,6 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 다음 작업
 
-Unit 9 문서·Git·recovery 마감 뒤 정확 계수 부분의 단독 재사용을 검토할 수 있다. 먼저 auxiliary 총예산과 비교 단위, base/READY 캐시 한도, 단독 호출의 직렬화 비용과 실패 우선순위를 명시한다. 현재 결합 후보를 재적용하거나 Q5000/30초 한도를 올리는 것은 별도 결정이다. 일반 효율·UI/Live·전시 패키지·저장 자료 정리는 자동 포함하지 않는다.
+Unit10 문서·Git·recovery 마감 뒤 새 계수기의 부모 Q/G 연결 설계를 검토한다. 실패·취소·오류의 units_total 누적 차감, sampler/root/legacy와의 작업 정의·비교 단위, oversized DTO·깊은 재귀 반환 계약을 먼저 정한다. Unit9 미채택이나 과거 미과금을 소급 변경하지 않는다. Q5000/30초·READY 결합 후보 재적용, 실전 S/M/R·UI/Live·전시 패키지·저장 정리는 자동 시작하지 않는다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.
