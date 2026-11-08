@@ -138,16 +138,60 @@ def _sum_usage(a, b):
         for f in fields(RuntimeUsage)})
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeHistory:
+    """Consumption only; never a checkpoint of a proposal, cache or permit."""
+    scope: tuple[str, str] | None = None
+    attempts: int = 0
+    last_attempt_count: int | None = None
+    seen: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.scope is not None and (type(self.scope) is not tuple or len(self.scope) != 2
+                or any(type(v) is not str or not v or len(v) > 128 for v in self.scope)):
+            raise ValueError("Invalid consumption scope")
+        if type(self.attempts) is not int or not 0 <= self.attempts <= 8:
+            raise ValueError("Invalid consumption attempts")
+        if ((self.attempts == 0) != (self.last_attempt_count is None) or
+                (self.last_attempt_count is not None and
+                 (type(self.last_attempt_count) is not int or self.last_attempt_count < 1))):
+            raise ValueError("Invalid last consumption count")
+        if (type(self.seen) is not tuple or len(self.seen) > 384 or len(set(self.seen)) != len(self.seen)
+                or any(type(v) is not str or len(v) != 64 or any(c not in "0123456789abcdef" for c in v) for v in self.seen)
+                or (self.scope is None and (self.attempts or self.seen))):
+            raise ValueError("Invalid consumed request identities")
+
+    def to_payload(self):
+        return dict(scope=None if self.scope is None else list(self.scope), attempts=self.attempts,
+                    last_attempt_count=self.last_attempt_count, seen=list(self.seen))
+
+    @classmethod
+    def from_payload(cls, value):
+        if type(value) is not dict or set(value) != {"scope", "attempts", "last_attempt_count", "seen"}:
+            raise ValueError("Invalid consumption fields")
+        if type(value["seen"]) is not list or (value["scope"] is not None and type(value["scope"]) is not list):
+            raise ValueError("Invalid consumption collections")
+        return cls(None if value["scope"] is None else tuple(value["scope"]), value["attempts"],
+                   value["last_attempt_count"], tuple(value["seen"]))
+
+
 class RuntimePolicy:
-    def __init__(self):
+    def __init__(self, *, history=None, history_sink=None):
+        if history is not None and type(history) is not RuntimeHistory:
+            raise TypeError("RuntimeHistory required")
+        if history_sink is not None and not callable(history_sink):
+            raise TypeError("Consumption sink must be callable")
+        history = history or RuntimeHistory()
         self.session_id = uuid4().hex
         self._lock = Lock()
         self._cancel = Event()
         self._closed = False
-        self._scope = self._settings = self._pending = None
-        self._attempts = 0
-        self._last_attempt_count = None
-        self._seen = set()
+        self._scope = history.scope
+        self._settings = self._pending = None
+        self._attempts = history.attempts
+        self._last_attempt_count = history.last_attempt_count
+        self._seen = set(history.seen)
+        self._history_sink = history_sink
         self._consumed = set()
         self._serial = 0
 
@@ -165,6 +209,14 @@ class RuntimePolicy:
     @property
     def attempts_used(self):
         return self._attempts
+
+    def consumption_history(self):
+        """Read after a decision, or in the synchronous pre-work sink."""
+        return RuntimeHistory(self._scope, self._attempts, self._last_attempt_count, tuple(sorted(self._seen)))
+
+    def _publish_consumption(self):
+        if self._history_sink is not None:
+            self._history_sink(self.consumption_history())
 
     def choose(self, request, *, cancelled=None):
         if type(request) is not RuntimeRequest:
@@ -225,6 +277,7 @@ class RuntimePolicy:
             if len(self._seen) >= 384:
                 return result("RESOURCE_LIMIT", "EPISODE_DECISION_LIMIT")
             self._seen.add(request.identity)
+            self._publish_consumption()
             if request.mode == "R" and request.target is None:
                 return result("TARGET_REQUIRED", "POSITIVE_EXPLICIT_TARGET_REQUIRED")
             if sum(v >= 0 for row in request.observation for v in row) == len(request.observation)*len(request.observation[0])-request.num_mines:
@@ -237,6 +290,7 @@ class RuntimePolicy:
             if should_model:
                 self._attempts += 1
                 self._last_attempt_count = request.counted_inputs
+                self._publish_consumption()
                 attempted = True
                 mr = ModelRequest(request.observation, request.num_mines, request.counted_inputs,
                     request.mode, request.allow_guess, request.target, request.planning_seed,

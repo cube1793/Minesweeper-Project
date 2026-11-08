@@ -19,6 +19,11 @@ DEFAULT_MINES = 99
 
 
 def main():
+    if sys.argv[1:2] == ["--stage4-live-worker"]:
+        from stage4_live_worker import main as worker_main
+
+        return worker_main(sys.argv[1:])
+
     # Frozen builds re-enter this executable for the PyQt-independent worker.
     if sys.argv[1:2] == ["--zini-metric-worker"]:
         from zini_metric_worker import main as worker_main

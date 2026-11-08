@@ -1,12 +1,23 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Units28–29 묶음 독립 검토 완료. K100K 명시 옵션 한정 수용, Unit29 PARTIAL과 화면 미연결 유지.
+Updated: **2026-11-08 (Asia/Seoul)** — Units30–32 final v02 연결 한정 수용. 현재 PC 사용자 native 확인 완료, 권고 수정과 전체 효과성은 후속.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **5d4b64dbd94f51fecd99a94df920cf051d654e27**이다. Unit27은 이 commit과 Desktop destination 검증까지 마쳤다. Units28–29는 이 HEAD에서 source 375개와 tracked 460개를 기준으로 수행했다. 이번 마감은 검토된 source/tests 4경로와 문서 6경로이며 tracked 461개를 예상한다. 이후 commit을 과거 실행 HEAD로 소급하지 않는다. 실제 Git·영수증·recovery를 현재 authority로 확인한다.
+현재 문서 갱신의 출발 HEAD/origin은 **b79d7a3e52877152ee159095fe5f134415575e2e**다. Units28–29는 이 commit과 Desktop destination 검증까지 마쳤다. Units30–32는 source 375개·tracked 461개에서 출발했고 final v02 source는 384개다. 이번 마감은 검토된 통합 source/tests 12경로와 문서 6경로이며 commit 후 tracked 471개를 예상한다. 이후 commit을 과거 실행 HEAD로 소급하지 않는다. Git 성공 영수증과 별도 Desktop destination 검증이 현재 마감의 최종 근거다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units30–32 연결 마감](stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md). LIVE_INTEGRATION_ACCEPTED_BOUNDED. Main S/M/R·worker·실제 입력·Replay 연결을 수용했다. 전체 Stage4 완료와 일반 효율은 미확정이다.
+- 사용자는 M 승리 뒤 같은 창에서 새 게임·다른 정책·Replay가 정상이라고 확인했다. PERMIT/HISTORY 오류와 지속 ACK/worker 정리 차단도 없었다. 개별 S/R 완주·모든 Replay 종료 방식의 항목별 전사로 확대하지 않는다.
+- 권고 F-01 ACK 장애 복구, F-02 시계 통일, F-03 이력 읽기 경합과 보충 자동 시험은 후속이다. 해당 오류가 실제 native에서 발생하면 필수 보완으로 다시 분류한다.
+- 계산 속도·효율, 상급 보드 스크롤, R의 자동 최고 기록 목표 재설계를 사용자가 후속으로 요청했다. 현재 R은 명시 목표를 요구한다. 기본 indexed 8/4와 명시 K100K 4/2를 구분한다.
+- v02 17회와 영향 없는 v01 10개를 구분하고 총 실행 42회·고유 27개로 기록한다. 추가 조율 시험은 0이다. 원 읽기·명령 4/2 초과와 과거 PARTIAL은 유지한다.
+- 다음은 사용자 Git 마감과 영수증 검증, 별도 Desktop recovery 2개 교체다. 전시 노트북·frozen 패키지·Production은 PENDING이다.
+
+### 이전 단위별 기록
+
+아래의 미연결·NOT_MERGED와 다음 단계 문구는 각 단위 작성 당시의 이력이다.
 
 - [Units28–29 고정 F·실전 평가 마감](stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md). K100K는 명시 API 옵션으로 한정 수용한다. 기존 indexed와 모델 기본 samples 8 / shortlist 4는 유지한다. source/tests 4파일은 검토 bytes 그대로다.
 - C36의 가용성은 K100K 15/18, BASELINE 9/18, 완료 퇴행 0, mode별 nonzero 4/4/4로 동결 기준을 충족했다. R의 엄격 hit 차이는 0이며 일반 효율·속도 개선은 NOT_ESTABLISHED다.

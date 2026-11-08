@@ -1141,6 +1141,12 @@ Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2
 
 Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. `fixed_followup_limits`가 model row와 runtime fallback에 동일 F 설정을 제공하고, 별도 F ID가 request/cache/score에 결속된다. 실제 입력 1,316개와 COMPLETE 모델 23개를 독립 재생했다. G01 M/R은 Q 한도에서 제안 없이 멈췄다. 다음 caller는 Auto와 예약을 중단하고 같은 상태를 자동 재요청하지 않아야 한다. 모델 CHORD·공유 FLAG skip·취소/BUSY/만료·시간 한도·guess OFF의 실전 미관측을 유지한다. [상세 기록](docs/stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md)을 따른다.
 
+### Units30–32 Main·worker·Replay 연결
+
+Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다.
+
+`stage4_live_contract`, `stage4_live_worker`, `stage4_live_job`, `stage4_live_delivery`, `stage4_live_ui`가 공개 DTO·소유권·permit/ACK·정리·Main 상태를 연결한다. 공개 원장과 모델 사용 이력은 세대 변경에도 보존한다. 제안 없는 한도 응답은 Auto를 끄고 같은 상태를 자동 재요청하지 않는다. 기본 indexed는 표본 8/후보 4이고 K100K는 명시적 표본 4/후보 2다. R은 현재 명시 목표 IOE를 요구한다. [연결 범위와 알려진 장애 경로](docs/stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md)를 따른다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

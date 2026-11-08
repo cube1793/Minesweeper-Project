@@ -6,6 +6,8 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 최근 효율 실험
 
+[Units30–32 연결 마감](STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md). Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다. 아래의 미연결 상태는 과거 단위의 기록이다.
+
 [Units28–29 고정 F·실전 평가 마감](STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md). Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. Main/worker/Replay는 다음 연결 범위다.
 
 [Unit27 고정 F 프로파일 마감](STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md). Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. 실행·산술의 한정 수용과 실전 효율·운영 통합 보류를 분리한다.
@@ -62,6 +64,6 @@ H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFI
 
 ## 다음 작업
 
-다음은 검토된 K100K 명시 옵션과 RuntimePolicy의 Main/worker/Replay 연결이다. 제안 없는 RESOURCE_LIMIT와 F_TIME_RESERVATION은 Auto·예약을 중단하고 사유와 보드/Replay를 보존하며 같은 상태를 자동 재요청하지 않는다. 미관측 분기는 기존 시험·통제 근거와 연결 경로를 대조하고 부족한 경우만 표적 시험한다. 성능 수치 개선은 별도이며 Unit29 PARTIAL, 일반 효과성 미확립과 Stage4 NOT_MERGED를 유지한다. 전시 노트북·패키지 수용은 후속이다.
+Main/worker/Replay의 현재 PC 핵심 연결은 한정 수용했다. 다음은 Git·Desktop 마감이며, F-01/F-02 권고와 보충 자동 시험, 계산 속도·실제 효율, 상급 보드 배치, R 목표 재설계는 후속으로 남긴다. 전시 노트북·패키지는 별도 수용한다. 전체 Stage4 완료·효율 보장·Production 승인을 선언하지 않는다.
 
-현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.
+현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 이번 연결 수용에는 현재 PC 사용자 native 보고를 사용했다. 장애 주입 복구·BUSY의 전체 조합, 전시 노트북과 frozen 패키지는 후속이다. Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 유지한다.

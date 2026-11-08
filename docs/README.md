@@ -3,7 +3,9 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 기록은 [Units28–29 고정 F·실전 평가 마감](stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md)이다. Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. UI 연결의 중단 계약과 미검증 분기를 함께 기록했다.
+최근 기록은 [Units30–32 연결 마감](stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md)이다. Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다.
+
+이전 기록은 [Units28–29 고정 F·실전 평가 마감](stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md)이다. Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. UI 연결의 중단 계약과 미검증 분기를 함께 기록했다.
 
 이전 기록은 [Unit27 고정 F 프로파일 마감](stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md)이다. Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. 미완료 커널 비용과 다음 설계의 경계를 기록했고 제품 source 변경은 없다.
 
