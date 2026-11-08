@@ -341,10 +341,16 @@ def read_next(directory,direction,seq,run_id):
     path=channel_path(directory,direction,seq)
     if not path.exists():
         pattern=re.compile(rf"s4-{direction}-([0-9]{{8}})\.json\Z")
+        future=False
         for p in path.parent.glob(f"s4-{direction}-*.json"):
             match=pattern.fullmatch(p.name)
-            require(match is not None and int(match[1])<=seq, "STAGE4_FUTURE_MESSAGE")
-        return None
+            require(match is not None, "STAGE4_FUTURE_MESSAGE")
+            future=future or int(match[1])>seq
+        # Enumeration is not a snapshot: ordered publication may have supplied
+        # both this sequence and its successor since the first absence check.
+        if not path.exists():
+            require(not future, "STAGE4_FUTURE_MESSAGE")
+            return None
     require(path.is_file() and not path.is_symlink(), "STAGE4_MESSAGE_PATH")
     with path.open("rb") as stream:
         raw=stream.read(MAX_BYTES+1)

@@ -22,15 +22,16 @@ class Stage4Controller(QObject):
         self.owner_id=uuid4().hex;self.retired=True;self.applying=False
         self.histories={};self.latches={};self.status="수동 · Auto OFF"
         self.last_error=None;self.controls=None;self.table=None
+        self._finished_run_id=None
 
     def _new_job(self):
         job=Stage4LiveJob(self.ui)
-        job.proposal_ready.connect(self.on_proposal)
-        job.admitted.connect(self.on_admitted)
-        job.acknowledged.connect(self.on_ack)
+        job.proposal_ready.connect(lambda value:self.on_proposal(value) if job is self.job else None)
+        job.admitted.connect(lambda value:self.on_admitted(value) if job is self.job else None)
+        job.acknowledged.connect(lambda value:self.on_ack(value) if job is self.job else None)
         job.acknowledged.connect(lambda ack:self.ui._on_replay_entry_ack(job,ack))
         job.finished.connect(lambda record:self.ui._guard_replay_entry_finish(job,record))
-        job.finished.connect(self.on_finished)
+        job.finished.connect(lambda record:self.on_finished(record) if job is self.job else None)
         job.finished.connect(lambda record:self.ui._on_replay_entry_finished(job,record))
         return job
 
@@ -40,7 +41,8 @@ class Stage4Controller(QObject):
 
     @property
     def clean(self):
-        return self.job.state=="idle" and self.job.active_run_id is None and self.expected_ack is None
+        return (self.job.state=="idle" and self.job.active_run_id is None and self.expected_ack is None
+                and self.job._process is None and self.job._scope is None and self.job._directory is None)
 
     def build_controls(self,layout):
         ui=self.ui
@@ -124,6 +126,10 @@ class Stage4Controller(QObject):
 
     def restore_after_close_refusal(self):
         if self.job.state=="closed":
+            if self.job.last_record is not None:
+                self.on_finished(self.job.last_record)
+            if self.expected_ack is not None:
+                return
             records=list(self.job.records);self.job.deleteLater();self.job=self._new_job();self.job.records.extend(records)
 
     def update_controls(self):
@@ -180,6 +186,7 @@ class Stage4Controller(QObject):
             state=self.snapshot()
             require(state.stop_key not in self.latches,self.latches.get(state.stop_key,""))
             self.retired=False;self.status="다음 수 계산 중";self.last_error=None
+            self._finished_run_id=None
             history=self.histories.get(state.game_id,RuntimeHistory())
             self.job.start(state,history)
             ui.live_owner_records.append(dict(game_id=state.game_id,run_id=state.run_id,policy_id=ui._live_policy,
@@ -299,7 +306,9 @@ class Stage4Controller(QObject):
 
     def on_ack(self,ack):
         ui=self.ui
-        if self.job._start_snapshot is None or ack.run_id!=self.job._start_snapshot.run_id:
+        if (self.job._start_snapshot is None or ack.run_id!=self.job._start_snapshot.run_id
+                or ack.run_id!=self.job.active_run_id or self.job.last_ack!=ack
+                or self.expected_ack is None):
             return
         if self.expected_ack!=ack:
             self.fail("Stage4 원 입력 ACK 불일치");return
@@ -307,12 +316,16 @@ class Stage4Controller(QObject):
         for record in reversed(ui.live_action_records):
             if record.get("run_id")==ack.run_id and record.get("token")==ack.token:
                 record["ack_state"]="ACKED";break
-        if self.retired or not self.selected or ui._replay_mode or not ui.simple_auto_checkbox.isChecked():
+        if ack.status!="PLAYING":
+            if ack.after.game_id==ui._live_game_id:
+                self.status="실제 입력 ACK 확인 완료 · Stage4 worker 정리 중"
+            ui._update_policy_controls()
+            return
+        if (ack.after.game_id!=ui._live_game_id or self.retired or not self.selected
+                or ui._replay_mode or not ui.simple_auto_checkbox.isChecked()):
             if ack.status=="PLAYING":
                 self.job.cancel("Stage4 원 입력 확인 후 정리")
             return
-        if ack.status!="PLAYING":
-            self.status="게임 종료 · Stage4 worker 정리 중";return
         try:
             current=self.snapshot()
             require(current==ack.after,"Stage4 ACK 후 공개 상태 변경")
@@ -324,21 +337,51 @@ class Stage4Controller(QObject):
     def on_finished(self,record):
         ui=self.ui
         start=self.job._start_snapshot
-        if start is not None and record.get("run_id")!=start.run_id:
+        if (start is None or record.get("run_id")!=start.run_id or record is not self.job.last_record
+                or record.get("run_id")==self._finished_run_id):
             return
-        if start is not None:
-            self.histories[start.game_id]=self.job.history
-        clean=record.get("cleanup_complete") is True and record.get("reaped") is True and record.get("tree_active_count")==0
-        if not clean or record.get("error") or record.get("status") in ("FAILED","TIMEOUT"):
-            self.last_error=record.get("error") or record.get("intent_reason") or "worker 정리 실패"
-            self.status="Stage4 중단: "+str(self.last_error)
-            ui._set_auto_off(clear_guess=False)
-        if self.expected_ack is not None:
-            self.last_error="Stage4 실제 입력 ACK 미확인"
-            ui._record_live_failure(self.last_error,stage="Stage4 ACK")
+        self.histories[start.game_id]=self.job.history
+        current_game=start.game_id==ui._live_game_id
+        clean=(record.get("cleanup_complete") is True and record.get("reaped") is True
+               and record.get("tree_active_count")==0 and self.job.active_run_id is None
+               and self.job.state in ("idle","closed") and self.job._process is None
+               and self.job._scope is None and self.job._directory is None)
+        unconfirmed=self.expected_ack if self.expected_ack is not None and self.expected_ack.run_id==start.run_id else None
+        failure=(record.get("error") or record.get("intent_reason") or "worker 정리 실패"
+                 if not clean or record.get("error") or record.get("status") in ("FAILED","TIMEOUT") else None)
+        if failure is None and current_game:
+            failure=self.last_error or (ui._live_first_failure or {}).get("cause")
+        if unconfirmed is not None:
+            failure="Stage4 실제 입력 ACK 미확인"+(": "+str(failure) if failure else "")
+            for action in reversed(ui.live_action_records):
+                if action.get("run_id")==unconfirmed.run_id and action.get("token")==unconfirmed.token:
+                    action["ack_state"]="UNCONFIRMED";break
+            # Keep the failed game's record; release only the dead owner's gate.
+            if clean:
+                self.expected_ack=None
+        if failure:
+            if current_game:
+                self.last_error=str(failure)
+                ui._record_live_failure(self.last_error,stage="Stage4 ACK" if unconfirmed else "Stage4 worker")
+                ui._set_auto_off(clear_guess=False)
+                self.status="Stage4 중단: "+self.last_error
+            elif not any(item.get("run_id")==start.run_id for item in ui.live_failure_records):
+                ui.live_failure_records.append(dict(game_id=start.game_id,run_id=start.run_id,
+                    input_revision=unconfirmed.after.revision if unconfirmed else start.revision,
+                    cause=str(failure),stage="Stage4 이전 owner",ack_pending=unconfirmed is not None,
+                    cleanup_state=self.job.state))
+        elif current_game and clean:
+            ack=self.job.last_ack
+            if (ack is not None and ack.run_id==start.run_id and ack.status!="PLAYING"
+                    and record.get("last_ack")==ack.to_dict() and record.get("ack_count",0)>0
+                    and record.get("status") in ("SUCCEEDED","CANCELLED","CLOSED")):
+                self.status="게임 종료 · 실제 입력 ACK 확인 · Stage4 worker 정리 완료"
         for owner in reversed(ui.live_owner_records):
             if owner["run_id"]==record.get("run_id"):
-                owner.update(end_reason=self.status,cleanup_complete=clean,history=self.job.history.to_payload());break
+                owner.update(end_reason=str(failure) if failure else self.status,
+                    cleanup_complete=clean,history=self.job.history.to_payload());break
+        if clean:
+            self._finished_run_id=start.run_id
         self.pending=None;self.retired=True;self.cancel_wait()
         ui._update_policy_controls()
 

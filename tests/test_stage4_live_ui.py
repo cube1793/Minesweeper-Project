@@ -232,3 +232,138 @@ class ActualMainTests(UIBase):
         self.assertEqual(ui._stage4.histories[ui._live_game_id].attempts,1)
         self.assertEqual(ui._live_action_count,before)
         AUDIT("actual_ui_responsive",dict(ticks=len(ticks),additional_inputs=0,job=ui._stage4.job.last_record))
+
+
+class RecoveryUITests(UIBase):
+    def delivered(self,outcome="PLAYING"):
+        """Real UI input/recording; explicit controlled permit and wire ACK publisher."""
+        from stage4_live_contract import exact
+        ui=self.make_ui();self.select(ui)
+        ui.engine.reset_with_mines(9,9,10,{(x,8) for x in range(9)}|{(8,7)})
+        ui._reset_replay_recorder();ui.allow_guess_checkbox.setChecked(True)
+        ui.simple_auto_checkbox.setChecked(True)
+        controller=ui._stage4;job=controller.job;before=controller.snapshot()
+        directory=TemporaryDirectory(prefix="minesweeper_live_policy_stage4_");self.addCleanup(directory.cleanup)
+        job._directory=Path(directory.name).resolve();job._temp_parent=job._directory.parent
+        job._owner_record=dict(run_id=before.run_id,policy_id="STAGE4_LIVE_SMR_V1")
+        point={"WON":(0,0),"LOST":(8,8),"PLAYING":(7,7)}[outcome]
+        proposal=dict(state_id=before.identity,request_id=before.runtime_request().identity,token="c"*64,
+            move=dict(action="OPEN",x=point[0],y=point[1]),position=0,source="MODEL",status="MODEL_SELECTED",
+            reason="CONTROLLED_TERMINAL_DELIVERY",is_guess=True,desired_flag=None,model_status="COMPLETE",
+            attempts=0,survival=exact(Fraction(1,2)))
+        nonce="controlled-terminal-nonce"
+        permit=dict(proposal=proposal,nonce=nonce,deadline_ns=int((job._clock()+5)*1_000_000_000))
+        controller.pending=job._pending=proposal;controller.nonce=job._accepted_nonce=nonce
+        job._permit=permit;job._awaiting=None;job._sequence=0;job.state="admitted"
+        controller.on_admitted(permit)
+        self.assertEqual(ui.engine.status.name,outcome,controller.last_error)
+        self.assertIsNotNone(controller.expected_ack,controller.last_error)
+        self.assertEqual(ui.live_action_records[-1]["ack_state"],"SENT")
+        self.assertIn("ACK 대기",controller.status)
+        return ui,job,controller.expected_ack,permit
+
+    def receive(self,job,ack):
+        from stage4_live_contract import envelope,write_once
+        kind="ACKED" if ack.status=="PLAYING" else "FINISHED"
+        write_once(job._directory,"worker",0,envelope(ack.run_id,0,kind,ack.to_dict()))
+        job._read_reply()
+
+    def test_terminal_ack_auto_off_status_and_cleanup(self):
+        for outcome in ("WON","LOST"):
+            for retired in (False,True):
+                with self.subTest(outcome=outcome,retired=retired):
+                    ui,job,ack,permit=self.delivered(outcome);controller=ui._stage4
+                    self.assertFalse(ui.simple_auto_checkbox.isChecked())
+                    self.assertEqual(job.state,"finishing");controller.retired=retired
+                    self.receive(job,ack)
+                    ack_status=controller.status;ack_label=ui.live_policy_status_label.text()
+                    self.assertIsNone(controller.expected_ack)
+                    self.assertEqual(ui.live_action_records[-1]["ack_state"],"ACKED")
+                    self.assertEqual((job.state,job.last_ack),("finishing",ack))
+                    job._finish("CANCELLED" if retired else "SUCCEEDED",None,0)
+                    AUDIT("terminal_ack_status",dict(outcome=outcome,retired=retired,ack_status=ack_status,
+                        ack_label=ack_label,finished_status=controller.status,finished_label=ui.live_policy_status_label.text(),
+                        ack_state=ui.live_action_records[-1]["ack_state"],expected_ack=controller.expected_ack,
+                        job_state=job.state,cleanup=job.last_record))
+                    self.assertIn("ACK 확인 완료",ack_status);self.assertIn("정리 중",ack_status)
+                    self.assertIn("ACK 확인 완료",ack_label)
+                    self.assertIn("게임 종료",controller.status);self.assertIn("정리 완료",controller.status)
+                    self.assertIn("정리 완료",ui.live_policy_status_label.text());self.assertTrue(controller.clean)
+
+    def test_missing_ack_clean_owner_recovers_new_game(self):
+        ui,job,ack,permit=self.delivered();controller=ui._stage4
+        data=ui._build_current_replay_data("controlled recovery")
+        before=ui._live_action_count
+        job._finish("FAILED","CONTROLLED_ACK_EXIT",1)
+        AUDIT("missing_ack_recovery",dict(expected_ack_retained=controller.expected_ack is not None,
+            status=controller.status,ack_state=ui.live_action_records[-1]["ack_state"],job_state=job.state,
+            cleanup=job.last_record,current_failure=ui._live_first_failure))
+        self.assertIsNotNone(ui._live_first_failure);self.assertTrue(ui._live_input_uncertain)
+        self.assertEqual(ui.live_action_records[-1]["ack_state"],"UNCONFIRMED")
+        self.assertIsNone(controller.expected_ack);self.assertTrue(controller.clean)
+        controller.on_ack(ack);controller.on_admitted(permit)
+        self.assertEqual(ui._live_action_count,before);self.assertNotIn("정리 완료",controller.status)
+        failed_record=job.last_record;ui.on_reset()
+        self.assertTrue(controller.clean);self.assertIsNone(ui._live_first_failure)
+        ui.stage4_target_edit.setText("120")
+        for index in range(ui.live_policy_combo.count()):
+            ui.live_policy_combo.setCurrentIndex(index)
+            self.assertTrue(ui._same_board_transition_ready())
+            self.assertTrue(ui.simple_auto_checkbox.isEnabled())
+        ui.simple_auto_checkbox.setChecked(True)
+        self.assertNotEqual(job.active_run_id,ack.run_id)
+        status=controller.status
+        controller.on_ack(ack);controller.on_finished(failed_record);controller.on_admitted(permit)
+        self.assertEqual(ui._live_action_count,0);self.assertEqual(controller.status,status)
+        self.assertIsNone(ui._live_first_failure)
+        ui.simple_auto_checkbox.setChecked(False)
+        self.assertTrue(controller.clean)
+        self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)))
+        self.assertTrue(ui._exit_replay_mode())
+        self.assertTrue(controller.clean);self.assertFalse(ui.simple_auto_checkbox.isChecked())
+
+    def test_unreaped_and_cleanup_failure_still_block_and_never_reapply(self):
+        ui,job,ack,permit=self.delivered();controller=ui._stage4;before=ui._live_action_count
+        forged=dict(run_id=ack.run_id,status="FAILED",error="CONTROLLED_STILL_ALIVE",reaped=True,
+            tree_active_count=0,cleanup_complete=True)
+        job.last_record=forged;job._process=SimpleNamespace(pid=-1);job.state="idle"
+        controller.on_finished(forged)
+        self.assertFalse(controller.clean);self.assertIsNotNone(controller.expected_ack)
+        controller.on_admitted(permit);self.assertEqual(ui._live_action_count,before)
+        job._process=None
+        with patch.object(job,"_cleanup",side_effect=OSError("CONTROLLED_CLEANUP_FAILURE")):
+            job._finish("FAILED","CONTROLLED_ACK_EXIT",1)
+        self.assertEqual(job.state,"blocked");self.assertFalse(controller.clean)
+        self.assertIsNotNone(controller.expected_ack);self.assertNotIn("정리 완료",controller.status)
+        self.assertFalse(ui._same_board_transition_ready())
+        controller.on_admitted(permit);self.assertEqual(ui._live_action_count,before)
+        job._finish("FAILED","CONTROLLED_ACK_EXIT",1)
+        self.assertTrue(controller.clean);self.assertIsNone(controller.expected_ack)
+        self.assertIsNotNone(ui._live_first_failure)
+
+    def test_error_after_terminal_ack_does_not_display_success(self):
+        ui,job,ack,permit=self.delivered("WON");controller=ui._stage4
+        self.receive(job,ack);self.assertEqual(ui.live_action_records[-1]["ack_state"],"ACKED")
+        job._finish("FAILED","CONTROLLED_EXIT_ERROR",1)
+        self.assertIn("CONTROLLED_EXIT_ERROR",controller.status)
+        self.assertNotIn("정리 완료",controller.status);self.assertIsNone(controller.expected_ack)
+        self.assertIsNotNone(ui._live_first_failure)
+        ui,job,ack,permit=self.delivered("LOST");controller=ui._stage4
+        self.receive(job,ack);ui._record_live_failure("CONTROLLED_GUI_ERROR",stage="Stage4 input")
+        job._finish("SUCCEEDED",None,0)
+        self.assertIn("CONTROLLED_GUI_ERROR",controller.status);self.assertNotIn("정리 완료",controller.status)
+
+    def test_closed_owner_is_settled_before_close_refusal_replacement(self):
+        ui,job,ack,permit=self.delivered();controller=ui._stage4;before=ui._live_action_count
+        job.state="cancelling";job._intent="CANCELLED"
+        Stage4LiveJob.shutdown(job)
+        self.assertEqual(job.state,"closed");self.assertTrue(job.last_record["cleanup_complete"])
+        self.assertEqual(job.last_record["unconfirmed_ack"],ack.to_dict())
+        self.assertIsNotNone(controller.expected_ack)
+        controller.restore_after_close_refusal()
+        self.assertIsNot(controller.job,job);self.assertIsNone(controller.expected_ack)
+        self.assertTrue(controller.clean);self.assertEqual(ui.live_action_records[-1]["ack_state"],"UNCONFIRMED")
+        self.assertIsNotNone(ui._live_first_failure)
+        job.acknowledged.emit(ack);job.admitted.emit(permit);job.finished.emit(job.last_record)
+        self.assertEqual(ui._live_action_count,before)
+        ui.on_reset();self.assertTrue(controller.clean);self.assertIsNone(ui._live_first_failure)

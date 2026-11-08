@@ -4,7 +4,9 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 세 방식은 **안전성 유지(S), 평균 성과(M), 목표 기록(R)**다. 공통 추론·비용 모델을 공유하며 위험 조건과 목적 점수를 다르게 적용한다. 작은 계획기·평가기, 공개 계수기·후보 근거, 제한 rollout 선택기, Unit7 색인 P0, Unit 8 Q/G에 이어 Unit 10의 독립 합산 계수기를 추가했다. Unit 11은 Q/G API에 합산 계수기를 명시적 선택 옵션으로 연결했다.
 
-## 최근 효율 실험
+## 최근 연결과 실험
+
+[Unit33 통신·ACK 복구 마감](STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md). Unit33은 Stage4 메시지 게시 경합, 모델 사용 이력 결속, ACK 미수신 회복과 종료 표시를 보완했다. 최종 동일 바이트의 고유 시험 47개가 통과했고 독립 검토의 필수 보완은 0건이다. 현재 PC의 사용자 native 확인을 수용했다. 원 사용자 판의 원인은 미확정이며, F-02 시계 통일과 비차단 표시·기록·정리 권고는 후속이다.
 
 [Units30–32 연결 마감](STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md). Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다. 아래의 미연결 상태는 과거 단위의 기록이다.
 
@@ -64,6 +66,6 @@ H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFI
 
 ## 다음 작업
 
-Main/worker/Replay의 현재 PC 핵심 연결은 한정 수용했다. 다음은 Git·Desktop 마감이며, F-01/F-02 권고와 보충 자동 시험, 계산 속도·실제 효율, 상급 보드 배치, R 목표 재설계는 후속으로 남긴다. 전시 노트북·패키지는 별도 수용한다. 전체 Stage4 완료·효율 보장·Production 승인을 선언하지 않는다.
+Main/worker/Replay 연결과 Unit33 복구는 현재 PC에서 한정 수용했다. 사용자 Git과 Desktop 마감 뒤 보드 배치·Auto 설정·R 목표 UX·입력별 확정 표시와 성능 비용을 다룬다. 계산 지연·일반 효율·고효율 Replay 분석은 별도 검증하며, 전시 노트북과 패키지도 별도로 수용한다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 이번 연결 수용에는 현재 PC 사용자 native 보고를 사용했다. 장애 주입 복구·BUSY의 전체 조합, 전시 노트북과 frozen 패키지는 후속이다. Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 유지한다.

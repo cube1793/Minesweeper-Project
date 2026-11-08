@@ -179,3 +179,98 @@ class WorkerTests(unittest.TestCase):
             AUDIT("actual_restart",dict(first=first.last_record,second=second.last_record))
             self.assertTrue(second.last_record["cleanup_complete"])
         finally:first.shutdown();second.shutdown()
+
+
+class HistoryRecoveryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+
+    def make_job(self,directory,state):
+        from pathlib import Path
+        job=Stage4LiveJob();job._directory=Path(directory)
+        job._start_snapshot=job._expected_snapshot=state;job._active_run_id=state.run_id
+        job._awaiting="PROPOSAL";job.state="computing";job._sequence=0
+        return job
+
+    def release(self,job):
+        job._directory=None;job._active_run_id=None;job._sent_ack=None;job._scope=None;job.state="idle"
+        job.shutdown();job.deleteLater()
+
+    def proposal(self,state):
+        return dict(state_id=state.identity,request_id=state.runtime_request().identity,token="b"*64,
+            move=dict(action="OPEN",x=0,y=0),position=0,source="EXACT_Q",status="HEURISTIC_FALLBACK",
+            reason="CONTROLLED_HISTORY_SCHEDULE",is_guess=True,desired_flag=None,model_status="COMPLETE",
+            attempts=1,survival=exact(Fraction(4,5)))
+
+    def test_history_publication_between_first_drain_and_proposal(self):
+        from tempfile import TemporaryDirectory
+        import stage4_live_job as module
+        from stage4_live_contract import envelope,write_once
+        with TemporaryDirectory() as directory:
+            state=snapshot();job=self.make_job(directory,state);received=[]
+            job.proposal_ready.connect(received.append);proposal=self.proposal(state)
+            write_once(directory,"history",0,envelope(state.run_id,0,"HISTORY",RuntimeHistory().to_payload()))
+            original_read=module.read_next;published=[]
+            def interleave(path,direction,seq,run):
+                if direction=="worker" and not published:
+                    self.assertEqual((job.history_sequence,job.history.attempts),(1,0))
+                    histories=(RuntimeHistory((state.game_id,state.game_id),0,None,(proposal["request_id"],)),
+                               RuntimeHistory((state.game_id,state.game_id),1,state.counted,(proposal["request_id"],)))
+                    for index,history in enumerate(histories,1):
+                        write_once(directory,"history",index,envelope(run,index,"HISTORY",history.to_payload()));published.append(index)
+                    write_once(directory,"worker",0,envelope(run,0,"PROPOSAL",proposal))
+                return original_read(path,direction,seq,run)
+            try:
+                try:
+                    with patch.object(module,"read_next",interleave):job._read_reply()
+                except Exception as exc:
+                    AUDIT("history_proposal_interleave",dict(published=published,attempts=job.history.attempts,error=repr(exc)))
+                    raise
+                self.assertEqual((job.history_sequence,job.history.attempts),(3,1))
+                self.assertEqual(received,[proposal]);self.assertEqual(job._proposal_count,1)
+                nonce="history-race-input";job.validate_pending(state,nonce)
+                permit=dict(proposal=proposal,nonce=nonce,deadline_ns=int((job._clock()+5)*1_000_000_000))
+                write_once(directory,"worker",1,envelope(state.run_id,1,"ADMITTED",permit));job._read_reply()
+                job.mark_applying(proposal["token"],nonce,state)
+                engine=make_engine();engine.step(0,0,Action.OPEN)
+                after=replace(state,observation=tuple(tuple(int(v) for v in row) for row in engine.get_observation()),
+                    counted=3,revision=3,event_count=3,ledger=digest(["history-race-actual-open"]),cursor=(0,0))
+                ack=Acknowledgement(state.run_id,proposal["token"],nonce,state.identity,after)
+                job.acknowledge(ack);write_once(directory,"worker",2,envelope(state.run_id,2,"ACKED",ack.to_dict()))
+                job._read_reply();job._read_reply()
+                with self.assertRaises(ValueError):job.mark_applying(proposal["token"],nonce,state)
+                self.assertEqual((job._proposal_count,job._applied_count,job._ack_count),(1,1,1))
+                AUDIT("history_proposal_interleave",dict(published=published,attempts=job.history.attempts,
+                    history_sequence=job.history_sequence,proposals=1,consumed_inputs=1,acknowledged=1))
+            finally:self.release(job)
+
+    def test_history_rollback_scope_and_unsettled_remain_errors(self):
+        from tempfile import TemporaryDirectory
+        from stage4_live_contract import envelope,write_once
+        state=snapshot();request_id=state.runtime_request().identity
+        initial=RuntimeHistory((state.game_id,state.game_id),1,state.counted,(request_id,))
+        histories=(RuntimeHistory((state.game_id,state.game_id),0,None,(request_id,)),
+            RuntimeHistory(("other","other"),1,state.counted,(request_id,)),
+            RuntimeHistory((state.game_id,state.game_id),1,state.counted,()),
+            RuntimeHistory((state.game_id,state.game_id),1,state.counted-1,(request_id,)))
+        for history in histories:
+            with self.subTest(history=history),TemporaryDirectory() as directory:
+                job=self.make_job(directory,state);job.history=initial
+                try:
+                    write_once(directory,"history",0,envelope(state.run_id,0,"HISTORY",history.to_payload()))
+                    with self.assertRaisesRegex(ValueError,"HISTORY.*ROLLBACK"):job._read_reply()
+                    self.assertEqual(job.history,initial);self.assertEqual(job._applied_count,0)
+                finally:self.release(job)
+        with TemporaryDirectory() as directory:
+            job=self.make_job(directory,state)
+            try:
+                write_once(directory,"worker",0,envelope(state.run_id,0,"PROPOSAL",self.proposal(state)))
+                with self.assertRaisesRegex(ValueError,"HISTORY_NOT_SETTLED"):job._read_reply()
+                self.assertEqual(job._applied_count,0)
+            finally:self.release(job)
+        with TemporaryDirectory() as directory:
+            job=self.make_job(directory,state);job.history=RuntimeHistory((state.game_id,state.game_id))
+            try:
+                write_once(directory,"history",0,envelope(state.run_id,0,"HISTORY",RuntimeHistory().to_payload()))
+                with self.assertRaisesRegex(ValueError,"HISTORY_ROLLBACK"):job._read_reply()
+            finally:self.release(job)

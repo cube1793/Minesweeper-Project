@@ -1147,6 +1147,12 @@ Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일
 
 `stage4_live_contract`, `stage4_live_worker`, `stage4_live_job`, `stage4_live_delivery`, `stage4_live_ui`가 공개 DTO·소유권·permit/ACK·정리·Main 상태를 연결한다. 공개 원장과 모델 사용 이력은 세대 변경에도 보존한다. 제안 없는 한도 응답은 Auto를 끄고 같은 상태를 자동 재요청하지 않는다. 기본 indexed는 표본 8/후보 4이고 K100K는 명시적 표본 4/후보 2다. R은 현재 명시 목표 IOE를 요구한다. [연결 범위와 알려진 장애 경로](docs/stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md)를 따른다.
 
+### Unit33 통신·ACK 복구
+
+메시지 파일의 첫 부재 확인과 열거 사이에 연속 게시가 들어올 수 있다. 읽기 경로는 열거 뒤 기대 seq를 다시 확인하고 그 파일만 소비한다. PROPOSAL은 새로 게시된 HISTORY까지 읽은 뒤 모델 사용 횟수와 결속한다.
+
+ACK를 받지 못한 입력은 UNCONFIRMED로 보존하며, owner의 정리와 현재 run 일치를 확인한 뒤 대기 상태를 해제한다. 마지막 ACK 수신과 정리 완료 표시는 분리한다. [Unit33 통신·ACK 복구 마감](docs/stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)에 조건과 후속 검증을 정리했다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

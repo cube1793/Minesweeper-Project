@@ -111,3 +111,63 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):c.guard_target(proposal,changed)
         with self.assertRaises(ValueError):c.validate_ack(ack,before,proposal,"old-nonce")
         with self.assertRaises(ValueError):c.validate_ack(replace(ack,after=replace(after,counted=2)),before,proposal,"nonce")
+
+
+AUDIT=lambda *args:None
+
+
+class TransportRecoveryTests(unittest.TestCase):
+    def test_ordered_publication_between_absence_and_glob(self):
+        # Control the production filesystem-call boundary, not read_next's answer.
+        for direction,kind in (("history","HISTORY"),("parent","START"),("worker","PROPOSAL")):
+            with self.subTest(direction=direction), TemporaryDirectory() as directory:
+                original_glob=Path.glob;published=[]
+                first=c.envelope("race",0,kind,p.RuntimeHistory().to_payload() if direction=="history" else {})
+                second=c.envelope("race",1,kind,p.RuntimeHistory(("game","game"),0,None,("a"*64,)).to_payload() if direction=="history" else {})
+                def interleave(path,pattern):
+                    if pattern==f"s4-{direction}-*.json" and not published:
+                        self.assertFalse(c.channel_path(directory,direction,0).exists())
+                        c.write_once(directory,direction,0,first);published.append(0)
+                        c.write_once(directory,direction,1,second);published.append(1)
+                    return original_glob(path,pattern)
+                try:
+                    with patch.object(Path,"glob",interleave):value=c.read_next(directory,direction,0,"race")
+                except Exception as exc:
+                    AUDIT("ordered_publication",dict(direction=direction,published=published,error=repr(exc),
+                        expected_exists=c.channel_path(directory,direction,0).exists()))
+                    raise
+                self.assertEqual(value,first);self.assertEqual(published,[0,1])
+                self.assertEqual(c.read_next(directory,direction,1,"race"),second)
+                self.assertIsNone(c.read_next(directory,direction,2,"race"))
+                AUDIT("ordered_publication",dict(direction=direction,published=published,read_sequences=[0,1],old_only_poll=None))
+
+    def test_gaps_identity_corruption_names_and_immutable_publication(self):
+        cases=("gap","run","sequence","json","duplicate_key","filename","directory","symlink","oversize","schema")
+        for case in cases:
+            with self.subTest(case=case), TemporaryDirectory() as directory:
+                path=c.channel_path(directory,"history",0)
+                value=c.envelope("run",0,"HISTORY",p.RuntimeHistory().to_payload())
+                if case=="gap":c.write_once(directory,"history",1,c.envelope("run",1,"HISTORY",{}))
+                elif case=="run":c.write_once(directory,"history",0,c.envelope("other",0,"HISTORY",{}))
+                elif case=="sequence":path.write_text(json.dumps(dict(value,seq=1)))
+                elif case=="json":path.write_text('{')
+                elif case=="duplicate_key":path.write_text(json.dumps(value)[:-1]+',"seq":0}')
+                elif case=="filename":(Path(directory)/"s4-history-invalid.json").write_text('{}')
+                elif case=="directory":path.mkdir()
+                elif case=="oversize":path.write_bytes(b' '* (c.MAX_BYTES+1))
+                elif case=="schema":path.write_text(json.dumps(dict(value,schema="legacy")))
+                else:c.write_once(directory,"history",0,value)
+                if case=="symlink":
+                    original=Path.is_symlink
+                    with patch.object(Path,"is_symlink",lambda current:current==path or original(current)):
+                        with self.assertRaisesRegex(ValueError,"MESSAGE_PATH"):c.read_next(directory,"history",0,"run")
+                else:
+                    with self.assertRaises((ValueError,OSError)):c.read_next(directory,"history",0,"run")
+        with TemporaryDirectory() as directory:
+            value=c.envelope("run",0,"HISTORY",{})
+            c.write_once(directory,"history",0,value)
+            original=c.channel_path(directory,"history",0).read_bytes()
+            with self.assertRaises(FileExistsError):c.write_once(directory,"history",0,value)
+            self.assertEqual(c.channel_path(directory,"history",0).read_bytes(),original)
+            self.assertIsNone(c.read_next(directory,"history",1,"run"))
+            with self.assertRaisesRegex(ValueError,"DIRECTION"):c.read_next(directory,"invalid",0,"run")

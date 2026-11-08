@@ -110,6 +110,7 @@ class Stage4LiveJob(LivePolicyJob):
             require(value["kind"]=="HISTORY","STAGE4_HISTORY_MESSAGE")
             history=RuntimeHistory.from_payload(value["payload"])
             require(history.scope in (None,(self._start_snapshot.game_id,self._start_snapshot.game_id))
+                    and (self.history.scope is None or history.scope==self.history.scope)
                     and history.attempts>=self.history.attempts
                     and set(history.seen)>=set(self.history.seen),"STAGE4_HISTORY_ROLLBACK")
             if self.history.last_attempt_count is not None:
@@ -177,6 +178,10 @@ class Stage4LiveJob(LivePolicyJob):
             fields(payload,"code detail");text(payload["code"]);text(payload["detail"],2048)
             raise ValueError(payload["code"]+": "+payload["detail"])
         require(kind==self._awaiting,"STAGE4_REPLY_ORDER")
+        if kind=="PROPOSAL":
+            # The worker durably publishes consumption before its proposal.
+            # Include history posted after our initial drain but before this read.
+            self._read_history()
         self._sequence+=1;self._awaiting=None;self._deadline=None
         if kind=="PROPOSAL":
             self._pending=validate_projection(payload,self._expected_snapshot)
@@ -226,6 +231,7 @@ class Stage4LiveJob(LivePolicyJob):
             operations=list(self.operations),proposal_count=self._proposal_count,
             consumed_token_count=self._applied_count,ack_count=self._ack_count,
             last_ack=None if self.last_ack is None else self.last_ack.to_dict(),
+            unconfirmed_ack=None if self._sent_ack is None else self._sent_ack.to_dict(),
             wall_seconds=self.elapsed,compute_response_seconds=COMPUTE_RESPONSE_SECONDS)
 
     def _cleanup(self):
