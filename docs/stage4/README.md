@@ -6,6 +6,8 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 최근 효율 실험
 
+[Unit27 고정 F 프로파일 마감](STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md). Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. 실행·산술의 한정 수용과 실전 효율·운영 통합 보류를 분리한다.
+
 [Units24–26 실험용 S/M/R와 F1 마감](STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md). Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. 커널 388/857과 퇴행 3건, 모델 원 4/18·엄격 3/18, 실전 16패를 보존한다. 보완 후 큰 모델은 미측정이며 Stage4 NOT_MERGED다.
 
 [Units21–23 공개 추론·안전 비용 마감](STAGE4_PUBLIC_CORE_UNITS21_23_CLOSEOUT.md). Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API를 추가했다. 순수 API는 BOUNDED_ACCEPT, output 전달은 harness 한정 LIMITED_ACCEPT다. 개발 승리 합계336→328, V8 승리4=4·matched-win C657→666으로 전체 정책은 MIXED/NOT_ADOPTED다. 신규 순수 API와 시험4파일은 미연결 실험 모듈이다. 독립 proof/계획/엔진 재생과 커널 미완료·기한 한계를 분리 기록한다.
@@ -58,6 +60,6 @@ H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFI
 
 ## 다음 작업
 
-Units24–26의 F1 보완을 수용한 미연결 실험 코드를 기준으로 계산 모델과 가용성 기준을 다시 정한다. 커널과 모델의 가용성 미달, 효율·실전 목적 차이 미확립을 유지하며 Main/worker/UI 통합은 보류한다. 일반 S/M/R 실전 평가, UI/Live 통합, 전시 노트북·패키지는 후속 범위다. 이번 수용은 output prototype과 통제된 전달 수순의 범위이며 제품 반영은 DEFERRED다.
+Unit27의 프로파일 NONE을 유지하며 고정 F의 kernel 선행 비용을 검토한다. 한도나 경로를 바꾼 F는 별도 identity·cache·정산·행동 비교를 등록해야 한다. 커널과 모델의 가용성 미달, 효율·실전 목적 차이 미확립을 유지하며 Main/worker/UI 통합은 보류한다. 일반 S/M/R 실전 평가, UI/Live 통합, 전시 노트북·패키지는 후속 범위다. 이번 수용은 output prototype과 통제된 전달 수순의 범위이며 제품 반영은 DEFERRED다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.

@@ -1133,6 +1133,10 @@ Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API
 
 `stage4_runtime_policy`는 S/M/R 목적과 판당 quota·공개 count·요청 identity를 결속한다. 전달 검증은 output harness에서 수용됐다. Main/worker/UI 연결은 미구현이다. Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. [상세 마감](docs/stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md)을 참고한다.
 
+### Unit27 고정 F 프로파일 진단
+
+Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. F1의 등록 F와 전량 예약·cache 경계를 유지했고 samples/shortlist/rows만 바꿨다. 483행·15,237전이와 42개 score를 독립 재생했다. 원시 미완료 36건 중 35건은 KERNEL_BUDGET이었다. F의 비용 변경에는 별도 identity·회계·행동 비교가 필요하다. [상세 기록](docs/stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md)을 참고한다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.
