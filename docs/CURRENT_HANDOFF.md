@@ -1,12 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Unit27 독립 검토 완료. 실행·산술 한정 수용, 프로파일 NONE, 가용성 미달·통합 보류 유지.
+Updated: **2026-11-08 (Asia/Seoul)** — Units28–29 묶음 독립 검토 완료. K100K 명시 옵션 한정 수용, Unit29 PARTIAL과 화면 미연결 유지.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **03d26861f3544cb5c20495f42f3414b448f3cf6e**다. Units24–26은 이 commit과 Desktop destination 검증까지 마쳤다. Unit27은 이 HEAD에서 source 375개와 tracked 459개를 보존해 실행했다. 이번 마감은 문서 6경로만 대상으로 하며 tracked 460개를 예상한다. 이후 commit을 과거 실행 HEAD로 소급하지 않는다. 실제 Git·영수증·recovery를 현재 authority로 확인한다.
+현재 문서 갱신의 출발 HEAD/origin은 **5d4b64dbd94f51fecd99a94df920cf051d654e27**이다. Unit27은 이 commit과 Desktop destination 검증까지 마쳤다. Units28–29는 이 HEAD에서 source 375개와 tracked 460개를 기준으로 수행했다. 이번 마감은 검토된 source/tests 4경로와 문서 6경로이며 tracked 461개를 예상한다. 이후 commit을 과거 실행 HEAD로 소급하지 않는다. 실제 Git·영수증·recovery를 현재 authority로 확인한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units28–29 고정 F·실전 평가 마감](stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md). K100K는 명시 API 옵션으로 한정 수용한다. 기존 indexed와 모델 기본 samples 8 / shortlist 4는 유지한다. source/tests 4파일은 검토 bytes 그대로다.
+- C36의 가용성은 K100K 15/18, BASELINE 9/18, 완료 퇴행 0, mode별 nonzero 4/4/4로 동결 기준을 충족했다. R의 엄격 hit 차이는 0이며 일반 효율·속도 개선은 NOT_ESTABLISHED다.
+- Unit29는 8회 시작, WON 4 / LOST 2 / UNRESOLVED 2, 정상 종단 6/8로 PARTIAL이다. 실제 1,316입력과 완료 모델 23개는 독립 재생됐다. G01 M/R은 Q 한도로 C105에서 제안 없이 멈췄다. G02 M/R은 F_ONLY 대비 각 4입력 감소, S는 2입력 증가다.
+- 다음 Main/worker/Replay caller는 제안 없는 자원 한도 응답에서 Auto·예약을 중단하고 사유를 표시하며 현재 보드/Replay를 보존한다. 같은 상태의 자동 재요청은 금지한다. 미관측 모델 CHORD·공유 FLAG skip·취소/BUSY/만료·시간 한도·guess OFF는 기존 근거를 연결 경로에 대응시키고 부족한 부분만 시험한다.
+- Unit28 PARTIAL/H04/incident 7/6, Unit29 A 실패와 U29-O03 최초 PID 상태 공백은 보존한다. 구현 1,218파일과 검토 26파일이 결속됐다. Stage4 NOT_MERGED, 화면 미연결, 전시 노트북 PENDING이다. 아래 단위별 다음 단계 문구는 각 작성 시점의 snapshot으로 읽는다.
 
 - [Unit27 고정 F 프로파일 마감](stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md). 54개 호출을 정확히 한 번 처분했다. B0/P1/P2 완료는 3/18·6/18·9/18, 후속 후보는 NONE이다. source와 기본값 변경은 0이다.
 - 독립 검토는 483행·15,237전이, score 42개, F 기록 12,538개와 56개 주장값을 확인했다. 필수 제품/helper 보완은 0건이다. AVAILABILITY_NOT_MET / MODEL_INFORMATION_NOT_OBSERVED / INTEGRATION_NOT_READY를 유지한다.

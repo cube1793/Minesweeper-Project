@@ -445,5 +445,233 @@ class FixedFollowupLimitsTests(unittest.TestCase):
                   classification="real_small_model_and_real_F_no_engine_or_policy_owner")
 
 
+class IndexedK100KTests(unittest.TestCase):
+    """A separate fixed F, with legacy payloads and atomic gates preserved."""
+
+    def limits(self, **changes):
+        return replace(TINY, kernel_kind="indexed_k100k", **changes)
+
+    def followup(self):
+        return m.FollowupRequest(((0, H),), 0, 1, False,
+            limits=m.fixed_followup_limits("indexed_k100k"))
+
+    def fake(self, request, *, cancelled=None):
+        usage = m.RuntimeUsage(kernel_calls=1, kernel_work=7, q_calls=1,
+                               q_local=11, unit10_calls=1, unit10_units=13)
+        caps = (("kernel_work", 100000), ("q_local", 20000), ("unit10_units", 200000))
+        reply = m.FollowupResult(m.K100K_F_ID, request.identity, request,
+            "GUESS_BLOCKED", "INJECTED_K100K", (), "EXACT_Q", "GUESS_BLOCKED",
+            None, None, None, None, None, usage,
+            tuple(m.Settlement(k, cap, getattr(usage, k), "SETTLED") for k, cap in caps), True, 0.0)
+        if AUDIT:
+            AUDIT.emit("k100k_injected_f", dict(request=request, result=reply,
+                classification="controlled_response_not_real_F"))
+        return reply
+
+    def test_legacy_serialized_limits_identity_and_missing_fields(self):
+        import json
+        old_f = dict(kernel=dict(max_cells=480, max_constraints=2048, max_derived=1024,
+                                 max_work=500000, max_seconds=2.0),
+            plan=dict(max_pivots=12, max_targets=96, max_subsets=131072, max_seconds=1.0),
+            q=dict(max_cells=480, local_work=20000, exact_work=200000, max_seconds=2.0,
+                   counter_units=200000), max_seconds=5.0, kernel_kind="indexed")
+        old_model = dict(samples=8, shortlist=4, rows=32, sampler_work=2000000,
+            virtual_inputs=20000, row_inputs=512, f_lookups=16000, f_misses=4096,
+            kernel_work=60000000, q_local=10000000, unit10_units=30000000,
+            cache_entries=2048, max_seconds=30.0, root=dict(max_cells=480,
+                max_generated=4096, max_candidates=2048, max_distinct_events=512,
+                max_backend_calls=33, max_total_backend_work=500000, max_seconds=10.0),
+            diagnostic=False, kernel_kind="indexed")
+        for kind, fid in (("indexed", "PUBLIC_F_INDEXED_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1"),
+                          ("v1", "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1")):
+            with self.subTest(kind=kind):
+                old_f["kernel_kind"] = old_model["kernel_kind"] = kind
+                fq = replace(self.followup(), limits=m.fixed_followup_limits(kind))
+                expected_f = dict(observation=((0, H),), num_mines=0, counted_inputs=1,
+                    allow_guess=False, prior_id=m.PRIOR_ID, limits=old_f)
+                self.assertEqual(json.dumps(m.exact_json(fq), sort_keys=True),
+                                 json.dumps(m.exact_json(expected_f), sort_keys=True))
+                self.assertEqual(fq.identity, m.public_digest((fid, expected_f)))
+                self.assertEqual(fq.limits, m.FollowupLimits(kernel_kind=kind))
+                q = m.ModelRequest(((0, H),), 0, 1, limits=m.ModelLimits(kernel_kind=kind))
+                expected = dict(observation=((0, H),), num_mines=0, counted_inputs=1,
+                    mode="S", allow_guess=False, target=None, planning_seed=0,
+                    prior_id=m.PRIOR_ID, limits=old_model)
+                self.assertEqual(q.identity, m.public_digest((
+                    "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS", expected)))
+                self.assertEqual(m.ModelRequest.from_payload(q.to_payload()), q)
+        self.assertEqual(m.ModelLimits.from_payload({}), m.ModelLimits())
+        payload = m.ModelRequest(((0, H),), 0, 1).to_payload()
+        del payload["limits"]["kernel_kind"]
+        self.assertEqual(m.ModelRequest.from_payload(payload).limits, m.ModelLimits())
+
+    def test_kind_validation_and_fixed_caps_reject_contradictions(self):
+        fixed = m.fixed_followup_limits("indexed_k100k")
+        self.assertEqual(fixed.followup_id,
+            "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1")
+        self.assertEqual(fixed.kernel, m.KernelLimits(max_work=100000))
+        self.assertEqual((fixed.plan, fixed.q, fixed.max_seconds), (m.PlanLimits(), m.ExactLimits(), 5.0))
+        q = replace(query(), limits=self.limits())
+        self.assertEqual(m.ModelRequest.from_payload(q.to_payload()), q)
+        for bad in (None, True, 1, "", "INDEXED_K100K", "indexed_k99999"):
+            with self.subTest(bad=bad), self.assertRaises((TypeError, ValueError)):
+                m.ModelLimits.from_payload({"kernel_kind": bad})
+        with self.assertRaises(ValueError):
+            m.FollowupLimits(kernel_kind="indexed_k100k")
+        changes = [dict(kernel=m.KernelLimits(max_work=n)) for n in (0, 99999, 100001, 500000)]
+        changes += [dict(kernel=replace(fixed.kernel, max_derived=1023)),
+                    dict(kernel=replace(fixed.kernel, max_seconds=1.0)),
+                    dict(plan=m.PlanLimits(max_subsets=1)), dict(plan=m.PlanLimits(max_seconds=0.5)),
+                    dict(q=m.ExactLimits(local_work=19999)), dict(q=m.ExactLimits(counter_units=199999)),
+                    dict(q=m.ExactLimits(max_seconds=1.0)), dict(max_seconds=4.999)]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                replace(fixed, **change)
+        for bad in (True, -1, 100000.0):
+            with self.subTest(bad_cap=bad), self.assertRaises(ValueError):
+                m.KernelLimits(max_work=bad)
+
+    def test_real_small_models_use_one_fixed_F_and_score_identity(self):
+        for mode in ("S", "M", "R"):
+            q = replace(query("G001", mode), limits=self.limits())
+            result = m.evaluate_model(q)
+            self.assertEqual(result.status, "COMPLETE", result.error)
+            self.assertEqual((result.model_id, result.followup_id), (m.MODEL_ID, m.K100K_F_ID))
+            self.assertTrue(result.calls)
+            self.assertTrue(result.scores)
+            self.assertTrue(all(s.pilot_id == m.K100K_F_ID for s in result.scores))
+            for call in result.calls:
+                self.assertEqual(call.request.limits, m.fixed_followup_limits("indexed_k100k"))
+                self.assertEqual(call.result.followup_id, m.K100K_F_ID)
+                self.assertEqual(call.request.logical_key, call.result.request.logical_key)
+                self.assertEqual(call.origin_request_id, call.result.request_id)
+                if call.result.facts:
+                    self.assertEqual(call.result.facts.work_version, m.WORK_VERSION)
+            if AUDIT:
+                AUDIT.emit("k100k_real_small", dict(request=q, result=result,
+                    classification="real_small_exhaustive_model_not_performance_sample"))
+
+    def test_cache_separates_F_identity_and_rejects_injected_other_F(self):
+        fq = self.followup()
+        baseline = replace(fq, limits=m.fixed_followup_limits("indexed"))
+        self.assertNotEqual(fq.identity, baseline.identity)
+        self.assertNotEqual(fq.logical_key, baseline.logical_key)
+        with patch.object(m, "perf_counter", return_value=100.0):
+            budget = m._Budget(replace(query(), limits=self.limits()), None)
+            cache, calls = m._FollowupCache(2), []
+            with patch.object(m, "choose_followup", wraps=m.choose_followup) as backend:
+                old = cache.choose(baseline, budget, calls)
+                new = cache.choose(fq, budget, calls)
+                self.assertEqual(backend.call_count, 2)
+                self.assertEqual(new.followup_id, m.K100K_F_ID)
+                self.assertIs(cache.choose(fq, budget, calls), new)
+                self.assertEqual(backend.call_count, 2)
+            cache.entries[fq.logical_key] = old
+            with patch.object(m, "choose_followup") as backend, self.assertRaisesRegex(ValueError, "INVALID_CACHED_F"):
+                cache.choose(fq, budget, calls)
+            backend.assert_not_called()
+
+    def test_full_reservation_99999_100000_Q_unit10_and_time(self):
+        caps = (("kernel_work", 100000, "KERNEL_BUDGET"),
+                ("q_local", 20000, "Q_LOCAL_BUDGET"), ("unit10_units", 200000, "UNIT10_BUDGET"))
+        with patch.object(m, "perf_counter", return_value=100.0):
+            for resource, cap, reason in caps:
+                for delta in (-1, 0, 1):
+                    with self.subTest(resource=resource, remaining=cap+delta):
+                        budget = m._Budget(replace(query(), limits=self.limits(**{resource: cap+delta})), None)
+                        cache, calls = m._FollowupCache(1), []
+                        with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                            if delta < 0:
+                                with self.assertRaises(m._Stop) as stopped:
+                                    cache.choose(self.followup(), budget, calls)
+                                self.assertEqual(stopped.exception.reason, reason)
+                                self.assertEqual((calls, budget.settlements, budget.usage.f_misses), ([], [], 0))
+                                backend.assert_not_called()
+                            else:
+                                cache.choose(self.followup(), budget, calls)
+                                self.assertEqual(backend.call_count, 1)
+                                self.assertEqual(backend.call_args.args[0].limits, self.followup().limits)
+                                self.assertEqual([s.reserved for s in budget.settlements], [100000, 20000, 200000])
+            for seconds in (4.999, 5.0, 5.001):
+                budget = m._Budget(replace(query(), limits=self.limits()), None)
+                budget.deadline = 100.0+seconds
+                cache, calls = m._FollowupCache(1), []
+                with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                    if seconds < 5:
+                        with self.assertRaises(m._Stop) as stopped:
+                            cache.choose(self.followup(), budget, calls)
+                        self.assertEqual(stopped.exception.reason, "F_TIME_RESERVATION")
+                        self.assertEqual((calls, budget.settlements, backend.call_count), ([], [], 0))
+                    else:
+                        cache.choose(self.followup(), budget, calls)
+                        self.assertEqual(backend.call_count, 1)
+
+    def test_atomic_limits_cancel_exception_and_unknown_accounting(self):
+        q = replace(query(), limits=self.limits())
+        for limits in (self.limits(kernel_work=99999), self.limits(row_inputs=0), self.limits(f_misses=0)):
+            result = m.evaluate_model(replace(q, limits=limits))
+            self.assertEqual(result.status, "RESOURCE_LIMIT")
+            self.assertEqual((result.sequence, result.scores, result.selected_candidate_id), ((), (), None))
+            for row in result.rows:
+                if row.outcome in ("NOT_STARTED", "UNRESOLVED"):
+                    self.assertEqual((row.value_x, row.hit, row.virtual_b), (None, None, None))
+        self.assertEqual(m.evaluate_model(q, cancelled=lambda: True).status, "CANCELLED")
+        self.assertEqual(m.evaluate_model(q, cancelled=lambda: 1).status, "ERROR")
+        with patch.object(m, "choose_followup", side_effect=RuntimeError("injected after reservation")):
+            result = m.evaluate_model(q)
+        self.assertEqual((result.status, result.sequence, result.scores), ("ERROR", (), ()))
+        self.assertFalse(result.usage.accounting_complete)
+        unknown = [s for s in result.settlements if s.status == "UNKNOWN_SPEND"]
+        self.assertEqual([(s.resource, s.reserved, s.actual) for s in unknown],
+            [("kernel_work", 100000, None), ("q_local", 20000, None), ("unit10_units", 200000, None)])
+
+    def test_partial_matrix_keeps_terminal_rows_without_scores(self):
+        original_row, finished = m._row, []
+        def exhaust(*args):
+            row, stopped = original_row(*args)
+            if not finished:
+                self.assertIsNone(stopped)
+                self.assertIsNotNone(row.value_x)
+                finished.append(row)
+                budget = args[4]
+                budget.usage = replace(budget.usage, kernel_work=budget.request.limits.kernel_work)
+            return row, stopped
+        with patch.object(m, "perf_counter", return_value=100.0), patch.object(m, "_row", side_effect=exhaust):
+            result = m.evaluate_model(replace(query(), limits=self.limits(cache_entries=0)))
+        self.assertEqual((result.status, result.reason), ("RESOURCE_LIMIT", "KERNEL_BUDGET"))
+        self.assertEqual(result.rows[0], finished[0])
+        self.assertEqual((result.sequence, result.scores, result.selected_candidate_id), ((), (), None))
+        self.assertTrue(any(r.outcome == "UNRESOLVED" and r.value_x is None for r in result.rows))
+
+    def test_incomplete_indexed_kernel_passes_same_public_state_to_Q(self):
+        from stage4_public_kernel import KernelResult
+        fq = self.followup()
+        # Controlled kernel replies test routing; B separately measures real work limits.
+        for status in ("WORK_LIMIT", "DERIVED_LIMIT"):
+            def limited(kr, **kwargs):
+                self.assertEqual(kr.limits, m.KernelLimits(max_work=100000))
+                return KernelResult("STAGE4_PUBLIC_KERNEL", kr.version, kr.identity,
+                    status, status, (), (), (), None, 100000, (), m.WORK_VERSION, 0, 0, 0, 0.0)
+            seen = []
+            original = m.ExactPilot.choose
+            def q_spy(owner, request, **kwargs):
+                seen.append(request)
+                return original(owner, request, **kwargs)
+            with patch.object(m, "infer_public_indexed", side_effect=limited) as indexed, \
+                    patch.object(m, "infer_public") as v1, patch.object(m, "plan_safe") as plan, \
+                    patch.object(m.ExactPilot, "choose", q_spy):
+                result = m.choose_followup(fq)
+            self.assertEqual(indexed.call_count, 1)
+            v1.assert_not_called()
+            plan.assert_not_called()
+            self.assertEqual((result.status, result.source, result.followup_id), ("READY", "EXACT_Q", m.K100K_F_ID))
+            self.assertEqual(len(seen), 1)
+            self.assertEqual((seen[0].observation, seen[0].num_mines, seen[0].counted_inputs,
+                seen[0].allow_guess, seen[0].prior_id),
+                (fq.observation, fq.num_mines, fq.counted_inputs, fq.allow_guess, fq.prior_id))
+            self.assertEqual((result.facts.proven_safe, result.facts.proven_mines,
+                              result.facts.constraints, result.facts.proof_id), ((), (), (), None))
+
+
 if __name__ == "__main__":
     unittest.main()

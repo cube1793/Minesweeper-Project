@@ -14,7 +14,7 @@ from stage4_belief import PRIOR_ID, exact_json
 from stage4_exact_pilot import _integer_payload, _payload_fields, _seconds_payload, _validate_seconds
 from stage4_posterior import public_digest
 from stage4_runtime_model import (MODEL_ID, F_ID, V1_F_ID, ModelLimits, ModelRequest,
-    RuntimeUsage, FollowupLimits, FollowupRequest, evaluate_model, choose_followup)
+    RuntimeUsage, FollowupLimits, FollowupRequest, evaluate_model, choose_followup, fixed_followup_limits)
 
 POLICY_ID = "UNCONNECTED_RUNTIME_SMR_V1"
 
@@ -252,6 +252,9 @@ class RuntimePolicy:
                 if model.status == "COMPLETE":
                     if not model.sequence or not model.scores:
                         raise ValueError("EMPTY_COMPLETE_MODEL")
+                    if (model.followup_id != fixed_followup_limits(request.limits.model.kernel_kind).followup_id or
+                            any(s.pilot_id != model.followup_id for s in model.scores)):
+                        raise ValueError("MODEL_F_BINDING")
                     sequence, source = model.sequence, "MODEL"
                     status = "NO_INFORMATION" if model.information == "COMPLETE_ALL_ZERO" else "MODEL_SELECTED"
                     reason = model.information+":"+model.target_status
@@ -266,16 +269,22 @@ class RuntimePolicy:
                 stopped = check()
                 if stopped:
                     return result("CANCELLED" if stopped == "CANCELLED" else "RESOURCE_LIMIT", stopped)
+                fixed = fixed_followup_limits(request.limits.model.kernel_kind)
+                remaining = max(0.0, deadline-perf_counter())
+                if request.limits.model.kernel_kind == "indexed_k100k":
+                    if remaining < fixed.max_seconds:
+                        return result("RESOURCE_LIMIT", "F_TIME_RESERVATION")
+                else:
+                    fixed = replace(fixed, max_seconds=min(5.0, remaining))
                 fq = FollowupRequest(request.observation, request.num_mines, request.counted_inputs,
-                    request.allow_guess, request.prior_id, FollowupLimits(
-                        max_seconds=min(5.0, max(0.0, deadline-perf_counter())),
-                        kernel_kind=request.limits.model.kernel_kind))
+                    request.allow_guess, request.prior_id, fixed)
                 followup = choose_followup(fq, cancelled=relay)
                 usage = _sum_usage(usage, followup.usage)
                 stopped = check()
                 if stopped:
                     return result("CANCELLED" if stopped == "CANCELLED" else "RESOURCE_LIMIT", stopped)
-                if followup.request_id != fq.identity or not usage.accounting_complete:
+                if (followup.request_id != fq.identity or followup.followup_id != fq.limits.followup_id or
+                        followup.request.logical_key != fq.logical_key or not usage.accounting_complete):
                     raise ValueError("F_BINDING_OR_UNKNOWN_ACCOUNTING")
                 if followup.status == "READY":
                     sequence, source = followup.sequence, "F"

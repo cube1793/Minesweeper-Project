@@ -3,7 +3,9 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 기록은 [Unit27 고정 F 프로파일 마감](stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md)이다. Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. 미완료 커널 비용과 다음 설계의 경계를 기록했고 제품 source 변경은 없다.
+최근 기록은 [Units28–29 고정 F·실전 평가 마감](stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md)이다. Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. UI 연결의 중단 계약과 미검증 분기를 함께 기록했다.
+
+이전 기록은 [Unit27 고정 F 프로파일 마감](stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md)이다. Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. 미완료 커널 비용과 다음 설계의 경계를 기록했고 제품 source 변경은 없다.
 
 이전 기록은 [Units24–26 실험용 S/M/R와 F1 마감](stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md)이다. Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. 커널 388/857·퇴행 3건, 원 모델 4/18과 엄격 3/18, 실전 16패를 구분한다. 수정 후 큰 모델은 미측정이며 Stage4 NOT_MERGED다.
 

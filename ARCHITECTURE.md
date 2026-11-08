@@ -1137,6 +1137,10 @@ Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API
 
 Unit27은 기존 모델의 계산 폭을 비교했다. B0(8×4)는 3/18, P1(8×2)은 6/18, P2(4×2)는 9/18 완료했다. 독립 산술·실행 검토는 통과했으며 필수 보완은 0건이다. 세 프로파일의 가용성과 모델 정보 조건은 미충족이므로 후속 후보는 NONE이다. F1의 등록 F와 전량 예약·cache 경계를 유지했고 samples/shortlist/rows만 바꿨다. 483행·15,237전이와 42개 score를 독립 재생했다. 원시 미완료 36건 중 35건은 KERNEL_BUDGET이었다. F의 비용 변경에는 별도 identity·회계·행동 비교가 필요하다. [상세 기록](docs/stage4/STAGE4_FIXED_F_PROFILE_UNIT27_CLOSEOUT.md)을 참고한다.
 
+### Units28–29 고정 F와 실제 전달
+
+Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F 옵션으로 한정 수용했다. C36의 완료는 9/18→15/18, 완료 퇴행 0으로 등록 가용성 기준을 충족했다. 새 상급판 8회는 4승·2패·2미완료여서 Unit29는 PARTIAL을 유지한다. 기본 indexed와 모델 기본값은 그대로이며 일반 효과성과 R의 엄격한 목적 차이는 미확립이다. `fixed_followup_limits`가 model row와 runtime fallback에 동일 F 설정을 제공하고, 별도 F ID가 request/cache/score에 결속된다. 실제 입력 1,316개와 COMPLETE 모델 23개를 독립 재생했다. G01 M/R은 Q 한도에서 제안 없이 멈췄다. 다음 caller는 Auto와 예약을 중단하고 같은 상태를 자동 재요청하지 않아야 한다. 모델 CHORD·공유 FLAG skip·취소/BUSY/만료·시간 한도·guess OFF의 실전 미관측을 유지한다. [상세 기록](docs/stage4/STAGE4_FIXED_F_FRESH_PILOT_UNITS28_29_CLOSEOUT.md)을 따른다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

@@ -25,6 +25,7 @@ from stage4_rollout import VirtualBoard
 
 MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS"
 F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION
+K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION
 V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1"
 _MODEL_ACTIVE = ContextVar("stage4_runtime_model_active", default=False)
 _F_ACTIVE = ContextVar("stage4_runtime_followup_active", default=False)
@@ -81,12 +82,23 @@ class FollowupLimits:
         if type(self.kernel) is not KernelLimits or type(self.plan) is not PlanLimits or type(self.q) is not ExactLimits:
             raise TypeError("Typed followup limits required")
         _validate_seconds(self.max_seconds, 5.0)
-        if self.kernel_kind not in ("indexed", "v1"):
+        if self.kernel_kind not in ("indexed", "v1", "indexed_k100k"):
             raise ValueError("Unknown followup kernel")
+        if self.kernel_kind == "indexed_k100k" and (
+                self.kernel != KernelLimits(max_work=100_000) or self.plan != PlanLimits() or
+                self.q != ExactLimits() or self.max_seconds != 5.0):
+            raise ValueError("indexed_k100k requires its fixed followup limits")
 
     @property
     def followup_id(self):
-        return F_ID if self.kernel_kind == "indexed" else V1_F_ID
+        return {"indexed": F_ID, "v1": V1_F_ID, "indexed_k100k": K100K_F_ID}[self.kernel_kind]
+
+
+def fixed_followup_limits(kernel_kind="indexed"):
+    """One fixed F per kind, independent of remaining model resources."""
+    if kernel_kind == "indexed_k100k":
+        return FollowupLimits(kernel=KernelLimits(max_work=100_000), kernel_kind=kernel_kind)
+    return FollowupLimits(kernel_kind=kernel_kind)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +230,7 @@ All calls reserve before execution and settle even on cancellation/failure.
             limits=replace(request.limits.kernel, max_seconds=min(request.limits.kernel.max_seconds, clock.remaining())))
         usage = replace(usage, kernel_calls=1, accounting_complete=False)
         try:
-            fn = infer_public_indexed if request.limits.kernel_kind == "indexed" else infer_public
+            fn = infer_public_indexed if request.limits.kernel_kind in ("indexed", "indexed_k100k") else infer_public
             facts = fn(kr, cancelled=clock.relay)
         finally:
             spent = _settle(settlements, "kernel_work", kr.limits.max_work, getattr(facts, "work", None))
@@ -321,7 +333,7 @@ class ModelLimits:
             raise TypeError("Typed root limits and diagnostic flag required")
         if not self.diagnostic and (self.samples > 8 or self.shortlist > 4 or self.rows > 32):
             raise ValueError("Expanded matrix is limited to registered tiny exhaustive diagnostics")
-        if self.kernel_kind not in ("indexed", "v1"):
+        if self.kernel_kind not in ("indexed", "v1", "indexed_k100k"):
             raise ValueError("Unknown F kernel")
 
     @classmethod
@@ -590,7 +602,7 @@ def _row(request, candidate, sample, index, budget, cache, calls):
                 raise ValueError("F_GROUP_DID_NOT_PROGRESS")
             query = FollowupRequest(board.observation, request.num_mines, request.counted_inputs+len(actions),
                 request.allow_guess, request.prior_id,
-                FollowupLimits(kernel_kind=request.limits.kernel_kind))
+                fixed_followup_limits(request.limits.kernel_kind))
             call_index = len(calls)
             try:
                 decision = cache.choose(query, budget, calls)
@@ -638,7 +650,7 @@ def evaluate_model(request, *, cancelled=None):
     rows, calls = [], []
     selected_id = token = error = None
     information, target_status = "INCOMPLETE_NO_INFORMATION", "NOT_EVALUATED"
-    fid = F_ID if request.limits.kernel_kind == "indexed" else V1_F_ID
+    fid = fixed_followup_limits(request.limits.kernel_kind).followup_id
     try:
         if _MODEL_ACTIVE.get() or _F_ACTIVE.get():
             raise _Stop("ERROR", "RECURSIVE_MODEL_FORBIDDEN")

@@ -115,5 +115,95 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertEqual(p.RuntimePolicy().choose(request(), cancelled=lambda:1).status, "ERROR")
 
 
+class IndexedK100KPolicyTests(unittest.TestCase):
+    def request(self, **kwargs):
+        return request(limits=p.RuntimeLimits(model=ModelLimits(kernel_kind="indexed_k100k"),
+            **kwargs))
+
+    def test_real_skipped_model_and_resource_fallback_use_fixed_K100K(self):
+        import stage4_runtime_model as m
+        cases = [self.request(max_model_attempts=0),
+            p.RuntimeRequest(((-2, 1, -2), (-2, -2, -3)), 1, 2, "M", True,
+                limits=p.RuntimeLimits(model=ModelLimits(kernel_kind="indexed_k100k", kernel_work=99999)))]
+        for index, q in enumerate(cases):
+            policy = p.RuntimePolicy()
+            try:
+                with patch.object(p, "choose_followup", wraps=p.choose_followup) as backend:
+                    result = policy.choose(q)
+                self.assertEqual((result.status, result.decision_source), ("HEURISTIC_FALLBACK", "F"))
+                self.assertEqual(backend.call_count, 1)
+                self.assertEqual(result.followup.request.limits, m.fixed_followup_limits("indexed_k100k"))
+                self.assertEqual(result.followup.followup_id, m.K100K_F_ID)
+                self.assertEqual(result.model_attempted, bool(index))
+                if index:
+                    self.assertEqual((result.model.reason, result.model.usage.f_misses), ("KERNEL_BUDGET", 0))
+                self.assertEqual(policy.claim(result, q), result.sequence)
+                self.assertEqual(policy.claim(result, q), ())
+                self.assertEqual(policy.choose(q).sequence, ())
+            finally:
+                policy.close()
+
+    def test_new_payload_and_stale_kind_cannot_consume_proposal(self):
+        q = self.request(max_model_attempts=0)
+        self.assertEqual(p.RuntimeRequest.from_payload(json.loads(json.dumps(q.to_payload()))), q)
+        old = replace(q, limits=replace(q.limits, model=ModelLimits()))
+        self.assertNotEqual(q.identity, old.identity)
+        self.assertNotEqual(q.settings_fingerprint, old.settings_fingerprint)
+        policy = p.RuntimePolicy()
+        try:
+            result = policy.choose(q)
+            self.assertTrue(result.sequence)
+            self.assertEqual(policy.claim(result, old), ())
+            self.assertEqual(policy.claim(result, q), ())
+        finally:
+            policy.close()
+
+    def test_runtime_K100K_requires_all_five_seconds(self):
+        import stage4_runtime_model as m
+        for seconds in (4.999, 5.0, 5.001):
+            with patch.object(p, "perf_counter", return_value=100.0), \
+                    patch.object(p, "choose_followup", wraps=p.choose_followup) as backend:
+                policy = p.RuntimePolicy()
+                try:
+                    result = policy.choose(self.request(max_model_attempts=0, max_seconds=seconds))
+                finally:
+                    policy.close()
+            if seconds < 5:
+                self.assertEqual((result.status, result.reason, result.sequence),
+                                 ("RESOURCE_LIMIT", "F_TIME_RESERVATION", ()))
+                backend.assert_not_called()
+            else:
+                self.assertEqual(backend.call_count, 1)
+                self.assertEqual(backend.call_args.args[0].limits, m.fixed_followup_limits("indexed_k100k"))
+                self.assertTrue(result.sequence)
+
+    def test_wrong_followup_and_complete_model_F_identity_are_rejected(self):
+        import stage4_runtime_model as m
+        q = self.request(max_model_attempts=0)
+        original = p.choose_followup
+        def bad_f(fq, **kwargs):
+            return replace(original(fq, **kwargs), followup_id=m.F_ID)
+        policy = p.RuntimePolicy()
+        with patch.object(p, "choose_followup", side_effect=bad_f):
+            result = policy.choose(q)
+        self.assertEqual((result.status, result.sequence, result.proposal_id), ("ERROR", (), None))
+        self.assertEqual(policy.claim(result, q), ())
+        policy.close()
+        for wrong_model, wrong_score in ((True, False), (False, True)):
+            def bad_model(mq, **kwargs):
+                return SimpleNamespace(request_id=mq.identity, model_id=m.MODEL_ID,
+                    followup_id=m.F_ID if wrong_model else m.K100K_F_ID,
+                    status="COMPLETE", reason="INJECTED", usage=RuntimeUsage(),
+                    sequence=("injected_not_deliverable",),
+                    scores=(SimpleNamespace(pilot_id=m.F_ID if wrong_score else m.K100K_F_ID),))
+            policy = p.RuntimePolicy()
+            with patch.object(p, "evaluate_model", side_effect=bad_model), patch.object(p, "choose_followup") as backend:
+                result = policy.choose(self.request())
+            self.assertEqual((result.status, result.sequence, result.proposal_id), ("ERROR", (), None))
+            self.assertIn("MODEL_F_BINDING", result.error)
+            backend.assert_not_called()
+            policy.close()
+
+
 if __name__ == "__main__":
     unittest.main()
