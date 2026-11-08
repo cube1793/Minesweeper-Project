@@ -1,16 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Units15–17 묶음 독립 검토 완료. 수학·실행 보호 수용, 제한 성과 MIXED/후보 미채택. 최종 envelope PARTIAL과 재사용 전 H1 PENDING을 유지한다.
+Updated: **2026-11-08 (Asia/Seoul)** — Units18–19 묶음 독립 검토와 R1 보충 수용. Unit18 1클릭 제한 개선, Unit19 MIXED. 공유 FLAG 방어는 통제 수순에서 해결됐으며 정책 도달성은 미확인, 제품 반영은 DEFERRED다.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **ae88e5e8c6c13cff735a2cf9a55d33c9c17746fc**다. source365는 동일하며 아래 과거 실행 HEAD·실패 이력은 당시 snapshot이다. Units15–17 source/계수/게임 재실행 없이 문서6경로를 함께 마감 준비한다.
+현재 문서 갱신의 출발 HEAD/origin은 **606a36316b125294f45d4a7cfb970eeadcdf381f**다. source365와 출발 tracked445를 확인했다. Units18–19/R1 실행 당시 HEAD를 새 문서 커밋으로 소급하지 않는다. 이번 문서6경로 마감 후 tracked446을 예상하며, 실제 commit/push와 Desktop destination은 영수증 및 현재 Git으로 확인한다.
 
 ## Stage 4 현재 상태와 다음 범위
 
-- [Units12–17 효율 실험 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md). Unit15 네 판342입력 기준선과 Unit16 20 COMPLETE/확정0없음을 보존한다. Unit17은 E01 C163→157, E02 C174→175, E03/E04 동일 패배로 MIXED/미채택이다.
-- 독립 검토는 수학·실행 보호 수용, 필수 제품0·helper H1 1건이다. H1은 다음 driver 재사용 전 Fraction/중첩 dataclass/큰 정수 직렬화 보완이며 아직 PENDING이다. 완료 판 재실행은 필요 없다. 과거 PARTIAL과 최종 envelope 실패를 그대로 둔다.
-- 다음은 H1을 실행 준비에 묶고 공유 FLAG·겹치는 CHORD의 복합 수순 비용을 검토한다. 실전 효율·S/M/R 일반 평가·UI/worker·전시 노트북은 후속이다.
+- [Units18–19와 R1 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md). Unit18은 E01 163/E02 173으로 제한 1클릭 개선, Unit19는 E01 158/E02 175로 MIXED다. 같은 네 판과 각 판 비증가 기준을 함께 읽는다.
+- 본 검토는 1,021입력과 COMPLETE 사건110호출/186사건을 독립 재현했다. R1 보충은 실제99입력과 기존trace22를 재생해 RV-U18-01을 RESOLVED_FOR_CONTROLLED_SEQUENCE로 판정했다. 실제 상급판에서 정책이 해당 J를 고르는지는 UNCONFIRMED다.
+- H1은 새 helper의 정확한 분수/큰 정수와 실제 최종 저장에서 해소됐다. Unit17 원 PARTIAL·MIXED, Unit18 첫 oracle UNKNOWN/정확 회계 PARTIAL(상한18692), Unit19 subset1064/896의 source 재구성 표시를 유지한다.
+- R1 고유시험38은 최초34/38과 실패4개 보완4/4다. 제품 source365는 수정하지 않았으며 prototype 채택은 DEFERRED다. 후속 전략·일반 S/M/R 평가·UI/worker·전시 노트북은 별도 범위다.
+- [Units12–17 이전 실험](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)의 기준선·확정0 진단·오프닝 하한과 실패 이력은 당시 범위로 보존한다. 아래 과거의 다음 후보 문구도 당시 snapshot으로 읽는다.
 
 - [Unit 11 Q/G 합산 계수기 연결 마감](stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)은 연결·회계 ACCEPT_IN_REGISTERED_SCOPE, 필수 제품·근거 보완 각 0건이다. 검토된 Q/G와 시험 네 파일을 반영하고 REVIEWED_OPT_IN_APPLIED_A48_PASS를 확인했다. 새 A 실행 1회에서 START 48 / PASS 48, P3는 원 PASS 재사용이다.
 - 기본 UNIT4_LEGACY와 명시적 UNIT10_SUMMED를 구분한다. Q/G의 units_total 예약·차감, UNKNOWN_SPEND, 공개 정보와 결과의 원자성은 등록 범위에서 수용했다. Unit 11 legacy 버전과 요청 ID의 변경도 기록한다.

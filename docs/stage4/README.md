@@ -6,7 +6,9 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 최근 효율 실험
 
-[Units12–17 마감](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)에 Q 전체 판 기준선,20개 상태의 확정0 진단, 첫 확장 하한 점수 후보를 기록했다. Units15–17 묶음 독립 검토에서 수학과 실행·보호는 수용됐고 성과는 MIXED/미채택이다. E01은6입력 절약, E02는1입력 증가이며 counter 비용은 약10.3배였다. 최종 driver 요약 PARTIAL과 재사용 전 H1 PENDING을 유지한다.
+[Units18–19 및 R1 마감](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)에 두 후보와 공유 FLAG 방어를 기록했다. Unit18은 등록 네 판에서 1클릭 제한 개선, Unit19는 E01 −5/E02 +2로 MIXED다. 수학·완료 사건·관측 경로를 독립 재현했으며 R1은 통제된 합법 엔진 수순에서 해결됐다. 실제 정책의 상급판 도달성은 UNCONFIRMED이고 제품은 미반영이다.
+
+H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)의 원 PARTIAL·MIXED와 Unit18 oracle UNKNOWN/부분 회계, Unit19 subset 재구성 표시를 보존한다.
 
 ## 현재 수용
 
@@ -50,6 +52,6 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 다음 작업
 
-다음은 driver H1 직렬화를 보완한 뒤 공유 FLAG·겹치는 CHORD를 포함한 복합 수순의 총비용을 검토하는 일이다. 이 문서의 수용은 Unit 11 연결·회계와 반영 확인 범위다. Unit 9 미채택과 과거 미과금은 각 당시 기록을 따른다. 실전 효율·UI/Live·전시 패키지·저장 정리는 별도 범위로 관리한다.
+Units18–19/R1 기록 마감 이후의 새 전략과 비교는 별도 등록한다. 일반 S/M/R 실전 평가, UI/Live 통합, 전시 노트북·패키지는 후속 범위다. 이번 수용은 output prototype과 통제된 전달 수순의 범위이며 제품 반영은 DEFERRED다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.

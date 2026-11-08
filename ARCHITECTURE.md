@@ -1101,7 +1101,15 @@ G는 Q 호출의 합산 작업을 남은 `counter_units`에서 예약한다. 호
 
 Unit15의 Q 기준선과 Unit16의20개 공개 상태 진단, Unit17의 안전 입력 점수 후보는 output 영역에서 수행했습니다. 제품 모듈은 Unit11 기준을 유지합니다. L은0확률의 union bound, gain은 직접 표적과 겹침을 제거한1단계 이웃 공개 수의 하한이며 준비 입력을 포함해 score를 계산합니다. 계획 전체 실행 시의 즉시 기대값 하한이고 최종 E[X]/IOE 보장은 별도입니다.
 
-후보 수학과 실행·보호는 독립 수용됐으며 실제 성과는 MIXED/미채택입니다. 원자 입력 후 재계획한37개 다중 입력 제안은 실제 꼬리가 유지됐고, counter 비용은 약10.3배였습니다. 출력 driver의 Fraction-safe 직렬화 H1은 다음 재사용 전 보완 대상입니다. [실험·검토 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)을 따릅니다.
+후보 수학과 실행·보호는 독립 수용됐으며 실제 성과는 MIXED/미채택입니다. 원자 입력 후 재계획한37개 다중 입력 제안은 실제 꼬리가 유지됐고, counter 비용은 약10.3배였습니다. 출력 driver의 Fraction-safe 직렬화 H1은 당시 보완 대상이었으며, 후속 Unit18·19의 새 helper에서 최종 저장까지 확인했습니다. 원 실패는 유지합니다. [실험·검토 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)을 따릅니다.
+
+### Units18–19 및 R1 외부 prototype
+
+Unit18의 SAFE_COMPONENT_COVER_V1은 현재 Q의 공개 안전/지뢰 집합으로 같은 안전 영역의 FLAG·CHORD·OPEN 총비용을 비교합니다. Unit19의 SAFE_OPEN_REMAINING_COST_V1은 정확한 0 공동 사건과 고정 영역의 두 경우 잔여 비용 H를 사용합니다. c(J), K, H는 선언한 정적 모형의 값이며 게임 전체 최적성이나 실제 절약량으로 확대하지 않습니다.
+
+R1은 빈 CHORD 그룹의 준비 중 뒤 CHORD가 필요로 하는 확정 지뢰 FLAG를 원래 planned_index에 보존합니다. root proof와 실제 이웃을 다시 검증하고 기존 원자 guard를 사용합니다. 이 변경은 output prototype에 있으며, 통제 수순에서는 해결됐고 실제 상급판 정책 도달성은 UNCONFIRMED입니다. 제품 source의 Q/G 연결과 기본/opt-in 구분은 기존 상태입니다.
+
+[Units18–19 및 R1 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)에 독립 검토, 한정 성과, 실패와 미확인을 기록했습니다. Unit18은 1클릭 제한 개선, Unit19는 MIXED이며 두 prototype은 제품에 반영하지 않았습니다.
 
 ## 6. 테스트 전략
 
