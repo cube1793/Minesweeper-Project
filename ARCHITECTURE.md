@@ -1117,6 +1117,14 @@ SAFE_GROUP_REPLAN_V1은 Unit18의 READY·override·여러 그룹 결정에서 �
 
 Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_BOUNDED, 저장 재사용은 조건부 수용이며 신규 E02는 WON/C173·IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 후보는 NOT_ADOPTED로 마감한다. 실제 경로에서 준비 중 Q0·fresh144·terminal 뒤 Q/입력0과 회계를 독립 확인했다. 첫 구간은 counted112에서 합쳐졌으며 미예약6은 절약이 아니다. [Unit20 마감](docs/stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md)에 조건부 재사용·비차단6건과 실패 이력을 남겼다.
 
+### Units21–23 공개 사실과 안전 성분 비용 API
+
+`stage4_public_kernel.infer_public(KernelRequest)`는 공개 숫자/전체 지뢰 수를 사용해 0/전체 전파와 진부분집합 차집합을 고정점까지 적용한다. FLAG도 미확정 변수이며 공개 proof DAG를 반환한다. 기본480칸/제약2048/파생1024/work500000/협력2초다. 미완료 결과는 사실을 비우며 COMPLETE는 이 규칙 계열에 한정된다.
+
+`stage4_efficiency_plan.plan_safe`는 proof를 검증하고 공유 표적/필요 FLAG로 연결된 전체 성분을 비교한다. 새 FLAG·안전 FLAG 해제·CHORD·직접 OPEN의 비용을 센다. 성분12 pivot/96표적, 전체131072 부분집합/협력1초를 적용하며 큰 성분은 UNSUPPORTED_SIZE다. 반환하는 실행 제안은 첫 그룹이다. 미래 flood와 최종 게임 효율은 이 정적 비용에 포함되지 않는다.
+
+Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API를 추가했다. 순수 API는 BOUNDED_ACCEPT, output 전달은 harness 한정 LIMITED_ACCEPT다. 개발 승리 합계336→328, V8 승리4=4·matched-win C657→666으로 전체 정책은 MIXED/NOT_ADOPTED다. 두 API와 시험은 실험용으로 보존하며 Main/worker/UI에는 연결되지 않았다. output PublicPending/기존 Q fallback은 별도 harness에서만 검토됐다. 기한 clamp·커널 한도 소모·검증 미확인을 [상세 마감](docs/stage4/STAGE4_PUBLIC_CORE_UNITS21_23_CLOSEOUT.md)에 남긴다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

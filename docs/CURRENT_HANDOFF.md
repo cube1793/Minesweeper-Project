@@ -1,12 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Unit20 묶음 독립 검토 완료. 전달 한정 수용·재사용 조건부 수용, E02 C173 동일로 NO_IMPROVEMENT이며 후보는 NOT_ADOPTED다.
+Updated: **2026-11-08 (Asia/Seoul)** — Units21–23 독립 검토 완료. 순수 API 한정 수용·미연결 보존, 전체 정책 MIXED/NOT_ADOPTED.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **624854a26d426f9886c6d65b80e9c3d64acbddac**다. source365와 출발 tracked446을 확인했다. Unit20 실행 HEAD를 새 문서 커밋으로 소급하지 않는다. 이번 문서6경로 마감 후 tracked447을 예상하며 실제 commit/push·Desktop destination은 영수증과 현재 Git으로 확인한다.
+현재 문서 갱신의 출발 HEAD/origin은 **40a7f0edac0725b0d292c8513ed8fca21f6a7bb8**다. Unit20은 이 commit과 Desktop destination 검증까지 마쳤다. 이번 구현·시험·비교도 이 HEAD에서 실행했고 기존source365/tracked447을 보존했다. 신규source4를 더한 source369와 문서6경로를 마감하며 tracked452를 예상한다. 이후 commit을 과거 시험 HEAD로 소급하지 않는다. 실제 Git/영수증/recovery를 현재 authority로 확인한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units21–23 공개 추론·안전 비용 마감](stage4/STAGE4_PUBLIC_CORE_UNITS21_23_CLOSEOUT.md). 순수 API와 신규 시험4파일을 검토 bytes 그대로 실험용으로 보존한다. 전체 정책은 MIXED/NOT_ADOPTED, Stage4 NOT_MERGED다.
+- 개발 승리 합336→328은 통과, V8은 양쪽4승·matched-win C657→666·합계X 감소로 실패했다. 개발4후보+검증8쌍의20회와 신규21시험을 구분한다.
+- 독립 엔진1,714입력, proof339/81,688 node, plan339와 exact656 성분을 재현했다. BFS는482/656, focused bitmask는13,276개다. 필수 제품/helper0, 비차단6·미확인10·문구2를 상세 기록한다.
+- 후보 kernel857회 중WORK_LIMIT482/DERIVED_LIMIT36, Q fallback550과 기준선 fallbacks544를 구분한다. source API 수용이 커널 완전성·일반 효율·Main 통합 수용을 뜻하지 않는다.
+- I01 pre-spawn 실패, I02 timing I/O, I03 stdout 미보존을 유지한다. 실제2 START/image4와 보수3/6, Job/owner의 과거 원시 확인을 구분한다. 다음은 공통 API의 재사용 범위·예산과 S/M/R 실전 연결을 별도 등록한다.
 
 - [Unit20 그룹 경계 재계획 마감](stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md). AST14·A279·B34와 C 신규 E02 한 판을 묶어 검토했다. E01/E03/E04는 조건부 저장 재사용이며 신규 네 판이 아니다.
 - E02는 WON/C173, 3BV177, IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 입력30곳이 달라졌지만 C112에서 같은 상태로 합쳐졌다. 미예약 tail6은 절약이 아니며 후보는 NOT_ADOPTED다.
