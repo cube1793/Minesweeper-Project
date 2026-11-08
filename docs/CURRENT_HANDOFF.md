@@ -1,12 +1,18 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Units21–23 독립 검토 완료. 순수 API 한정 수용·미연결 보존, 전체 정책 MIXED/NOT_ADOPTED.
+Updated: **2026-11-08 (Asia/Seoul)** — Units24–26 및 F1 보충 검토 마감. F1_FIXED_BOUNDED 수용, 가용성 미달·통합 보류, 미연결 실험 코드 보존.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **40a7f0edac0725b0d292c8513ed8fca21f6a7bb8**다. Unit20은 이 commit과 Desktop destination 검증까지 마쳤다. 이번 구현·시험·비교도 이 HEAD에서 실행했고 기존source365/tracked447을 보존했다. 신규source4를 더한 source369와 문서6경로를 마감하며 tracked452를 예상한다. 이후 commit을 과거 시험 HEAD로 소급하지 않는다. 실제 Git/영수증/recovery를 현재 authority로 확인한다.
+현재 문서 갱신의 출발 HEAD/origin은 **ba3d140660ad57f300cbd9f1333b983d661aefee**다. Units21–23은 이 commit과 Desktop destination 검증까지 마쳤다. Units24–26 구현·시험·비교·F1 보완은 이 HEAD에서 실행했다. source 375개, 출발 tracked 452개, source/tests 7경로와 문서 6경로를 마감하며 tracked 459개를 예상한다. 이후 commit을 과거 시험 HEAD로 소급하지 않는다. 실제 Git·영수증·recovery를 현재 authority로 확인한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units24–26 실험용 S/M/R와 F1 마감](stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md). 검토된 source/tests 7경로를 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐고 새 필수 문제는 0건이다.
+- 커널은 388/857 완료, 기존 339개 중 336개 유지·신규 52개·퇴행 3개다. 원 모델은 4/18 완료지만 등록된 고정 F 기준 유효 완료는 3/18이다. F1 수정 후 큰 모델은 미측정이다.
+- 실전 16회 모두 패배했고 S/M/R의 수순은 같았다. 모델 선택은 S 2회, M/R 0회다. AVAILABILITY_NOT_MET / INTEGRATION_NOT_READY / 효율·실전 목적 차이 NOT_ESTABLISHED / Stage4 NOT_MERGED를 유지한다.
+- F1은 남은 예산에 따른 F 한도 축소를 제거했다. 유효 cache hit를 먼저 확인하고, miss에는 등록 자원 전체와 5초가 필요하다. 부족하면 모델을 RESOURCE_LIMIT으로 끝낸다. 보완 고유 시험 18개와 독립 작은 모델 12개 대조를 구분한다.
+- 원 실행 START 5/image 10과 보완 추가 1/2를 구분한다. 원 F1, I01/I02, 보완 I01–I03, 비차단·미확인과 과거 PARTIAL/MIXED 이력을 보존한다. 다음은 계산 모델과 가용성 기준을 조율하며 운영 UI 통합은 보류한다.
 
 - [Units21–23 공개 추론·안전 비용 마감](stage4/STAGE4_PUBLIC_CORE_UNITS21_23_CLOSEOUT.md). 순수 API와 신규 시험4파일을 검토 bytes 그대로 실험용으로 보존한다. 전체 정책은 MIXED/NOT_ADOPTED, Stage4 NOT_MERGED다.
 - 개발 승리 합336→328은 통과, V8은 양쪽4승·matched-win C657→666·합계X 감소로 실패했다. 개발4후보+검증8쌍의20회와 신규21시험을 구분한다.

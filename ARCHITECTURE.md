@@ -1125,6 +1125,14 @@ Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_
 
 Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API를 추가했다. 순수 API는 BOUNDED_ACCEPT, output 전달은 harness 한정 LIMITED_ACCEPT다. 개발 승리 합계336→328, V8 승리4=4·matched-win C657→666으로 전체 정책은 MIXED/NOT_ADOPTED다. 두 API와 시험은 실험용으로 보존하며 Main/worker/UI에는 연결되지 않았다. output PublicPending/기존 Q fallback은 별도 harness에서만 검토됐다. 기한 clamp·커널 한도 소모·검증 미확인을 [상세 마감](docs/stage4/STAGE4_PUBLIC_CORE_UNITS21_23_CLOSEOUT.md)에 남긴다.
 
+### Units24–26 미연결 S/M/R runtime API
+
+`stage4_runtime_kernel.infer_public_indexed`는 기존 공개 식과 proof API를 재사용하고 불변 관계와 색인으로 전파한다. 기존 `verify_proof`는 새 work-version을 허용한다. 기본 work 500,000에는 완료 전 검증이 포함된다. 완료 388/857과 검증 단계 퇴행 3건을 유지한다.
+
+`stage4_runtime_model`은 같은 공개 posterior bank와 고정 후속 정책 F로 후보를 비교한다. F는 공개 커널, 안전 비용 계획, Q/UNIT10_SUMMED를 사용한다. F1 보완은 kernel 500,000/Q local 20,000/Unit10 200,000/F 5초를 고정하고, 유효 cache hit 확인 후 miss에서 전량 예약을 검사한다. 자원이 부족한 모델은 RESOURCE_LIMIT이며 완전한 행렬에서만 점수를 발행한다. 모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS`다.
+
+`stage4_runtime_policy`는 S/M/R 목적과 판당 quota·공개 count·요청 identity를 결속한다. 전달 검증은 output harness에서 수용됐다. Main/worker/UI 연결은 미구현이다. Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. [상세 마감](docs/stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md)을 참고한다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

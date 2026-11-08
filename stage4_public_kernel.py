@@ -294,7 +294,7 @@ Raises ValueError on invalid provenance; cancellation belongs to the caller.
     check(result.status == "COMPLETE" and result.error is None, "FACTS_INCOMPLETE")
     check(result.producer == PRODUCER and result.version == request.version == VERSION and
           request.prior_id == PRIOR_ID and result.request_id == request.identity, "FACT_IDENTITY")
-    check(result.work_version == WORK_VERSION and 0 <= result.work <= request.limits.max_work and
+    check(result.work_version in (WORK_VERSION, "prepaid_indexed_immutable_relations_v1") and 0 <= result.work <= request.limits.max_work and
           result.work == sum(v for _, v in result.work_by_family), "FACT_ACCOUNTING")
     check(len(result.constraints) == result.constraint_count <= request.limits.max_constraints and
           result.derived_count == sum(p.rule == "SUBSET" for p in result.constraints) <= request.limits.max_derived,
