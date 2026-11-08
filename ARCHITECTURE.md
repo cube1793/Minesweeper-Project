@@ -1111,6 +1111,12 @@ R1은 빈 CHORD 그룹의 준비 중 뒤 CHORD가 필요로 하는 확정 지뢰
 
 [Units18–19 및 R1 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)에 독립 검토, 한정 성과, 실패와 미확인을 기록했습니다. Unit18은 1클릭 제한 개선, Unit19는 MIXED이며 두 prototype은 제품에 반영하지 않았습니다.
 
+### Unit20 그룹 경계 재계획 실험
+
+SAFE_GROUP_REPLAN_V1은 Unit18의 READY·override·여러 그룹 결정에서 첫 그룹만 예약한다. 준비 FLAG와 마지막 CHORD/OPEN은 묶어 실행하고 새 관측·counted로 Q를 다시 부른다. 미예약 tail은 감사 자료이며 실행 큐에 남지 않는다. 기존 원자 guard와 공개 정보 경계를 유지한다.
+
+Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_BOUNDED, 저장 재사용은 조건부 수용이며 신규 E02는 WON/C173·IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 후보는 NOT_ADOPTED로 마감한다. 실제 경로에서 준비 중 Q0·fresh144·terminal 뒤 Q/입력0과 회계를 독립 확인했다. 첫 구간은 counted112에서 합쳐졌으며 미예약6은 절약이 아니다. [Unit20 마감](docs/stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md)에 조건부 재사용·비차단6건과 실패 이력을 남겼다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

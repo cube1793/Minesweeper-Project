@@ -6,6 +6,8 @@ Stage 4는 일반 플레이처럼 제한된 공개 정보만 사용해 최종 Ef
 
 ## 최근 효율 실험
 
+[Unit20 그룹 경계 재계획 마감](STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md). Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_BOUNDED, 저장 재사용은 조건부 수용이며 신규 E02는 WON/C173·IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 후보는 NOT_ADOPTED로 마감한다. AST14/A279/B34와 새 C 한 판을 묶었고, 비차단6건 및 원 실패를 보존한다.
+
 [Units18–19 및 R1 마감](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)에 두 후보와 공유 FLAG 방어를 기록했다. Unit18은 등록 네 판에서 1클릭 제한 개선, Unit19는 E01 −5/E02 +2로 MIXED다. 수학·완료 사건·관측 경로를 독립 재현했으며 R1은 통제된 합법 엔진 수순에서 해결됐다. 실제 정책의 상급판 도달성은 UNCONFIRMED이고 제품은 미반영이다.
 
 H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)의 원 PARTIAL·MIXED와 Unit18 oracle UNKNOWN/부분 회계, Unit19 subset 재구성 표시를 보존한다.
@@ -52,6 +54,6 @@ H1은 새 helper의 최종 저장까지 확인했다. [Units12–17](STAGE4_EFFI
 
 ## 다음 작업
 
-Units18–19/R1 기록 마감 이후의 새 전략과 비교는 별도 등록한다. 일반 S/M/R 실전 평가, UI/Live 통합, 전시 노트북·패키지는 후속 범위다. 이번 수용은 output prototype과 통제된 전달 수순의 범위이며 제품 반영은 DEFERRED다.
+Unit20 NO_IMPROVEMENT·미채택 기록 마감 이후의 새 전략과 비교는 별도 등록한다. 일반 S/M/R 실전 평가, UI/Live 통합, 전시 노트북·패키지는 후속 범위다. 이번 수용은 output prototype과 통제된 전달 수순의 범위이며 제품 반영은 DEFERRED다.
 
 현재 Git와 recovery는 [CURRENT_HANDOFF](../CURRENT_HANDOFF.md)를 따른다. 순수 계산 모듈의 이번 수용에는 추가 native가 필요하지 않다. 같은 인스턴스의 미적용 입력 복구와 BUSY, 전시 노트북 PENDING, Stage 3 V1/frozen 정책·Model C·Program K 연구/holdout 경계는 그대로다.

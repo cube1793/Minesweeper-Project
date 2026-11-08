@@ -3,7 +3,9 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 효율 실험은 [Units18–19 및 R1 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)을 따른다. Unit18 제한 1클릭 개선, Unit19 MIXED, R1 공유 FLAG 방어의 통제 수순 수용과 정책 도달성 미확인을 구분한다. 두 prototype은 제품 미반영이며 Stage4 전체 판정은 NOT_MERGED다.
+최근 기록은 [Unit20 그룹 경계 재계획 마감](stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md)을 따른다. Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_BOUNDED, 저장 재사용은 조건부 수용이며 신규 E02는 WON/C173·IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 후보는 NOT_ADOPTED로 마감한다. 비차단6건·조건부 재사용·실패 이력을 분리했다.
+
+이전 효율 실험은 [Units18–19 및 R1 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)을 따른다. Unit18 제한 1클릭 개선, Unit19 MIXED, R1 공유 FLAG 방어의 통제 수순 수용과 정책 도달성 미확인을 구분한다. 두 prototype은 제품 미반영이며 Stage4 전체 판정은 NOT_MERGED다.
 
 [Units12–17 이전 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS12_17_CLOSEOUT.md)은 당시 후보·실패를 보존한다. H1은 후속 새 helper에서 해소됐고 원 Unit17 최종 저장 PARTIAL은 유지한다.
 

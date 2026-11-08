@@ -38,6 +38,8 @@ Unit15–17은 실제 상급판 기준선, 확정0 진단과 안전한 입력의
 
 Unit18은 공유 FLAG·CHORD의 총비용을 비교해 등록 네 판에서 1클릭 제한 개선을 확인했습니다. Unit19의 정확한 0 확률·잔여 비용 후보는 E01 163→158, E02 173→175로 MIXED입니다. R1의 공유 FLAG 누락 방어는 통제된 7×5 합법 엔진 수순에서 독립 수용됐으며 실제 정책의 상급판 도달성은 미확인입니다. H1은 새 helper의 최종 저장까지 확인했습니다. 후보와 보완은 output 영역의 prototype이며 제품 반영은 DEFERRED입니다. [Units18–19 및 R1 마감](docs/stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md)을 참고하세요.
 
+Unit20은 그룹마다 재계획하는 후보를 비교했다. 전달은 ACCEPT_BOUNDED, 저장 재사용은 조건부 수용이며 신규 E02는 WON/C173·IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 후보는 NOT_ADOPTED로 마감한다. 비차단6건과 실행 전 실패·보완 이력은 [Unit20 마감](docs/stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md)에 기록했다. 세 저장 경로의 재사용은 bounded Q 완료 조건부이며 일반 효율 우위로 확대하지 않는다.
+
 작은 상태의 계획기는 최대 64칸·닫힘/깃발 8칸의 선언 후보군을 지원합니다. 새 계수기의 480칸 상한이 이 계획기의 지원 범위를 넓히지는 않습니다. Main 메뉴에는 아직 연결하지 않았으며 Unit 2 C01과 Unit 3 U3-H01, 이전 구현자의 PARTIAL은 별도로 보존합니다.
 
 현재 범위는 [Stage 4 인덱스](docs/stage4/README.md), [기반 closeout](docs/stage4/STAGE4_OPENING_PLANNING_FOUNDATION_CLOSEOUT.md), [평가기 Unit 3 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md), [공개 계수기 Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md), [후보 수순 근거 Unit 5 closeout](docs/stage4/STAGE4_CANDIDATE_EVIDENCE_UNIT5_CLOSEOUT.md), [rollout 선택 정책 Unit 6 closeout](docs/stage4/STAGE4_ROLLOUT_POLICY_UNIT6_CLOSEOUT.md), [색인 P0 Unit 7 closeout](docs/stage4/STAGE4_INDEXED_P0_UNIT7_CLOSEOUT.md), [정밀 후속 Unit 8 closeout](docs/stage4/STAGE4_EXACT_OBJECTIVE_PILOT_UNIT8_CLOSEOUT.md), [보존 후보 Unit 9 closeout](docs/stage4/STAGE4_EXACT_COMPLETION_UNIT9_CLOSEOUT.md), [독립 계수기 Unit 10 closeout](docs/stage4/STAGE4_STANDALONE_COUNTS_UNIT10_CLOSEOUT.md), [Q/G 합산 연결 Unit 11 closeout](docs/stage4/STAGE4_QG_COUNTER_INTEGRATION_UNIT11_CLOSEOUT.md)을 참고하세요. 작은 목적 선택 사례는 일반 성능이나 최고 기록의 근거가 아닙니다.

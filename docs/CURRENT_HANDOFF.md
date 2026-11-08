@@ -1,12 +1,17 @@
 # Current Project Handoff
 
-Updated: **2026-11-08 (Asia/Seoul)** — Units18–19 묶음 독립 검토와 R1 보충 수용. Unit18 1클릭 제한 개선, Unit19 MIXED. 공유 FLAG 방어는 통제 수순에서 해결됐으며 정책 도달성은 미확인, 제품 반영은 DEFERRED다.
+Updated: **2026-11-08 (Asia/Seoul)** — Unit20 묶음 독립 검토 완료. 전달 한정 수용·재사용 조건부 수용, E02 C173 동일로 NO_IMPROVEMENT이며 후보는 NOT_ADOPTED다.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD/origin은 **606a36316b125294f45d4a7cfb970eeadcdf381f**다. source365와 출발 tracked445를 확인했다. Units18–19/R1 실행 당시 HEAD를 새 문서 커밋으로 소급하지 않는다. 이번 문서6경로 마감 후 tracked446을 예상하며, 실제 commit/push와 Desktop destination은 영수증 및 현재 Git으로 확인한다.
+현재 문서 갱신의 출발 HEAD/origin은 **624854a26d426f9886c6d65b80e9c3d64acbddac**다. source365와 출발 tracked446을 확인했다. Unit20 실행 HEAD를 새 문서 커밋으로 소급하지 않는다. 이번 문서6경로 마감 후 tracked447을 예상하며 실제 commit/push·Desktop destination은 영수증과 현재 Git으로 확인한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit20 그룹 경계 재계획 마감](stage4/STAGE4_GROUP_REPLAN_UNIT20_CLOSEOUT.md). AST14·A279·B34와 C 신규 E02 한 판을 묶어 검토했다. E01/E03/E04는 조건부 저장 재사용이며 신규 네 판이 아니다.
+- E02는 WON/C173, 3BV177, IOE177/173으로 Unit18과 같아 NO_IMPROVEMENT다. 입력30곳이 달라졌지만 C112에서 같은 상태로 합쳐졌다. 미예약 tail6은 절약이 아니며 후보는 NOT_ADOPTED다.
+- 필수 수정0, 비차단6건은 원시를 보존하고 문구로 처분한다. A의 E02.reason, TJO 효과 미입증, 승인 파일의 START 전 갱신/이전 사본 부재, 구조적 플래그, 시각 라벨 순서, 실행 간 Q 응답 bytes 차이를 구분한다.
+- 원 Unit20의 권한/AST/PID getter 실패와 예산 소진을 유지한다. 원 START3/3 뒤 별도 C1회를 더한 전체 START4·실제 image6·보수8이며 source365는 동일하다. 다음 전략·제품 통합·일반 S/M/R·전시 노트북은 별도 범위다.
 
 - [Units18–19와 R1 마감](stage4/STAGE4_EFFICIENCY_EXPERIMENTS_UNITS18_19_CLOSEOUT.md). Unit18은 E01 163/E02 173으로 제한 1클릭 개선, Unit19는 E01 158/E02 175로 MIXED다. 같은 네 판과 각 판 비증가 기준을 함께 읽는다.
 - 본 검토는 1,021입력과 COMPLETE 사건110호출/186사건을 독립 재현했다. R1 보충은 실제99입력과 기존trace22를 재생해 RV-U18-01을 RESOLVED_FOR_CONTROLLED_SEQUENCE로 판정했다. 실제 상급판에서 정책이 해당 J를 고르는지는 UNCONFIRMED다.
