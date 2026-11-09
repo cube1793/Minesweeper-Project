@@ -243,6 +243,149 @@ class UsabilityUITests(UIBase):
         AUDIT('logical_board_fit',dict(classification='OFFSCREEN_LOGICAL_LAYOUT_NOT_NATIVE_DPI',screens=evidence))
 
 
+class WindowRetentionTests(UIBase):
+    POLICIES = ('S2_SIMPLE', 'STAGE3_V1', 'K_P0', 'K_LC0', 'K_LC1',
+                'STAGE4_S', 'STAGE4_M', 'STAGE4_R')
+
+    def settle(self):
+        self.app.processEvents()
+        self.app.processEvents()
+
+    def test_enlarged_window_survives_all_policies_replay_and_show(self):
+        from PyQt5.QtCore import QRect
+        with patch.object(MinesweeperUI, '_board_available_geometry',
+                          return_value=QRect(0, 0, 1920, 1080)):
+            ui = self.make_ui(width=30, height=16, mines=99)
+            ui.on_left_click(0, 0)
+            ui.resize(1800, 980)
+            self.settle()
+            enlarged = ui.size()
+            observation = ui.engine.get_observation()
+            inputs = ui._live_action_count
+            combo = ui.live_policy_combo
+            self.assertEqual(tuple(combo.itemData(i) for i in range(combo.count())),
+                             self.POLICIES)
+            for policy in self.POLICIES:
+                combo.setCurrentIndex(combo.findData(policy))
+                self.settle()
+                self.assertEqual(combo.currentData(), policy)
+                self.assertNotIn('(실험적)', combo.currentText())
+                self.assertEqual(ui.size(), enlarged)
+                self.assertEqual(ui._cell_size, 28)
+            self.assertEqual(ui.engine.get_observation(), observation)
+            self.assertEqual(ui._live_action_count, inputs)
+            data = ui._build_current_replay_data('window retention fixture')
+            self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)))
+            self.settle()
+            self.assertEqual(ui.size(), enlarged)
+            self.assertTrue(ui._exit_replay_mode())
+            self.settle()
+            ui.hide()
+            ui.show()
+            self.settle()
+            self.assertEqual(ui.size(), enlarged)
+            self.assertEqual(ui._live_action_count, 0)  # Existing canonical exit starts a new game.
+            self.assertFalse(ui.simple_auto_checkbox.isChecked())
+            self.assertEqual(ui._stage4.job.starts, 0)
+            self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),
+                              ui.scroll_area.verticalScrollBar().maximum()), (0, 0))
+            AUDIT('enlarged_window', dict(classification='OFFSCREEN_NOT_NATIVE',
+                  width=ui.width(), height=ui.height(), inputs=inputs,
+                  policies=list(self.POLICIES), fit=ui._board_fit_record))
+
+    def test_maximized_state_and_restore_geometry_survive_transitions(self):
+        from PyQt5.QtCore import QRect
+        with patch.object(MinesweeperUI, '_board_available_geometry',
+                          return_value=QRect(0, 0, 1920, 1080)):
+            ui = self.make_ui(width=30, height=16, mines=99)
+            ui.on_left_click(0, 0)
+            ui.resize(1500, 900)
+            self.settle()
+            normal = ui.size()
+            ui.showMaximized()
+            self.settle()
+            self.assertTrue(ui.isMaximized())
+            with patch.object(ui, 'resize', wraps=ui.resize) as resize:
+                for policy in self.POLICIES:
+                    self.select(ui, policy)
+                    self.settle()
+                    self.assertTrue(ui.isMaximized())
+                data = ui._build_current_replay_data('maximized retention fixture')
+                self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)))
+                self.settle()
+                self.assertTrue(ui.isMaximized())
+                self.assertTrue(ui._exit_replay_mode())
+                self.settle()
+                self.assertTrue(ui.isMaximized())
+                resize.assert_not_called()
+            ui.showNormal()
+            self.settle()
+            self.assertEqual(ui.size(), normal)
+            ui.showMaximized()
+            self.settle()
+            with patch.object(ui, 'resize', wraps=ui.resize) as resize:
+                ui.hide()
+                ui.show()
+                self.settle()
+                self.assertTrue(ui.isMaximized())
+                self.assertTrue(ui._board_fit_record['window_state_preserved'])
+                resize.assert_not_called()
+            AUDIT('maximized_window', dict(classification='OFFSCREEN_NOT_NATIVE',
+                  restored=(normal.width(), normal.height()), fit=ui._board_fit_record,
+                  hidden_restore_geometry='NATIVE_PENDING'))
+
+    def test_available_screen_and_dpi_change_refits_with_scroll_access(self):
+        from PyQt5.QtCore import QRect
+        available = QRect(0, 0, 1920, 1080)
+        with patch.object(MinesweeperUI, '_board_available_geometry',
+                          side_effect=lambda: available):
+            ui = self.make_ui(width=30, height=16, mines=99)
+            ui.resize(1800, 980)
+            self.settle()
+            # Exercise the connected signals without changing the host monitor.
+            screen = ui.screen()
+            available = QRect(0, 0, 1024, 768)
+            screen.availableGeometryChanged.emit(available)
+            screen.logicalDotsPerInchChanged.emit(144.0)
+            self.settle()
+            record = ui._board_fit_record
+            self.assertTrue(record['physical_limit'])
+            self.assertLessEqual(ui.width() + record['decoration'][0], 1024)
+            self.assertLessEqual(ui.height() + record['decoration'][1], 768)
+            self.assertEqual(ui._cell_size, 28)
+            self.assertEqual((ui.board_container.width(), ui.board_container.height()),
+                             (840, 448))
+            self.assertGreater(ui.scroll_area.horizontalScrollBar().maximum() +
+                               ui.scroll_area.verticalScrollBar().maximum(), 0)
+            viewport = ui.scroll_area.viewport()
+            self.assertTrue(ui.rect().contains(viewport.mapTo(ui, viewport.rect().bottomRight())))
+            available = QRect(0, 0, 1920, 1080)
+            screen.availableGeometryChanged.emit(available)
+            self.settle()
+            self.assertFalse(ui._board_fit_record['physical_limit'])
+            self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),
+                              ui.scroll_area.verticalScrollBar().maximum()), (0, 0))
+            AUDIT('screen_dpi_refit', dict(classification='CONTROLLED_LOGICAL_SIGNALS',
+                  small=record, restored=ui._board_fit_record))
+
+    def test_larger_board_grows_and_smaller_board_retains_user_space(self):
+        from PyQt5.QtCore import QRect
+        with patch.object(MinesweeperUI, '_board_available_geometry',
+                          return_value=QRect(0, 0, 1920, 1080)):
+            ui = self.make_ui()
+            ui.difficulty_combo.setCurrentIndex(0)
+            ui.difficulty_combo.setCurrentIndex(2)
+            self.settle()
+            self.assertEqual((ui.engine.width, ui.engine.height), (30, 16))
+            self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),
+                              ui.scroll_area.verticalScrollBar().maximum()), (0, 0))
+            large = ui.size()
+            ui.difficulty_combo.setCurrentIndex(0)
+            self.settle()
+            self.assertEqual(ui.size(), large)
+            self.assertEqual(ui._cell_size, 28)
+
+
 class ActualMainTests(UIBase):
     def test_normal_main_bootstrap_ack_replay_both_exits_and_stale_callbacks(self):
         import main

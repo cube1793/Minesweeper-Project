@@ -1,12 +1,25 @@
 # Current Project Handoff
 
-Updated: **2026-11-09 (Asia/Seoul)** — Units34–35 사용성 A 수용, 표시 B 비용 FAIL·미채택, 사용자 native 보고 반영.
+Updated: **2026-11-09 (Asia/Seoul)** — Unit36 W 현재 PC 범위 수용, D 정·역순 비용 FAIL·미채택, native 최종 사용자 보고 반영.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 마감 출발 HEAD와 local origin/main은 **d4018a72bb606d7a8455cfa528ab545b7a8ce7bf**다. Unit33은 commit/push·Desktop destination 검증까지 완료됐다. Units34–35 마감은 A 제품·시험 11경로와 문서 6경로, 총 17경로다. source384를 유지하고 새 문서로 tracked472→473을 예상한다. 결과 commit은 사용자 영수증과 tree 검증으로 확정한다.
+현재 마감 출발 HEAD와 local origin/main은 **676fe5912030ed29dcbc3c902bf7132ccf8e6a6c**다. Units34–35는 사용자 commit/push와 Desktop destination 검증까지 완료됐다. Unit36은 W 제품·시험 2경로와 문서 6경로, 총 8경로를 준비한다. source384를 유지하고 tracked473→474를 예상한다. 최종 commit·remote·Desktop 완료는 사용자 영수증과 조율 사후 검증으로 확정한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit36 마감](stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md). Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
+- W 작은 화면 native gate RV36-NB1은 사용자 보고로 충족했다. 실제 hide/show, 다중 모니터, 다른 Windows 배율과 첫 표시 정밀 치수는 미확인이다. 정상 보고를 모든 복원 경로의 증명으로 확대하지 않는다.
+- 전체 실행 기록 108회는 102 PASS + 5 FAIL + 1 ERROR, 고유 ID 88개다. D86은 B72 ∪ W9(중복3) + 신규8이다. 표시용 추가 counter/model 0/0은 통제 시험 한정이며 통합 모델 호출은 7회다.
+- 필수 종료 5회와 이번 census 6/6·6/6·2/2·16/16·2/2는 모두 통과했다. 기존 302 PASS + 보호 FAIL1, B_COST_FAIL, 역사적 INCOMPLETE_CENSUS·35/34 FAIL, run04 추가 진단 경로 충돌 ERROR를 보존한다.
+- 다음은 사용자 Unit36 commit/push와 조율의 tree·원격 대조, 실제 commit에 결속한 Desktop 교체다. 이후 초기·단순 국면 모델 호출 선별, 고효율 Replay 분석, 새 보드 S/M/R 비교, R 목표 UX와 전시 노트북 검증을 별도 범위로 준비한다. D 비용 개선은 미채택 후속 후보로 남는다.
+- frozen 정책·Model C·holdout·formal evidence 금지와 Production 미승인 경계를 유지한다. 11월10일18시는 노트북 대여 신청 시작이며 수령 시각은 미정이다.
+
+### Units34–35 마감 당시 기록
+
+아래는 당시 문서의 출발점·마감 전 표현을 보존한 기록이다. 실제 Units34–35 Git·Desktop 완료 기준은 위의 676fe591 commit이다.
+
+현재 마감 출발 HEAD와 local origin/main은 **d4018a72bb606d7a8455cfa528ab545b7a8ce7bf**다. Unit33은 commit/push·Desktop destination 검증까지 완료됐다. Units34–35 마감은 A 제품·시험 11경로와 문서 6경로, 총 17경로다. source384를 유지하고 새 문서로 tracked472→473을 예상한다. 결과 commit은 사용자 영수증과 tree 검증으로 확정한다.
 
 - [Units34–35 마감](stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md). A는 독립 검토 필수0과 현재 PC의 사용자 native 보고 범위에서 수용한다. 현재 작업 트리는 A snapshot 22파일과 같고 실제 변경은 제품·시험11경로다.
 - A 시험은 302 PASS + 보호 기준선 FAIL1이다. Unit33 47/47은 이번 A에서 실행한 부분집합이다. 보호된 5정책 기대 실패와 대체 8정책 회귀를 구분한다.

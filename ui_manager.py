@@ -873,7 +873,11 @@ class MinesweeperUI(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._queue_board_fit()
+        handle = self.windowHandle()
+        if handle is not None and handle is not getattr(self, '_board_fit_window', None):
+            self._board_fit_window = handle
+            handle.screenChanged.connect(self._on_board_screen_changed)
+        self._on_board_screen_changed()
 
     def eventFilter(self, watched, event):
         if watched is self and event.type() == QEvent.Close:
@@ -1544,7 +1548,7 @@ class MinesweeperUI(QWidget):
         self.auto_cursor_overlay.raise_()
 
     def _apply_initial_window_size(self):
-        """Fit actual visible rows, viewport frame and window decoration in logical pixels."""
+        """Grow to fit the board while retaining a user's larger normal/maximized window."""
         self.ensurePolished();self.layout().activate()
         area=self._game_area_layout
         items=[area.itemAt(i) for i in range(area.count()) if not area.itemAt(i).isEmpty()]
@@ -1566,15 +1570,42 @@ class MinesweeperUI(QWidget):
             decoration_w=max(decoration_w,2*self.style().pixelMetric(QStyle.PM_DefaultFrameWidth))
             decoration_h=max(decoration_h,self.style().pixelMetric(QStyle.PM_TitleBarHeight)+decoration_w)
         capacity=(max(1,available.width()-decoration_w),max(1,available.height()-decoration_h))
-        target=(min(required_w,capacity[0]),min(required_h,capacity[1]))
+        retained = hasattr(self, '_board_fit_record')
+        previous = (self.width(), self.height())
+        target=(min(max(required_w,previous[0] if retained else 0),capacity[0]),
+                min(max(required_h,previous[1] if retained else 0),capacity[1]))
+        managed = self.isMaximized() or self.isFullScreen()
         self._board_fit_record=dict(board=(board.width(),board.height()),cell_size=self._cell_size,
             required_client=(required_w,required_h),available=(available.width(),available.height()),
             decoration=(decoration_w,decoration_h),target_client=target,
+            previous_client=previous,window_state_preserved=managed,
             physical_limit=required_w>capacity[0] or required_h>capacity[1])
-        self.resize(*target)
+        if not managed:
+            minimum = self.layout().minimumSize()
+            self.setMinimumSize(min(minimum.width(),capacity[0]),
+                                min(minimum.height(),capacity[1]))
+        if not managed and target != previous:
+            self.resize(*target)
 
     def _board_available_geometry(self):
         return self.screen().availableGeometry()
+
+    def _on_board_screen_changed(self, screen=None):
+        screen = screen or self.screen()
+        previous = getattr(self, '_board_fit_screen', None)
+        if screen is not previous:
+            if previous is not None:
+                try:
+                    previous.availableGeometryChanged.disconnect(self._queue_board_fit)
+                    previous.logicalDotsPerInchChanged.disconnect(self._queue_board_fit)
+                except (TypeError, RuntimeError):
+                    # A screen can be removed before its change notification.
+                    pass
+            self._board_fit_screen = screen
+            if screen is not None:
+                screen.availableGeometryChanged.connect(self._queue_board_fit)
+                screen.logicalDotsPerInchChanged.connect(self._queue_board_fit)
+        self._queue_board_fit()
 
     def _queue_board_fit(self):
         if self._board_fit_pending:return

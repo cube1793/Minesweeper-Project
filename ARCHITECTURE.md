@@ -1153,6 +1153,14 @@ Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일
 
 ACK를 받지 못한 입력은 UNCONFIRMED로 보존하며, owner의 정리와 현재 run 일치를 확인한 뒤 대기 상태를 해제한다. 마지막 ACK 수신과 정리 완료 표시는 분리한다. [Unit33 통신·ACK 복구 마감](docs/stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)에 조건과 후속 검증을 정리했다.
 
+### Unit36 창 크기 유지와 표시 비용
+
+Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
+
+보드 fitting은 현재 수동 확대 크기를 보존하고 최대화·전체 화면 상태의 resize/minimum-size 적용을 건너뛴다. 일반 창의 최소 크기는 화면 용량으로 제한하며 화면·DPI 변경 시 재배치를 예약한다. 작은 화면에서는 보드 스크롤을 허용한다. 셀 크기·좌표·입력 권한·Auto/guess·owner/ACK·Replay 의미를 유지했다.
+
+표시용 추가 counter/model 호출은 통제 시험에서 0/0이며, 실제 통합 모델 호출 7회와 구분한다. D_OFF에도 producer·wire·수신 검증 비용이 포함된다. batch P95는 9개 배치 평균 중 최대값이며 개별 입력 지연 P95가 아니다. [Unit36 상세 마감](docs/stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md)에 비용 원시 대조, native 한계와 비차단 사항을 기록했다.
+
 ### Units34–35 사용성 A와 표시 B
 
 Units34–35는 사용성 A를 등록 시험·독립 검토와 현재 PC 사용자 native 보고 범위에서 수용했다. A는 permit 시계 통일, ACK/실패 표시, 자기 owner 정리 재시도, 추측 설정 변경 후 Auto 재개와 창 배치를 보완한다. 시험은 302 PASS + 보호 기준선 FAIL 1, Unit33은 이번 A에서 47/47이다. 표시 B는 기능 72 PASS이나 중급·상급 비용 증가로 미채택이며, 입력별 확정·확률 상시 갱신은 후속이다.
