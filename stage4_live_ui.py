@@ -1,8 +1,9 @@
 """Main's Stage4 controller: public snapshots, viewing waits and guarded input."""
 from uuid import uuid4
+from time import monotonic
 
-from PyQt5.QtWidgets import QHBoxLayout, QLabel, QComboBox, QLineEdit, QWidget
-from PyQt5.QtCore import QObject
+from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QLineEdit, QWidget
+from PyQt5.QtCore import QObject, QTimer
 from core_engine import Action, GameStatus
 from live_analysis import LiveAnalysis, CellOverlay
 from simple_algorithm import SimpleMove
@@ -23,6 +24,10 @@ class Stage4Controller(QObject):
         self.histories={};self.latches={};self.status="수동 · Auto OFF"
         self.last_error=None;self.controls=None;self.table=None
         self._finished_run_id=None
+        self._guess_resume=None
+        self._progress_clock=monotonic;self._compute_started=None
+        self._progress_timer=QTimer(self);self._progress_timer.setInterval(200)
+        self._progress_timer.timeout.connect(self._refresh_progress)
 
     def _new_job(self):
         job=Stage4LiveJob(self.ui)
@@ -48,19 +53,23 @@ class Stage4Controller(QObject):
         ui=self.ui
         for key,label in (("STAGE4_S","Stage4 안전성 S"),("STAGE4_M","Stage4 평균 효율 M"),("STAGE4_R","Stage4 목표 기록 R")):
             ui.live_policy_combo.addItem(label,key)
-        self.controls=QWidget(ui);row=QHBoxLayout(self.controls);row.setContentsMargins(0,0,0,0)
+        self.controls=QWidget(ui);rows=QVBoxLayout(self.controls);rows.setContentsMargins(0,0,0,0);rows.setSpacing(6)
+        row=QHBoxLayout();rows.addLayout(row)
         row.addWidget(QLabel("Stage4 프로파일:"))
         ui.stage4_profile_combo=QComboBox()
         ui.stage4_profile_combo.addItem("기본 indexed · 표본 8 / 후보 4", "indexed")
         ui.stage4_profile_combo.addItem("제한 K100K · 표본 4 / 후보 2 / 행 8", "indexed_k100k")
         ui.stage4_profile_combo.setToolTip("K100K는 F 커널 한도 100,000과 작은 모델 폭을 명시적으로 선택합니다. 일반 효율·안정 처리 시간을 보장하지 않습니다.")
         row.addWidget(ui.stage4_profile_combo)
+        row.addStretch()
+        self.target_row=QWidget(self.controls);target_row=QHBoxLayout(self.target_row);target_row.setContentsMargins(0,0,0,0)
+        rows.addWidget(self.target_row)
         self.target_label=QLabel("R 목표 IOE (%):")
-        row.addWidget(self.target_label)
+        target_row.addWidget(self.target_label)
         ui.stage4_target_edit=QLineEdit();ui.stage4_target_edit.setMaximumWidth(145)
         ui.stage4_target_edit.setPlaceholderText("양의 백분율 입력")
         ui.stage4_target_edit.setToolTip("직접 정한 양의 목표를 입력하세요. 120%는 6/5라는 설명 예시이며 추천값이 아닙니다.")
-        row.addWidget(ui.stage4_target_edit);row.addStretch()
+        target_row.addWidget(ui.stage4_target_edit);target_row.addStretch()
         ui.stage4_profile_combo.currentIndexChanged.connect(self.settings_changed)
         ui.stage4_target_edit.textChanged.connect(self.settings_changed)
         layout.addWidget(self.controls)
@@ -107,7 +116,39 @@ class Stage4Controller(QObject):
         self.ui._clear_live_analysis(self.status)
         self.ui._update_policy_controls()
 
-    def invalidate(self,reason,*,drain_ack=True):
+    def guess_changed(self):
+        ui=self.ui
+        if not self.selected or ui._replay_mode:return
+        resume=ui.simple_auto_checkbox.isChecked()
+        self.latches.clear();ui._live_board_generation+=1
+        self._guess_resume=(ui._live_game_id,ui._live_policy,ui._live_board_generation,
+                            self.settings(),ui._live_action_count) if resume else None
+        self.invalidate("추측 설정 변경 · 원 입력 ACK/worker 정리 대기",keep_resume=True)
+        ui._clear_live_analysis(self.status);ui._update_policy_controls()
+        self._queue_guess_resume()
+
+    def _queue_guess_resume(self):
+        token=self._guess_resume
+        if token is not None and self.clean:
+            QTimer.singleShot(0,lambda:self._resume_guess(token))
+
+    def _resume_guess(self,token):
+        ui=self.ui
+        if token!=self._guess_resume:return
+        if (not self.selected or ui._replay_mode or ui._live_closing or ui._mouse_buttons
+                or ui._replay_entry_pending is not None or not ui.simple_auto_checkbox.isChecked()
+                or ui._live_first_failure is not None or ui._live_input_uncertain
+                or ui.engine.status!=GameStatus.PLAYING):
+            self._guess_resume=None;return
+        current=(ui._live_game_id,ui._live_policy,ui._live_board_generation,self.settings(),ui._live_action_count)
+        if current!=token:
+            self._guess_resume=None;return
+        if not self.clean:return
+        self._guess_resume=None;ui._restart_fixed_cadence();self.start()
+
+    def invalidate(self,reason,*,drain_ack=True,keep_resume=False):
+        if not keep_resume:self._guess_resume=None
+        self._progress_timer.stop()
         self.retired=True;self.pending=None;self.cancel_wait();self.status=reason
         if self.job.active_run_id is not None and not (drain_ack and self.expected_ack is not None):
             self.job.cancel(reason[:128])
@@ -122,7 +163,24 @@ class Stage4Controller(QObject):
         self.job.invalidate_admission()
 
     def reset_episode(self):
+        self._guess_resume=None
+        self.job.retry_cleanup()
         self.latches.clear();self.last_error=None;self.status="새 게임 · 수동 · Auto OFF"
+
+    def _begin_compute(self):
+        self.status="다음 수 계산 중";self._compute_started=self._progress_clock()
+        self._progress_timer.start()
+
+    def _progress_message(self):
+        elapsed=max(0.,self._progress_clock()-self._compute_started) if self._compute_started is not None else 0.
+        return f"다음 수 계산 중 · 경과 {elapsed:.1f}초"
+
+    def _refresh_progress(self):
+        # Presentation only: this timer cannot request, schedule or authorize input.
+        if (not self.selected or self.retired or self.ui._replay_mode or self.ui._live_closing
+                or self.job.state!="computing" or self.last_error or self.ui._live_first_failure):
+            self._progress_timer.stop();return
+        self.ui.live_policy_status_label.setText(f"Stage4 {POLICIES[self.ui._live_policy]} | {self._progress_message()}")
 
     def restore_after_close_refusal(self):
         if self.job.state=="closed":
@@ -138,6 +196,7 @@ class Stage4Controller(QObject):
             return False
         self.controls.setVisible(self.selected and not ui._replay_mode)
         self.controls.setEnabled(not ui._live_closing and not ui._replay_mode)
+        self.target_row.setVisible(self.selected and POLICIES[ui._live_policy]=="R")
         self.target_label.setVisible(self.selected and POLICIES[ui._live_policy]=="R")
         ui.stage4_target_edit.setVisible(self.selected and POLICIES[ui._live_policy]=="R")
         if not self.selected or ui._replay_mode:
@@ -162,16 +221,23 @@ class Stage4Controller(QObject):
         message=reason or self.status
         if ui._live_close_error is not None:
             message="종료 정리 실패: "+ui._live_close_error
+        elif self.last_error or ui._live_first_failure:
+            message="Stage4 중단: "+str(self.last_error or ui._live_first_failure["cause"])
+            if self.job.state in ("cancelling","blocked"):
+                message+=" · worker 정리 "+("실패" if self.job.state=="blocked" else "중")
         elif ui._replay_entry_pending is not None:
             message="Replay 준비 중 · 원 입력 ACK/Stage4 worker 정리 대기"
         elif self.job.state in ("cancelling","blocked"):
             message=("Stage4 worker 정리 실패: "+str(self.last_error) if self.job.state=="blocked" else "Stage4 worker 정리 중")
+        elif self.job.state=="computing" and not self.retired:
+            message=self._progress_message()
         ui.live_policy_status_label.setText(f"Stage4 {POLICIES[ui._live_policy]} | {message}")
         return True
 
     def start(self):
         ui=self.ui
         try:
+            self.job.retry_cleanup()
             require(self.selected and not ui._replay_mode and not ui._live_closing and not ui._mouse_buttons
                     and ui._replay_entry_pending is None and not ui._live_input_uncertain
                     and ui._live_first_failure is None and ui.engine.status==GameStatus.PLAYING,"Stage4 시작 상태를 확인하세요.")
@@ -185,7 +251,7 @@ class Stage4Controller(QObject):
             ui._live_run_id=uuid4().hex;self.owner_id=uuid4().hex
             state=self.snapshot()
             require(state.stop_key not in self.latches,self.latches.get(state.stop_key,""))
-            self.retired=False;self.status="다음 수 계산 중";self.last_error=None
+            self.retired=False;self.last_error=None;self._begin_compute()
             self._finished_run_id=None
             history=self.histories.get(state.game_id,RuntimeHistory())
             self.job.start(state,history)
@@ -193,6 +259,7 @@ class Stage4Controller(QObject):
                 board_generation=state.generation,start_revision=state.revision,end_reason=None,
                 profile=state.settings.profile,history=history.to_payload()))
         except Exception as exc:
+            self._guess_resume=None;self._progress_timer.stop()
             self.status=str(exc);ui._set_auto_off(clear_guess=False)
         ui._update_policy_controls()
 
@@ -200,6 +267,7 @@ class Stage4Controller(QObject):
         ui=self.ui
         if self.retired or ui._replay_mode or ui._live_closing:
             return
+        self._progress_timer.stop()
         try:
             state=self.snapshot()
             require(state==self.job._expected_snapshot,"Stage4 오래된 관측 응답")
@@ -317,7 +385,7 @@ class Stage4Controller(QObject):
             if record.get("run_id")==ack.run_id and record.get("token")==ack.token:
                 record["ack_state"]="ACKED";break
         if ack.status!="PLAYING":
-            if ack.after.game_id==ui._live_game_id:
+            if ack.after.game_id==ui._live_game_id and not self.last_error and ui._live_first_failure is None:
                 self.status="실제 입력 ACK 확인 완료 · Stage4 worker 정리 중"
             ui._update_policy_controls()
             return
@@ -329,7 +397,7 @@ class Stage4Controller(QObject):
         try:
             current=self.snapshot()
             require(current==ack.after,"Stage4 ACK 후 공개 상태 변경")
-            self.status="다음 수 계산 중";self.job.request(current)
+            self._begin_compute();self.job.request(current)
         except Exception as exc:
             self.fail(str(exc))
         ui._update_policy_controls()
@@ -362,7 +430,9 @@ class Stage4Controller(QObject):
         if failure:
             if current_game:
                 self.last_error=str(failure)
-                ui._record_live_failure(self.last_error,stage="Stage4 ACK" if unconfirmed else "Stage4 worker")
+                self._guess_resume=None
+                ui._record_live_failure(self.last_error,stage="Stage4 ACK" if unconfirmed else "Stage4 worker",
+                                        owner=self.job,ack_pending=unconfirmed is not None)
                 ui._set_auto_off(clear_guess=False)
                 self.status="Stage4 중단: "+self.last_error
             elif not any(item.get("run_id")==start.run_id for item in ui.live_failure_records):
@@ -383,9 +453,13 @@ class Stage4Controller(QObject):
         if clean:
             self._finished_run_id=start.run_id
         self.pending=None;self.retired=True;self.cancel_wait()
+        self._progress_timer.stop()
         ui._update_policy_controls()
+        self._queue_guess_resume()
 
     def fail(self,reason):
         self.last_error=reason;self.invalidate("Stage4 중단: "+reason)
+        self.ui._record_live_failure(reason,stage="Stage4 input",owner=self.job,
+                                     ack_pending=self.expected_ack is not None)
         self.ui._set_auto_off(clear_guess=False)
         self.ui._clear_live_analysis(self.status)

@@ -1,12 +1,22 @@
 # Current Project Handoff
 
-Updated: **2026-11-09 (Asia/Seoul)** — Unit33 통신·ACK 복구 한정 수용 및 사용자 native 통과.
+Updated: **2026-11-09 (Asia/Seoul)** — Units34–35 사용성 A 수용, 표시 B 비용 FAIL·미채택, 사용자 native 보고 반영.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 문서 갱신의 출발 HEAD와 local origin/main은 **f7f768bd5c4fded5167bfa09bf1794c969ab91bd**다. Units30–32는 이 커밋의 push와 Desktop destination 검증까지 마쳤다. Unit33은 source 384개·tracked 471개에서 출발한다. 마감은 제품·시험 6경로와 문서 6경로이며 commit 후 tracked 472개를 예상한다. 현재 마감은 사용자 Git 영수증과 Desktop destination 검증으로 확정한다.
+현재 마감 출발 HEAD와 local origin/main은 **d4018a72bb606d7a8455cfa528ab545b7a8ce7bf**다. Unit33은 commit/push·Desktop destination 검증까지 완료됐다. Units34–35 마감은 A 제품·시험 11경로와 문서 6경로, 총 17경로다. source384를 유지하고 새 문서로 tracked472→473을 예상한다. 결과 commit은 사용자 영수증과 tree 검증으로 확정한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Units34–35 마감](stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md). A는 독립 검토 필수0과 현재 PC의 사용자 native 보고 범위에서 수용한다. 현재 작업 트리는 A snapshot 22파일과 같고 실제 변경은 제품·시험11경로다.
+- A 시험은 302 PASS + 보호 기준선 FAIL1이다. Unit33 47/47은 이번 A에서 실행한 부분집합이다. 보호된 5정책 기대 실패와 대체 8정책 회귀를 구분한다.
+- B는 기능72 PASS지만 표시 비용 기준 FAIL로 미채택이다. 중급/상급 중앙값 증가는 3.705606/6.535634ms다. 최신 안전칸·지뢰칸·확률 상시 갱신은 아직 제품에 반영되지 않았다.
+- 승인된 실행 gate는 필수 요청 owner와 현재 Job의 종료를 확인하며 역사적 전수 공백은 INCOMPLETE_CENSUS로 보존한다. run01 16/14, 이전35/34 FAIL과 보정 전 helper bytes 공백을 유지한다.
+- native는 사용자 종합 통과 보고다. 확대/최대화 창의 크기 유지 NB-1은 상세 관측이 남고, 초기1칸 후 11.8초 계산 화면은 지연 개선 근거로 확대하지 않는다. Auto와 추측 허용은 별도 설정을 유지한다.
+- 다음은 이 A 마감의 사용자 Git 영수증과 commit tree 검증, 이어 해당 commit에 결속한 Desktop recovery 교체다. 이후 B 비용 개선·초기 모델 호출 선별·고효율 Replay 분석을 별도 단위로 진행한다.
+- 전시 노트북은 수령 후 검증한다. 11월10일18시는 학교 대여 신청 시작 시각이다. 일반 효율, frozen 패키지, Production 및 Stage4 전체 효과성은 별도 수용 범위다.
+
+### Unit33 마감 당시 기록
 
 - [Unit33 통신·ACK 복구 마감](stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md). 통신·ACK 복구를 한정 수용했다. 필수 제품과 helper·증거 보완은 각각 0건이며 현재 PC 사용자 native 확인은 통과했다.
 - 최종 동일 바이트의 시험 47개는 run04 완료 22개와 run05 완료 25개다. run04의 외부 중단과 보수적 입력 상한 311회는 별도로 보존한다. 44개 소유자 부재는 원시 기록으로 확인했다.

@@ -1,19 +1,16 @@
 """Persistent Stage4 owner, entered through main.py before any Qt import."""
 import sys
-from time import perf_counter_ns, sleep
+from time import monotonic_ns, sleep
 
 from experiments.random_expert_exhibition_process import verify_worker_scope
 from stage4_live_contract import (Snapshot, Acknowledgement, POLICY_ID, MAX_SEQUENCE, MAX_INPUTS,
     require, fields, text, digest, exact, envelope, read_next, write_once,
-    validate_ack, guard_target)
+    validate_ack, guard_target, PERMIT_NS)
 from stage4_live_delivery import RuntimeDelivery
 from stage4_runtime_policy import RuntimePolicy, RuntimeHistory
 
-PERMIT_NS = 5_000_000_000
-
-
 class Session:
-    def __init__(self, state, history, history_sink, *, policy=None, clock_ns=perf_counter_ns):
+    def __init__(self, state, history, history_sink, *, policy=None, clock_ns=monotonic_ns):
         require(state.status=="PLAYING", "STAGE4_START_TERMINAL")
         require(history.scope in (None,(state.game_id,state.game_id)), "STAGE4_HISTORY_SCOPE")
         self.policy = policy if policy is not None else RuntimePolicy(history=history,history_sink=history_sink)

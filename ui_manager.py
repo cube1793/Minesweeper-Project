@@ -773,6 +773,8 @@ class MinesweeperUI(QWidget):
         self.live_auto_totals = self._empty_live_auto_totals()
         self._chord_mode = ChordMode.LEFT_CLICK
         self._cell_size = DEFAULT_CELL_SIZE
+        self._board_fit_pending = False
+        self._board_fit_record = None
         self._replay_mode = False
         self._replay_player = None
         self._replay_data = None
@@ -868,6 +870,10 @@ class MinesweeperUI(QWidget):
         self._invalidate_mouse_input()
         self._mouse_trace_recorder.break_segment()
         super().hideEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._queue_board_fit()
 
     def eventFilter(self, watched, event):
         if watched is self and event.type() == QEvent.Close:
@@ -1119,6 +1125,7 @@ class MinesweeperUI(QWidget):
         세로로 쌓는 기존 레이아웃을 그대로 유지한다.
         """
         main_layout = QVBoxLayout()
+        self._game_area_layout = main_layout
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(6)
 
@@ -1294,12 +1301,13 @@ class MinesweeperUI(QWidget):
         top_bar.addWidget(self.reset_button)
         top_bar.addStretch()
         top_bar.addWidget(self.timer_label)
-        top_bar.addSpacing(12)
-        top_bar.addWidget(self.current_replay_button)
-        top_bar.addWidget(self.save_replay_button)
-        top_bar.addWidget(self.save_replay_as_button)
-        top_bar.addWidget(self.load_replay_button)
         main_layout.addLayout(top_bar)
+        replay_files_bar = QHBoxLayout()
+        for button in (self.current_replay_button,self.save_replay_button,
+                       self.save_replay_as_button,self.load_replay_button):
+            replay_files_bar.addWidget(button)
+        replay_files_bar.addStretch()
+        main_layout.addLayout(replay_files_bar)
 
         policy_bar = QHBoxLayout()
         self.live_policy_label = QLabel("Auto 알고리즘:")
@@ -1464,7 +1472,10 @@ class MinesweeperUI(QWidget):
 
         self.replay_control_bar = QWidget()
         self.replay_control_bar.setVisible(False)
-        replay_control_layout = QHBoxLayout(self.replay_control_bar)
+        replay_control_rows = QVBoxLayout(self.replay_control_bar)
+        replay_control_rows.setContentsMargins(0, 2, 0, 0)
+        replay_control_layout = QHBoxLayout()
+        replay_control_rows.addLayout(replay_control_layout)
         replay_control_layout.setContentsMargins(0, 2, 0, 0)
         replay_control_layout.setSpacing(6)
         replay_control_layout.addWidget(self.replay_first_button)
@@ -1477,9 +1488,12 @@ class MinesweeperUI(QWidget):
         replay_control_layout.addWidget(self.replay_time_speed_spin)
         replay_control_layout.addWidget(self.replay_slider, 1)
         replay_control_layout.addWidget(self.replay_status_label)
-        replay_control_layout.addWidget(self.replay_mode_save_button)
-        replay_control_layout.addWidget(self.replay_mode_save_as_button)
-        replay_control_layout.addWidget(self.exit_replay_button)
+        replay_action_layout = QHBoxLayout()
+        replay_action_layout.addStretch()
+        replay_action_layout.addWidget(self.replay_mode_save_button)
+        replay_action_layout.addWidget(self.replay_mode_save_as_button)
+        replay_action_layout.addWidget(self.exit_replay_button)
+        replay_control_rows.addLayout(replay_action_layout)
         main_layout.addWidget(self.replay_control_bar)
 
         return main_layout
@@ -1530,15 +1544,46 @@ class MinesweeperUI(QWidget):
         self.auto_cursor_overlay.raise_()
 
     def _apply_initial_window_size(self):
-        """초기 창 크기를 보드 비율에 맞춰 설정(화면 초과 시 적당히 제한)."""
-        engine = self._engine_for_current_mode()
-        board_w = engine.width * self._cell_size
-        board_h = engine.height * self._cell_size
-        # Reserve space for settings, game controls, policy/analysis/trace controls,
-        # and scroll-area frames so the default expert board fits on first show.
-        w = min(board_w + STATS_PANEL_WIDTH + 80, 1500)
-        h = min(board_h + 290, 900)
-        self.resize(w, h)
+        """Fit actual visible rows, viewport frame and window decoration in logical pixels."""
+        self.ensurePolished();self.layout().activate()
+        area=self._game_area_layout
+        items=[area.itemAt(i) for i in range(area.count()) if not area.itemAt(i).isEmpty()]
+        frame=2*self.scroll_area.frameWidth()
+        board=self.board_container.size()
+        right_w=board.width()+frame;right_h=board.height()+frame
+        for item in items:
+            if item.widget() is self.scroll_area:continue
+            right_w=max(right_w,item.minimumSize().width())
+            right_h+=item.sizeHint().height()
+        right_h+=max(0,len(items)-1)*area.spacing()
+        margins=self.layout().contentsMargins()
+        required_w=right_w+self.stats_panel.width()+self.layout().spacing()+margins.left()+margins.right()
+        required_h=max(right_h,self.stats_panel.minimumSizeHint().height())+margins.top()+margins.bottom()
+        available=self._board_available_geometry()
+        decoration_w=max(0,self.frameGeometry().width()-self.width())
+        decoration_h=max(0,self.frameGeometry().height()-self.height())
+        if not self.isVisible():
+            decoration_w=max(decoration_w,2*self.style().pixelMetric(QStyle.PM_DefaultFrameWidth))
+            decoration_h=max(decoration_h,self.style().pixelMetric(QStyle.PM_TitleBarHeight)+decoration_w)
+        capacity=(max(1,available.width()-decoration_w),max(1,available.height()-decoration_h))
+        target=(min(required_w,capacity[0]),min(required_h,capacity[1]))
+        self._board_fit_record=dict(board=(board.width(),board.height()),cell_size=self._cell_size,
+            required_client=(required_w,required_h),available=(available.width(),available.height()),
+            decoration=(decoration_w,decoration_h),target_client=target,
+            physical_limit=required_w>capacity[0] or required_h>capacity[1])
+        self.resize(*target)
+
+    def _board_available_geometry(self):
+        return self.screen().availableGeometry()
+
+    def _queue_board_fit(self):
+        if self._board_fit_pending:return
+        self._board_fit_pending=True
+        QTimer.singleShot(0,self._finish_board_fit)
+
+    def _finish_board_fit(self):
+        self._board_fit_pending=False
+        if not self._live_closing:self._apply_initial_window_size()
 
     def _init_shortcuts(self):
         """Route one key press according to the current Live/Replay mode."""
@@ -2763,6 +2808,7 @@ class MinesweeperUI(QWidget):
         self.exit_replay_button.setVisible(self._replay_mode)
         self._update_policy_controls()
         self._sync_replay_slider()
+        self._queue_board_fit()
 
     # ------------------------------------------------------------------
     # 설정 핸들러
@@ -2781,6 +2827,7 @@ class MinesweeperUI(QWidget):
             btn.setFixedSize(value, value)
         self._resize_board_container()
         self.render_board()
+        self._queue_board_fit()
 
     def on_difficulty_changed(self, text: str):
         self._cancel_replay_entry()
@@ -3572,6 +3619,7 @@ class MinesweeperUI(QWidget):
             self._v1_status = "수동 · 다음 Auto ON에 현재 판 인수"
             self._clear_live_analysis("정책 선택 완료 · Auto OFF")
         self._update_policy_controls()
+        self._queue_board_fit()
 
     def _update_policy_controls(self, *_args):
         if not hasattr(self, "live_policy_combo") or not hasattr(self, "simple_auto_checkbox"):
@@ -3859,13 +3907,15 @@ class MinesweeperUI(QWidget):
         terminal = f"{self._v1_status} | " if self.engine.status != GameStatus.PLAYING else ""
         return f"{terminal}자동 진행 차단: {cause} · 새 게임이 필요합니다. 수동 플레이는 가능합니다."
 
-    def _record_live_failure(self, message, *, stage=None):
+    def _record_live_failure(self, message, *, stage=None, owner=None, ack_pending=None):
         if self._live_first_failure is None:
+            owner=self._v1_job if owner is None else owner
+            if ack_pending is None:
+                ack_pending=self._v1_expected_ack is not None or self._k_retiring is not None
             failure = dict(game_id=self._live_game_id, run_id=self._live_run_id,
                            input_revision=self._live_action_count, cause=str(message),
-                           stage=stage or self._v1_job.state,
-                           ack_pending=self._v1_expected_ack is not None or self._k_retiring is not None,
-                           cleanup_state=self._v1_job.state)
+                           stage=stage or owner.state,
+                           ack_pending=ack_pending,cleanup_state=owner.state)
             self._live_first_failure = failure
             self.live_failure_records.append(failure)
             for owner in reversed(self.live_owner_records):
@@ -5177,7 +5227,7 @@ class MinesweeperUI(QWidget):
 
     def on_allow_guess_toggled(self, _enabled):
         if self._stage4.selected and not self._replay_mode:
-            self._stage4.settings_changed()
+            self._stage4.guess_changed()
             return
         if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
             self._schedule_v1_step()

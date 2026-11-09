@@ -1153,6 +1153,14 @@ Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일
 
 ACK를 받지 못한 입력은 UNCONFIRMED로 보존하며, owner의 정리와 현재 run 일치를 확인한 뒤 대기 상태를 해제한다. 마지막 ACK 수신과 정리 완료 표시는 분리한다. [Unit33 통신·ACK 복구 마감](docs/stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)에 조건과 후속 검증을 정리했다.
 
+### Units34–35 사용성 A와 표시 B
+
+Units34–35는 사용성 A를 등록 시험·독립 검토와 현재 PC 사용자 native 보고 범위에서 수용했다. A는 permit 시계 통일, ACK/실패 표시, 자기 owner 정리 재시도, 추측 설정 변경 후 Auto 재개와 창 배치를 보완한다. 시험은 302 PASS + 보호 기준선 FAIL 1, Unit33은 이번 A에서 47/47이다. 표시 B는 기능 72 PASS이나 중급·상급 비용 증가로 미채택이며, 입력별 확정·확률 상시 갱신은 후속이다.
+
+worker와 부모는 동일 monotonic ns로 permit 기한을 검사한다. 추측 토글은 원 ACK와 정리 후 마지막 설정으로 재개되며, 새 판·정책·Replay·OFF가 예약을 취소한다. 분석 owner 인수와 자기 owner 정리 재시도는 기존 입력/세대 guard를 유지한다.
+
+시험용 실행 판정은 필수 요청 owner·현재 Job 종료와 역사적 전수 신원을 분리한다. 전수 차이는 INCOMPLETE_CENSUS로 기록하며 실제 owner 누락과 조회 실패를 허용하지 않는다. B의 통제 표시 수순 비용과 일반 정책 성능을 구분한다. [상세 마감](docs/stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md)을 따른다.
+
 ## 6. 테스트 전략
 
 `unittest`로 규칙 회귀, 순수 계산, 모듈 간 계약과 Qt UI 연동을 나누어 검증한다. 아래는 현재 테스트의 주요 범위이며 모든 보드·플랫폼에 대한 완전성 증명은 아니다.

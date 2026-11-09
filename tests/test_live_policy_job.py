@@ -100,6 +100,13 @@ class LivePolicyJobTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.job.start(initial_snapshot("b" * 32))
 
+    def test_stage4_retry_extension_does_not_opt_in_v1_or_k_owners(self):
+        self.job.state='blocked';self.job.last_record=dict(cleanup_complete=False,error='retained')
+        with patch.object(self.job,'_cleanup') as cleanup:
+            self.assertFalse(self.job.retry_cleanup());cleanup.assert_not_called()
+        self.assertEqual(self.job.last_record,dict(cleanup_complete=False,error='retained'))
+        self.job.state='idle'
+
     def test_directory_hint_only_dispatches_the_current_published_reply_once(self):
         _, _, directory, _ = self.launch()
         self.job.timer.start()
@@ -818,6 +825,7 @@ class LivePolicyRealWorkerTests(unittest.TestCase):
             return [sys.executable, "-B", str(fixture), str(directory), run_id, scope_name, mode]
         with patch.object(jobs, "build_worker_command", side_effect=command):
             self.job.start(initial_snapshot())
+
         directory = self.job._directory
         self.wait_until(lambda: (directory / "fixture-ready.json").exists())
         ready = json.loads((directory / "fixture-ready.json").read_text())

@@ -18,6 +18,10 @@ HIDDEN, FLAG = -2, -3
 KINDS = {"START", "NEXT", "VALIDATE", "ACK", "PROPOSAL", "ADMITTED", "ACKED", "FINISHED", "ERROR", "HISTORY"}
 
 
+# Shared cross-process permit clock is time.monotonic_ns (not perf_counter).
+PERMIT_NS = 5_000_000_000
+
+
 def require(condition, reason):
     if not condition:
         raise ValueError(reason)

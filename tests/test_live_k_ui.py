@@ -83,6 +83,33 @@ class KUIFakeJob(SyntheticLivePolicyJob):
         super().shutdown()
 
 
+class PolicyCatalogRegressionTests(unittest.TestCase):
+    def test_stage4_catalog_preserves_k_labels_presets_and_custom_guard(self):
+        # The original LC1 test predates the three Stage4 entries. Its source is
+        # protected; exercise its behavioral coverage with today's full catalog.
+        from tests import test_live_k_lc1_ui as lc1
+        case=lc1.LiveLC1UITests()
+        case.setUpClass();case.setUp()
+        try:
+            ui=case.ui;combo=ui.live_policy_combo
+            self.assertEqual([combo.itemData(i) for i in range(combo.count())],
+                ['S2_SIMPLE','STAGE3_V1','K_P0','K_LC0','K_LC1','STAGE4_S','STAGE4_M','STAGE4_R'])
+            for policy,label in [('K_P0','K-P0'),('K_LC0','K-LC0'),('K_LC1','K-LC1')]:
+                self.assertTrue(combo.model().item(combo.findData(policy)).isEnabled())
+                self.assertEqual(combo.itemText(combo.findData(policy)),label)
+                case.select(policy);self.assertEqual(ui._live_policy,policy)
+                self.assertTrue(ui.live_policy_status_label.text().startswith(f'현재: {label} | '))
+            for index in (0,1,2):
+                ui.difficulty_combo.setCurrentIndex(index);self.assertTrue(ui._v1_supported())
+                ui.on_analyze_current();state=case.job.requests[-1]
+                self.assertEqual((state.policy_id,state.definition,state.phase),('K_LC1',lc1.k.LC1_DEFINITION,lc1.k.PHASE_LC1))
+                self.assertEqual(state.game_id,ui._live_game_id);self.assertEqual(ui._live_action_count,0)
+                ui._invalidate_v1_run('catalog preset check');case.job.complete_cancel()
+            with patch.object(ui.difficulty_combo,'currentText',return_value='커스텀'):
+                self.assertFalse(ui._v1_supported())
+        finally:case.doCleanups()
+
+
 class LiveKUITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

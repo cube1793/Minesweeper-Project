@@ -9,14 +9,14 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from time import monotonic
+from time import monotonic, monotonic_ns
 
 from PyQt5.QtCore import QFileSystemWatcher
 from experiments.random_expert_exhibition_process import CREATE_SUSPENDED, create_scope
 from live_policy_job import LivePolicyJob, ROOT
 from stage4_live_contract import (Snapshot, Acknowledgement, POLICY_ID, MAX_SEQUENCE, MAX_INPUTS,
     require, fields, integer, text, envelope, read_next, write_once,
-    validate_projection, guard_target, validate_ack)
+    validate_projection, guard_target, validate_ack, PERMIT_NS)
 from stage4_runtime_policy import RuntimeHistory
 
 COMPUTE_RESPONSE_SECONDS=40.0  # RuntimeLimits 35s plus serialization/retrieval allowance.
@@ -30,14 +30,19 @@ def build_worker_command(directory,run_id,scope_name=""):
 
 
 class Stage4LiveJob(LivePolicyJob):
-    def __init__(self,parent=None,*,clock=monotonic):
+    def __init__(self,parent=None,*,clock=monotonic,clock_ns=None):
         super().__init__(parent,clock=clock)
+        # Production uses the identical integer clock as Session. A supplied
+        # seconds clock is an explicit test adapter; clock_ns avoids rounding.
+        self._permit_clock_ns=(clock_ns if clock_ns is not None else
+                               monotonic_ns if clock is monotonic else lambda:int(clock()*1_000_000_000))
         self.history=RuntimeHistory()
         self.history_sequence=0
         self.operations=[]
         self.last_ack=None
         self._consumed_nonce=None
         self._owner_record={}
+        self._cleanup_owner=None
 
     @property
     def _is_k(self):
@@ -64,6 +69,7 @@ class Stage4LiveJob(LivePolicyJob):
         self._owner_record=dict(run_id=state.run_id,policy_id=POLICY_ID,
             started_utc=datetime.now(timezone.utc).isoformat(),pid=None,scope_name=None,
             suspended=False,assigned_and_resumed=False)
+        self._cleanup_owner=None
         try:
             self._temp_parent=Path(tempfile.gettempdir()).resolve()
             self._directory=Path(tempfile.mkdtemp(prefix=PREFIX,dir=self._temp_parent)).resolve()
@@ -87,6 +93,7 @@ class Stage4LiveJob(LivePolicyJob):
             if self._scope:
                 self._scope.assign_and_resume(self._process)
                 self._owner_record["assigned_and_resumed"]=True
+                self._capture_cleanup_owner()
         except Exception as exc:
             self._failure=f"STAGE4_STARTUP: {exc!r}";self._request_stop()
         self.timer.start()
@@ -152,12 +159,18 @@ class Stage4LiveJob(LivePolicyJob):
                 and not self._intent and not self._failure and not self._shutting_down
                 and nonce==self._accepted_nonce==self._permit["nonce"]
                 and token==self._pending["token"] and state==self._expected_snapshot,"STAGE4_PERMIT_BINDING")
-        require(int(self._clock()*1_000_000_000)<self._permit["deadline_ns"],"STAGE4_PERMIT_EXPIRED")
+        self._validate_permit_deadline(self._permit["deadline_ns"])
         guard_target(self._pending,state)
         self._consumed_nonce=nonce;self._permit=None;self._accepted_nonce=None
         self.state="applying";self._applied_count+=1
         self._deadline=self._clock()+CONTROL_RESPONSE_SECONDS
         return self._pending
+
+    def _validate_permit_deadline(self,deadline):
+        integer(deadline,1,2**63-1)
+        now=self._permit_clock_ns()
+        require(now<deadline,"STAGE4_PERMIT_EXPIRED")
+        require(deadline<=now+PERMIT_NS,"STAGE4_PERMIT_DEADLINE")
 
     def acknowledge(self,ack):
         require(self.state=="applying" and self._pending is not None and not self._intent,"STAGE4_APPLIED_REQUIRED")
@@ -192,8 +205,7 @@ class Stage4LiveJob(LivePolicyJob):
             fields(payload,"proposal nonce deadline_ns")
             require(payload["proposal"]==self._pending and self._sent_validation is not None
                     and payload["nonce"]==self._sent_validation["nonce"],"STAGE4_PERMIT_REPLY")
-            integer(payload["deadline_ns"],1,2**63-1)
-            require(payload["deadline_ns"]<=int((self._clock()+6)*1_000_000_000),"STAGE4_PERMIT_DEADLINE")
+            self._validate_permit_deadline(payload["deadline_ns"])
             self._permit=payload if payload["nonce"]==self._accepted_nonce else None
             self._sent_validation=None;self.state="admitted" if self._permit else "pending"
             self.admitted.emit(payload)
@@ -237,6 +249,46 @@ class Stage4LiveJob(LivePolicyJob):
     def _cleanup(self):
         self._read_history()  # A bad/missing history chain retains the channel, never resets quota.
         super()._cleanup()
+
+    @staticmethod
+    def _retained_process_identity(process,scope):
+        """Query the retained creation handle only; never reopen a numeric PID."""
+        import ctypes as C
+        from ctypes import wintypes as W
+        require(os.name=="nt" and process._handle is not None and scope.handle is not None,
+                "STAGE4_CLEANUP_OWNERSHIP_UNAVAILABLE")
+        api=C.WinDLL("kernel32",use_last_error=True)
+        times=api.GetProcessTimes
+        times.argtypes=[W.HANDLE,*([C.POINTER(W.FILETIME)]*4)];times.restype=W.BOOL
+        stamps=[W.FILETIME() for _ in range(4)]
+        if not times(int(process._handle),*[C.byref(s) for s in stamps]):raise C.WinError(C.get_last_error())
+        member=W.BOOL()
+        if not scope.api.IsProcessInJob(int(process._handle),scope.handle,C.byref(member)):
+            raise C.WinError(C.get_last_error())
+        require(member.value,"STAGE4_CLEANUP_MEMBERSHIP_LOST")
+        created=(stamps[0].dwHighDateTime<<32)|stamps[0].dwLowDateTime
+        return (process.pid,int(process._handle),created,scope.handle,scope.name)
+
+    def _capture_cleanup_owner(self):
+        identity=self._retained_process_identity(self._process,self._scope)
+        self._cleanup_owner=(self._start_snapshot,self._process,self._scope,self._directory,
+                             self._temp_parent,identity)
+        self._owner_record["creation_filetime_100ns"]=identity[2]
+        self._owner_record["membership_verified"]=True
+
+    def _cleanup_retry_owned(self):
+        owner=self._cleanup_owner
+        if owner is None or self._start_snapshot is not owner[0]:return False
+        state,process,scope,directory,parent,identity=owner
+        record=self.last_record
+        if (not record or record.get("run_id")!=state.run_id or self._owner_record.get("run_id")!=state.run_id
+                or self._directory not in (None,directory) or self._temp_parent!=parent):return False
+        if self._process is not None and self._process is not process:return False
+        if self._scope is not None and self._scope is not scope:return False
+        if self._process is None and record.get("reaped") is not True:return False
+        if self._scope is None:
+            return (scope.handle is None and self._process is None and record.get("tree_active_count")==0)
+        return self._retained_process_identity(process,scope)==identity
 
     def shutdown(self):
         # The GUI first revokes future input. Drain an actual input's ACK before

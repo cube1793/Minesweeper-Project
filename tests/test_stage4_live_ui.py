@@ -162,6 +162,87 @@ class ControlledUITests(UIBase):
             original_result=res,additional_engine_inputs=0,retry_starts=0,status=ui.live_policy_status_label.text()))
 
 
+class UsabilityUITests(UIBase):
+    def test_reference_compute_auto_adopts_owner_and_progress_is_display_only(self):
+        ui=self.make_ui();self.select(ui)
+        ui.analysis_checkbox.setChecked(True);ui.on_analyze_current()
+        job=ui._stage4.job;run=job.active_run_id;owner=ui._stage4.owner_id
+        self.assertEqual(job.state,'computing');self.assertFalse(ui.allow_guess_checkbox.isChecked())
+        ui.simple_auto_checkbox.setChecked(True)
+        self.assertEqual((job.starts,job.active_run_id,ui._stage4.owner_id),(1,run,owner))
+        self.assertFalse(ui.allow_guess_checkbox.isChecked())
+        clock=[20.];ui._stage4._progress_clock=lambda:clock[0];ui._stage4._compute_started=20.
+        before=(job.starts,len(job.operations),ui._live_action_count,ui._stage4.reservation)
+        for i in range(1,21):clock[0]=20.+i/4;ui._stage4._refresh_progress()
+        self.assertIn('경과 5.0초',ui.live_policy_status_label.text())
+        self.assertEqual((job.starts,len(job.operations),ui._live_action_count,ui._stage4.reservation),before)
+        self.assertNotIn('%',ui.live_policy_status_label.text())
+
+    def test_guess_toggles_coalesce_keep_quota_and_off_stays_off(self):
+        ui=self.make_ui();self.select(ui);ui.simple_auto_checkbox.setChecked(True)
+        controller=ui._stage4;job=controller.job
+        history=RuntimeHistory(scope=(ui._live_game_id,ui._live_game_id),attempts=8,last_attempt_count=1)
+        job.history=history;old_run=job.active_run_id;old_generation=ui._live_board_generation
+        ui.allow_guess_checkbox.setChecked(True)
+        ui.allow_guess_checkbox.setChecked(False)
+        ui.allow_guess_checkbox.setChecked(True)
+        self.assertTrue(ui.simple_auto_checkbox.isChecked());self.assertEqual(job.starts,1)
+        self.app.processEvents()
+        self.assertEqual(job.starts,2);self.assertNotEqual(job.active_run_id,old_run)
+        self.assertTrue(job._start_snapshot.settings.allow_guess);self.assertIs(job.history,history)
+        self.assertEqual(job.history.attempts,8);self.assertGreater(ui._live_board_generation,old_generation)
+        self.assertIsNone(controller._guess_resume)
+        ui.simple_auto_checkbox.setChecked(False);starts=job.starts
+        ui.allow_guess_checkbox.setChecked(False);self.app.processEvents()
+        self.assertFalse(ui.simple_auto_checkbox.isChecked());self.assertEqual(job.starts,starts)
+
+    def test_guess_resume_cancelled_by_hard_boundaries_and_target_change(self):
+        for boundary in ('off','reset','policy','replay','error','target'):
+            with self.subTest(boundary=boundary):
+                ui=self.make_ui();self.select(ui,'STAGE4_R');ui.stage4_target_edit.setText('120')
+                ui.simple_auto_checkbox.setChecked(True);job=ui._stage4.job
+                ui.allow_guess_checkbox.setChecked(True)
+                if boundary=='off':ui.simple_auto_checkbox.setChecked(False)
+                elif boundary=='reset':ui.on_reset()
+                elif boundary=='policy':ui.live_policy_combo.setCurrentIndex(0)
+                elif boundary=='replay':ui._invalidate_v1_run('Replay 진입',drain_ack=True)
+                elif boundary=='error':ui._stage4.fail('CONTROLLED_SETTING_ERROR')
+                else:ui.stage4_target_edit.setText('121')
+                self.app.processEvents()
+                self.assertEqual(job.starts,1);self.assertIsNone(ui._stage4._guess_resume)
+                self.assertFalse(ui.simple_auto_checkbox.isChecked())
+
+    def test_expert_full_board_logical_screens_initial_policy_and_replay(self):
+        from PyQt5.QtCore import QRect
+        from replay_model import ReplayBoard,ReplayData,ReplayEvent
+        evidence=[]
+        for width,height in ((1280,1024),(1920,1080),(1024,768)):
+            with self.subTest(screen=(width,height)),patch.object(MinesweeperUI,'_board_available_geometry',return_value=QRect(0,0,width,height)):
+                ui=self.make_ui(width=30,height=16,mines=99)
+                for policy in ('STAGE4_S','STAGE4_M','STAGE4_R','SIMPLE'):
+                    if policy=='SIMPLE':ui.live_policy_combo.setCurrentIndex(0)
+                    else:self.select(ui,policy)
+                    self.app.processEvents();self.app.processEvents()
+                    record=dict(ui._board_fit_record,policy=policy,viewport=(ui.scroll_area.viewport().width(),ui.scroll_area.viewport().height()),
+                                scroll_max=(ui.scroll_area.horizontalScrollBar().maximum(),ui.scroll_area.verticalScrollBar().maximum()))
+                    evidence.append(record)
+                    self.assertEqual(ui._cell_size,28);self.assertEqual((ui.board_container.width(),ui.board_container.height()),(840,448))
+                    if width>=1280:
+                        self.assertFalse(record['physical_limit'],record)
+                        self.assertEqual(record['scroll_max'],(0,0),record)
+                        self.assertGreaterEqual(record['viewport'][0],840);self.assertGreaterEqual(record['viewport'][1],448)
+                    else:self.assertTrue(record['physical_limit'],record)
+                # The small fixture supplies only a saved Replay; no board game is run.
+                ui.on_left_click(0,0)
+                data=ui._build_current_replay_data('logical sizing fixture')
+                self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)))
+                self.app.processEvents();self.app.processEvents()
+                if width>=1280:self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),ui.scroll_area.verticalScrollBar().maximum()),(0,0))
+                self.assertTrue(ui._exit_replay_mode());self.app.processEvents();self.app.processEvents()
+                if width>=1280:self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),ui.scroll_area.verticalScrollBar().maximum()),(0,0))
+        AUDIT('logical_board_fit',dict(classification='OFFSCREEN_LOGICAL_LAYOUT_NOT_NATIVE_DPI',screens=evidence))
+
+
 class ActualMainTests(UIBase):
     def test_normal_main_bootstrap_ack_replay_both_exits_and_stale_callbacks(self):
         import main
@@ -367,3 +448,85 @@ class RecoveryUITests(UIBase):
         job.acknowledged.emit(ack);job.admitted.emit(permit);job.finished.emit(job.last_record)
         self.assertEqual(ui._live_action_count,before)
         ui.on_reset();self.assertTrue(controller.clean);self.assertIsNone(ui._live_first_failure)
+
+    def test_failure_before_terminal_ack_never_flashes_success_and_uses_stage4_owner(self):
+        ui,job,ack,permit=self.delivered('WON');controller=ui._stage4
+        controller.fail('CONTROLLED_BEFORE_ACK_FAILURE')
+        failure=ui._live_first_failure
+        self.assertTrue(failure['ack_pending']);self.assertEqual(failure['cleanup_state'],'finishing')
+        self.assertEqual(ui._v1_job.state,'idle')
+        self.receive(job,ack)
+        self.assertIn('CONTROLLED_BEFORE_ACK_FAILURE',controller.status)
+        self.assertIn('CONTROLLED_BEFORE_ACK_FAILURE',ui.live_policy_status_label.text())
+        self.assertNotIn('ACK 확인 완료',controller.status)
+        job._finish('SUCCEEDED',None,0)
+        self.assertIn('CONTROLLED_BEFORE_ACK_FAILURE',controller.status)
+        self.assertNotIn('정리 완료',controller.status)
+
+    def test_guess_change_waits_for_original_ack_and_ignores_old_permit(self):
+        ui,job,ack,permit=self.delivered();controller=ui._stage4
+        before=ui._live_action_count;starts=job.starts;old=job.active_run_id
+        ui.allow_guess_checkbox.setChecked(False)
+        self.assertTrue(controller.retired);self.assertIs(controller.expected_ack,ack)
+        self.assertEqual(job.active_run_id,old);self.assertEqual(job.starts,starts)
+        controller.on_admitted(permit);self.assertEqual(ui._live_action_count,before)
+        with patch.object(job,'cancel',side_effect=lambda reason:job._finish('CANCELLED',None,0)):
+            self.receive(job,ack)
+        self.assertEqual(ui.live_action_records[-1]['ack_state'],'ACKED')
+        self.app.processEvents()
+        self.assertEqual(job.starts,starts+1);self.assertFalse(job._start_snapshot.settings.allow_guess)
+        self.assertIsNone(controller.expected_ack);self.assertEqual(ui._live_action_count,before)
+        controller.on_admitted(permit);self.assertEqual(ui._live_action_count,before)
+
+
+class ActualUsabilityTests(UIBase):
+    def test_actual_reference_compute_auto_adopts_same_owner(self):
+        ui=self.make_ui(fake=False);self.select(ui)
+        ui.engine.reset_with_mines(9,9,10,{(x,8) for x in range(9)}|{(8,7)})
+        ui._reset_replay_recorder();ui.on_left_click(7,7)
+        ui.simple_auto_interval_spin.setValue(5000);ui.analysis_checkbox.setChecked(True);ui.on_analyze_current()
+        job=ui._stage4.job;owner=ui._stage4.owner_id;run=job.active_run_id;process=job._process
+        self.assertEqual(job.state,'computing');ui.simple_auto_checkbox.setChecked(True)
+        self.assertEqual((ui._stage4.owner_id,job.active_run_id,job._process),(owner,run,process))
+        self.assertFalse(ui.allow_guess_checkbox.isChecked())
+        pump(self.app,lambda:job.history.attempts>=1 or job.state in ('idle','blocked'),15)
+        self.assertEqual(job.history.attempts,1,job.last_record)
+        ui.simple_auto_checkbox.setChecked(False)
+        pump(self.app,lambda:ui._stage4.clean or job.state=='blocked',10)
+        self.assertTrue(ui._stage4.clean,job.last_record);self.assertEqual(ui._live_action_count,1)
+        AUDIT('G01_actual_owner_adoption',dict(classification='ACTUAL_SUBPROCESS_PUBLIC_9X9_BOUNDED_NO_AUTO_INPUT',owner=owner,run_id=run,record=job.last_record))
+
+    def test_actual_terminal_ack_then_replay_roundtrip_small_engine_fixture(self):
+        ui=self.make_ui(fake=False,width=3,height=2,mines=1);self.select(ui,'STAGE4_S')
+        ui.engine.reset_with_mines(3,2,1,{(2,1)});ui._reset_replay_recorder()
+        ui.on_left_click(1,0);ui.on_right_click(2,1);ui.simple_auto_interval_spin.setValue(1)
+        # Explicit small engine support fixture; production preset gating stays intact.
+        with patch.object(ui._stage4,'support_reason',return_value=None):
+            ui.allow_guess_checkbox.setChecked(True);ui.simple_auto_checkbox.setChecked(True)
+            pump(self.app,lambda:ui.engine.status!=GameStatus.PLAYING or ui._live_first_failure is not None,20)
+            self.assertNotEqual(ui.engine.status,GameStatus.PLAYING,ui._stage4.status)
+            pump(self.app,lambda:ui._stage4.clean or ui._stage4.job.state=='blocked',10)
+            self.assertTrue(ui._stage4.clean,ui._stage4.job.last_record)
+        ack=ui._stage4.job.last_ack;self.assertIsNotNone(ack);self.assertNotEqual(ack.status,'PLAYING')
+        self.assertEqual(ui.live_action_records[-1]['ack_state'],'ACKED')
+        data=ui._build_current_replay_data('actual terminal fixture');records=len(ui._stage4.job.records)
+        self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)));self.assertTrue(ui._exit_replay_mode(same_board=True))
+        self.assertTrue(ui._enter_replay_mode(ReplayPlayer(data)));self.assertTrue(ui._exit_replay_mode())
+        self.assertEqual(len(ui._stage4.job.records),records);self.assertFalse(ui.simple_auto_checkbox.isChecked())
+        AUDIT('G02_actual_terminal_replay',dict(classification='ACTUAL_MODEL_AND_SUBPROCESS_SMALL_3X2_ENGINE_FIXTURE',ack=ack.to_dict(),record=ui._stage4.job.last_record,exits=['same_board','canonical']))
+
+    def test_actual_owned_cleanup_retry_after_transient_directory_error(self):
+        ui=self.make_ui(fake=False);self.select(ui);ui.analysis_checkbox.setChecked(True);ui.on_analyze_current()
+        job=ui._stage4.job
+        pump(self.app,lambda:job.state in ('pending','idle','blocked'),10)
+        self.assertEqual(job.state,'pending',job.last_record)
+        with patch.object(job,'_cleanup',side_effect=PermissionError('CONTROLLED_TRANSIENT_DIRECTORY_DENIAL')):
+            ui._stage4.invalidate('registered cleanup retry')
+            pump(self.app,lambda:job.state in ('idle','blocked'),10)
+        self.assertEqual(job.state,'blocked');self.assertFalse(job.last_record['cleanup_complete'])
+        self.assertTrue(job._cleanup_retry_owned())
+        ui.on_reset()
+        self.assertTrue(ui._stage4.clean,job.last_record);self.assertTrue(job.last_record['cleanup_retry_complete'])
+        self.assertEqual(job.last_record['status'],'FAILED');self.assertIsNone(ui._live_first_failure)
+        self.assertTrue(ui.simple_auto_checkbox.isEnabled())
+        AUDIT('actual_owned_retry',dict(record=job.last_record,new_game=ui._live_game_id))

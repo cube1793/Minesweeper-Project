@@ -3,7 +3,9 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 기록은 [Unit33 통신·ACK 복구 마감](stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)이다. Unit33은 Stage4 메시지 게시 경합, 모델 사용 이력 결속, ACK 미수신 회복과 종료 표시를 보완했다. 최종 동일 바이트의 고유 시험 47개가 통과했고 독립 검토의 필수 보완은 0건이다. 현재 PC의 사용자 native 확인을 수용했다. 원 사용자 판의 원인은 미확정이며, F-02 시계 통일과 비차단 표시·기록·정리 권고는 후속이다.
+최근 기록은 [Units34–35 사용성 A·표시 B 마감](stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md)이다. Units34–35는 사용성 A를 등록 시험·독립 검토와 현재 PC 사용자 native 보고 범위에서 수용했다. A는 permit 시계 통일, ACK/실패 표시, 자기 owner 정리 재시도, 추측 설정 변경 후 Auto 재개와 창 배치를 보완한다. 시험은 302 PASS + 보호 기준선 FAIL 1, Unit33은 이번 A에서 47/47이다. 표시 B는 기능 72 PASS이나 중급·상급 비용 증가로 미채택이며, 입력별 확정·확률 상시 갱신은 후속이다.
+
+이전 기록은 [Unit33 통신·ACK 복구 마감](stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)이다. Unit33은 Stage4 메시지 게시 경합, 모델 사용 이력 결속, ACK 미수신 회복과 종료 표시를 보완했다. 최종 동일 바이트의 고유 시험 47개가 통과했고 독립 검토의 필수 보완은 0건이다. 현재 PC의 사용자 native 확인을 수용했다. 원 사용자 판의 원인은 미확정이며, F-02 시계 통일과 비차단 표시·기록·정리 권고는 후속이다.
 
 이전 연결 기록은 [Units30–32 연결 마감](stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md)이다. Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다.
 

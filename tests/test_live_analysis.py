@@ -636,6 +636,9 @@ class LiveAnalysisUITests(unittest.TestCase):
             self.assertEqual(button.probability_text, "")
 
     def test_initial_expert_window_fits_board_without_internal_scrollbars(self):
+        from PyQt5.QtCore import QRect
+        screen=patch.object(MinesweeperUI,'_board_available_geometry',return_value=QRect(0,0,1280,1024))
+        screen.start();self.addCleanup(screen.stop)
         self.ui.close()
         self.ui.deleteLater()
         self.ui = MinesweeperUI(MinesweeperEngine(30, 16, 99))
@@ -650,16 +653,24 @@ class LiveAnalysisUITests(unittest.TestCase):
             self.assertGreaterEqual(viewport.height(), 16 * 28)
             self.assertEqual(self.ui.scroll_area.horizontalScrollBar().maximum(), 0)
             self.assertEqual(self.ui.scroll_area.verticalScrollBar().maximum(), 0)
-        self.assertLessEqual(self.ui.width(), 1500)
-        self.assertLessEqual(self.ui.height(), 900)
+        self.assertLessEqual(self.ui.frameGeometry().width(), 1280)
+        self.assertLessEqual(self.ui.frameGeometry().height(), 1024)
+        self.assertFalse(self.ui._board_fit_record['physical_limit'])
 
     def test_large_board_initial_window_keeps_existing_size_limits(self):
+        from PyQt5.QtCore import QRect
+        self.ui.board_container.setFixedSize(2800,2800)
         with (
-            patch.object(self.ui, "_engine_for_current_mode", return_value=SimpleNamespace(width=100, height=100)),
+            patch.object(self.ui, '_board_available_geometry',return_value=QRect(0,0,1280,1024)),
             patch.object(self.ui, "resize") as resize,
         ):
             self.ui._apply_initial_window_size()
-        resize.assert_called_once_with(1500, 900)
+        fit=self.ui._board_fit_record
+        resize.assert_called_once_with(*fit['target_client'])
+        self.assertTrue(fit['physical_limit']);self.assertEqual(fit['board'],(2800,2800))
+        self.assertLessEqual(fit['target_client'][0]+fit['decoration'][0],1280)
+        self.assertLessEqual(fit['target_client'][1]+fit['decoration'][1],1024)
+        self.assertEqual(self.ui._cell_size,28)
 
 
 if __name__ == "__main__":

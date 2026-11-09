@@ -181,6 +181,118 @@ class WorkerTests(unittest.TestCase):
         finally:first.shutdown();second.shutdown()
 
 
+class PermitClockTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+
+    def test_common_integer_clock_different_perf_origin_and_exact_boundaries(self):
+        import stage4_live_worker as worker
+        from stage4_live_contract import PERMIT_NS
+        # Seconds clock represents timeout bookkeeping with a different origin.
+        # Both permit endpoints are explicitly injected into the same ns domain.
+        now=[100_000_000_000]
+        state=snapshot(observation=((-2,-2,-2),(-2,-2,-2)),counted=0,revision=0,event_count=0,
+                       ledger=digest([]),cursor=(0,0),entry="CANONICAL_NEW")
+        policy=SimpleNamespace(attempts_used=0,close=lambda:None)
+        session=Session(state,RuntimeHistory(),lambda h:None,policy=policy,clock_ns=lambda:now[0])
+        proposal=session.propose(state)
+        permit=session.validate(dict(state=state.to_dict(),token=proposal['token'],nonce='clock-nonce'))
+        self.assertEqual(permit['deadline_ns'],now[0]+PERMIT_NS)
+        job=Stage4LiveJob(clock=lambda:-9_000_000.,clock_ns=lambda:now[0])
+        self.addCleanup(job.shutdown)
+        def arm(deadline=None):
+            job._start_snapshot=job._expected_snapshot=state;job._pending=proposal
+            job.state='admitted';job._accepted_nonce=permit['nonce']
+            job._permit=dict(permit,deadline_ns=permit['deadline_ns'] if deadline is None else deadline)
+        arm();now[0]=permit['deadline_ns']-1
+        self.assertEqual(job.mark_applying(proposal['token'],permit['nonce'],state),proposal)
+        for delta in (0,1,10_000):
+            arm();now[0]=permit['deadline_ns']+delta
+            with self.assertRaisesRegex(ValueError,'EXPIRED'):job.mark_applying(proposal['token'],permit['nonce'],state)
+        now[0]=100_000_000_000;arm(now[0]+PERMIT_NS+1)
+        with self.assertRaisesRegex(ValueError,'DEADLINE'):job.mark_applying(proposal['token'],permit['nonce'],state)
+        arm()
+        for nonce,other in [('old',state),(permit['nonce'],replace(state,generation=state.generation+1))]:
+            with self.assertRaisesRegex(ValueError,'BINDING'):job.mark_applying(proposal['token'],nonce,other)
+        self.assertEqual(job._applied_count,1)
+        import time
+        self.assertIs(worker.Session.__init__.__kwdefaults__['clock_ns'],time.monotonic_ns)
+        production=Stage4LiveJob();self.addCleanup(production.shutdown)
+        self.assertIs(production._permit_clock_ns,time.monotonic_ns)
+
+    def test_wire_deadline_rejects_expiry_future_and_preserves_cancelled_nonce(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from stage4_live_contract import envelope,write_once,PERMIT_NS
+        state=snapshot(observation=((-2,-2,-2),(-2,-2,-2)),counted=0,revision=0,event_count=0,
+                       ledger=digest([]),cursor=(0,0),entry='CANONICAL_NEW')
+        session=Session(state,RuntimeHistory(),lambda h:None,policy=SimpleNamespace(attempts_used=0),clock_ns=lambda:100)
+        p=session.propose(state)
+        for delta,expected in [(0,'EXPIRED'),(-1,'EXPIRED'),(PERMIT_NS+1,'DEADLINE'),(PERMIT_NS,None)]:
+            with self.subTest(delta=delta),TemporaryDirectory() as d:
+                job=Stage4LiveJob(clock_ns=lambda:100)
+                try:
+                    job._start_snapshot=job._expected_snapshot=state;job._active_run_id=state.run_id
+                    job._pending=p;job._awaiting='ADMITTED';job._sequence=0;job._directory=Path(d)
+                    job._sent_validation=dict(nonce='sent');job._accepted_nonce=None
+                    write_once(d,'worker',0,envelope(state.run_id,0,'ADMITTED',dict(proposal=p,nonce='sent',deadline_ns=100+delta)))
+                    if expected:
+                        with self.assertRaisesRegex(ValueError,expected):job._read_reply()
+                    else:
+                        job._read_reply();self.assertEqual(job.state,'pending');self.assertIsNone(job._permit)
+                    self.assertEqual(job._applied_count,0)
+                finally:
+                    job._directory=None;job._active_run_id=None;job.shutdown()
+
+
+class OwnedCleanupRetryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
+
+    def fixture(self):
+        state=snapshot();job=Stage4LiveJob()
+        process=SimpleNamespace(pid=123,_handle=456,poll=lambda:0,wait=lambda **kw:0)
+        scope=SimpleNamespace(handle=789,name='controlled-private-job',active_count=0)
+        scope.close=lambda:setattr(scope,'handle',None)
+        job._process=process;job._scope=scope;job._start_snapshot=state;job._active_run_id=state.run_id
+        job._owner_record=dict(run_id=state.run_id)
+        job.last_record=dict(run_id=state.run_id,status='FAILED',error='original cleanup failure',reaped=False,tree_active_count=0,cleanup_complete=False)
+        job.state='blocked'
+        identity=(123,456,999,789,scope.name)
+        return job,process,scope,identity
+
+    def release(self,job):
+        job._scope=job._process=job._directory=None;job._active_run_id=None;job.shutdown()
+
+    def test_retry_releases_only_confirmed_original_handles_and_preserves_failure(self):
+        job,process,scope,identity=self.fixture();self.addCleanup(self.release,job)
+        with patch.object(job,'_retained_process_identity',return_value=identity):
+            job._capture_cleanup_owner()
+            self.assertTrue(job.retry_cleanup())
+        self.assertEqual(job.state,'idle');self.assertIsNone(job._scope);self.assertIsNone(job._process)
+        self.assertEqual(job.last_record['error'],'original cleanup failure')
+        self.assertEqual(job.last_record['status'],'FAILED');self.assertTrue(job.last_record['cleanup_complete'])
+
+    def test_live_unknown_reused_pid_foreign_scope_and_permission_fail_closed(self):
+        for case in ('alive','descendant','pid_reused','foreign_process','foreign_scope','lost_identity','permission'):
+            with self.subTest(case=case):
+                job,process,scope,identity=self.fixture()
+                try:
+                    with patch.object(job,'_retained_process_identity',return_value=identity):job._capture_cleanup_owner()
+                    if case=='alive':process.poll=lambda:None
+                    if case=='descendant':scope.active_count=1
+                    if case=='foreign_process':job._process=SimpleNamespace(pid=process.pid,_handle=process._handle)
+                    if case=='foreign_scope':job._scope=SimpleNamespace(handle=scope.handle,name=scope.name)
+                    if case=='lost_identity':job._cleanup_owner=None
+                    effect=PermissionError('CONTROLLED_ACCESS_DENIED') if case=='permission' else None
+                    current=(123,456,1000,789,scope.name) if case=='pid_reused' else identity
+                    with patch.object(job,'_retained_process_identity',return_value=current,side_effect=effect),patch.object(job,'_cleanup') as cleanup:
+                        self.assertFalse(job.retry_cleanup());cleanup.assert_not_called()
+                    self.assertFalse(job.last_record['cleanup_complete']);self.assertEqual(job.state,'blocked')
+                    if case=='permission':self.assertIn('ACCESS_DENIED',job.last_record['cleanup_retry_error'])
+                finally:self.release(job)
+
+
 class HistoryRecoveryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])

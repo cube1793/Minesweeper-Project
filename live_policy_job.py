@@ -564,6 +564,38 @@ class LivePolicyJob(QObject):
         if not self._shutting_down:
             self.finished.emit(record)
 
+    def _cleanup_retry_owned(self):
+        return False  # Opt-in by an owner that retains creation/Job evidence.
+
+    def retry_cleanup(self):
+        """Retry only an already retired, proven owner; never kill or find PIDs."""
+        if self.state != "blocked" or self.last_record is None:
+            return False
+        try:
+            if not self._cleanup_retry_owned():
+                return False
+            if self._process is not None:
+                if self._process.poll() is None:
+                    return False
+                self._process.wait(timeout=0)
+            if self._scope is not None and self._scope.active_count != 0:
+                return False
+            self._process = None
+            self._cleanup()
+        except Exception as exc:
+            self.last_record["cleanup_retry_error"] = repr(exc)
+            return False
+        # The failure status/cause remains historical; only ownership is released.
+        self.last_record.update(cleanup_complete=True, reaped=True, tree_active_count=0,
+                                cleanup_retry_complete=True)
+        self._active_run_id = None
+        self._pending = self._sent_ack = self._expected_snapshot = None
+        self._awaiting = self._deadline = self._finish_exit_deadline = None
+        self._shutting_down = False
+        self.state = "idle"
+        self.finished.emit(self.last_record)
+        return True
+
     def shutdown(self):
         """Bounded final teardown; failure retains ownership and prevents close."""
         self._shutting_down = True
