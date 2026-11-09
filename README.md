@@ -50,6 +50,8 @@ Units28–29에서는 kernel 한도 100,000의 `indexed_k100k`를 명시적 F �
 
 Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일 입력 permit/ACK와 Replay 왕복을 final v02 범위에서 연결했다. 독립 검토의 지정 필수 결함은 0건이며 현재 PC의 사용자 핵심 native 확인을 수용했다. 시험은 42회·고유 27개로, v02 17회와 영향 없는 v01 10개 이월을 구분한다. F-01/F-02 권고와 보충 시험 공백은 후속으로 남겼다. 전체 Stage4 완료·일반 효율·전시 노트북·Production 승인은 별도다. [Units30–32 연결 마감](docs/stage4/STAGE4_MAIN_WORKER_REPLAY_UNITS30_32_CLOSEOUT.md)에 근거와 남은 항목을 기록했다. 앞선 미연결·NOT_MERGED 문구는 각 단위 작성 시점의 이력이다.
 
+Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다. [Unit37 진단 마감](docs/stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md)에 요청 결속 보완과 보호 범위의 한계를 기록했다.
+
 Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다. [Unit36 마감](docs/stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md)에 근거와 남은 범위를 기록했다.
 
 Units34–35는 사용성 A를 등록 시험·독립 검토와 현재 PC 사용자 native 보고 범위에서 수용했다. A는 permit 시계 통일, ACK/실패 표시, 자기 owner 정리 재시도, 추측 설정 변경 후 Auto 재개와 창 배치를 보완한다. 시험은 302 PASS + 보호 기준선 FAIL 1, Unit33은 이번 A에서 47/47이다. 표시 B는 기능 72 PASS이나 중급·상급 비용 증가로 미채택이며, 입력별 확정·확률 상시 갱신은 후속이다. [사용성 A와 표시 B 마감](docs/stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md)에 수용 범위와 남은 한계를 기록했다.

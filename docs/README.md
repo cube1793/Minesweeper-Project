@@ -3,7 +3,9 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 기록은 [Unit36 창 크기 유지·표시 비용 마감](stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md)이다. Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
+최근 기록은 [Unit37 모델 호출 PROXY 진단 마감](stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md)이다. Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다. 보호 PASS는 결속 항목에 한정하고 .git 내부 메타데이터 관측을 병기한다.
+
+이전 기록은 [Unit36 창 크기 유지·표시 비용 마감](stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md)이다. Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
 
 이전 기록은 [Units34–35 사용성 A·표시 B 마감](stage4/STAGE4_USABILITY_DISPLAY_UNITS34_35_CLOSEOUT.md)이다. Units34–35는 사용성 A를 등록 시험·독립 검토와 현재 PC 사용자 native 보고 범위에서 수용했다. A는 permit 시계 통일, ACK/실패 표시, 자기 owner 정리 재시도, 추측 설정 변경 후 Auto 재개와 창 배치를 보완한다. 시험은 302 PASS + 보호 기준선 FAIL 1, Unit33은 이번 A에서 47/47이다. 표시 B는 기능 72 PASS이나 중급·상급 비용 증가로 미채택이며, 입력별 확정·확률 상시 갱신은 후속이다.
 

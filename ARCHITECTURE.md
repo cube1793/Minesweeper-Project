@@ -1153,6 +1153,14 @@ Units30–32에서는 메인화면의 Stage4 S/M/R, 공개 정보 worker, 단일
 
 ACK를 받지 못한 입력은 UNCONFIRMED로 보존하며, owner의 정리와 현재 run 일치를 확인한 뒤 대기 상태를 해제한다. 마지막 ACK 수신과 정리 완료 표시는 분리한다. [Unit33 통신·ACK 복구 마감](docs/stage4/STAGE4_LIVE_TRANSPORT_RECOVERY_UNIT33_CLOSEOUT.md)에 조건과 후속 검증을 정리했다.
 
+### Unit37 모델 호출 진단
+
+Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다.
+
+현재 RuntimePolicy는 counted≥1, attempts<8, 첫 시도 또는 입력 간격≥16, 남은 시간 조건으로 모델을 호출한다. 복잡도 gate는 없다. 모델은 가상 행이 모두 완료되어야 선택을 발행하며 F cache는 호출마다 새로 만든다. C01/C05는 가상 작업 뒤 자원 한도에 닿아 별도 fresh F 행동으로 돌아갔다. root 축소·단일 후보 생략·F 우선이 같은 의미를 보존한다는 근거를 확보하지 못해 후보를 적용하지 않았다.
+
+정수30/35와 실수30.0/35.0은 제품 DTO/identity에서 다르다. run04가 기존 worker와 정확한 GUI형 C01 identity·행동·history를 결속했으며 원 FAIL은 유지한다. primary에도 진입 카운터/영수증 비용이 포함된다. 보호는 결속 HEAD/ref/index/source/tracked/Desktop에 한정하며 packed-refs와 refs/codex 관측을 별도로 남긴다. [Unit37 상세 마감](docs/stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md)을 참조한다.
+
 ### Unit36 창 크기 유지와 표시 비용
 
 Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.

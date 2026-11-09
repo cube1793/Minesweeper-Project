@@ -1,12 +1,26 @@
 # Current Project Handoff
 
-Updated: **2026-11-09 (Asia/Seoul)** — Unit36 W 현재 PC 범위 수용, D 정·역순 비용 FAIL·미채택, native 최종 사용자 보고 반영.
+Updated: **2026-11-09 (Asia/Seoul)** — Unit37 PROXY 진단·NO_SAFE_CANDIDATE 한정 수용, 제품 변경0, 문서 마감 준비.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
 
-현재 마감 출발 HEAD와 local origin/main은 **676fe5912030ed29dcbc3c902bf7132ccf8e6a6c**다. Units34–35는 사용자 commit/push와 Desktop destination 검증까지 완료됐다. Unit36은 W 제품·시험 2경로와 문서 6경로, 총 8경로를 준비한다. source384를 유지하고 tracked473→474를 예상한다. 최종 commit·remote·Desktop 완료는 사용자 영수증과 조율 사후 검증으로 확정한다.
+현재 마감 출발 HEAD와 local origin/main은 **cccfb7d8483fb91601cc3db4bdd4cb46494aae12**다. Unit36은 사용자 commit/push와 Desktop destination 검증까지 완료됐다. Unit37은 문서6경로만 갱신하며 source384 유지·tracked474→475를 예상한다. Unit37 최종 commit/remote/Desktop 완료는 사용자 영수증과 사후 검증으로 확정한다.
 
 ## Stage 4 현재 상태와 다음 범위
+
+- [Unit37 진단 마감](stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md). Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다.
+- C01 상세 wall12.203초 중 가상 F11.659초, root0.188초다. 정확한 GUI형 직접13.391초/worker 후속13.078초는 같은 요청·행동·history지만 단일 표본이며 일반 성능 개선을 뜻하지 않는다.
+- 실제 model48=진단·primary18+회귀30, supervisor4/Python11/worker7/engine13/memory59다. 필수 종료4회와 census4/4·4/4·2/2·12/12 COMPLETE를 확인했다.
+- 원 typed binding FAIL과 history label ERROR를 유지한다. run05 초기 history는 operation log 수준이다. TEST_MATRIX 미분류9개도 실행 PASS이며 closeout에서 보충한다.
+- RV37-N1: 보호 PASS는 HEAD/main/local origin/main/index/source/tracked/Desktop 결속 항목 한정이다. .git/packed-refs 재생성과 refs/codex checkpoint를 관측했으나 작성자는 미확인이다. 현재 원문·해시·목록을 새 baseline으로 남기고 사용자 Git 전후에도 기록한다. .git 전체 무변경이나 최초 Git/시각 공백의 소급 PASS를 주장하지 않는다.
+- Unit36 W 및 current-PC native 수용을 유지한다. D와 B 비용 FAIL, 302 PASS+보호 FAIL1, 역사적 INCOMPLETE_CENSUS·35/34 FAIL, Unit36 추가 진단 ERROR를 보존한다.
+- 다음은 사용자 Unit37 문서 commit/push와 조율 검증, 실제 commit에 결속한 Desktop 교체다. 이후 고효율 Replay 해체 분석과 새 보드 S/M/R 비교를 준비한다. kernel/proof 재사용·admission 변경, R 목표 UX, 표시 D 비용, 전시 노트북/패키지는 별도 범위다. frozen 정책·Model C·holdout·formal evidence 금지·Production 미승인 경계는 유지한다.
+
+### Unit36 마감 당시 기록
+
+아래는 Unit36 문서 작성 당시의 마감 전 표현을 보존한 이력이다. 실제 Unit36 Git·Desktop 완료 기준은 위 cccfb7d8 commit과 사용자 영수증/조율 destination 검증이다.
+
+현재 마감 출발 HEAD와 local origin/main은 **676fe5912030ed29dcbc3c902bf7132ccf8e6a6c**다. Units34–35는 사용자 commit/push와 Desktop destination 검증까지 완료됐다. Unit36은 W 제품·시험 2경로와 문서 6경로, 총 8경로를 준비한다. source384를 유지하고 tracked473→474를 예상한다. 최종 commit·remote·Desktop 완료는 사용자 영수증과 조율 사후 검증으로 확정한다.
 
 - [Unit36 마감](stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md). Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
 - W 작은 화면 native gate RV36-NB1은 사용자 보고로 충족했다. 실제 hide/show, 다중 모니터, 다른 Windows 배율과 첫 표시 정밀 치수는 미확인이다. 정상 보고를 모든 복원 경로의 증명으로 확대하지 않는다.
