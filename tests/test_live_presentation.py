@@ -68,12 +68,18 @@ class LivePresentationTests(unittest.TestCase):
                     cell = self.ui._buttons[(4, 4)]
                     controls = (self.ui.analyze_button, self.ui.simple_auto_checkbox)
                     self.assertTrue(all(c.isEnabled() for c in controls))
-                    QTest.mousePress(cell, button)
-                    self.assertTrue(self.ui._mouse_buttons)
-                    self.assertTrue(all(c.isEnabled() for c in controls))
-                    self.ui._update_policy_controls()
-                    self.assertTrue(all(c.isEnabled() for c in controls))
-                    QTest.mouseRelease(cell, button)
+                    label = self.ui.analysis_status_label
+                    with patch.object(label, "setText", wraps=label.setText) as updates:
+                        QTest.mousePress(cell, button)
+                        self.assertTrue(self.ui._mouse_buttons)
+                        self.assertTrue(all(c.isEnabled() for c in controls))
+                        self.ui._update_policy_controls()
+                        self.assertTrue(all(c.isEnabled() for c in controls))
+                        QTest.mouseRelease(cell, button)
+                    # Check transient writes too: the final text alone can hide flicker.
+                    self.assertEqual(label.text(), "수동 플레이")
+                    self.assertTrue(all(call.args[0] == "수동 플레이"
+                                        for call in updates.call_args_list))
                     self.assertFalse(self.ui._mouse_buttons)
                     self.assertTrue(all(c.isEnabled() for c in controls))
                     self.assertEqual(len(self.ui._replay_recorder.events), 1)

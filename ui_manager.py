@@ -671,6 +671,7 @@ class MinesweeperUI(QWidget):
     def __init__(self, engine: MinesweeperEngine):
         super().__init__()
         self.engine = engine
+        self._help_dialog = None
         self._benchmark_statistics_window = None
         self._stage3_visualizer_launcher = None
         self._same_board_comparison_launcher = None
@@ -926,19 +927,19 @@ class MinesweeperUI(QWidget):
         """Source eligibility only; admission gives precise comparison rejections."""
         action = self.same_board_comparison_action
         if self._same_board_comparison_launcher is not None:
-            action.setText("Open Comparison…")
+            action.setText("비교 창 다시 열기…")
             enabled = True
-            explanation = "Open the Comparison launcher for its captured Human recording."
+            explanation = "앞서 선택한 수동 플레이 기록의 비교 창을 다시 엽니다."
         else:
-            action.setText("Compare as full-game Human Replay…")
-            explanation = "Finish the current game or load a full-game Human Replay."
+            action.setText("같은 보드 비교(수동 플레이)…")
+            explanation = "직접 플레이한 판을 끝내거나, 완료된 수동 플레이 Replay를 불러오세요."
             if self._replay_mode:
                 replay = self._replay_data
                 if replay is None and self._replay_player is not None:
                     replay = self._replay_player.replay_data
                 enabled = replay is not None and replay.source_type == SOURCE_HUMAN
                 if replay is not None and not enabled:
-                    explanation = "Same-board Comparison requires a Human-labeled Replay."
+                    explanation = "수동 플레이로 표시된 Replay만 비교할 수 있습니다."
             else:
                 enabled = (
                     self.engine.status in (GameStatus.WON, GameStatus.LOST)
@@ -946,9 +947,12 @@ class MinesweeperUI(QWidget):
                     and self._replay_recorder.source_type == SOURCE_HUMAN
                 )
                 if self._replay_recorder.source_type != SOURCE_HUMAN:
-                    explanation = "자동 입력이 포함된 판은 Human Replay 비교 대상이 아닙니다."
+                    explanation = "자동 입력이 포함된 판은 수동 플레이 기록 비교 대상이 아닙니다."
             if enabled:
-                explanation = "Submit the entire recording as a full-game Human Replay for comparison."
+                explanation = (
+                    "현재 기록 전체를 수동 플레이 한 판으로 제출하여 같은 보드의 "
+                    "Stage2 Simple·Stage3 V1 실행과 비교합니다."
+                )
         action.setEnabled(enabled)
         action.setToolTip(explanation)
         action.setStatusTip(explanation)
@@ -997,6 +1001,16 @@ class MinesweeperUI(QWidget):
         if self._replay_mode and self._replay_player is not None:
             return self._replay_player.engine
         return self.engine
+
+    def on_help(self):
+        """Show reusable help without changing the current game or Auto state."""
+        if self._help_dialog is None:
+            from ui_help import HelpDialog
+
+            self._help_dialog = HelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
 
     # ------------------------------------------------------------------
     # UI 구성
@@ -1054,13 +1068,10 @@ class MinesweeperUI(QWidget):
         layout.addWidget(self.stats_table)
 
         self.zini_explorer_button = QPushButton("ZiNi Explorer")
+        self.zini_explorer_button.setToolTip("현재 보드의 ZiNi 분석 경로 보기 — 분석 결과가 준비되면 사용할 수 있습니다.")
         self.zini_explorer_button.setEnabled(False)
         self.zini_explorer_button.clicked.connect(self.on_open_zini_explorer)
         layout.addWidget(self.zini_explorer_button)
-
-        self.stage3_visualizer_button = QPushButton("Stage-3 Visualizer")
-        self.stage3_visualizer_button.clicked.connect(self.on_stage3_visualizer)
-        layout.addWidget(self.stage3_visualizer_button)
 
         return panel
 
@@ -1071,7 +1082,9 @@ class MinesweeperUI(QWidget):
         - 사용자가 편집/선택하지 못하도록 읽기 전용으로 설정한다.
         - Left/Right/Chord 등 세부 항목도 동일한 방식으로 행을 만든다.
         """
-        table = QTableWidget(len(STAT_ROWS), 2)
+        from ui_help import STAT_TOOLTIPS, StatisticsTable
+
+        table = StatisticsTable(len(STAT_ROWS), 2)
         table.setObjectName("statsTable")
 
         # 헤더/스크롤/선택 동작 정리
@@ -1095,6 +1108,7 @@ class MinesweeperUI(QWidget):
         for row, (key, label, dummy) in enumerate(STAT_ROWS):
             # 0열: 항목명
             name_item = QTableWidgetItem(label)
+            name_item.setToolTip(STAT_TOOLTIPS[key])
             name_item.setFont(label_font)
             name_item.setFlags(Qt.ItemIsEnabled)
             name_item.setForeground(QColor("#303030"))
@@ -1102,6 +1116,7 @@ class MinesweeperUI(QWidget):
 
             # 1열: 값(더미). stat_key로 참조 보관.
             value_item = QTableWidgetItem(dummy)
+            value_item.setToolTip(STAT_TOOLTIPS[key])
             value_item.setFont(value_font)
             value_item.setFlags(Qt.ItemIsEnabled)
             value_item.setForeground(QColor("#000080"))
@@ -1167,16 +1182,26 @@ class MinesweeperUI(QWidget):
         settings_bar.addWidget(self.cell_size_spin)
 
         settings_bar.addStretch()
+        self.help_button = QToolButton()
+        self.help_button.setText("도움말")
+        self.help_button.setToolTip("기본 조작, 알고리즘, 통계와 Replay 설명")
+        self.help_button.clicked.connect(self.on_help)
+        settings_bar.addWidget(self.help_button)
+
         self.tools_button = QToolButton()
         self.tools_button.setText("도구")
         self.tools_button.setPopupMode(QToolButton.InstantPopup)
         tools_menu = QMenu(self.tools_button)
-        self.benchmark_statistics_action = tools_menu.addAction("벤치마크 통계")
-        self.benchmark_statistics_action.triggered.connect(self.on_benchmark_statistics)
-        self.replay_directory_action = tools_menu.addAction("Replay 저장 폴더...")
+        self.general_tools_menu = tools_menu.addMenu("일반 도구")
+        self.developer_tools_menu = tools_menu.addMenu("개발자 도구")
+        self.replay_directory_action = self.general_tools_menu.addAction("Replay 저장 폴더...")
         self.replay_directory_action.triggered.connect(self.on_replay_directory)
-        self.same_board_comparison_action = tools_menu.addAction("Compare as full-game Human Replay…")
+        self.same_board_comparison_action = self.general_tools_menu.addAction("같은 보드 비교(수동 플레이)…")
         self.same_board_comparison_action.triggered.connect(self.on_same_board_comparison)
+        self.benchmark_statistics_action = self.developer_tools_menu.addAction("벤치마크 통계")
+        self.benchmark_statistics_action.triggered.connect(self.on_benchmark_statistics)
+        self.stage3_visualizer_action = self.developer_tools_menu.addAction("Stage-3 Visualizer")
+        self.stage3_visualizer_action.triggered.connect(self.on_stage3_visualizer)
         self.tools_button.setMenu(tools_menu)
         settings_bar.addWidget(self.tools_button)
         main_layout.addLayout(settings_bar)
@@ -1431,7 +1456,7 @@ class MinesweeperUI(QWidget):
         main_layout.addWidget(self.pacing_status_label)
         self._sync_pacing_editors()
         self.analysis_status_label = LiveStatusLabel(
-            "분석 대기", 2,
+            "수동 플레이", 2,
             hint="초록: SAFE | 빨강: MINE | 주황: 최소 지뢰 확률 후보 | 테두리: 실제 추천")
         main_layout.addWidget(self.analysis_status_label)
 
@@ -4608,7 +4633,11 @@ class MinesweeperUI(QWidget):
         self._analysis_observation = None
         self._analysis_first_click = False
 
-    def _clear_live_analysis(self, status="분석 대기", *, keep_certainty=False):
+    def _clear_live_analysis(self, status=None, *, keep_certainty=False):
+        if status is None:
+            # Clearing stale analysis after a manual input is not a new analysis request.
+            status = ("분석 대기" if self._replay_mode or self.analysis_checkbox.isChecked()
+                      or self.simple_auto_checkbox.isChecked() else "수동 플레이")
         self._invalidate_analysis_state()
         if not keep_certainty:
             self._certainty_frame = None
@@ -4809,7 +4838,7 @@ class MinesweeperUI(QWidget):
             self._display_context(previous_observation=auto_observation),
             self._display_context(), self.engine.get_observation())
             if type(frame) is CertaintyFrame and auto_observation is not None else None)
-        self._clear_live_analysis("다음 수 계산 중" if self._certainty_frame else "분석 대기",
+        self._clear_live_analysis("다음 수 계산 중" if self._certainty_frame else None,
                                   keep_certainty=True)
         self.render_board()
         if info is not None:

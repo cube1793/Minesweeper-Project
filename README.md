@@ -15,8 +15,9 @@ Stage4 S/M/R은 Main/Live에서 사용할 수 있습니다. Unit73에서 **N1 �
   S의 승리는 22판으로 같았지만 M/R은 N0 22승 → K1 18승이므로 평균만으로 전체 개선을 선언하지 않습니다.
 - **검증:** Stage4 관련 14모듈·187시험 통과. 전체 소스 회귀는 **FAILED_UNRESOLVED**이며 배포 완료는 아닙니다.
 
-다음 우선순위는 현재 앱의 실제 플레이 녹화입니다. 평균 120%는 중간 이정표이고
-평균·고점 개선의 상한이 아닙니다. 도움말/UI 변경과 후속 알고리즘 개발은 별도 작업입니다.
+제출용 영상의 녹화·편집·메일 제출은 사용자 보고로 완료됐습니다. 다음 단계는 전시회 준비입니다.
+평균 120%는 중간 이정표이며 평균·고점 개선의 상한이 아닙니다. 도움말·통계 툴팁·도구 메뉴 정리는
+아래 안내를 따르며, 후속 알고리즘 개발은 별도 작업입니다.
 근거·용어·제한은 [Units69–74 마감](docs/stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md),
 현재 인수 상태는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 참고하세요.
 
@@ -168,9 +169,23 @@ Live에서 초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 �
 
 계산 전략과 결과 해석은 [ZiNi 설계](ARCHITECTURE.md#zini-results)에 정리되어 있습니다.
 
+## 도움말과 도구 메뉴
+
+오른쪽 위 **도움말**은 **도구** 버튼 왼쪽에 있습니다. 기본 조작, 알고리즘·속도,
+통계 계산식, Replay, 보조 도구 설명을 확인할 수 있습니다. 왼쪽 통계의 항목명이나
+값에 마우스를 올리면 짧은 설명이 표시되고, 벗어나면 사라집니다.
+
+- **도구 → 일반 도구:** Replay 저장 폴더, 같은 보드 비교(수동 플레이).
+- **도구 → 개발자 도구:** 벤치마크 통계, Stage-3 Visualizer.
+- **ZiNi Explorer:** 현재 보드의 통계와 연결되므로 왼쪽 아래 버튼을 유지합니다.
+
+도움말은 별도 창으로 열리며 Auto나 Replay를 자동으로 멈추지 않습니다.
+분석 표시와 Auto가 꺼진 수동 플레이에서는 상태줄을 **수동 플레이**로 유지합니다.
+분석 결과·오류·게임 종료가 발생하면 해당 상태를 표시합니다.
+
 ## Benchmark Statistics / 벤치마크 통계
 
-상단 **도구 → 벤치마크 통계**에서 별도 창을 열고, **데이터베이스 열기**에서 기존 텔레메트리 SQLite 파일을 선택합니다. 데이터베이스는 읽기 전용으로 열며 생성·초기화·마이그레이션하지 않습니다. 게임, Live Auto, Replay 상태는 유지됩니다.
+상단 **도구 → 개발자 도구 → 벤치마크 통계**에서 별도 창을 열고, **데이터베이스 열기**에서 기존 텔레메트리 SQLite 파일을 선택합니다. 데이터베이스는 읽기 전용으로 열며 생성·초기화·마이그레이션하지 않습니다. 게임, Live Auto, Replay 상태는 유지됩니다.
 
 - 실행 선택: 저장된 실행의 ID·솔버·보드·첫 클릭 정책, 요청/처리/저장 수와 정확한 접두 범위, Git dirty 및 공식 사용 가능 여부를 표시합니다. 부분/실패 실행에는 **진단용 실행** 표시가 붙습니다.
 - 실행 요약: 승패·승률·추측 비율/평균, 행동/추론 횟수, 계산 시간의 총합·평균·최대·P50/P90/P95/P99를 표시합니다.
@@ -191,7 +206,7 @@ Live에서 초록은 확정 안전, 빨강은 확정 지뢰, 주황은 최소 �
 
 ## Stage-3 Visualizer
 
-메인 화면 왼쪽 **Counters** 패널의 **Stage-3 Visualizer** 버튼으로 별도 실행 창을 엽니다.
+메인 화면 상단 **도구 → 개발자 도구 → Stage-3 Visualizer**로 별도 실행 창을 엽니다.
 현재 Live/Replay 보드와 독립된 `EXPERT_GENERAL_V1` 벤치마크의 **Game Index**
 (0 이상의 십진 정수)를 입력하고 **Run**을 누릅니다. 실행은 subprocess에서
 진행하며 **Cancel**로 취소할 수 있습니다. 완료하면 결과 Visualizer가 자동으로
@@ -436,16 +451,18 @@ SHA는 `a59d0d963bdf1544a03968163b884342e2797ee0`입니다.
 [polish closeout](docs/stage3-extended/STAGE3_VISUALIZATION_USABILITY_POLISH_CLOSEOUT.md)에
 자동/package 회귀와 **사용자 source-GUI A–M / V-A..V-I** 수용을 구분해 기록했습니다.
 
-- 완료된 Live 판 또는 Human-labeled Replay에서 **도구 → Compare as full-game Human Replay…**를
+- 완료된 수동 Live 판 또는 Human-labeled Replay에서 **도구 → 일반 도구 → 같은 보드 비교(수동 플레이)…**를
   선택합니다. 이 명시적 동작은 전체 Human 기록으로 제출한다는 의도이며 역사적 출처의 증명이 아닙니다.
   Replay는 현재 표시 index와 무관하게 원본 전체를 사용합니다. 미완료·terminal 이후 event 등은
   Comparison 전용 admission 사유로 거절하며 일반 Replay 사용 규칙을 바꾸지 않습니다.
 - 실행 창은 한 번 capture한 context를 유지합니다. Main의 새 게임·Replay 교체로 대상이 바뀌지
-  않으며 **Open Comparison…**은 기존 창을 엽니다. **Run / Cancel / Open Result**로 실행·취소·
+  않으며 **비교 창 다시 열기…**는 기존 창을 엽니다. **Run / Cancel / Open Result**로 실행·취소·
   완료 결과 재열기를 제어하며 결과 창 재열기는 solver를 다시 실행하지 않습니다.
 - 결과 창은 한 보드와 Human / Stage 2 / Stage 3 선택, First / Previous / Next / Last,
   direct-track-seek slider와 native handle drag를 제공합니다. 세 run의 상태를 독립적으로
   기억하고 선택 run만 재생합니다. Human은 **Index / Replay Time**, solver는 **Index / Model C Time**입니다.
+- 비교 실행은 **Stage2 Simple과 Stage3 V1로 고정**되어 있습니다. 결과 창의 선택란은 표시할
+  실행 결과를 고르는 용도이며, Stage3 K 계열 및 Stage4 S/M/R 선택은 아직 지원하지 않습니다.
   공통 synchronized clock/playhead는 없습니다. 현재 재구성 status와 최종 outcome은 별개입니다.
 - Index는 20..5000 ms/action, 기본 200, 최소 **Max (20 ms)**이며 범위 밖 입력은 commit 시
   보정합니다. Time 배속은 0.25x..8x의 정확한 0.25 단위입니다. 약 16 ms refresh는

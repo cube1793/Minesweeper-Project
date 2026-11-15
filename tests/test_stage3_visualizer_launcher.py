@@ -548,23 +548,24 @@ class Stage3MainUIIntegrationTests(unittest.TestCase):
         self.app.processEvents()
 
     def open_launcher(self):
-        self.ui.stage3_visualizer_button.click()
+        self.ui.stage3_visualizer_action.trigger()
         launcher = self.ui._stage3_visualizer_launcher
         self.assertIsNotNone(launcher)
         return launcher
 
-    def test_counters_entry_preserves_existing_tools_statistics_action(self):
+    def test_developer_menu_entry_preserves_statistics_and_zini_tools(self):
         main = self.ui
-        button = main.stage3_visualizer_button
-        self.assertEqual(button.text(), "Stage-3 Visualizer")
-        self.assertTrue(button.isEnabled())
-        self.assertTrue(main.stats_panel.isAncestorOf(button))
-        layout = main.stats_panel.layout()
-        self.assertGreater(layout.indexOf(button), layout.indexOf(main.zini_explorer_button))
+        action = main.stage3_visualizer_action
+        self.assertEqual(action.text(), "Stage-3 Visualizer")
+        self.assertTrue(action.isEnabled())
+        self.assertEqual(main.developer_tools_menu.actions().count(action), 1)
+        self.assertEqual([button.text() for button in main.stats_panel.findChildren(_MainPushButton)],
+                         ["ZiNi Explorer"])
+        self.assertTrue(main.stats_panel.isAncestorOf(main.zini_explorer_button))
         self.assertIsNone(main._stage3_visualizer_launcher)
         self.assertEqual(main.tools_button.text(), "도구")
         self.assertEqual(main.tools_button.popupMode(), _MainToolButton.InstantPopup)
-        self.assertIn(main.benchmark_statistics_action, main.tools_button.menu().actions())
+        self.assertIn(main.benchmark_statistics_action, main.developer_tools_menu.actions())
         self.assertEqual(main.benchmark_statistics_action.text(), "벤치마크 통계")
         self.assertFalse(main.stats_panel.isAncestorOf(main.tools_button))
         self.assertNotIn("벤치마크 통계", [
@@ -607,7 +608,7 @@ class Stage3MainUIIntegrationTests(unittest.TestCase):
                 _main_patch.object(launcher, "raise_") as raise_window,
                 _main_patch.object(launcher, "activateWindow") as activate,
             ):
-                self.ui.stage3_visualizer_button.click()
+                self.ui.stage3_visualizer_action.trigger()
             factory.assert_called_once_with(self.ui)
             show.assert_called_once_with()
             raise_window.assert_called_once_with()
@@ -818,7 +819,7 @@ class Stage3MainUIIntegrationTests(unittest.TestCase):
         player.go_to(1)
         self.ui._enter_replay_mode(player)
         self.set_analysis_fixture(replay=True)
-        self.assertTrue(self.ui.stage3_visualizer_button.isEnabled())
+        self.assertTrue(self.ui.stage3_visualizer_action.isEnabled())
         self.assertTrue(self.ui._replay_mode)
         self.exercise_launcher_activity_without_main_changes()
 

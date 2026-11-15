@@ -291,7 +291,7 @@ class StatisticsUITests(StatisticsTestCase):
             with patch.object(engine, "reset", wraps=engine.reset) as reset:
                 self.assertEqual(main.tools_button.text(), "도구")
                 self.assertEqual(main.tools_button.popupMode(), QToolButton.InstantPopup)
-                self.assertIn(main.benchmark_statistics_action, main.tools_button.menu().actions())
+                self.assertIn(main.benchmark_statistics_action, main.developer_tools_menu.actions())
                 self.assertEqual(main.benchmark_statistics_action.text(), "벤치마크 통계")
                 self.assertFalse(main.stats_panel.isAncestorOf(main.tools_button))
                 self.assertNotIn("벤치마크 통계", [b.text() for b in main.stats_panel.findChildren(QPushButton)])

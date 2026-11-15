@@ -131,11 +131,11 @@ class SameBoardMainUITests(unittest.TestCase):
 
     def test_tools_action_exists_once_and_initial_source_is_unavailable(self):
         action = self.ui.same_board_comparison_action
-        self.assertEqual(self.ui.tools_button.menu().actions().count(action), 1)
-        self.assertEqual(action.text(), "Compare as full-game Human Replay…")
+        self.assertEqual(self.ui.general_tools_menu.actions().count(action), 1)
+        self.assertEqual(action.text(), "같은 보드 비교(수동 플레이)…")
         self.assertFalse(action.isEnabled())
         for text in (action.toolTip(), action.statusTip()):
-            self.assertIn("Finish the current game or load a full-game Human Replay.", text)
+            self.assertIn("직접 플레이한 판을 끝내거나, 완료된 수동 플레이 Replay를 불러오세요.", text)
         self.assertIsNone(self.ui._same_board_comparison_launcher)
 
     def test_main_initialization_keeps_comparison_imports_lazy(self):
@@ -193,8 +193,8 @@ class SameBoardMainUITests(unittest.TestCase):
                 self.enter_replay(replace(replay, source_type=source))
                 action = self.ui.same_board_comparison_action
                 self.assertFalse(action.isEnabled())
-                self.assertIn("requires a Human-labeled Replay", action.toolTip())
-                self.assertIn("requires a Human-labeled Replay", action.statusTip())
+                self.assertIn("수동 플레이로 표시된 Replay만 비교할 수 있습니다.", action.toolTip())
+                self.assertIn("수동 플레이로 표시된 Replay만 비교할 수 있습니다.", action.statusTip())
         self.enter_replay(replay)
         self.assertTrue(self.ui.same_board_comparison_action.isEnabled())
         self.ui._exit_replay_mode()
@@ -319,7 +319,7 @@ class SameBoardMainUITests(unittest.TestCase):
         context = owner.context
         self.ui._exit_replay_mode()
         action = self.ui.same_board_comparison_action
-        self.assertEqual(action.text(), "Open Comparison…")
+        self.assertEqual(action.text(), "비교 창 다시 열기…")
         self.assertTrue(action.isEnabled())
         with patch.object(self.ui, "_build_current_replay_data", side_effect=AssertionError("recapture")), \
                 patch("same_board_comparison.HumanComparisonContext", side_effect=AssertionError("readmission")), \
@@ -355,7 +355,7 @@ class SameBoardMainUITests(unittest.TestCase):
         self.enter_replay(replace(replay, source_type=SOURCE_AI))
         self.assertTrue(old.close())
         self.assertIsNone(self.ui._same_board_comparison_launcher)
-        self.assertEqual(self.ui.same_board_comparison_action.text(), "Compare as full-game Human Replay…")
+        self.assertEqual(self.ui.same_board_comparison_action.text(), "같은 보드 비교(수동 플레이)…")
         self.assertFalse(self.ui.same_board_comparison_action.isEnabled())
         self.enter_replay(replay)
         new = self.open_comparison()
