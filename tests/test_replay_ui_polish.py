@@ -177,6 +177,8 @@ class ReplayUIPolishTests(unittest.TestCase):
         self.assertEqual(self.ui.live_policy_status_label.text(), '알고리즘 사용 기록: 확인 불가')
 
     def test_only_actual_auto_input_marks_record_and_manual_policy_changes_keep_it(self):
+        now = [1_000_000_000]
+        self.ui._pacing_clock_ns = lambda: now[0]
         self.engine.reset_with_mines(3, 3, 1, {(1, 1)})
         self.ui.on_left_click(0, 0)
         self.ui.on_right_click(2, 2)
@@ -186,7 +188,8 @@ class ReplayUIPolishTests(unittest.TestCase):
         before = len(self.ui._replay_recorder.events)
         self.ui.simple_auto_checkbox.setChecked(True)
         self.ui._simple_auto_timer.stop()
-        self.ui._on_simple_auto_timeout()
+        now[0] = self.ui._fixed_cadence.deadline_ns
+        self.ui._simple_auto_timeout_slot()
         self.assertEqual(len(self.ui._replay_recorder.events), before + 1)
         self.assertEqual(self.ui.live_action_records[-1]['semantic_input'], 'UNFLAG')
         self.assertEqual(self.ui._replay_recorder.source_type, SOURCE_ALGORITHM)

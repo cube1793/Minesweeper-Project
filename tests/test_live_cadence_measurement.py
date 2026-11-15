@@ -544,6 +544,8 @@ class MeasurementHarnessTests(unittest.TestCase):
                 with patch.object(sys,'setprofile',side_effect=AssertionError('profile')), \
                         patch.object(sys,'settrace',side_effect=AssertionError('trace')):
                     campaign.install()
+                with self.assertRaisesRegex(RuntimeError, 'Unregistered child start blocked'):
+                    sys.audit('subprocess.Popen', sys.executable, [], None, None)
                 self.assertIsNone(sys.getprofile())
                 self.assertIsNone(sys.gettrace())
                 self.assertIsNot(MinesweeperUI._apply_live_action,original)

@@ -160,56 +160,6 @@ class _StatItem:
         self.text = text
 
 
-class _SignalProbe:
-    def connect(self, callback):
-        self.callback = callback
-
-
-class _TimerProbe:
-    def __init__(self, *_args, **_kwargs):
-        self.timeout = _SignalProbe()
-        self.active = False
-        self.interval = None
-
-    def setInterval(self, interval):
-        self.interval = interval
-
-    def setSingleShot(self, single_shot):
-        self.single_shot = single_shot
-
-    def start(self):
-        self.active = True
-
-    def stop(self):
-        self.active = False
-
-    def isActive(self):
-        return self.active
-
-
-class _WidgetProbe:
-    def __init__(self):
-        self.text = None
-        self.fixed_size = None
-
-    def setText(self, text):
-        self.text = text
-
-    def setFixedSize(self, width, height):
-        self.fixed_size = (width, height)
-
-
-class _GridProbe:
-    def __init__(self):
-        self.widgets = []
-
-    def addWidget(self, widget, y, x):
-        self.widgets.append((widget, x, y))
-
-    def removeWidget(self, widget):
-        self.widgets = [entry for entry in self.widgets if entry[0] is not widget]
-
-
 class ReplayStatisticsTests(unittest.TestCase):
     def _lost_replay(self):
         return ReplayData(
@@ -445,6 +395,15 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         super().setUpClass()
         cls.qt_application = _ensure_test_qapplication()
 
+    def setUp(self):
+        from tests.ui_settings import isolate_ui_settings
+        isolate_ui_settings(self)
+
+    def close_ui(self, ui):
+        ui.close()
+        ui.deleteLater()
+        self.qt_application.processEvents()
+
     def _live_engine(self):
         engine = MinesweeperEngine(width=4, height=3, num_mines=2)
         engine.reset_with_mines(
@@ -471,43 +430,18 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         )
 
     def _ui_with_live_engine(self, live_engine):
-        def init_ui_stub(ui):
-            ui.same_board_comparison_action = Mock()
-            ui.same_board_history_menu = Mock()
-            ui.same_board_history_menu.actions.return_value = []
-
-        with (
-            patch.object(ui_manager, "QTimer", _TimerProbe),
-            patch.object(ui_manager, "QSettings"),
-            patch.object(MinesweeperUI, "_init_ui", init_ui_stub),
-            patch.object(MinesweeperUI, "_init_shortcuts"),
-            patch.object(MinesweeperUI, "render_board"),
-            patch.object(MinesweeperUI, "_update_statistics_panel"),
-        ):
+        # Real controls/timers keep the ownership fixture aligned with Main.
+        # Only background computation is isolated; engine and Replay stay real.
+        with patch.object(MinesweeperUI, "_ensure_zini_metric_job"):
             ui = MinesweeperUI(live_engine)
-        # This fixture bypasses _init_ui; supply the new presentation controls.
-        ui.zini_explorer_button = Mock()
-        ui.mouse_trace_record_checkbox = Mock()
-        ui.mouse_trace_display_checkbox = Mock()
-        ui.mouse_trace_display_checkbox.isChecked.return_value = False
-        ui.mouse_trace_overlay = Mock()
-        ui.analysis_status_label = _WidgetProbe()
-        ui.analysis_checkbox = Mock()
-        ui.analysis_checkbox.isChecked.return_value = False
-        ui.probability_checkbox = Mock()
-        ui.probability_checkbox.isChecked.return_value = True
-        ui.reduction_checkbox = Mock()
-        ui.reduction_checkbox.isChecked.return_value = False
-        ui.simple_auto_checkbox = Mock()
-        ui.simple_auto_checkbox.isChecked.return_value = False
-        ui.allow_guess_checkbox = Mock()
-        ui.allow_guess_checkbox.isChecked.return_value = False
+        worker = patch.object(ui._zini_job, "start", return_value=None)
+        worker.start()
+        self.addCleanup(worker.stop)
+        self.addCleanup(self.close_ui, ui)
         return ui
 
     def _prepare_lifecycle_ui(self, live_engine):
         ui = self._ui_with_live_engine(live_engine)
-        ui.reset_button = _WidgetProbe()
-        ui.timer_label = _WidgetProbe()
         ui._build_grid = Mock()
         ui._apply_initial_window_size = Mock()
         ui.render_board = Mock()
@@ -730,12 +664,7 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         player.go_to(2)
         ui._replay_mode = True
         ui._replay_player = player
-        ui._buttons = {}
         ui._cell_size = 10
-        ui.grid = _GridProbe()
-        ui.board_container = _WidgetProbe()
-        ui.mine_label = _WidgetProbe()
-        ui.resize = Mock()
         ui._render_cell = Mock()
 
         ui._build_grid()
@@ -743,18 +672,16 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         ui.render_board()
 
         self.assertEqual(set(ui._buttons), {(0, 0), (1, 0), (0, 1), (1, 1)})
-        self.assertEqual(len(ui.grid.widgets), 4)
-        self.assertEqual(ui.board_container.fixed_size, (20, 20))
-        ui.resize.assert_called_once_with(
-            20 + ui_manager.STATS_PANEL_WIDTH + 80,
-            20 + 250,
-        )
+        self.assertEqual(ui.grid.count(), 4)
+        self.assertEqual((ui.board_container.width(), ui.board_container.height()), (20, 20))
+        # Adaptive window fitting must receive Replay's 2x2 board, not Live's 4x3.
+        self.assertEqual(ui._board_fit_record['board'], (20, 20))
         self.assertEqual(ui._render_cell.call_count, 4)
         self.assertEqual(
             [call.args[1] for call in ui._render_cell.call_args_list],
             [value for row in player.engine.get_observation() for value in row],
         )
-        self.assertEqual(ui.mine_label.text, "💣 000")
+        self.assertEqual(ui.mine_label.text(), "💣 000")
         self.assertIs(ui.engine, live_engine)
 
     def test_zini_snapshot_uses_live_or_latest_replay_engine_by_mode(self):

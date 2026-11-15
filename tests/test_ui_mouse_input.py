@@ -1315,7 +1315,8 @@ class LiveV1HandoffMouseTests(unittest.TestCase):
         self.assertEqual(job.state, "cancelling")
         self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
         self.assertEqual(self.ui._replay_recorder.events, ())
-        self.assertTrue(self.ui.allow_guess_checkbox.isChecked())
+        # Manual handoff retires guessing at press, before a release can act.
+        self.assertFalse(self.ui.allow_guess_checkbox.isChecked())
         old_callback()
         self.ui.on_analyze_current()
         self.ui.simple_auto_checkbox.setChecked(True)
@@ -1402,11 +1403,12 @@ class LiveV1HandoffMouseTests(unittest.TestCase):
 
     def test_manual_auto_manual_auto_real_mouse_flag_handoffs_keep_mixed_provenance(self):
         from live_policy import ADOPT_CURRENT, plan_snapshot
+        from tests.test_live_auto import advance_auto_timer
         self.press((4, 4), Qt.RightButton)
         self.release((4, 4), Qt.RightButton)
         job, first = self.arm()
         self.assertTrue(first.is_flag_review)
-        self.ui._simple_auto_timer.timeout.emit()
+        advance_auto_timer(self.ui)
         job.deliver_ack()
         guess = plan_snapshot(job.requests[-1])
         job.deliver(guess)
@@ -1424,7 +1426,7 @@ class LiveV1HandoffMouseTests(unittest.TestCase):
         self.assertNotEqual(snapshot.run_id, prior_run)
         second = plan_snapshot(snapshot)
         job.deliver(second)
-        self.ui._simple_auto_timer.timeout.emit()
+        advance_auto_timer(self.ui)
         self.assertEqual([e.action for e in self.ui._replay_recorder.events], ["FLAG"] * 4)
         self.assertEqual(self.ui._replay_recorder.source_type, "algorithm")
         self.assertFalse(self.ui._mouse_trace_recorder.eligible)

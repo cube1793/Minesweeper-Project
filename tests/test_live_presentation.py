@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PyQt5.QtCore import QEvent, QPoint, Qt
+from PyQt5.QtCore import QEvent, QPoint, QRect, Qt
 from PyQt5.QtGui import QFont, QFontMetrics, QImage, QKeyEvent
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QLayout
@@ -56,6 +56,9 @@ class LivePresentationTests(unittest.TestCase):
                 "cell_origin": [point.x(), point.y()], "cell_size": [cell.width(), cell.height()],
                 "policy": list(self.ui.live_policy_status_label.geometry().getRect()),
                 "analysis": list(self.ui.analysis_status_label.geometry().getRect()),
+                "controls": [list(control.geometry().getRect()) for control in
+                             (self.ui.live_policy_combo, self.ui.analyze_button,
+                              self.ui.simple_auto_checkbox, self.ui.simple_auto_interval_spin)],
                 "minimum_width": self.ui.minimumSizeHint().width()}
 
     def test_idle_controls_do_not_flicker_on_press_hold_release(self):
@@ -120,6 +123,8 @@ class LivePresentationTests(unittest.TestCase):
                 self.ui.simple_auto_interval_spin.setValue(2000)
 
     def test_simple_right_input_refreshes_during_hold_and_rearms_after_release(self):
+        now = [1_000_000_000]
+        self.ui._pacing_clock_ns = lambda: now[0]
         self.ui.simple_auto_checkbox.setChecked(True)
         self.ui.allow_guess_checkbox.setChecked(True)
         old_callback = self.ui._simple_auto_timeout_slot
@@ -143,9 +148,20 @@ class LivePresentationTests(unittest.TestCase):
         self.ui.simple_auto_checkbox.setChecked(True)
         self.assertTrue(self.ui._simple_auto_pending)
         fresh_callback = self.ui._simple_auto_timeout_slot
+        deadline = self.ui._fixed_cadence.deadline_ns
+        self.assertEqual(deadline, now[0] + 500_000_000)
         old_callback()
         self.assertTrue(self.ui._simple_auto_pending)
         self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        now[0] = deadline - 1
+        fresh_callback()
+        self.assertTrue(self.ui._simple_auto_pending)
+        self.assertEqual(self.ui._simple_auto_timer.interval(), 1)
+        self.assertEqual(len(self.ui._replay_recorder.events), 1)
+        now[0] = deadline
+        fresh_callback()
+        self.assertEqual(len(self.ui._replay_recorder.events), 2)
+        old_callback()
         fresh_callback()
         self.assertEqual(len(self.ui._replay_recorder.events), 2)
 
@@ -226,8 +242,10 @@ class LivePresentationTests(unittest.TestCase):
         self.assertFalse(self.ui.analyze_button.isEnabled())
         self.ui._live_closing = False
 
-    def test_status_geometry_stays_fixed_for_simple_v1_and_replay(self):
+    @patch.object(MinesweeperUI, "_board_available_geometry", return_value=QRect(0, 0, 1920, 1080))
+    def test_status_geometry_stays_fixed_for_simple_v1_and_replay(self, _screen):
         # Offscreen's existing toolbar minimum differs from native Windows.
+        # Give the requested windows a real capacity; keep screen fitting active.
         # Fix only this fixture's window constraint to measure the requested
         # viewport widths; all labels, layout, cell sizing and guards are real.
         self.ui.layout().setSizeConstraint(QLayout.SetNoConstraint)

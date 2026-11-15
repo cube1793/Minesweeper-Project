@@ -403,7 +403,9 @@ class ExhibitionJobTests(unittest.TestCase):
         self.assertIn("GUI_FREE_REJECTION", result.stdout)
 
     def real_sleeper(self):
-        code = "import time,sys,os; from pathlib import Path; Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        code = ("import time,sys,os; from pathlib import Path; p=Path(sys.argv[1]); "
+                "tmp=p.with_suffix('.tmp'); tmp.write_text(str(os.getpid())); "
+                "tmp.replace(p); time.sleep(30)")
         def command(payload, result, progress, scope_name):
             return [sys.executable, "-B", "-c", code, str(Path(payload).parent / "ready")]
         with patch.object(jobs, "build_worker_command", side_effect=command):

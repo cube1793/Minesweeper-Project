@@ -57,15 +57,35 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 if ($LASTEXITCODE -ne 0) { throw 'Full source acceptance failed.' }
 ```
 
-This runner discovers every source test and executes each exactly once. The entire
-`test_program_k_harness.ProgramKSlice7SupervisorTests` class runs in a fresh
-approved-Python subprocess; all other tests run in the main partition. These
-supervisor tests validate an explicit 1,000,000,000-byte coordinator+worker
-private-committed-memory contract. Arbitrary memory retained by thousands of
-unrelated earlier unittest cases is outside the operation being tested. The fresh
-process preserves the original test source, cap, assertions and production
-supervisor semantics. The gate reconciles both partitions' executed IDs and
-counts, reports skips separately, and fails on test or accounting errors.
+This runner discovers tests in a separate child using canonical `tests.*` module
+names. Imported TestCase aliases are collapsed only when their class, method,
+pristine instance state, and standard unittest ID/run implementations match.
+The discovery receipt records every removed occurrence and its source hash.
+Each unique test is selected once. Every module runs in a fresh approved-Python
+process, and `tests.test_program_k_harness.ProgramKSlice7SupervisorTests` retains
+its own process. This prevents irreversible audit hooks, Qt state, and accumulated
+memory in unrelated tests from affecting subsequent modules. The supervisor's
+1,000,000,000-byte coordinator+worker contract and all production guards remain
+in force. Each child is contained in a private Windows Job with no added memory
+cap; the runner verifies that its owned processes have exited.
+
+Results default to a new `results/source-unittest-<timestamp>/` directory. Use
+`--output-dir <new-directory>` to select an evidence location; existing directories
+are rejected. `--collect-only` audits discovery without running tests. Repeat
+`--module tests.test_example` for a diagnostic subset; its summary is explicitly
+marked `subset`, not full-source acceptance. The default timeout is 3,600 seconds
+per child and can be set with `--timeout`; each process receipt records it.
+This outer watchdog accommodates large sequential validation modules and does
+not change any test's own time or memory assertions.
+
+Each partition retains stdout/stderr, a flushed event journal, exact selected/
+started/stopped IDs, per-test outcomes, and process cleanup results. `summary.json`
+distinguishes selected, run, completed, pass, failure, error, skip, not_started,
+and unfinished. A test with several failing subTests counts as one failed test;
+`failure_events`/`error_events` separately include every subTest and fixture event.
+An error takes precedence over a failure on the same test, with both events
+retained. Fixture errors and missing receipts cannot become PASS. Opt-in skips
+remain skips. The gate fails on test, discovery, accounting, or process errors.
 
 Direct `python -B -m unittest discover -s tests -v` remains useful as a raw
 monolithic diagnostic (including the clean-build check above). It is not the

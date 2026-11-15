@@ -3901,8 +3901,12 @@ class MinesweeperUI(QWidget):
             self._update_policy_controls()
             return
         if self._live_policy == POLICY_SIMPLE:
+            had_auto = self.simple_auto_checkbox.isChecked() or self._simple_auto_pending
             self._set_auto_off(clear_guess=True)
-            self._clear_live_analysis("수동 플레이")
+            # A press/drag preview has not changed the board. Preserve manual
+            # analysis until an actual action, while retiring Auto immediately.
+            if had_auto:
+                self._clear_live_analysis("수동 플레이")
             return
         if not (self._v1_owned or self._v1_pending is not None or self.simple_auto_checkbox.isChecked()):
             self._set_auto_off(clear_guess=True)

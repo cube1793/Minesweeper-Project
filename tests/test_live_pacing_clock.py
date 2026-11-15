@@ -214,12 +214,12 @@ class LivePacingClockTests(unittest.TestCase):
         original_start, original_apply = ui._start_auto_pacing, ui._apply_live_action
         table, starts, inputs, errors = load_timing_table(), [], [], []
         loop, guard, expired = real_loop(6000)
-        def start(cost=None):
-            result, row = observer.capture_call(original_start, time.perf_counter_ns, cost)
+        def start(cost=None, target=None):
+            result, row = observer.capture_call(original_start, time.perf_counter_ns, cost, target)
             wait = ui._pacing_wait
             row.update(cost=cost, rate=str(wait.rate.rate), exact_us=str(wait.exact_us),
                        delay_ms=wait.delay_ms, product_started_ns=wait.started_ns,
-                       product_deadline_ns=wait.deadline_ns, cursor=list(ui._v1_cursor))
+                       product_deadline_ns=wait.deadline_ns, cursor=list(ui._v1_cursor), target=target)
             starts.append(row)
             return result
         def apply(x, y, action, **kwargs):
@@ -240,6 +240,7 @@ class LivePacingClockTests(unittest.TestCase):
         try:
             with patch.object(ui, '_start_auto_pacing', start), patch.object(ui, '_apply_live_action', apply):
                 ui.simple_auto_checkbox.setChecked(True)
+                self.assertIsNone(ui._live_first_failure)
                 loop.exec_()
         finally:
             guard.stop()
@@ -254,6 +255,7 @@ class LivePacingClockTests(unittest.TestCase):
         for i, entry in enumerate(inputs):
             with self.subTest(input=i):
                 row = starts[entry['start_index']]
+                self.assertEqual(tuple(entry['target']), row['target'])
                 self.assertEqual(entry['oracle_cost'], row['cost'])
                 self.assertGreaterEqual(entry['elapsed_lower_ns'], row['delay_ms'] * 1_000_000)
         self.assertIs(ui._pacing_clock_ns, time.perf_counter_ns)

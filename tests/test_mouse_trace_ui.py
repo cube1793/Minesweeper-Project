@@ -42,6 +42,8 @@ class MouseTraceUITests(unittest.TestCase):
         self.engine.reset_with_mines(5, 5, 3, {(1, 1), (3, 1), (3, 3)})
         self.ui = MinesweeperUI(self.engine)
         self.addCleanup(self.close_ui)
+        self.pacing_now = 1_000_000_000
+        self.ui._pacing_clock_ns = lambda: self.pacing_now
         self.clock = Mock(return_value=1_000_000_000)
         self.install_recorder()
         self.ui.show()
@@ -62,6 +64,12 @@ class MouseTraceUITests(unittest.TestCase):
     def install_recorder(self):
         self.recorder = MouseTraceRecorder(self.engine.width, self.engine.height, clock_ns=self.clock)
         self.ui._mouse_trace_recorder = self.recorder
+
+    def auto_due(self):
+        # Trace eligibility changes only when the real pacing deadline is due.
+        self.assertTrue(self.ui._simple_auto_pending)
+        self.pacing_now = self.ui._fixed_cadence.deadline_ns
+        self.ui._simple_auto_timeout_slot()
 
     def point(self, target):
         if isinstance(target, QPoint):
@@ -738,7 +746,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.ui.allow_guess_checkbox.setChecked(True)
         self.assertTrue(self.recorder.eligible)
         self.assertTrue(self.ui._simple_auto_pending)
-        self.ui._simple_auto_timer.timeout.emit()
+        self.auto_due()
         self.assertFalse(self.recorder.eligible)
         self.assertIsNone(self.recorder.snapshot())
         self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
@@ -758,7 +766,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.ui.allow_guess_checkbox.setChecked(True)
         self.assertTrue(self.ui._simple_auto_pending)
         with patch.object(self.engine, "step", side_effect=RuntimeError("not executed")) as step:
-            self.ui._simple_auto_timer.timeout.emit()
+            self.auto_due()
         step.assert_called_once()
         self.assertTrue(self.recorder.eligible)
         self.assertIsNotNone(self.recorder.snapshot())
@@ -1053,7 +1061,7 @@ class MouseTraceUITests(unittest.TestCase):
         self.assertTrue(self.ui._simple_auto_pending)
         self.assertTrue(self.ui.mouse_trace_record_checkbox.isEnabled())
         self.assertTrue(self.recorder.eligible)
-        self.ui._simple_auto_timer.timeout.emit()
+        self.auto_due()
         self.assertEqual(len(self.ui._replay_recorder.events), 1)
         self.assertFalse(self.ui.mouse_trace_record_checkbox.isEnabled())
         self.assertFalse(self.recorder.eligible)
@@ -1103,7 +1111,7 @@ class MouseTraceUITests(unittest.TestCase):
                     self.ui.simple_auto_checkbox.setChecked(True)
                     self.ui.allow_guess_checkbox.setChecked(True)
                     self.assertTrue(self.ui._simple_auto_pending)
-                    self.ui._simple_auto_timer.timeout.emit()
+                    self.auto_due()
                 else:
                     self.ui.on_left_click(0, 0)
                 self.assertIn(self.engine.status, (GameStatus.WON, GameStatus.LOST))
@@ -1344,7 +1352,7 @@ class MouseTraceUITests(unittest.TestCase):
                 if invalidated:
                     self.ui.simple_auto_checkbox.setChecked(True)
                     self.ui.allow_guess_checkbox.setChecked(True)
-                    self.ui._simple_auto_timer.timeout.emit()
+                    self.auto_due()
                     self.ui.simple_auto_checkbox.setChecked(False)
                 self.assertFalse(self.recorder.eligible)
                 path = root / f"trace-free-{invalidated}.json"

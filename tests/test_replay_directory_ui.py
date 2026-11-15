@@ -106,7 +106,7 @@ class ReplayDirectoryUITests(unittest.TestCase):
         second = self.new_ui()
         self.assertIsNot(second._replay_settings, self.ui._replay_settings)
         self.assertEqual(second._replay_dialog_directory(), directory)
-        self.assertEqual(second.simple_auto_interval_spin.value(), 180)
+        self.assertEqual(second.simple_auto_interval_spin.value(), 200)
         # A new process proves this is flushed to disk, not only Qt's shared cache.
         probe = subprocess.run([
             sys.executable, "-c",

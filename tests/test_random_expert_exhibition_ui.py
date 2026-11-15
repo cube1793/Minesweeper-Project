@@ -416,6 +416,11 @@ class ExhibitionUITests(unittest.TestCase):
         self.assertEqual(len(panel.board.frame.automatic_flags), 99)
 
     def test_1920_layout_and_per_panel_small_window_scroll(self):
+        # Fix the reference typography as well as the viewport. Native Windows
+        # uses 9pt here; Qt offscreen otherwise supplies a 12pt default.
+        font = self.window.font()
+        font.setPointSize(9)
+        self.window.setFont(font)
         self.install()
         self.window.resize(1920, 1000)
         QTest.qWait(10)

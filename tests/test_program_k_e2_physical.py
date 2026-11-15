@@ -955,7 +955,9 @@ class QualifiedCaptureTests(unittest.TestCase):
         self.assertGreaterEqual(len(opened), 5)
 
     def test_extension_branch_hashes_exact_native_file_with_matching_origin(self):
-        with tempfile.TemporaryDirectory() as directory:
+        # This success case requires ASCII artifact paths by profile contract.
+        # Keep the fixture under the source tree rather than locale-dependent TEMP.
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             native = Path(directory) / "synthetic-zlib-native.bin"
             native.write_bytes(b"controlled native provider fixture")
             with patch.object(zlib, "__file__", str(native), create=True), \
@@ -970,6 +972,15 @@ class QualifiedCaptureTests(unittest.TestCase):
                 sha256=hashlib.sha256(b"controlled native provider fixture").hexdigest()))
             self.assertIn("python_dll", artifacts)
             self.assertIs(p.require_qualified_profile(profile), profile)
+
+    def test_extension_nonascii_path_keeps_profile_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native = Path(directory) / "native-한글.bin"
+            native.write_bytes(b"controlled native provider fixture")
+            with patch.object(zlib, "__file__", str(native), create=True), \
+                    patch.object(zlib, "__spec__", types.SimpleNamespace(name="zlib", origin=str(native))), \
+                    self.assertRaisesRegex(p.PhysicalError, "PROFILE_ASCII_TEXT_REQUIRED"):
+                self.capture()
 
     def test_extension_missing_unreadable_invalid_or_conflicting_facts_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

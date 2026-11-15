@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QRect
 from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtTest import QTest, QSignalSpy
 from PyQt5.QtWidgets import QApplication
@@ -18,6 +18,7 @@ from replay_model import ReplayBoard, ReplayData
 from replay_player import ReplayPlayer
 from tests.test_live_pacing_ui import SimplePacingUITests, edit, mode
 from tests.test_live_fixed_rate import FixedRateUITests
+from ui_manager import MinesweeperUI
 
 
 def enter(editor, text):
@@ -235,7 +236,10 @@ class PrecisionUITests(unittest.TestCase):
         edit(ui,'4',True)
         self.assertIs(ui._fixed_period,fixed)
 
-    def test_mode_layout_narrow_window_font_and_cell_size(self):
+    @patch.object(MinesweeperUI, '_board_available_geometry', return_value=QRect(0, 0, 1920, 1080))
+    def test_mode_layout_narrow_window_font_and_cell_size(self, _screen):
+        # Allow the real layout minimum to grow for 14pt text; offscreen's
+        # default 800px screen cannot contain that minimum plus the sidebar.
         self.show()
         ui=self.ui
         enter(ui.pacing_cps_edit,'6')
