@@ -1,5 +1,82 @@
 # Current Project Handoff
 
+Updated: **2026-11-15 (Asia/Seoul)** — Unit73 제품 반영·커밋/푸시 완료,
+Unit74 S/M/R 평가와 독립 검토 한정 수용. 다음 우선순위는 현재 앱의 녹화본 확보다.
+
+## 현재 상태
+
+- 제품 기준 커밋: **`8fc12f39a6dcfb8a5326943f089ab42bc7b2f84c`** (`main`, origin/main 푸시 확인).
+  부모는 Unit37 마감 `34eabd17d576d61262d782d7362a40157a0267a0`다.
+  이번 갱신은 이 제품 바이트를 유지하는 문서 변경이다. 이후 문서 커밋은 제품 커밋과 구분한다.
+- N1(상태 검증 중 이웃 표 재사용)과 FA1-K(깃발 재사용을 고려한 동률 선택)가 반영됐다.
+  제품 5파일·시험 식별자 2파일·설계 문서 1파일의 이전 반영이며 UI/기본값/예산은 유지했다.
+- Stage4 관련 14모듈·187시험은 Unit73 사본과 Unit74 설치본에서 각각 PASS했다.
+  **전체 소스 회귀는 `FAILED_UNRESOLVED`**다. 모든 시험 통과나 배포 완료로 쓰지 않는다.
+- [Units69–74 현재 마감](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)이 상세 근거와 적용 범위의 출발점이다.
+  아래의 Unit37 이전 본문은 역사 자료이며 현재의 다음 작업/역할/허가로 읽지 않는다.
+
+## 성과와 한계
+
+| 근거 | 확인된 결과 | 확대하면 안 되는 주장 |
+|---|---|---|
+| Unit70 N1 | 기존 12판 wall 합 432.33 → 28.07초, 같은 수순 | 모든 모드·GUI·Stage3의 15.4배 가속 |
+| Unit72 F_ONLY | 새 100보드, 양쪽 46승54패; 승리 평균 104.196697 → 108.361795%; K1 최고 132.335329% | 일반 승률 보장, S/M/R에서도 같은 성적 |
+| Unit74 S | 새 본평가 54보드, 양쪽 같은 22승; 승리 평균 104.9421 → 109.6483% | 모든 새 보드에서 개선 |
+| Unit74 M/R | 22승 → 18승, 공동 승리 16판의 입력 감소; K1 승리 평균 110.0961%, 최고 125.1748% | 승리판 평균만으로 전체 개선 선언 |
+
+Unit74의 실제 본평가는 **54보드 × N0/K1 × S/M/R = 324판**이다.
+별도 smoke 8·pilot 36을 더한 실행은 368판이고, 준비한 1,000보드를 모두 실행하지 않았다.
+N0/K1은 비교 소스 이름이며 K1은 현재 제품과 같다. FA1-K는 S/M/R에 추가된 독립 UI 모드가 아니다.
+F_ONLY는 모델 시도 0인 별도 평가 설정이고 현재 UI의 S/M/R은 모델 시도 8을 사용한다.
+
+M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 전달됐지만
+추가 목표 기준이 선택을 바꾸지 않았다. 후보별 원 점수는 미기록이며, 다음 R 실험에서는
+구별할 조건과 기록을 정해야 한다. 평균 120%는 중간 이정표일 뿐 장기 목표의 상한이 아니다.
+
+## 다음 작업과 승인 범위
+
+1. 현재 앱으로 Stage3와 Stage4의 **실제 알고리즘 플레이 녹화**를 먼저 확보한다.
+2. Stage4에서 만족스러운 약 120% 사례를 얻지 못하면 실제 알고리즘 저장 입력을 기존 Replay로 재생한다.
+   평가 JSONL의 앱 호환·변환·GUI 재현은 미확인이다. 촬영 전용 버튼/새 고정 보드 UI를 만들지 않는다.
+   재생은 재생으로 표시하고 재생용 시간과 원 측정 시간을 구분한다.
+3. 촬영 이후: Stage3 계산/통신/표시 비용 분해와 기존 3개 개선안, R 실험 설계,
+   전체 소스 회귀 격리·실패 정리를 별도 범위로 다룬다. 도움말·UI 정리는 아직 구현하지 않았다.
+
+이번 사용자 승인은 **저장소 문서 갱신과 이어지는 바탕화면 복구 문서 2개 갱신**이다.
+새 제품 변경·벤치마크·Unit·자동 앱 실행을 이 문서로 승인하지 않는다.
+문서 커밋·푸시와 바탕화면 교체 완료는 이번 갱신의 별도 결과 기록으로 확인한다.
+파일 검토 동안 브라우저를 닫을 필요는 없다. 실제 부하 측정/녹화에서 종료가 권장될 때는 미리 알린다.
+
+## 계속 유지할 경계와 협업
+
+- 기존 Stage3 V1/Model C와 D0–D5 수용, 과거 실패·미확인·미채택 원시 기록은 유지한다.
+  Phase2/R0-B/ActualE2, Production K/Gate P, holdout 2,010,000..2,010,099, 금지 formal evidence를 재개하지 않는다.
+- 실제 배치·복원용 seed를 정책에 주지 않는다. 공개 조건 모의 계획용 `planning_seed`와 구분한다.
+- 과거 봉인·gate·UNKNOWN을 새 성공으로 덮어쓰지 않는다. 새 결과의 범위와 당시 결과를 분리한다.
+- 사용자 최신 지시를 우선한다. 옛 '조율은 절대 Git/Desktop 작업 불가' 문구는 과거 역할 배정이며
+  이번처럼 사용자가 승인한 작업을 다시 막는 규칙이 아니다. 독립 검토는 구현 결과와 구분한다.
+- Claude Code 전달문에는 새/기존 세션, 모델, 노력을 적는다. 최근 운영 선택은 Fable 5.2 / 높음이며
+  과제와 최신 사용자 선택에 따른다. 화면에 드러나지 않은 실제 설정은 미확인으로 쓴다.
+- `.git` 전체 무변경이나 시스템 전체 프로세스 부재를 제한된 파일/Job 근거로 주장하지 않는다.
+
+## 근거 찾기
+
+- [현재 마감과 원시 경로 표](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)
+- [Unit74 검토 수용](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/REVIEW_RECEPTION_KO.txt>)
+- [촬영 계획](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/RECORDING_PLAN_KO.txt>)
+- [제품 커밋·푸시 결과](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_PRODUCT_INTEGRATION_PREPARATION_UNIT73_2026-11-15/git_closeout_01/REPORT_KO.txt>)
+- [Stage3 미구현 후속안](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_FOLLOWUP_NOTES_2026-11-07/coordinator_01/REQUESTED_ITEMS_KO.txt>)
+- [전체 문서 색인](README.md)
+
+## 2026-11-09 / Unit37까지의 역사 기록
+
+아래는 이전 인수 내용이다. '현재', '다음', '미반영', 모델/역할 지정과 Git/Desktop 대기는
+**2026-11-09 당시**의 표현이다. 위 현재 요약과 이후 수용·반영 기록이 우선하며,
+이전 실행 허가나 중단 시계를 새 작업에 재사용하지 않는다.
+
+<details>
+<summary>Unit37 이전 인수 기록 펼치기 — 역사 자료</summary>
+
 Updated: **2026-11-09 (Asia/Seoul)** — Unit37 PROXY 진단·NO_SAFE_CANDIDATE 한정 수용, 제품 변경0, 문서 마감 준비.
 
 Unit 10은 commit **fe41a93353edf0b9e865a0acbd8f7eff98a9fed1**, Unit 9는 commit **f10c4346641e7d200e83573e9cbc35554e2b09a8**로 각각 Desktop destination 검증까지 마쳤다. Unit 8은 commit **dfa338d59bf2c2dfc2f5101c54fb36a4732fa91d**와 Desktop destination 검증까지 마쳤다. Unit 7은 commit **92270322bb1d99653ce753ddb17e9bc32a1128de**와 Desktop destination 검증까지 완료됐다. Unit 6는 commit **3670542ded239be34a1ef7f9de03a2d5a86d0950**와 Desktop destination 검증까지 완료됐다. Unit 5는 commit **fa6e33aa9a02a6facff447b81862727ca4f6e216**와 Desktop destination 검증까지 완료됐다. Unit 4 **9545f6368898d1f0679d178cd1dea5cdf8164ab9**, Unit 3 **1cf5ea9af95e69c069d3137b733801a43819333e**, Unit 1·2 **a0c503dd9bf6e106e132fa5a70cb8d5cd8bb0c81**, 거리 관람·고정 6 **dc740e222c2b913fa1697fba0f4785cfffc37c2c**의 수용·실패 이력은 유지한다. 전시 노트북은 PENDING이다. 과거 source 수/마감 준비 문구는 당시 snapshot이다.
@@ -243,3 +320,5 @@ Unit 11의 검토 source/tests 4경로와 문서 6경로를 `outputs/STAGE4_UNIT
 구현·실제 측정은 별도 Codex, 독립 검토는 Claude Code, 현재 채팅은 조율·문서·Git/recovery 인계다. 작은 환경/helper 수정은 정해진 범위·복구 예산 안에서 Codex가 이어가고 결과가 모이거나 큰 단위가 끝나면 Claude에 묶어서 넘긴다. coordinator는 제품 source/tests·프로젝트 Python/Qt/worker·실제 Git 쓰기·Desktop 교체를 수행하지 않는다. 긴 프롬프트는 높이 제한 스크롤·전문 복사·TXT로 제공하고 큰 단위 후 문서와 사용자 Git을 일괄 마감한다.
 
 D0–D5 CLOSED/FINAL ACCEPTANCE PASS, PHASE1_INCONCLUSIVE_TRANSFER, **effectiveness NOT ESTABLISHED**, **Production K/Gate P 미승인**, V1 CLOSED/FROZEN, Extended ACTIVE. Phase2/R0-B/ActualE2 미승인/미실행. frozen 정책·Model C·holdout **2,010,000..2,010,099**·금지 연구 formal evidence 경계를 지킨다. Main source 수용은 새 package/Stage4/연구 자동 승인과 다르다.
+
+</details>

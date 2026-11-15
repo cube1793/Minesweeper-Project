@@ -1,6 +1,24 @@
 # Minesweeper Project
 
-Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 K-P0/K-LC0/K-LC1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 플레이하면서 통계를 확인하고, Simple Algorithm, frozen Stage3 V1과 K-P0/K-LC0/K-LC1으로 현재 수를 분석하거나 Main/Live Auto를 진행할 수 있습니다. Stage4 S/M/R의 공개 정보 기반 풀이, Replay 기록·재생·분석과 3BV/Ops, ZiNi 보드 분석까지 구현되어 있습니다.
+
+## 현재 상태 — 2026-11-15
+
+Stage4 S/M/R은 Main/Live에서 사용할 수 있습니다. Unit73에서 **N1 상태 검증 비용 절감**과
+**FA1-K 깃발 재사용 동률 선택**을 제품에 반영하고 `8fc12f3`으로 커밋·푸시했습니다.
+기존 UI·기본값·예산은 유지했습니다. FA1-K는 별도 UI 모드가 아닌 공통 풀이 경로의 개선입니다.
+
+- **속도:** 기존 12판에서 같은 수순을 유지하며 wall 합 432.33 → 28.07초를 관측했습니다.
+  약 15.4라는 비율은 해당 평가의 결과이며 모든 환경·모드의 가속 보장이 아닙니다.
+- **F_ONLY 효율:** 새 100판의 공동 승리 46판에서 평균 104.196697 → 108.361795%, 최고 132.335329%를 기록했습니다.
+- **S/M/R 평가:** 별도 54보드 × 6조건에서 K1의 승리판 평균은 S 109.6483%, M/R 110.0961%였습니다.
+  S의 승리는 22판으로 같았지만 M/R은 N0 22승 → K1 18승이므로 평균만으로 전체 개선을 선언하지 않습니다.
+- **검증:** Stage4 관련 14모듈·187시험 통과. 전체 소스 회귀는 **FAILED_UNRESOLVED**이며 배포 완료는 아닙니다.
+
+다음 우선순위는 현재 앱의 실제 플레이 녹화입니다. 평균 120%는 중간 이정표이고
+평균·고점 개선의 상한이 아닙니다. 도움말/UI 변경과 후속 알고리즘 개발은 별도 작업입니다.
+근거·용어·제한은 [Units69–74 마감](docs/stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md),
+현재 인수 상태는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 참고하세요.
 
 ## 핵심 기능
 
@@ -12,7 +30,9 @@ Python과 PyQt5로 개발한 지뢰찾기 졸업프로젝트입니다. 직접 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
 
-## Stage 4 — 공개 정보 효율 계획 기반과 제한 선택 정책
+## Stage 4 — Unit37까지의 구현 이력
+
+아래 단위별 미연결·미채택·다음 단계 표현은 각 시점의 이력입니다. 현재 반영과 평가 결과는 위의 현재 상태 및 Units69–74 마감을 우선합니다.
 
 공개 관측만으로 오프닝의 지뢰/0 확률을 계산하는 `stage4_opening.py`와, 작은 상태에서 OPEN·FLAG·CHORD 수순을 비교하는 `stage4_planning.py`를 추가했습니다. **안전성 유지(S), 평균 성과(M), 목표 기록(R)**는 공통 후보군을 서로 다른 위험 조건과 목적함수로 평가합니다. 속도·이동 거리·Model C 시간은 이 선택 목표에 들어가지 않습니다.
 

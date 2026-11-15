@@ -1277,3 +1277,30 @@ Unit72의 F_ONLY + indexed_k100k 새100판에서는 양쪽 46승54패였고 공�
 N1의 12개 개발 보드 시간 합 432.33초→28.07초는 같은 수순을 유지한 별도 관측이며 일반 가속 배율을 보장하지 않는다. request_id만으로 반영 전후 알고리즘을 식별하지 않고 source bytes와 F 식별자도 함께 확인한다. 원 FAIL・ERROR・실험 봉인은 보존한다.
 
 근거: Unit72 `execution_02/REPORT_KO.txt`, `review_claude_01/REVIEW_REPORT_KO.txt`; Unit73 `execution_01/REPORT_KO.txt`, `coordinator_02/REGRESSION_AUDIT.json`, 적용 결과 `integration_01`. 출력 Unit 이름은 `STAGE4_FA1_CONFIRMATION_UNIT72_2026-11-14` 및 `STAGE4_PRODUCT_INTEGRATION_PREPARATION_UNIT73_2026-11-15`다.
+
+## Unit74 평가 수용과 현재 개발 경계 (2026-11-15)
+
+위 Unit73 반영은 `8fc12f39a6dcfb8a5326943f089ab42bc7b2f84c`으로 커밋·푸시됐다.
+Unit74는 같은 제품 바이트를 대상으로 모듈별 새 프로세스의 Stage4 14모듈·187시험을 통과했다.
+이는 Unit73 사본 회귀와 별도 기록이다. 전체 소스 회귀의 중복 ID·시험 간 감사 훅 누수·잔여 실패는
+`FAILED_UNRESOLVED`로 남으며 Stage4 한정 PASS로 대체하지 않는다.
+
+Unit74의 평가 child는 S/M/R 설정을 UI의 Settings → Snapshot.runtime_request 경로와 대조했다.
+본평가 54보드 × N0/K1 × S/M/R = 324판, 별도 smoke 8·pilot 36을 더해 368판이며,
+준비된 1,000개 본평가 보드를 모두 실행한 것은 아니다. R 목표는 13/10, 모델 시도는 최대 8회다.
+S는 두 군 같은 22승이고 승리판 평균 104.9421 → 109.6483%다. M/R은 22 → 18승이며
+공동 승리 16판의 입력 감소와 승패 변화를 함께 보고한다. K1 M/R 승리판 평균은 110.0961%다.
+
+M/R의 입력열·결정이 같았던 관측은 현재 후보·예산·표본의 결과다. R 완료 410건 중 409건의
+도달 증거 없음과 1건의 동일 선택이 기록됐지만 후보별 원 점수는 미기록이다.
+후속 R 비교에는 구별할 가설과 후보별 점수 기록이 필요하다. N0/K1은 비교 소스 명칭,
+F_ONLY는 모델 시도 0인 평가 설정이며 S/M/R과 나란히 노출한 새 UI 모드가 아니다.
+
+Stage3는 `stage4_live_delivery.consistent()`를 쓰는 경로가 아니다. N1의 약 15.4배 관측을
+Stage3에 적용하지 않는다. Stage3의 계산·통신·화면·입력 간격 비용과 가까운 확정 오프닝 등
+기존 후속안을 따로 검토하며 기존 V1/Model C는 보존한다.
+
+현재 우선순위는 기존 UI로 실제 알고리즘 플레이를 녹화하는 것이다. 필요하면 실제 저장 입력의
+Replay를 사용하되 평가 JSONL의 앱 호환/변환/GUI 재현은 별도 확인 사항이다.
+촬영 전용 UI·새 고정 보드 기능·새 벤치마크는 이번 문서 갱신에 포함하지 않는다.
+상세 수치, 적용 한계와 원시 경로는 [Units69–74 마감](docs/stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)에 모았다.

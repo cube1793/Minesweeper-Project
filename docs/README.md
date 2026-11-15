@@ -3,7 +3,11 @@
 현재 문서의 위치와 authority를 찾기 위한 인덱스다. 과거 문서는 당시의
 provenance로 읽고, 현재 상태는 `CURRENT_HANDOFF.md`와 각 최신 closeout을 우선한다.
 
-최근 기록은 [Unit37 모델 호출 PROXY 진단 마감](stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md)이다. Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다. 보호 PASS는 결속 항목에 한정하고 .git 내부 메타데이터 관측을 병기한다.
+최신 기준은 [Units69–74 N1·FA1-K 반영과 S/M/R 평가](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)다. Unit73 반영 커밋은 `8fc12f3`이고 Unit74 검토는 한정 수용됐다. Stage4 14모듈·187 PASS와 전체 소스 회귀 `FAILED_UNRESOLVED`를 구분한다. 현재 다음 작업은 녹화본 확보이며, 자세한 상태와 작업 경계는 [CURRENT_HANDOFF](CURRENT_HANDOFF.md)를 따른다.
+
+아래는 Unit37까지의 역사 기록이다. 이전의 미반영·다음 작업 문구를 현재 지시로 사용하지 않는다.
+
+이전 기록은 [Unit37 모델 호출 PROXY 진단 마감](stage4/STAGE4_MODEL_CALL_ADMISSION_UNIT37_CLOSEOUT.md)이다. Unit37은 초기 모델 호출의 PROXY 진단과 NO_SAFE_CANDIDATE를 한정 수용했다. 대표 희소 국면에서 가상 F 평가가 진단 wall의 약95.5%를 차지했지만 원 11.8초 사건의 정확한 재현은 아니다. 제품 변경·속도 개선은 없고 회귀42/42, 독립 검토 필수0이며 새 native는 불필요하다. 보호 PASS는 결속 항목에 한정하고 .git 내부 메타데이터 관측을 병기한다.
 
 이전 기록은 [Unit36 창 크기 유지·표시 비용 마감](stage4/STAGE4_DISPLAY_REFRESH_COST_UNIT36_CLOSEOUT.md)이다. Unit36은 창 크기 유지 W를 기능·회귀 9/9, 독립 검토 필수 수정 0건과 현재 PC 사용자 native 확인 범위에서 수용했다. 1024×768·100%의 정책 8개·Replay 조작부, 원래 1920×1080·100% 복원, 수동 확대 유지와 최대화 변경 후 복원을 확인했고 상급→초급의 큰 창 유지도 사용자가 수용했다. 실제 hide/show·다중 모니터·다른 배율은 미확인이다. 표시 D는 기능 86 PASS이나 정·역순 중급·상급 비용 FAIL로 미채택이며 W만 저장소에 남겼다.
 
