@@ -22,9 +22,12 @@ def consistent(root, current, safe, mines, total):
     require(not any(flat[c] >= 0 for c in mines), "ROOT_MINE_REVEALED")
     closed = {c for c,v in enumerate(flat) if v < 0}
     require(len(mines) <= total <= len(closed-safe), "ROOT_GLOBAL_CONTRADICTION")
+    neighbors = None
     for c in range(len(flat)):
         if flat[c] >= 0:
-            adjacent = set(neighbor_indices(width,height)[c])
+            if neighbors is None:
+                neighbors = neighbor_indices(width,height)
+            adjacent = set(neighbors[c])
             require(len(adjacent & mines) <= flat[c] <= len((adjacent & closed)-safe), "ROOT_FACT_CONTRADICTION")
 
 

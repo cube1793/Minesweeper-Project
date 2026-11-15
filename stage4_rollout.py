@@ -17,8 +17,8 @@ from stage4_candidates import EvidenceInput
 from stage4_posterior import neighbor_indices, public_digest
 
 
-PILOT_ID = "PUBLIC_LOCAL_COST_P0_V2_INDEXED_HINT"
-PILOT_WORK_ID = "P0_WORK_V2_RESIDUAL_CONSTRAINT_EDGES"
+PILOT_ID = "PUBLIC_LOCAL_COST_P0_V2_INDEXED_HINT:FA1K_U71"
+PILOT_WORK_ID = "P0_WORK_V2_RESIDUAL_CONSTRAINT_EDGES:FA1K_U71"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +131,30 @@ class _PilotCap(Exception):
     pass
 
 
+def fa1k_asset(kind, pivot, targets, new_flags, flat, adjacent, mines, charge):
+    """FA1-K asset of one safe candidate: 0 or 1, from public facts only.
+
+    1 only for a CHORD that places at least one new FLAG on a proven mine m such
+    that some open number q next to m, other than this pivot, keeps a closed
+    neighbour which is neither a target of this candidate nor a proven mine of
+    the caller's fact set.  OPEN, flag removal and flags already placed give 0.
+    The caller's adjacency table is reused.  charge(n) is called before every
+    bounded scan: at most 8 flags, 8 numbers each, 8 neighbours each.
+    """
+    if kind != "CHORD" or not new_flags:
+        return 0
+    for m in new_flags:
+        charge(len(adjacent[m]) + 1)
+        for q in adjacent[m]:
+            if q == pivot or flat[q] <= 0:
+                continue
+            charge(len(adjacent[q]))
+            for r in adjacent[q]:
+                if flat[r] < 0 and r not in targets and r not in mines:
+                    return 1
+    return 0
+
+
 def pilot_p0(observation, num_mines, counted_inputs, allow_guess, *, max_work=20_000, cancelled=None):
     """Public local rules and cost ordering. Density hints are heuristic only."""
     public = BeliefRequest(observation, num_mines)
@@ -200,10 +224,11 @@ def pilot_p0(observation, num_mines, counted_inputs, allow_guess, *, max_work=20
                 inference_complete = True
                 break
 
-        def add_candidate(kind, pivot, targets, sequence):
+        def add_candidate(kind, pivot, targets, sequence, new_flags=()):
             tick(len(targets) + 1)
             zero = any(all(n not in closed or n in safe for n in adjacent[t]) for t in targets)
-            key = (-Fraction(len(targets), len(sequence)), -int(zero), len(sequence),
+            asset = fa1k_asset(kind, pivot, frozenset(targets), new_flags, flat, adjacent, mines, tick)
+            key = (-Fraction(len(targets), len(sequence)), -int(zero), -asset, len(sequence),
                    ("OPEN", "CHORD").index(kind), pivot,
                    tuple((m.action, m.y, m.x) for m in sequence))
             candidates.append((key, sequence))
@@ -224,7 +249,8 @@ def pilot_p0(observation, num_mines, counted_inputs, allow_guess, *, max_work=20
             if changes and len(targets) < 2:
                 continue
             sequence = tuple(move("FLAG", n) for n in changes) + (move("CHORD", pivot),)
-            add_candidate("CHORD", pivot, targets, sequence)
+            add_candidate("CHORD", pivot, targets, sequence,
+                          tuple(n for n in changes if n in flags))
         if candidates:
             tick()
             return result("READY", "PROVEN_SAFE_COST", min(candidates, key=lambda item: item[0])[1])

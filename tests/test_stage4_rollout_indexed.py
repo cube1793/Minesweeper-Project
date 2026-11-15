@@ -32,8 +32,8 @@ class IndexedPilotTests(unittest.TestCase):
         self.assertEqual(tuple(inspect.signature(rollout.pilot_p0).parameters),
                          ("observation", "num_mines", "counted_inputs", "allow_guess", "max_work", "cancelled"))
         self.assertIsNone(rollout.pilot_p0.__closure__)
-        self.assertEqual(rollout.PILOT_ID, "PUBLIC_LOCAL_COST_P0_V2_INDEXED_HINT")
-        self.assertEqual(rollout.PILOT_WORK_ID, "P0_WORK_V2_RESIDUAL_CONSTRAINT_EDGES")
+        self.assertEqual(rollout.PILOT_ID, "PUBLIC_LOCAL_COST_P0_V2_INDEXED_HINT:FA1K_U71")
+        self.assertEqual(rollout.PILOT_WORK_ID, "P0_WORK_V2_RESIDUAL_CONSTRAINT_EDGES:FA1K_U71")
 
     def test_global_density_and_row_major_tie(self):
         result = self.compare(((H, H, H),), 1)

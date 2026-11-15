@@ -1265,3 +1265,15 @@ samples로 유지하고 synthetic route/cursor나 공통 clock과 합치지 않�
 - 실제 subprocess 실패·취소·종료 테스트와 QTest 기반 입력 통합 검증을 늘린다.
 - 다양한 보드·seed로 benchmark를 확대한다.
 - 기존 engine 공개 API를 기반으로 AI/Gymnasium 환경을 별도 계층에 추가할 수 있다.
+
+## Unit73 N1・FA1-K 소스 반영 (2026-11-15)
+
+N1은 `stage4_live_delivery.consistent()`에서 호출 안의 이웃 표를 재사용한다. FA1-K는 안전 후보의 동률 정렬에 공개 정보로 계산한 깃발 재사용 항을 추가한다. P0・Q・plan・F의 관련 식별자에는 평가본의 `:FA1K_U71` 접미사를 유지한다. 위 Unit7 등 역사적 절의 식별자는 당시 값이다.
+
+반영한 제품 5파일은 Unit72 K1 평가본과 같은 bytes이며, 식별자 단언 2파일도 Unit73 사본 회귀와 같다. Unit73의 관련 14모듈・187시험은 사본에서 PASS했다. 전체 소스 관문과 설치 경로의 수동 UI 확인, 새 배포물 검증은 이 결과에 포함되지 않는다.
+
+Unit72의 F_ONLY + indexed_k100k 새100판에서는 양쪽 46승54패였고 공동승리46판의 평균 효율은 104.196697%에서 108.361795%로, 입력 합은 7,710에서 7,414로 바뀌었다. 개선44・동일1・악화1이며 최고 관측은 N046의 132.335329%다. 표본 내 결과이며 일반 승률 보존이나 S/M/R 효율 향상으로 확장하지 않는다. 현재 UI는 모델 시도 한도8을 사용하며 F_ONLY(0)를 노출하지 않는다. UI・기본값・예산은 이 반영에서 바꾸지 않았다.
+
+N1의 12개 개발 보드 시간 합 432.33초→28.07초는 같은 수순을 유지한 별도 관측이며 일반 가속 배율을 보장하지 않는다. request_id만으로 반영 전후 알고리즘을 식별하지 않고 source bytes와 F 식별자도 함께 확인한다. 원 FAIL・ERROR・실험 봉인은 보존한다.
+
+근거: Unit72 `execution_02/REPORT_KO.txt`, `review_claude_01/REVIEW_REPORT_KO.txt`; Unit73 `execution_01/REPORT_KO.txt`, `coordinator_02/REGRESSION_AUDIT.json`, 적용 결과 `integration_01`. 출력 Unit 이름은 `STAGE4_FA1_CONFIRMATION_UNIT72_2026-11-14` 및 `STAGE4_PRODUCT_INTEGRATION_PREPARATION_UNIT73_2026-11-15`다.

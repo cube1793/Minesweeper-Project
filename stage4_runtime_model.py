@@ -24,9 +24,9 @@ from stage4_runtime_kernel import WORK_VERSION, infer_public_indexed
 from stage4_rollout import VirtualBoard
 
 MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS"
-F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION
-K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION
-V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1"
+F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
+K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
+V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1:FA1K_U71"
 _MODEL_ACTIVE = ContextVar("stage4_runtime_model_active", default=False)
 _F_ACTIVE = ContextVar("stage4_runtime_followup_active", default=False)
 _KERNEL_RESOURCE = {"CELL_LIMIT", "CONSTRAINT_LIMIT", "DERIVED_LIMIT", "WORK_LIMIT", "TIME_LIMIT"}

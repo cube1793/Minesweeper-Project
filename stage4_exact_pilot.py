@@ -24,14 +24,14 @@ from stage4_belief_counter import (
     BACKEND_VERSION, MATH_VERSION, WORK_ACCOUNTING_VERSION,
 )
 from stage4_posterior import neighbor_indices, public_digest
-from stage4_rollout import pilot_p0
+from stage4_rollout import fa1k_asset, pilot_p0
 
 
 UNIT4_LEGACY = "UNIT4_LEGACY"
 UNIT10_SUMMED = "UNIT10_SUMMED"
-Q_VERSION = "PUBLIC_EXACT_COST_Q_V2"
+Q_VERSION = "PUBLIC_EXACT_COST_Q_V2:FA1K_U71"
 Q_ID = f"{Q_VERSION}:{UNIT4_LEGACY}:{MATH_VERSION}:{COUNTER_VERSION}:unit4_work_v1"
-Q_WORK_ID = "Q_LOCAL_P0_V2_PLUS_CANDIDATE_VISITS_AND_UNIT4_WORK_V1"
+Q_WORK_ID = "Q_LOCAL_P0_V2_PLUS_CANDIDATE_VISITS_AND_UNIT4_WORK_V1:FA1K_U71"
 _Q_ACTIVE = ContextVar("stage4_exact_pilot_active", default=False)
 
 
@@ -297,7 +297,7 @@ class _Meter:
 
 
 def _safe_sequence(grid, safe, mines, meter):
-    """Preserve P0 V2's safe-candidate key, using exact facts after a stalled proof."""
+    """P0's safe-candidate key with the FA1-K asset term, using exact facts after a stalled proof."""
     width = len(grid[0])
     flat = tuple(value for row in grid for value in row)
     adjacent = neighbor_indices(width, len(grid))
@@ -307,10 +307,11 @@ def _safe_sequence(grid, safe, mines, meter):
     def move(action, cell):
         return EvidenceInput(action, cell % width, cell // width)
 
-    def add(kind, pivot, targets, sequence):
+    def add(kind, pivot, targets, sequence, new_flags=()):
         meter.tick(len(targets) + 1)
         zero = any(all(n not in closed or n in safe for n in adjacent[t]) for t in targets)
-        key = (-Fraction(len(targets), len(sequence)), -int(zero), len(sequence),
+        asset = fa1k_asset(kind, pivot, frozenset(targets), new_flags, flat, adjacent, mines, meter.tick)
+        key = (-Fraction(len(targets), len(sequence)), -int(zero), -asset, len(sequence),
                ("OPEN", "CHORD").index(kind), pivot,
                tuple((m.action, m.y, m.x) for m in sequence))
         candidates.append((key, sequence))
@@ -331,7 +332,8 @@ def _safe_sequence(grid, safe, mines, meter):
         if changes and len(targets) < 2:
             continue
         add("CHORD", pivot, targets,
-            tuple(move("FLAG", n) for n in changes) + (move("CHORD", pivot),))
+            tuple(move("FLAG", n) for n in changes) + (move("CHORD", pivot),),
+            tuple(n for n in changes if n in flags))
     meter.tick()
     return min(candidates, key=lambda item: item[0])[1]
 

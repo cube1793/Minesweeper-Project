@@ -12,9 +12,10 @@ from stage4_candidates import EvidenceInput
 from stage4_posterior import neighbor_indices, public_digest
 from stage4_exact_pilot import _validate_integer_limits, _validate_seconds
 from stage4_public_kernel import KernelRequest, KernelResult, verify_facts
+from stage4_rollout import fa1k_asset
 
 PRODUCER = "STAGE4_EFFICIENCY_PLAN"
-VERSION = "public_fact_cover_v1"
+VERSION = "public_fact_cover_v1:FA1K_U71"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +143,7 @@ def _group(kind, pivot, targets, mines, flags, width):
                      tuple(_move("FLAG", c, width) for c in changes) + (_move(kind, pivot, width),))
 
 
-def _candidates(ps, u, flags, zeros, width, meter, opened=frozenset()):
+def _candidates(ps, u, flags, zeros, width, meter, opened=frozenset(), key=None):
     rows = []
     for c in sorted(u - opened):
         meter.visit()
@@ -155,7 +156,7 @@ def _candidates(ps, u, flags, zeros, width, meter, opened=frozenset()):
             continue
         g = _group("CHORD", p.pivot, targets, p.required_mines, flags, width)
         rows.append(SafeCandidate(g, Fraction(len(targets), len(g.sequence)), bool(targets & zeros)))
-    return tuple(sorted(rows, key=_candidate_key))
+    return tuple(sorted(rows, key=_candidate_key if key is None else key))
 
 
 def _candidate_key(c):
@@ -163,6 +164,19 @@ def _candidate_key(c):
     return (-c.target_per_input, -int(c.contains_proven_zero), len(g.sequence),
             ("OPEN", "CHORD").index(g.kind), g.pivot,
             tuple((m.action, m.y, m.x) for m in g.sequence))
+
+
+def _fa1k_key(flat, adj, mines, flags, meter):
+    """Key of the top-level candidate list of plan_safe only: the default key with
+    the FA1-K asset term after the zero term.  _greedy keeps _candidate_key."""
+    def key(c):
+        g = c.group
+        new_flags = tuple(sorted(set(g.required_mines) - flags)) if g.kind == "CHORD" else ()
+        asset = fa1k_asset(g.kind, g.pivot, frozenset(g.targets), new_flags, flat, adj, mines, meter.visit)
+        return (-c.target_per_input, -int(c.contains_proven_zero), -asset, len(g.sequence),
+                ("OPEN", "CHORD").index(g.kind), g.pivot,
+                tuple((m.action, m.y, m.x) for m in g.sequence))
+    return key
 
 
 def _greedy(ps, u, initial_flags, zeros, width, meter):
@@ -230,7 +244,8 @@ cost with UNSUPPORTED_SIZE; no exact cost is assigned to a fragment.
                 t, f = closed & safe, closed & mines
                 if t and closed <= safe | mines and len(f) == clue:
                     ps.append(SafePivot(c, tuple(sorted(t)), tuple(sorted(f))))
-        candidates = _candidates(ps, safe, flags, zeros, width, meter)
+        candidates = _candidates(ps, safe, flags, zeros, width, meter,
+                                 key=_fa1k_key(flat, adj, mines, flags, meter))
         pending = set(range(len(ps)))
         while pending:
             indices = {min(pending)}

@@ -482,8 +482,8 @@ class IndexedK100KTests(unittest.TestCase):
                 max_generated=4096, max_candidates=2048, max_distinct_events=512,
                 max_backend_calls=33, max_total_backend_work=500000, max_seconds=10.0),
             diagnostic=False, kernel_kind="indexed")
-        for kind, fid in (("indexed", "PUBLIC_F_INDEXED_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1"),
-                          ("v1", "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1")):
+        for kind, fid in (("indexed", "PUBLIC_F_INDEXED_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1:FA1K_U71"),
+                          ("v1", "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1:FA1K_U71")):
             with self.subTest(kind=kind):
                 old_f["kernel_kind"] = old_model["kernel_kind"] = kind
                 fq = replace(self.followup(), limits=m.fixed_followup_limits(kind))
@@ -508,7 +508,7 @@ class IndexedK100KTests(unittest.TestCase):
     def test_kind_validation_and_fixed_caps_reject_contradictions(self):
         fixed = m.fixed_followup_limits("indexed_k100k")
         self.assertEqual(fixed.followup_id,
-            "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1")
+            "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:prepaid_indexed_immutable_relations_v1:FA1K_U71")
         self.assertEqual(fixed.kernel, m.KernelLimits(max_work=100000))
         self.assertEqual((fixed.plan, fixed.q, fixed.max_seconds), (m.PlanLimits(), m.ExactLimits(), 5.0))
         q = replace(query(), limits=self.limits())
