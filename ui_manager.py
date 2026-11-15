@@ -4028,7 +4028,7 @@ class MinesweeperUI(QWidget):
         self.analysis_status_label.setText(self._analysis_result.status_text)
         preparing = (proposal.is_preparation if k_live.is_k_policy(self._live_policy)
                      else proposal.is_flag_review)
-        self._remember_live_certainty(preparing=preparing)
+        self._remember_live_certainty(preparing=preparing, carry=True)
         self._render_live_analysis()
         self._schedule_v1_step()
 
@@ -4683,10 +4683,13 @@ class MinesweeperUI(QWidget):
                               revision, digest(history),
                               digest(tuple(tuple(row) for row in observation)))
 
-    def _remember_live_certainty(self, *, preparing=False):
+    def _remember_live_certainty(self, *, preparing=False, carry=False):
         context = None if preparing else self._display_context()
+        # carry: a V1/K result keeps the proofs the last recorded input already
+        # advanced into this context. Display only; proposals never receive them.
         self._certainty_frame = (CertaintyFrame.capture(
-            context, self._analysis_result.overlays, self.engine.get_observation())
+            context, self._analysis_result.overlays, self.engine.get_observation(),
+            carried=self._certainty_frame if carry else None)
             if context is not None else None)
 
     def _render_live_analysis(self):
@@ -4702,10 +4705,11 @@ class MinesweeperUI(QWidget):
                 text += "\n" + reference_text(result, player.engine.status, self._replay_reference_error)
                 overlays = reference_overlays(result)
             self.analysis_status_label.setText(text)
-        elif result is None and self._certainty_frame is not None:
+        elif self._certainty_frame is not None:
             if (type(self._certainty_frame) is CertaintyFrame
                     and self._certainty_frame.context == self._display_context()):
-                overlays = self._certainty_frame.overlays()
+                overlays = (self._certainty_frame.overlays() if result is None
+                            else self._certainty_frame.overlays_with(overlays))
             else:
                 self._certainty_frame = None
         for coordinate, button in self._buttons.items():

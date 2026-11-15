@@ -15,10 +15,12 @@ from replay_analysis import analyze_replay_step, ReplayComparisonKind
 from replay_display import recorded_input, reference_overlays
 from replay_model import ReplayBoard, ReplayData, ReplayEvent
 from replay_player import ReplayPlayer
+from simple_probability import CellProbability
 from tests import test_live_k_ui as base
 from tests.test_live_k_lc0_ui import FamilyFakeJob
 from tests.test_replay_analysis_ui import ReplayAnalysisUITests
 from tests.live_k_lc1_fixtures import install_singleton
+import ui_manager
 from ui_manager import CellButton
 
 
@@ -55,6 +57,75 @@ class CertaintyFrameTests(unittest.TestCase):
             with self.subTest(current=field):
                 self.assertIsNone(frame.advance(c, replace(c, revision=3, **({field: value} if field != 'revision' else {}))
                                                if field != 'revision' else replace(c, revision=value), [[-2]]))
+
+    def test_carried_proofs_join_a_new_capture_only_in_the_same_context_without_disagreement(self):
+        c = DisplayContext('g', 'p', 'r', 1, 3, 2, 'h', 'o')
+        obs = [[-2, -2, -2, -2, 1, -3]]
+        # (4, 0) was opened and (5, 0) flagged since the carried frame was made.
+        carried = CertaintyFrame(c, frozenset({(0, 0), (4, 0)}), frozenset({(1, 0), (5, 0)}))
+        fresh = {(2, 0): CellOverlay(OverlayKind.SAFE, True)}
+        plain = CertaintyFrame.capture(c, fresh, obs)
+        self.assertEqual((plain.safe, plain.mines), ({(2, 0)}, frozenset()))
+        kept = CertaintyFrame.capture(c, fresh, obs, carried=carried)
+        self.assertEqual((kept.safe, kept.mines), ({(0, 0), (2, 0)}, {(1, 0)}))
+        agreeing = {**fresh, (0, 0): CellOverlay(OverlayKind.SAFE), (1, 0): CellOverlay(OverlayKind.MINE)}
+        self.assertEqual(CertaintyFrame.capture(c, agreeing, obs, carried=carried), kept)
+        chance = CellProbability((0, 0), 1, 2)
+        for name, stated in (('safe became mine', {(0, 0): CellOverlay(OverlayKind.MINE)}),
+                             ('safe became uncertain', {(0, 0): CellOverlay(OverlayKind.UNCERTAIN, False, chance)}),
+                             ('safe became guess', {(0, 0): CellOverlay(OverlayKind.GUESS_CANDIDATE, False, chance)}),
+                             ('mine became safe', {(1, 0): CellOverlay(OverlayKind.SAFE)})):
+            with self.subTest(disagreement=name):
+                # One contradiction discredits the whole carried epoch, not just that cell.
+                overlays = {**fresh, **stated}
+                self.assertEqual(CertaintyFrame.capture(c, overlays, obs, carried=carried),
+                                 CertaintyFrame.capture(c, overlays, obs))
+        for field, value in [('game', 'g2'), ('policy', 'p2'), ('run', 'r2'), ('generation', 2),
+                             ('owner', 4), ('revision', 3), ('history_digest', 'h2'),
+                             ('observation_digest', 'o2')]:
+            with self.subTest(context=field):
+                other = replace(c, **{field: value})
+                self.assertEqual(CertaintyFrame.capture(other, fresh, obs, carried=carried),
+                                 CertaintyFrame.capture(other, fresh, obs))
+        for name, bad in (('absent', None), ('foreign', object()), ('dict', {'safe': {(0, 0)}}),
+                          ('mutable', CertaintyFrame(c, {(0, 0)}, frozenset())),
+                          ('overlapping', CertaintyFrame(c, frozenset({(0, 0)}), frozenset({(0, 0)}))),
+                          ('no context', CertaintyFrame(None, frozenset({(0, 0)}), frozenset()))):
+            with self.subTest(carried=name):
+                context = None if name == 'no context' else c
+                self.assertEqual(CertaintyFrame.capture(context, fresh, obs, carried=bad),
+                                 CertaintyFrame.capture(context, fresh, obs))
+
+    def test_carried_proofs_survive_several_recorded_inputs_until_opened_or_flagged(self):
+        c = DisplayContext('g', 'p', 'r', 1, 3, 2, 'h', 'o')
+        frame = CertaintyFrame.capture(c, {(0, 0): CellOverlay(OverlayKind.SAFE),
+                                           (1, 0): CellOverlay(OverlayKind.SAFE),
+                                           (2, 0): CellOverlay(OverlayKind.MINE)}, [[-2, -2, -2, -2]])
+        steps = (([[-2, -2, -2, 1]], {(0, 0), (1, 0)}, {(2, 0)}),   # local result knows none of them
+                 ([[-2, -2, -3, 1]], {(0, 0), (1, 0)}, set()),      # the mine was physically flagged
+                 ([[1, -2, -3, 1]], {(1, 0)}, set()))               # one safe cell was opened
+        for revision, (obs, safe, mines) in enumerate(steps, start=3):
+            current = replace(c, revision=revision, history_digest=f'h{revision}',
+                              observation_digest=f'o{revision}')
+            carried = frame.advance(frame.context, current, obs)
+            frame = CertaintyFrame.capture(current, {(3, 0): CellOverlay(None, True)}, obs, carried=carried)
+            self.assertEqual((frame.safe, frame.mines), (safe, mines))
+
+    def test_kept_colors_fill_only_cells_the_current_result_leaves_uncolored(self):
+        c = DisplayContext('g', 'p', 'r', 1, 3, 2, 'h', 'o')
+        frame = CertaintyFrame(c, frozenset({(0, 0), (2, 0), (4, 0)}), frozenset({(1, 0)}))
+        chance = CellProbability((3, 0), 1, 2)
+        current = {(2, 0): CellOverlay(OverlayKind.SAFE, True),
+                   (3, 0): CellOverlay(OverlayKind.GUESS_CANDIDATE, False, chance),
+                   (4, 0): CellOverlay(None, True), (5, 0): CellOverlay(None, True)}
+        merged = frame.overlays_with(current)
+        self.assertEqual(merged, {(0, 0): CellOverlay(OverlayKind.SAFE), (1, 0): CellOverlay(OverlayKind.MINE),
+                                  (2, 0): current[(2, 0)], (3, 0): current[(3, 0)],
+                                  (4, 0): CellOverlay(OverlayKind.SAFE, True), (5, 0): current[(5, 0)]})
+        self.assertEqual({k for k, o in merged.items() if o.recommended}, {(2, 0), (4, 0), (5, 0)})
+        self.assertEqual({k for k, o in merged.items() if o.probability}, {(3, 0)})
+        self.assertEqual(set(current), {(2, 0), (3, 0), (4, 0), (5, 0)})  # the result itself is untouched
+        self.assertEqual(CertaintyFrame(c, {(0, 0)}, frozenset()).overlays_with(current), current)
 
 
 class ReplayDisplayTests(unittest.TestCase):
@@ -299,3 +370,228 @@ class LiveDisplayTests(unittest.TestCase):
             button.set_analysis_overlay(button.analysis_overlay)
             update.assert_not_called()
         self.assertIsNone(self.ui._analysis_result)
+
+    def later_results(self, later):
+        """Display seam: reshape what later V1/K/Simple presentations show, never the proposals.
+
+        The first presentation after ``self.presented`` is emptied stays as produced.
+        """
+        self.presented, self.later = [], later
+        if getattr(self, 'presentation_seam', False):
+            return
+        self.presentation_seam = True
+
+        def wrap(original):
+            def present(*args):
+                result = original(*args)
+                change = self.later if self.presented else None
+                self.presented.append(result)
+                return result if change is None else replace(result, overlays=change(dict(result.overlays)))
+            return present
+
+        for name in ('present_v1_proposal', 'present_k_proposal', 'present_decision'):
+            patcher = patch.object(ui_manager, name, wrap(getattr(ui_manager, name)))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def local_only(overlays):
+        """A later local result: only the recommended cell keeps its SAFE color."""
+        return {c: o for c, o in overlays.items() if o.kind != OverlayKind.SAFE or o.recommended}
+
+    def advance_to_next_result(self, policy=POLICY_K_LC1):
+        self.apply(policy)
+        if policy != POLICY_SIMPLE:
+            self.job.deliver_ack()
+            self.job.compute()
+        return self.ui._analysis_result
+
+    def raw(self, result=None):
+        result = self.ui._analysis_result if result is None else result
+        return {c: o.kind for c, o in result.overlays.items() if o.kind in (OverlayKind.SAFE, OverlayKind.MINE)}
+
+    def test_proven_colors_stay_on_real_cells_through_later_local_results(self):
+        self.later_results(self.local_only)
+        for policy, expected_steps in ((POLICY_V1, 1), (POLICY_K_LC1, 2), (POLICY_K, 1), (POLICY_K_LC0, 1)):
+            with self.subTest(policy=policy):
+                self.presented.clear()
+                requests, applied = len(self.job.requests), len(self.job.applied)
+                self.prepare(policy)
+                shown, omitted_steps = self.certainty(), 0
+                self.assertEqual(shown, self.raw())
+                for _ in range(2):
+                    result = self.advance_to_next_result(policy)
+                    pending = self.ui._v1_pending
+                    hidden = hidden_cells(self.engine.get_observation())
+                    remaining = {c: kind for c, kind in shown.items() if c in hidden}
+                    raw = self.raw(result)
+                    omitted = set(remaining) - set(raw)
+                    omitted_steps += bool(omitted)
+                    # Actual cells: every still-hidden proof stays, the new result is added.
+                    self.assertEqual(self.certainty(), {**remaining, **raw})
+                    self.assertTrue(set(self.certainty()) <= hidden)
+                    for cell in omitted:
+                        button = self.ui._buttons[cell]
+                        self.assertEqual(button.analysis_overlay, CellOverlay(remaining[cell]))
+                        self.assertEqual(button.probability_text, '')
+                        self.assertNotIn('추천', button.toolTip())
+                    # Recommendation, probabilities and status come from the current result only.
+                    self.assertEqual({c for c, b in self.ui._buttons.items()
+                                      if b.analysis_overlay and b.analysis_overlay.recommended},
+                                     {(pending.x, pending.y)})
+                    self.assertEqual({c: b.analysis_overlay.probability for c, b in self.ui._buttons.items()
+                                      if b.analysis_overlay and b.analysis_overlay.probability},
+                                     {c: o.probability for c, o in result.overlays.items() if o.probability})
+                    self.assertEqual(self.ui.analysis_status_label.text(), result.status_text)
+                    # The proposal and the presented result never receive the kept cells.
+                    self.assertFalse(omitted & set(result.overlays))
+                    self.assertIs(self.ui._v1_pending, self.job.pending)
+                    if policy != POLICY_V1:
+                        self.assertEqual(pending.safe_cells,
+                                         tuple(sorted(self.job.owner.decision.selection_safe_cells,
+                                                      key=lambda c: (c[1], c[0]))))
+                    shown = self.certainty()
+                self.assertEqual(omitted_steps, expected_steps)
+                # One request per shown result and one consumed token per input: no extra analysis.
+                self.assertEqual(len(self.job.requests) - requests, 3)
+                self.assertEqual(len(self.job.applied) - applied, 2)
+
+    def test_disagreeing_result_discards_every_carried_color(self):
+        chance = CellProbability((1, 10), 1, 2)
+        for name, stated in (('mine', CellOverlay(OverlayKind.MINE)),
+                             ('uncertain', CellOverlay(OverlayKind.UNCERTAIN, False, chance))):
+            with self.subTest(stated=name):
+                self.later_results(lambda overlays: {**self.local_only(overlays), (1, 10): stated})
+                self.prepare()
+                self.assertEqual(self.certainty().get((1, 10)), OverlayKind.SAFE)
+                result = self.advance_to_next_result()
+                self.assertEqual(self.certainty(), self.raw(result))
+                self.assertNotIn((2, 10), self.certainty())
+                self.assertEqual(self.ui._buttons[(1, 10)].analysis_overlay, stated)
+                frame = self.ui._certainty_frame
+                self.assertEqual((frame.safe, frame.mines),
+                                 ({c for c, kind in self.raw(result).items() if kind == OverlayKind.SAFE},
+                                  {c for c, kind in self.raw(result).items() if kind == OverlayKind.MINE}))
+
+    def test_carried_colors_need_the_exact_current_context_when_the_result_arrives(self):
+        self.later_results(self.local_only)
+        for field, value in (('game', 'other'), ('policy', POLICY_K_LC0), ('run', 'other'),
+                             ('generation', 987), ('owner', 1), ('revision', 99),
+                             ('history_digest', 'other'), ('observation_digest', 'other')):
+            with self.subTest(field=field):
+                self.presented.clear()
+                self.prepare()
+                self.apply()
+                frame = self.ui._certainty_frame
+                self.assertIn((2, 10), frame.safe)
+                self.ui._certainty_frame = replace(frame, context=replace(frame.context, **{field: value}))
+                self.job.deliver_ack()
+                self.job.compute()
+                self.assertEqual(self.certainty(), self.raw())
+                self.assertNotIn((2, 10), self.certainty())
+
+    def test_hard_invalidations_and_context_changes_drop_kept_colors_under_a_result(self):
+        self.later_results(self.local_only)
+        actions = {
+            'manual press': lambda: QTest.mousePress(self.ui._buttons[(3, 3)], Qt.LeftButton),
+            'manual flag': lambda: self.ui.on_right_click(2, 10),
+            'policy': lambda: self.ui.live_policy_combo.setCurrentIndex(0),
+            'reset': self.ui.on_reset,
+            'analysis off': lambda: self.ui.analysis_checkbox.setChecked(False),
+            'failure': lambda: self.ui._fail_v1('display test failure'),
+            'owner disposal': lambda: self.ui._invalidate_v1_run('display test disposal'),
+            'Replay': lambda: self.ui._enter_replay_mode(ReplayPlayer(ReplayData(
+                ReplayBoard(2, 1, 1, {(1, 0)}), (ReplayEvent(1, 0, 0, 'OPEN'),)))),
+        }
+        for name, action in actions.items():
+            with self.subTest(boundary=name):
+                self.presented.clear()
+                self.prepare()
+                self.advance_to_next_result()
+                self.assertEqual(self.certainty().get((2, 10)), OverlayKind.SAFE)
+                self.assertNotIn((2, 10), self.ui._analysis_result.overlays)
+                action()
+                self.assertIsNone(self.ui._certainty_frame)
+                if not self.ui._replay_mode:
+                    self.assertEqual(self.certainty(), {})
+                if name == 'manual press':
+                    QTest.mouseRelease(self.ui._buttons[(3, 3)], Qt.LeftButton)
+                if self.ui._replay_mode:
+                    self.ui.analysis_checkbox.setChecked(False)
+                    self.ui._exit_replay_mode()
+        for field, value in (('_live_game_id', 'other'), ('_live_run_id', 'other'),
+                             ('_live_board_generation', 987), ('_live_input_uncertain', True),
+                             ('_v1_owned', False), ('_live_policy', POLICY_K_LC0)):
+            with self.subTest(field=field):
+                self.presented.clear()
+                self.prepare()
+                result = self.advance_to_next_result()
+                setattr(self.ui, field, value)
+                self.ui._render_live_analysis()
+                self.assertIsNone(self.ui._certainty_frame)
+                # The retained current result is still drawn; only the kept colors expire.
+                self.assertEqual(self.certainty(), self.raw(result))
+        self.presented.clear()
+        self.prepare()
+        self.advance_to_next_result()
+        self.ui.live_input_records[0]['x'] = 5
+        self.ui._render_live_analysis()
+        self.assertIsNone(self.ui._certainty_frame)
+        self.assertNotIn((2, 10), self.certainty())
+
+    def test_pause_and_redisplay_keep_colors_without_another_request(self):
+        self.later_results(self.local_only)
+        self.prepare()
+        self.advance_to_next_result()
+        kept, pending = self.certainty(), self.ui._v1_pending
+        self.assertEqual(kept.get((2, 10)), OverlayKind.SAFE)
+        requests = len(self.job.requests)
+        with patch('ui_manager.analyze_position', side_effect=AssertionError('extra analysis')):
+            self.ui.simple_auto_checkbox.setChecked(False)
+            self.assertEqual(self.certainty(), kept)
+            self.ui.probability_checkbox.toggle()
+            self.assertEqual(self.certainty(), kept)
+            self.ui.simple_auto_checkbox.setChecked(True)
+            self.assertEqual(self.certainty(), kept)
+        self.assertIs(self.ui._v1_pending, pending)
+        self.assertEqual(len(self.job.requests), requests)
+
+    def test_absent_or_tampered_cache_at_result_time_changes_only_the_kept_colors(self):
+        self.later_results(self.local_only)
+        outcomes = {}
+        for name in ('valid', 'absent', 'foreign', 'mutable fields'):
+            with self.subTest(cache=name):
+                self.presented.clear()
+                self.prepare()
+                self.apply()
+                frame = self.ui._certainty_frame
+                if name != 'valid':
+                    self.ui._certainty_frame = {'absent': None, 'foreign': object(),
+                                                'mutable fields': CertaintyFrame(frame.context, set(frame.safe),
+                                                                                 list(frame.mines))}[name]
+                requests = len(self.job.requests)
+                self.job.deliver_ack()
+                self.job.compute()
+                self.assertEqual(len(self.job.requests), requests + 1)
+                pending = self.ui._v1_pending
+                self.assertIs(pending, self.job.pending)
+                if name != 'valid':
+                    self.assertEqual(self.certainty(), self.raw())
+                applied = len(self.job.applied)
+                self.apply()
+                self.assertEqual(len(self.job.applied), applied + 1)
+                self.assertEqual(len(self.job.requests), requests + 1)
+                record = self.ui.live_action_records[-1]
+                self.assertEqual((record['token'], record['action'], record['x'], record['y']),
+                                 (pending.token, pending.action, pending.x, pending.y))
+                outcomes[name] = [(r['action'], r['x'], r['y']) for r in self.ui.live_action_records]
+        self.assertEqual(len(set(map(tuple, outcomes.values()))), 1)
+
+    def test_simple_results_still_replace_the_previous_colors(self):
+        self.later_results(self.local_only)
+        self.prepare(POLICY_SIMPLE)
+        shown = self.certainty()
+        result = self.advance_to_next_result(POLICY_SIMPLE)
+        hidden = hidden_cells(self.engine.get_observation())
+        self.assertTrue({c for c in shown if c in hidden} - set(self.raw(result)))
+        self.assertEqual(self.certainty(), self.raw(result))
