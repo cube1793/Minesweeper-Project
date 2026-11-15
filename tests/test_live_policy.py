@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError, replace
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -485,6 +486,143 @@ class WriteOnceTransportTests(unittest.TestCase):
             (self.directory / "worker-00000000.json").write_bytes(b" " * 101)
             with self.assertRaises(policy.LivePolicyError):
                 transport.read_next(self.directory, "worker", 0, RUN)
+
+    # --- expected message absent: the folder check repeated on every call ---
+
+    def folder_with(self, names):
+        """A fresh channel folder; a trailing slash makes a directory entry."""
+        folder = Path(tempfile.mkdtemp(dir=self.directory))
+        for name in names:
+            if name.endswith("/"):
+                (folder / name[:-1]).mkdir()
+            else:
+                (folder / name).write_bytes(b"{}")
+        return folder
+
+    def past_messages(self, count=5):
+        folder = self.folder_with(())
+        for seq in range(count):
+            for direction in ("parent", "worker"):
+                transport.write_once(folder, direction, seq, transport.message(RUN, seq, "NEXT", {}))
+        return folder
+
+    def test_absent_check_rejects_any_future_sequence_of_the_same_direction(self):
+        future = "Future message arrived before its predecessor."
+        for name in ("worker-00000006.json", "worker-00000008.json", "worker-00000900.json",
+                     "worker-99999999.json", "worker-00000009.json/"):
+            with self.subTest(name=name):
+                folder = self.past_messages()
+                if name.endswith("/"):
+                    (folder / name[:-1]).mkdir()
+                else:
+                    (folder / name).write_bytes(b"{}")
+                with self.assertRaisesRegex(policy.LivePolicyError, future):
+                    transport.read_next(folder, "worker", 5, RUN)
+                # The same file is not a future message for a later request or the other direction.
+                self.assertIsNone(transport.read_next(folder, "parent", 5, RUN))
+        self.assertIsNone(transport.read_next(self.past_messages(), "worker", 5, RUN))
+        self.assertIsNone(transport.read_next(self.folder_with(["parent-00000099.json"]), "worker", 0, RUN))
+        top = transport.MAX_SEQUENCE
+        self.assertIsNone(transport.read_next(self.folder_with([f"worker-{top - 1:08d}.json"]), "worker", top, RUN))
+        with self.assertRaisesRegex(policy.LivePolicyError, future):
+            transport.read_next(self.folder_with([f"worker-{top + 1:08d}.json"]), "worker", top, RUN)
+
+    def test_absent_check_rejects_malformed_names_within_the_selection(self):
+        malformed = "Malformed channel filename."
+        always = ("worker-0000001.json", "worker-000000001.json", "worker-.json", "worker-0000000a.json",
+                  "worker-+0000001.json", "worker-00000001.json.json", "worker-00000001.bak.json",
+                  "worker-\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0661.json",
+                  "worker-\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff11.json", "worker-bad.json/")
+        for name in always:
+            with self.subTest(name=name), self.assertRaisesRegex(policy.LivePolicyError, malformed):
+                transport.read_next(self.folder_with([name]), "worker", 5, RUN)
+        # The selection ignores case exactly where this platform's paths do.
+        insensitive = os.path.normcase("Aa") != "Aa"
+        for name in ("worker-00000001.JSON", "WORKER-00000001.json", "Worker-00000009.Json"):
+            with self.subTest(name=name, insensitive=insensitive):
+                folder = self.folder_with([name])
+                if insensitive:
+                    with self.assertRaisesRegex(policy.LivePolicyError, malformed):
+                        transport.read_next(folder, "worker", 5, RUN)
+                else:
+                    self.assertIsNone(transport.read_next(folder, "worker", 5, RUN))
+
+    def test_absent_check_ignores_names_outside_the_selection(self):
+        for name in ("worker-00000009.jsonx", "worker-00000009.txt", "worker_00000009.json",
+                     "xworker-00000009.json", "workers-00000009.json", "worker.json",
+                     ".worker-00000009.json." + "a" * 32 + ".part", "worker-00000009.json.part",
+                     "stderr.txt", "parent-00000009.json", "parent-bad.json"):
+            with self.subTest(name=name):
+                self.assertIsNone(transport.read_next(self.folder_with([name]), "worker", 5, RUN))
+
+    def test_absent_check_selects_exactly_what_the_glob_selected(self):
+        folder = self.folder_with([
+            "worker-00000001.json", "worker-00000002.JSON", "WORKER-00000003.json", "worker-.json",
+            "worker-x.json.json", "worker-00000004.jsonx", "worker_00000005.json", "xworker-00000006.json",
+            "workers-00000007.json", "worker.json", ".worker-00000008.json.part", "parent-00000009.json",
+            "wor\u212aer-00000010.json", "worker-00000011.j\u017fon", "worker-00000012.json/"])
+        select = transport._CHANNEL_NAMES["worker"][0]
+        selected = {name for name in os.listdir(folder) if select(name)}
+        self.assertEqual(selected, {candidate.name for candidate in folder.glob("worker-*.json")})
+        self.assertIn("worker-00000001.json", selected)
+        self.assertNotIn("parent-00000009.json", selected)
+
+    def test_absent_check_follows_listing_order_and_lists_on_every_call(self):
+        folder = self.folder_with(())
+        listed = []
+
+        def listing(names):
+            def listdir(target):
+                listed.append(Path(target))
+                return list(names)
+            return listdir
+
+        with patch.object(transport.os, "listdir", listing(["worker-!x.json", "worker-00000009.json"])):
+            with self.assertRaisesRegex(policy.LivePolicyError, "Malformed channel filename."):
+                transport.read_next(folder, "worker", 5, RUN)
+        with patch.object(transport.os, "listdir", listing(["worker-00000009.json", "worker-zz.json"])):
+            with self.assertRaisesRegex(policy.LivePolicyError, "Future message arrived"):
+                transport.read_next(folder, "worker", 5, RUN)
+        with patch.object(transport.os, "listdir", listing(["worker-00000003.json", "stderr.txt"])):
+            for _ in range(3):  # no cached answer and no skipped call
+                self.assertIsNone(transport.read_next(folder, "worker", 5, RUN))
+        self.assertEqual(listed, [folder] * 5)
+
+    def test_listing_failure_keeps_the_absent_answer_the_glob_gave(self):
+        # Not a new allowance: Path.glob already treated a failed listing as an empty
+        # folder, so a failure here hid even a future message. Kept unchanged on purpose.
+        folder = self.folder_with(["worker-00000009.json"])
+        for error in (PermissionError(13, "denied"), FileNotFoundError(2, "gone"), OSError(5, "io")):
+            with self.subTest(error=type(error).__name__), \
+                    patch.object(transport.os, "listdir", side_effect=error):
+                self.assertIsNone(transport.read_next(folder, "worker", 5, RUN))
+        with self.assertRaises(policy.LivePolicyError):  # and it is still rejected once listing works
+            transport.read_next(folder, "worker", 5, RUN)
+
+    def test_message_published_during_the_listing_is_read_by_the_next_call(self):
+        folder = self.past_messages(3)
+        expected = transport.message(RUN, 3, "ACKED", {})
+        real, published = transport.os.listdir, []
+
+        def publish_then_list(target):
+            if not published:
+                published.append(transport.write_once(folder, "worker", 3, expected))
+            return real(target)
+
+        with patch.object(transport.os, "listdir", publish_then_list):
+            self.assertIsNone(transport.read_next(folder, "worker", 3, RUN))
+        self.assertEqual(len(published), 1)
+        self.assertEqual(transport.read_next(folder, "worker", 3, RUN), expected)
+
+    def test_absent_check_leaves_the_folder_free_to_be_renamed(self):
+        folder = self.past_messages(3)
+        self.assertIsNone(transport.read_next(folder, "worker", 3, RUN))
+        (folder / "worker-00000009.json").write_bytes(b"{}")
+        with self.assertRaises(policy.LivePolicyError):  # a rejection must not keep a listing open either
+            transport.read_next(folder, "worker", 3, RUN)
+        moved = folder.with_name(folder.name + "_moved")
+        os.rename(folder, moved)  # an open directory handle would refuse this on Windows
+        self.assertIsNone(transport.read_next(moved, "parent", 3, RUN))
 
 
 class WorkerSequenceTests(unittest.TestCase):

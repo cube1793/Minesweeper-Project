@@ -1,5 +1,6 @@
 """Bounded, strict JSON messages published once per direction/sequence."""
 
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -100,14 +101,44 @@ def _invalid_constant(value):
     raise LivePolicyError(f"Non-finite JSON constant: {value}.")
 
 
+# The absent-message check selects names exactly as Path.glob(f"{direction}-*.json")
+# did: fnmatch's regex, ignoring case only where this platform's paths do. The second
+# entry is the strict published name.
+_GLOB_FLAGS = re.NOFLAG if os.path.normcase("Aa") == "Aa" else re.IGNORECASE
+_CHANNEL_NAMES = {
+    direction: (re.compile(fnmatch.translate(f"{direction}-*.json"), _GLOB_FLAGS).match,
+                re.compile(rf"{direction}-([0-9]{{8}})\.json\Z").fullmatch)
+    for direction in ("parent", "worker")
+}
+
+
+def _listed_names(folder):
+    """Every name in the channel folder, in the order the system lists them.
+
+    Same names and order as the glob this replaces, without one path object per
+    entry and with no directory handle left open. Two of the glob's outcomes are
+    kept as they were, not added: a folder that is no longer a directory and a
+    listing that fails both count as empty.
+    """
+    if not folder.is_dir():
+        return ()
+    try:
+        return os.listdir(folder)
+    except OSError:
+        return ()
+
+
 def read_next(directory, direction, seq, run_id):
     path = _path(directory, direction, seq)
     if not path.exists():
-        pattern = re.compile(rf"{direction}-([0-9]{{8}})\.json\Z")
-        for candidate in path.parent.glob(f"{direction}-*.json"):
-            match = pattern.fullmatch(candidate.name)
-            _require(match is not None, "Malformed channel filename.")
-            _require(int(match.group(1)) <= seq, "Future message arrived before its predecessor.")
+        # Checked on every call, never cached or skipped: no malformed name in the
+        # selection, and no message of this direction beyond the one awaited.
+        select, strict = _CHANNEL_NAMES[direction]
+        for name in _listed_names(path.parent):
+            if select(name):
+                match = strict(name)
+                _require(match is not None, "Malformed channel filename.")
+                _require(int(match.group(1)) <= seq, "Future message arrived before its predecessor.")
         return None
     _require(path.is_file() and not path.is_symlink(), "Unsafe channel message path.")
     with path.open("rb") as stream:
