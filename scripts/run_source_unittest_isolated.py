@@ -208,6 +208,61 @@ def successful(counts):
                                           "not_started", "unfinished", "fixture_errors"))
 
 
+def read_journal(path):
+    """Return (records, problems) from a child's events.jsonl without trusting it."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return [], ["Missing child journal"]
+    except (OSError, ValueError) as exc:
+        return [], [f"Unreadable child journal: {type(exc).__name__}: {exc}"]
+    records, problems = [], []
+    for number, line in enumerate(lines, 1):
+        try:
+            row = json.loads(line)
+            require(isinstance(row, dict) and row.get("kind") in ("start", "stop") + STATUSES[:6] and
+                    isinstance(row.get("id"), str) and "parent_id" in row and
+                    isinstance(row["parent_id"], (str, type(None))), "Not a journal record")
+            records.append(row)
+        except Exception:
+            # A killed child can leave a cut line. Keep the rows around it.
+            problems.append(f"Incomplete journal line {number}")
+    return records, problems
+
+
+def reconcile(directory, ids, exit_code):
+    """Return (receipt, problems) for one finished child.
+
+    The child's receipt counts only if the journal it flushed while running
+    rebuilds to the same receipt and the exit code agrees. Otherwise the journal
+    view is returned with the reasons, and the partition must not pass.
+    """
+    records, problems = read_journal(Path(directory) / "events.jsonl")
+    journal_usable = not problems
+    try:
+        from_journal = make_receipt(ids, records)
+    except Exception as exc:
+        journal_usable = False
+        problems.append(f"Journal accounting failed: {type(exc).__name__}: {exc}")
+        from_journal = make_receipt(ids, [])
+    receipt = None
+    try:
+        receipt_path = Path(directory) / "receipt.json"
+        require(receipt_path.is_file(), "Missing child receipt")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        validate_receipt(receipt, ids)
+    except Exception as exc:
+        receipt = None
+        problems.append(str(exc) if type(exc) is RuntimeError else f"{type(exc).__name__}: {exc}")
+    if receipt is not None:
+        if exit_code != (0 if successful(receipt["counts"]) else 1):
+            problems.append("Exit/receipt mismatch")
+        differing = [key for key in from_journal if receipt[key] != from_journal[key]]
+        if journal_usable and differing:
+            problems.append("Journal/receipt mismatch: " + ", ".join(differing))
+    return (from_journal if problems else receipt), problems
+
+
 def child(request_path, directory):
     ids = json.loads(Path(request_path).read_text(encoding="utf-8"))
     loader = unittest.TestLoader()
@@ -306,43 +361,36 @@ def full_source(output, modules=(), collect_only=False, timeout=3600):
         print(f"SOURCE_UNITTEST_COLLECTED raw={discovery['raw_discovered']} unique={discovery['unique_discovered']} "
               f"selected={len(selected_ids)} partitions={len(groups)}", flush=True)
         return 0
-    combined, launches, accounting_errors = [], [], []
+    combined, launches, accounting_errors, reconciled = [], [], [], 0
     for index, (name, ids) in enumerate(groups.items(), 1):
         directory = output / f"{index:03d}_{name}"
         directory.mkdir()
         request = directory / "request.json"
         write_json(request, ids)
         info = launch(["--test-child", str(request), str(directory)], directory, timeout)
-        receipt_path = directory / "receipt.json"
-        try:
-            require(receipt_path.is_file(), "Missing child receipt")
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            validate_receipt(receipt, ids)
-            require(info["exit_code"] == (0 if successful(receipt["counts"]) else 1), "Exit/receipt mismatch")
-        except Exception as exc:
-            info["errors"].append(f"{type(exc).__name__}: {exc}")
-            accounting_errors.append(dict(partition=name, error=str(exc)))
-            journal = directory / "events.jsonl"
-            records = []
-            if journal.is_file():
-                for line in journal.read_text(encoding="utf-8").splitlines():
-                    try:
-                        records.append(json.loads(line))
-                    except ValueError:
-                        info["errors"].append("Incomplete journal line")
-            receipt = make_receipt(ids, records)
-            write_json(directory / "recovered_receipt.json", receipt)
+        # The journal is read on every path, not only after a receipt failure.
+        receipt, problems = reconcile(directory, ids, info["exit_code"])
+        if problems:
+            try:
+                # Kept beside the child's own files, which are never rewritten.
+                write_json(directory / "recovered_receipt.json", receipt)
+            except Exception as exc:
+                problems.append(f"Recovered receipt not written: {type(exc).__name__}: {exc}")
+        info["errors"].extend(problems)
+        accounting_errors.extend(dict(partition=name, error=problem) for problem in problems)
+        reconciled += not problems
         combined.append(receipt)
         launches.append(dict(partition=name, directory=str(directory), **info))
         print(f"SOURCE_UNITTEST_PARTITION {index}/{len(groups)} {name} " +
-              json.dumps(receipt["counts"], sort_keys=True) + f" infrastructure_errors={len(info['errors'])}", flush=True)
+              json.dumps(receipt["counts"], sort_keys=True) + f" infrastructure_errors={len(info['errors'])}" +
+              f" journal={'RECOVERED' if problems else 'MATCH'}", flush=True)
     counts = {key: sum(row["counts"][key] for row in combined) for key in combined[0]["counts"]} if combined else {}
     summary = dict(scope="subset" if modules else "full_source", raw_discovered=discovery["raw_discovered"],
                    unique_discovered=discovery["unique_discovered"], removed_aliases=len(discovery["duplicates"]),
                    partitions=len(groups), counts=counts, processes=launches,
                    infrastructure_errors=sum(len(row["errors"]) for row in launches),
                    partition_integrity="PASS", result_accounting="PASS" if not accounting_errors else "INCOMPLETE",
-                   accounting_errors=accounting_errors)
+                   journal_reconciled=reconciled, accounting_errors=accounting_errors)
     summary["successful"] = bool(counts) and successful(counts) and not summary["infrastructure_errors"]
     write_json(output / "summary.json", summary)
     print("SOURCE_UNITTEST_SUMMARY " + json.dumps({k: v for k, v in summary.items() if k != "processes"}, sort_keys=True), flush=True)

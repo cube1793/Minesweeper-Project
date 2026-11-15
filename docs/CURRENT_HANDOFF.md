@@ -1,8 +1,10 @@
 # Current Project Handoff
 
-Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용.
+Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용,
+실행기 후속 보완(FU-01) 추가.
 보완한 표준 실행기에서 **6,295 PASS / 11 opt-in SKIP / FAIL·ERROR·미시작·미완료 0**을 확인했다.
 독립 검토의 수용 전 필수 수정은 0건이며, 검토된 코드와 offscreen Qt 소스 회귀 범위에서 수용한다.
+이 전체 회귀 수치는 FU-01 보완 전 실행기의 기록이며, 보완 뒤에는 전체 회귀를 실행하지 않았다.
 Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한다.
 제출용 영상 제작·메일 제출은 사용자 보고로 완료됐다.
 
@@ -11,9 +13,19 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
 - 이번 안정화의 기준 HEAD는 **`b586062003107bbc2832a4fb0e3fd3b343521f0f`**다.
   착수 시 작업 트리 clean 및 로컬 main·origin/main·연결 GitHub main의 일치를 확인했다.
   검증을 마친 2026-11-16 01:53에는 미커밋 작업 트리였고 새 커밋·푸시는 수행하지 않았다.
-  그 변경과 이 문서의 수용 보완은 하나의 커밋으로 반영하는 대상이다. 커밋 SHA와 원격 main
-  확인 결과는 [수용·Git 반영 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/acceptance_commit_01/REPORT_KO.md>)가
-  기준이며, 이 문서만으로 원격 반영을 확정하지 않는다.
+  그 변경과 수용 문서 보완은 커밋 **`7386e696cf848113a627b248effc059c89aecd11`**로 origin의 `main`에
+  반영됐고 원격 조회로 확인됐다. 근거는
+  [수용·Git 반영 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/acceptance_commit_01/REPORT_KO.md>)다.
+  안정화와 절차 정정은 완료된 일이며 아래 후속 보완으로 다시 미해결이 되지 않는다.
+- **실행기 후속 보완(2026-11-16, FU-01·FU-02 일부):** 부모 실행기가 성공 경로에서도 구획의
+  `events.jsonl`을 읽어 child의 `receipt.json`과 대조한다. journal 누락·손상, receipt와의 불일치,
+  종료 코드 모순은 구획 오류로 남고 전체 성공이 되지 않는다. 수정 전에는 내부적으로 유효한 receipt가
+  journal과 달라도 성공으로 처리됨을 최소 사례로 확인했다.
+  검증은 **부분 검증**이다: `tests.test_source_unittest_runner` 18건(기존 11 + 신규 7) PASS와,
+  표준 실행기로 그 모듈만 선택한 격리 부분 실행 PASS다. **이 수정 뒤 전체 회귀는 실행하지 않았다.**
+  FU-02는 대역으로 공급한 부모 처리 경로만 보완했고 실제 프로세스 경로의 자동 시험은 남아 있다.
+  상세는 마감 문서의 [실행기 후속 보완](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md#실행기-후속-보완-2026-11-16-fu-01fu-02-일부) 절,
+  커밋 SHA와 원격 확인은 [실행기 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/runner_followup_01/REPORT_KO.md>)에 있다.
 - [UI·전체 소스 회귀 안정화 마감](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md)이 최신 검증의 출발점이다.
   수집 6,539 occurrence에서 동일성을 확인한 중복 233개를 합쳐 고유 6,306개를 검증했다.
   187개 격리 구획, 수집 누락 0, 인프라·회계 오류 0, 소유 Job 188개 정리 완료다.
@@ -84,14 +96,21 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
    제출 영상·메일 원문을 직접 확인하지 않았으며, 완료한 녹화·제출을 다시 시작하지 않는다.
 2. **이번 승인 범위 완료:** UI 시험 2건, 전체 소스 회귀의 수집·격리·집계·실패 정리,
    직접 관련된 최소 제품 수정과 검증·기록이다. 검증 당시에는 커밋·푸시하지 않은 작업 트리 상태였다.
-   독립 검토 수용 뒤의 Git 반영 결과는 위 수용·Git 반영 보고서에서 확인한다.
-3. **작은 후속 보완:** Git 반영이 확인된 다음의 순서다. 우선 후보는 FU-01(실행기의 journal·receipt
-   교차 확인), FU-04(수동 입력 엔진 예외 경로의 분석 표시), FU-08(Replay 통계 시험의 창 크기 단언)이다.
-   나머지 FU·UV 항목도 마감 문서에 유지한다. 구체적 범위는 별도 전달문으로 정하며 이 문서로 승인하지 않는다.
-4. **그다음 본래의 3·4단계 성능 개선 계획:** 계산/통신/화면 갱신/설정 대기 시간을 분리해 확인하고,
-   Stage3 행동별 확정정보 갱신과 공통 병목을 먼저 개선한다. 이어 Stage4 계산 비용, M/R 선택 차이와 평균·고점을 검토한다.
-   Stage3의 가까운 확정 오프닝·불가피한 50/50, 비교 기능 확장, 전시 기기·배포본 검증은 후속 범위다.
-   이번 안정화에서 자동 착수하지 않았으며 구체적인 다음 범위는 사용자 요청에 따른다.
+   독립 검토 수용 뒤 커밋 `7386e69`로 origin의 `main`에 반영됐고 원격 조회로 확인됐다.
+3. **작은 후속 보완:** 관련성에 따라 처리한다. FU-01(실행기의 journal·receipt 대조)은 처리했고
+   FU-02(실행기 프로세스 경로의 자동 시험)는 부분 보완이다. 다음 UI 보완 후보는 FU-04(수동 입력 엔진
+   예외 경로의 분석 표시)와 FU-08(Replay 통계 시험의 창 크기 단언)이다. FU-03·FU-05·FU-07과 미확인
+   항목도 마감 문서에 유지한다. 구체적 범위는 별도 전달문으로 정하며 이 문서로 승인하지 않는다.
+4. **그다음 방향:** 아래 순서를 유지한다. 방향일 뿐 승인된 구현 범위가 아니다.
+   - 계산, 통신, 화면 갱신, 설정된 입력 대기를 분리해 공통 병목을 확인한다.
+   - Stage3의 지역 추론, 정밀 계산, worker 결과 수신, 화면 표시 시점을 구분한다.
+   - 이후 Stage4 계산 비용과 선택 품질, M/R 차이를 검토한다.
+   - 그 뒤 Stage3의 나머지 알고리즘 제안과 비교 기능 확장을 검토한다.
+   - 전시 기기 확인은 일정상 필요하면 앞당길 수 있다. 배포본 검증은 별도다.
+
+   Stage3의 정보 갱신 문제를 미리 확정하지 않으며, 매 입력마다 전체 정밀 계산을 강제하는 해법을
+   정해 두지 않는다. Stage4 N1의 가속 배율을 Stage3에 옮겨 적용하지 않는다.
+   자동 착수하지 않으며 구체적인 다음 범위는 사용자 요청에 따른다.
 
 기존 도움말/UI의 커밋·원격 반영·바탕화면 교체 결과는 아래의 과거 마감 기록에서 확인한다.
 이번 안정화 결과는 새 마감 문서와 보고서에 기록했다. Stage3/4는 일부 입력·표시 경로를 공유하지만
@@ -123,6 +142,7 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
   [검토 범위 정정](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/claude_review_01/REVIEW_SCOPE_CORRECTION_KO.md>).
   지적 원문은 같은 폴더의 `FINDINGS.json`, 해시·집계 확인은 `EVIDENCE_CHECKS.json`이다.
 - [수용·Git 반영 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/acceptance_commit_01/REPORT_KO.md>)
+- [실행기 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/runner_followup_01/REPORT_KO.md>)
 - [현재 마감과 원시 경로 표](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)
 - [Unit74 검토 수용](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/REVIEW_RECEPTION_KO.txt>)
 - [촬영 계획](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/RECORDING_PLAN_KO.txt>)
