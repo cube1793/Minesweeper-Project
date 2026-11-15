@@ -658,6 +658,12 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
         )
 
     def test_replay_grid_render_size_and_mine_counter_use_replay_engine(self):
+        from PyQt5.QtCore import QRect
+        # A virtual screen large enough for either board at the size used below.
+        screen = patch.object(MinesweeperUI, "_board_available_geometry",
+                              return_value=QRect(0, 0, 6000, 4500))
+        screen.start()
+        self.addCleanup(screen.stop)
         live_engine = self._live_engine()
         ui = self._ui_with_live_engine(live_engine)
         player = ReplayPlayer(self._replay_data())
@@ -682,6 +688,43 @@ class MinesweeperUIEngineOwnershipTests(unittest.TestCase):
             [value for row in player.engine.get_observation() for value in row],
         )
         self.assertEqual(ui.mine_label.text(), "💣 000")
+        self.assertIs(ui.engine, live_engine)
+
+        # At 10 px the controls' minimum size hides the board: Live's 4x3 and
+        # Replay's 2x2 give the same window. Make the Replay board the largest
+        # item in both directions, then check the window Qt actually has.
+        ui.showNormal()
+        self.qt_application.processEvents()
+        self.assertFalse(ui.isMaximized() or ui.isFullScreen())
+        before = (ui.size().width(), ui.size().height())
+        cell = 1000
+        board = (player.engine.width * cell, player.engine.height * cell)
+        live_board = (live_engine.width * cell, live_engine.height * cell)
+        self.assertEqual((board, live_board), ((2000, 2000), (4000, 3000)))
+        self.assertLess(before[0], board[0])
+        self.assertLess(before[1], board[1])
+
+        ui._cell_size = cell
+        ui._build_grid()
+        ui._apply_initial_window_size()
+        self.qt_application.processEvents()
+
+        actual = (ui.size().width(), ui.size().height())
+        viewport = ui.scroll_area.viewport()
+        # The window grew, and it shows exactly the Replay board: no slack, no scrolling.
+        self.assertGreater(actual[0], before[0])
+        self.assertGreater(actual[1], before[1])
+        self.assertEqual((ui.board_container.width(), ui.board_container.height()), board)
+        self.assertEqual((viewport.width(), viewport.height()), board)
+        self.assertEqual((ui.scroll_area.horizontalScrollBar().maximum(),
+                          ui.scroll_area.verticalScrollBar().maximum()), (0, 0))
+        # It is not sized for Live's board and not clipped by the virtual screen.
+        self.assertLess(actual[0], live_board[0])
+        self.assertLess(actual[1], live_board[1])
+        self.assertLessEqual(ui.frameGeometry().width(), 6000)
+        self.assertLessEqual(ui.frameGeometry().height(), 4500)
+        fit = ui._board_fit_record
+        self.assertEqual((fit['board'], fit['target_client'], fit['physical_limit']), (board, actual, False))
         self.assertIs(ui.engine, live_engine)
 
     def test_zini_snapshot_uses_live_or_latest_replay_engine_by_mode(self):

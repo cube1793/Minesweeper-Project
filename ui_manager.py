@@ -3320,6 +3320,13 @@ class MinesweeperUI(QWidget):
                     unchanged = False
                 if not unchanged:
                     self._mark_automated_recording()
+            else:
+                # A pure manual preview keeps the analysis, and the refresh that
+                # normally drops it is not reached. The board is now unknown.
+                try:
+                    self._clear_live_analysis(self._live_failure_text())
+                except Exception:
+                    pass  # Report the step failure, not a display failure.
             raise
         status_after = self.engine.status
         after = self.engine.get_counter_snapshot()

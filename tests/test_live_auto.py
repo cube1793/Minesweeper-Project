@@ -1348,6 +1348,28 @@ class LiveV1UITests(unittest.TestCase):
         self.assertEqual(job.requests[-1].cursor, (0, 0))
         self.assertNotEqual(job.requests[-1].run_id, previous_run)
 
+    def test_failed_manual_step_keeps_owner_retirement_and_blocks_restart(self):
+        job, _ = self.prepare_chord()
+        generation = self.ui._live_board_generation
+        requests = len(job.requests)
+        events = len(self.ui._replay_recorder.events)
+        with patch.object(self.engine, "step", side_effect=RuntimeError("injected step failure")) as step:
+            with self.assertRaisesRegex(RuntimeError, "injected step failure"):
+                self.ui.on_right_click(0, 0)
+        step.assert_called_once_with(0, 0, Action.FLAG)
+        # The owner is retired as for a completed manual input; nothing is acknowledged.
+        self.assertGreater(self.ui._live_board_generation, generation)
+        self.assertEqual((len(job.requests), job.acks), (requests, []))
+        self.assertTrue(self.ui._live_input_uncertain)
+        self.assertIsNone(self.ui._analysis_result)
+        self.assertTrue(all(btn.analysis_overlay is None for btn in self.ui._buttons.values()))
+        self.assertIn("실제 입력·기록을 확인할 수 없습니다", self.ui.analysis_status_label.text())
+        self.assertEqual(len(self.ui._replay_recorder.events), events)
+        self.assertEqual(self.ui._replay_recorder.source_type, "human")
+        job.complete_cancel()
+        self.ui.simple_auto_checkbox.setChecked(True)
+        self.assertEqual(len(job.requests), requests)
+
     def test_reset_and_replay_reject_late_proposals(self):
         job, proposal = self.prepare_chord()
         self.ui.on_reset()

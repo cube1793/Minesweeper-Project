@@ -370,6 +370,81 @@ class LiveAnalysisUITests(unittest.TestCase):
                 analyze.assert_not_called()
                 self.assert_clear()
 
+    def fail_manual_step(self, handler, coordinate, action, *, live, commit):
+        """Inject a step failure into one manual input on an analyzed Simple board."""
+        self.ui.analysis_checkbox.setChecked(False)
+        self.ui.on_reset()
+        self.prepared_board()
+        self.assertFalse(self.ui._live_input_uncertain)
+        self.ui.analysis_checkbox.setChecked(live)
+        if not live:
+            self.ui.analyze_button.click()
+        shown = {xy: btn.analysis_overlay for xy, btn in self.ui._buttons.items()}
+        self.assertIsNotNone(self.ui._analysis_result)
+        self.assertTrue(any(overlay is not None for overlay in shown.values()))
+        # The press preview of a pure manual gesture has not changed the board.
+        self.ui._retire_v1_for_manual("보드 입력으로 수동 인계")
+        self.assertIsNotNone(self.ui._analysis_result)
+        self.assertEqual(shown, {xy: btn.analysis_overlay for xy, btn in self.ui._buttons.items()})
+        recorded = (len(self.ui._replay_recorder.events), len(self.ui.live_input_records))
+        original = self.engine.step
+
+        def failing_step(x, y, requested):
+            if commit:
+                original(x, y, requested)
+            raise RuntimeError("injected step failure")
+
+        with (
+            patch.object(self.engine, "step", side_effect=failing_step) as step,
+            patch("ui_manager.analyze_position") as analyze,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "injected step failure"):
+                handler(*coordinate)
+            self.app.processEvents()
+        step.assert_called_once_with(*coordinate, action)
+        analyze.assert_not_called()
+        return recorded
+
+    def assert_no_followup(self):
+        self.assertTrue(self.ui._live_input_uncertain)
+        self.assertIn("실제 입력·기록을 확인할 수 없습니다", self.ui.analysis_status_label.text())
+        self.assertFalse(self.ui.simple_auto_checkbox.isChecked())
+        self.assertFalse(self.ui._simple_auto_pending)
+        self.assertFalse(self.ui._simple_auto_timer.isActive())
+
+    def test_failed_manual_step_clears_analysis_that_the_preview_preserved(self):
+        for handler, coordinate, action in (
+            (self.ui.on_left_click, (2, 2), Action.OPEN),
+            (self.ui.on_right_click, (2, 2), Action.FLAG),
+            (self.ui.on_both_click, (0, 0), Action.CHORD),
+        ):
+            for live in (False, True):
+                for commit in (False, True):
+                    with self.subTest(action=action.name, live_analysis=live, commit_before_error=commit):
+                        recorded = self.fail_manual_step(handler, coordinate, action, live=live, commit=commit)
+                        # Result, overlays, probability text and tooltips are all gone.
+                        self.assert_clear()
+                        self.assert_no_followup()
+                        # An input that did not complete is neither replayed nor attributed.
+                        self.assertEqual((len(self.ui._replay_recorder.events),
+                                          len(self.ui.live_input_records)), recorded)
+                        self.assertEqual(self.ui._replay_recorder.source_type, "human")
+
+    def test_manual_play_after_failed_step_starts_no_analysis_or_auto(self):
+        self.fail_manual_step(self.ui.on_left_click, (2, 2), Action.OPEN, live=True, commit=False)
+        self.assert_clear()
+        with (
+            patch("ui_manager.analyze_position") as analyze,
+            patch.object(self.engine, "step", wraps=self.engine.step) as step,
+        ):
+            self.ui.on_right_click(2, 2)
+            self.app.processEvents()
+        step.assert_called_once_with(2, 2, Action.FLAG)
+        self.assertEqual(self.engine.get_observation()[2][2], F)
+        analyze.assert_not_called()
+        self.assert_clear()
+        self.assert_no_followup()
+
     def test_live_on_invalidates_then_renders_then_analyzes_fresh_after_every_action(self):
         from live_simple_preparation import prepare_flags
         self.prepared_board()

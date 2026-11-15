@@ -1,10 +1,10 @@
 # Current Project Handoff
 
 Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용,
-실행기 후속 보완(FU-01) 추가.
+실행기 후속 보완(FU-01)과 UI 후속 보완(FU-04·FU-08) 추가.
 보완한 표준 실행기에서 **6,295 PASS / 11 opt-in SKIP / FAIL·ERROR·미시작·미완료 0**을 확인했다.
 독립 검토의 수용 전 필수 수정은 0건이며, 검토된 코드와 offscreen Qt 소스 회귀 범위에서 수용한다.
-이 전체 회귀 수치는 FU-01 보완 전 실행기의 기록이며, 보완 뒤에는 전체 회귀를 실행하지 않았다.
+이 전체 회귀 수치는 FU-01·FU-04 보완 전 코드의 기록이며, 두 보완 뒤에는 전체 회귀를 실행하지 않았다.
 Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한다.
 제출용 영상 제작·메일 제출은 사용자 보고로 완료됐다.
 
@@ -26,6 +26,16 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   FU-02는 대역으로 공급한 부모 처리 경로만 보완했고 실제 프로세스 경로의 자동 시험은 남아 있다.
   상세는 마감 문서의 [실행기 후속 보완](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md#실행기-후속-보완-2026-11-16-fu-01fu-02-일부) 절,
   커밋 SHA와 원격 확인은 [실행기 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/runner_followup_01/REPORT_KO.md>)에 있다.
+- **UI 후속 보완(2026-11-16, FU-04·FU-08):** 수동 입력에서 `engine.step`이 예외를 내면 이전 분석 결과와
+  셀 표시가 남는 것을 제어된 예외 주입으로 재현했다. 실제 사용 중 관측된 예외가 아니다.
+  `ui_manager.py`의 수동 입력 예외 처리 한 곳에서 분석을 무효화하도록 고쳤고 예외는 그대로 전달한다.
+  순수 press/drag 미리보기의 분석 보존, Auto 중단, 정상 입력 뒤 무효화·재분석, 자동 입력의 예외 처리와
+  Replay 출처 보호는 바꾸지 않았다. FU-08은 시험 보완이다. Replay 보드가 창 크기를 결정하는 조건에서
+  실제 `ui.size()`와 화면 영역을 검사한다. 제품 배치는 바꾸지 않았다.
+  검증은 **부분 검증**이다: 표준 실행기로 5개 모듈을 격리 실행해 202건 PASS, journal·receipt 일치 5/5다.
+  **이 수정 뒤 전체 회귀, native 화면·DPI 확인은 하지 않았다.**
+  상세는 마감 문서의 [UI 후속 보완](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md#ui-후속-보완-2026-11-16-fu-04fu-08) 절,
+  커밋 SHA와 원격 확인은 [UI 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/ui_followup_01/REPORT_KO.md>)에 있다.
 - [UI·전체 소스 회귀 안정화 마감](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md)이 최신 검증의 출발점이다.
   수집 6,539 occurrence에서 동일성을 확인한 중복 233개를 합쳐 고유 6,306개를 검증했다.
   187개 격리 구획, 수집 누락 0, 인프라·회계 오류 0, 소유 Job 188개 정리 완료다.
@@ -98,10 +108,12 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
    직접 관련된 최소 제품 수정과 검증·기록이다. 검증 당시에는 커밋·푸시하지 않은 작업 트리 상태였다.
    독립 검토 수용 뒤 커밋 `7386e69`로 origin의 `main`에 반영됐고 원격 조회로 확인됐다.
 3. **작은 후속 보완:** 관련성에 따라 처리한다. FU-01(실행기의 journal·receipt 대조)은 처리했고
-   FU-02(실행기 프로세스 경로의 자동 시험)는 부분 보완이다. 다음 UI 보완 후보는 FU-04(수동 입력 엔진
-   예외 경로의 분석 표시)와 FU-08(Replay 통계 시험의 창 크기 단언)이다. FU-03·FU-05·FU-07과 미확인
-   항목도 마감 문서에 유지한다. 구체적 범위는 별도 전달문으로 정하며 이 문서로 승인하지 않는다.
+   FU-02(실행기 프로세스 경로의 자동 시험)는 부분 보완이다. FU-04(수동 입력 엔진 예외 경로의 분석 표시)와
+   FU-08(Replay 통계 시험의 창 크기 단언)도 처리했다. 남은 것은 FU-02의 실제 프로세스 경로, FU-03,
+   FU-05, FU-07과 미확인 항목이며 마감 문서에 유지한다. 이들은 수용을 막는 필수 수정이 아니다.
+   구체적 범위는 별도 전달문으로 정하며 이 문서로 승인하지 않는다.
 4. **그다음 방향:** 아래 순서를 유지한다. 방향일 뿐 승인된 구현 범위가 아니다.
+   공통 병목과 Stage3 정보 갱신 진단의 다음 범위는 조율에서 정한다.
    - 계산, 통신, 화면 갱신, 설정된 입력 대기를 분리해 공통 병목을 확인한다.
    - Stage3의 지역 추론, 정밀 계산, worker 결과 수신, 화면 표시 시점을 구분한다.
    - 이후 Stage4 계산 비용과 선택 품질, M/R 차이를 검토한다.
@@ -143,6 +155,7 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
   지적 원문은 같은 폴더의 `FINDINGS.json`, 해시·집계 확인은 `EVIDENCE_CHECKS.json`이다.
 - [수용·Git 반영 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/acceptance_commit_01/REPORT_KO.md>)
 - [실행기 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/runner_followup_01/REPORT_KO.md>)
+- [UI 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/ui_followup_01/REPORT_KO.md>)
 - [현재 마감과 원시 경로 표](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)
 - [Unit74 검토 수용](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/REVIEW_RECEPTION_KO.txt>)
 - [촬영 계획](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/RECORDING_PLAN_KO.txt>)
