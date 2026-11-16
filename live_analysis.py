@@ -170,6 +170,12 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
             (cell.x, cell.y) == recommended,
             probability,
         )
+    if proposal.info is not None:
+        # Proven by the worker for this same public state, beyond the decision's
+        # own evidence: a color only, with no probability and no recommendation.
+        for cells, kind in ((proposal.info.safe, OverlayKind.SAFE), (proposal.info.mines, OverlayKind.MINE)):
+            for coordinate in cells:
+                overlays.setdefault(coordinate, CellOverlay(kind))
     # CHORD's selected target is a revealed clue, not a HIDDEN evidence cell.
     previous = overlays.get(recommended, CellOverlay())
     overlays[recommended] = CellOverlay(previous.kind, True, previous.probability)

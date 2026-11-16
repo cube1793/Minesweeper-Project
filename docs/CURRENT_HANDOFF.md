@@ -5,6 +5,7 @@ Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀
 같은 날 Stage3 정보 갱신 진단을 마치고, 이미 증명된 확정칸의 Live 표시 유지를 반영했다(부분 검증).
 이어서 파일 통신 비용을 진단하고, 메시지가 없을 때의 폴더 검사 비용을 검사 의미는 그대로 두고 줄였다(부분 검증).
 같은 날 Stage4 kernel 경로에 계산 캐시 세 개(K1_MEMO2)를 검증 의미는 그대로 두고 반영했다(부분 검증).
+같은 날 Stage3 V1의 표시용 정보 갱신(S3X_INFO_A1)을 frozen 결정과 입력 검증은 그대로 두고 반영했다(부분 검증).
 보완한 표준 실행기에서 **6,295 PASS / 11 opt-in SKIP / FAIL·ERROR·미시작·미완료 0**을 확인했다.
 독립 검토의 수용 전 필수 수정은 0건이며, 검토된 코드와 offscreen Qt 소스 회귀 범위에서 수용한다.
 이 전체 회귀 수치는 FU-01·FU-04 보완 전 코드의 기록이며, 두 보완 뒤에는 전체 회귀를 실행하지 않았다.
@@ -67,6 +68,7 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   **남은 것:** 아직 정밀 계산하지 않은 확정칸의 최초 발견 지연(위 원인 1), 메시지 파일 첫 열기 비용과
   메시지가 없을 때의 폴더 훑기 비용. 셋 다 후보일 뿐 승인된 범위가 아니다.
   (폴더 훑기 비용은 아래 항목에서 진단했고 일부를 줄였다.)
+  (원인 1은 V1의 표시에 한해 아래 S3X_INFO_A1 항목에서 다뤘다. K 계열은 그대로다.)
   커밋 SHA와 원격 확인은
   [확정칸 표시 유지 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_CERTAINTY_DISPLAY_2026-11-16/implementation_01/REPORT_KO.md>)에 있다.
 - **파일 통신 비용 진단과 빈 `read_next` 열거 비용 축소(2026-11-16):**
@@ -129,6 +131,78 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   근거는 [보완·검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_K1_MEMO_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
   커밋 SHA와 원격 확인은
   [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_K1_MEMO_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)에 있다.
+- **Stage3 V1 표시용 정보 갱신(S3X_INFO_A1, 2026-11-16):**
+  위 진단의 원인 (1), 곧 지역 수가 남아 있는 동안 정밀 계산으로만 증명되는 칸이 계산되지 않는 문제를
+  V1의 표시에 한해 줄였다. S3X_INFO_A1은 정보 계약을 구분하는 이름이며 새 UI 알고리즘이나 정책이 아니다.
+  **유지한 것:** frozen V1 결정(`plan_position`은 제안당 1회), `Proposal.overlays`, 입력 검증
+  (`_validate_projection_move`·`admit_proposal`·ACK), `compute_ns`의 뜻, 메시지 종류와 왕복 수, 전송 버전 10.
+  동결 풀이·계획 모듈, `ui_manager.py`, `live_display_state.py`, `live_policy_job.py`,
+  `live_policy_transport.py`, K·Simple·Replay·Stage4 파일은 바꾸지 않았다.
+  **더한 것:** V1 worker가 결정을 끝낸 뒤, 지역 경로(정밀 계산이 실행되지 않은 결정)에서만 노드 상한
+  20,000의 표시용 보충 계산을 한다(`live_policy_info.py`). 정밀 경로에서는 보충 계산을 하지 않는다.
+  결과는 `Proposal.info`에 따로 실린다. overlays가 말하지 않은 닫힌 칸의 안전·지뢰 좌표와 상태
+  (`COMPLETE`·`PARTIAL`·`INCONSISTENT`·`FAILED`·`NOT_RUN`)다. 추가 정보는 입력 허가도 추천 행동도 아니며
+  확률이 없다. 화면에는 색만 더해진다. 보충이 실패하면 기록만 남기고 frozen 결정은 그대로 나간다.
+  **전송:** PROPOSAL은 정확히 두 형식이다. 정보 없는 기존 형식(키 14개)과 거기에 `info`를 더한 형식이며,
+  null·누락·알 수 없는 키는 거부한다. 전송 버전은 10을 유지하므로 부모와 worker는 같은 소스 버전으로
+  새로 시작해야 한다. 구버전 부모와 신버전 worker의 혼용은 지원하지 않고 엄격 검사로 거부된다.
+  소스를 바꾼 뒤에는 실행 중이던 앱을 다시 시작한다.
+  **적용 범위:** V1만이다. K 계열에는 정보 갱신 개선을 적용하지 않았고 K-LC1의 같은 지연은 그대로다.
+  **기존 검증(제품과 같은 내용의 사본에서 수행, 이번에 재사용):** 개발 보드 22개의 프로세스 내 worker
+  루프 50판·6,460제안과 실제 worker Live 50회(조건 13개, offscreen)에서 기준과 후보의 입력·종료·공개 상태·
+  overlays가 같았다. 독립 오라클·실제 배치 대조와, 독립 검토가 오라클 없이 한 배치·frozen 정밀 결과 대조
+  모두에서 잘못된 확정은 0건이었다. 확정칸 수는 안전·지뢰 합산이다. Live에서 후보가 더한 정보는
+  32,773칸-제안(안전 22,753 + 지뢰 10,020)이며 같은 칸의 반복 관측을 포함하므로 서로 다른 칸의 수가 아니다.
+  셀 검증은 셀 위젯의 표시 상태 값이며 픽셀이나 실제 모니터 확인이 아니다.
+  상한에 걸리지 않은 상급 2보드에서는 늦게 표시되던 칸 200·222가 0이 됐다. 상한에 걸린 보드
+  (S3-select-015)는 판당 `PARTIAL` 17회이고 늦음 191 → 24, 미표시 8 → 2가 남는다. 상한은 올리지 않았다.
+  민감도 대조는 실효 변이 20종 검출, 무효 변이 1종, 도구 종료 코드 1이다. 도구 전체 PASS가 아니다.
+  사본의 부분 회귀는 53구획 1,155건 중 1,144 PASS / 11 opt-in SKIP이었다.
+  **시간(사본, 부하 정리는 사용자 보고 기준, 한 PC):** worker 계획 시간은 제안당 약 +0.6 ms였다.
+  20 ms 설정의 입력 간격 차이는 fixtureB 계측 조건에서 최초 28회 자료로 +0.15 ms, 추가 반복을 포함한
+  36회 자료로 +0.76 ms였다. 추가 반복 규칙의 문구가 모호해(어느 중앙값인지, 두 차이 모두인지가 계획에
+  없음) 무계측 조건의 추가 4회는 느슨한 해석에서만 규칙에 해당한다. 이 값들은 정밀하게 확정된 성능
+  저하율이 아니다. 200 ms 설정에서는 입력 간격 변화가 관측되지 않았다.
+  **반영 후 검증(제품 저장소, 부분 검증):** 5개 파일의 SHA-256이 준비본과 같다. 표준 실행기로 같은
+  53개 모듈을 격리 실행해 선택 1,155 = 시작 = 완료, 1,144 PASS / 11 opt-in SKIP, FAIL·ERROR·미시작·미완료 0,
+  journal·receipt 일치 53/53, 구획 프로세스 잔존 0이다. 실제 worker 확인(초급 fixture, 200 ms, 추측 허용
+  OFF)에서 기준 사본과 제품의 9입력과 종료 사유(추측 대기)가 같았다. 제품 worker는 제품 폴더의
+  `live_policy_info.py`를 적재했고, 계획 제안 10개 모두에 `S3X_INFO_A1` 정보가 실렸으며(`COMPLETE` 4,
+  `NOT_RUN` 6), 더해진 20칸-제안이 모두 셀 위젯 상태에 나타났다. K-LC1은 제품의 실제 worker 명령으로
+  START부터 첫 제안까지 1회 확인했다. 제안은 K 형식이고 `info`가 없으며, 취소로 끝났고 잔류 프로세스와
+  채널 폴더가 없었다. 이것은 기동 기능 확인 1회이며 K 전체 경로나 기동 시간의 검증이 아니다.
+  **이 반영 뒤 전체 회귀, native 화면·DPI 확인, 동결 빌드는 하지 않았다.** 입력이 같으므로 속도·승률·효율
+  개선은 이 변경의 성과가 아니다.
+  **독립 검토와 수용:** 구현에 참여하지 않은 Claude Code 세션(작성자와 같은 모델)의 검토에서 수용 전
+  필수 수정은 0건이었다. 조율은 검토한 코드와 offscreen 개발 표본 범위에서 수용했고 전송 버전 10 유지를
+  결정했다. 후속 보완 F-01~F-10과 미확인 U-01~U-08은 아래 상태로 유지하며 현재 수용을 막는 필수 수정이
+  아니다. 이 번호는 이 검토의 목록이며, 안정화 마감의 FU-01~FU-08·UV-01~UV-08과 다른 목록이다.
+
+  | 항목 | 내용 | 현재 상태 |
+  |---|---|---|
+  | F-01 | 보충 실패·부분 계산 상태가 제품 기록과 화면에 남지 않음 | 미해결. 후속 후보 |
+  | F-02 | 상한을 넘긴 성분이 그 패스의 남은 상한을 모두 씀 | 미해결. 상한 정책과 함께 볼 후보 |
+  | F-03 | `INCONSISTENT`일 때 이월된 색이 남음 | 문서에 한계로 기록. 제품 경로에서는 도달하지 않음. 코드 변경 없음 |
+  | F-04 | 버전 10을 유지한 채 PROPOSAL 형식이 둘 | 조율 결정(10 유지)과 문서 보완으로 처리. 코드 변경 없음 |
+  | F-05 | 민감도 최종 기록의 종료 코드 1, 변이가 다루지 않는 영역 | 표현을 문서에 고정. 재실행 없음 |
+  | F-06 | 추가 반복 규칙의 모호함 | 28회·36회 값을 함께 기록. 재측정 없음 |
+  | F-07 | 확정칸 수의 안전·지뢰 구성 미표기 | 문서에 구성 기록 |
+  | F-08 | 셀 검증은 위젯 표시 상태 값 | 문서 표현으로 한정. native 확인은 U-01 |
+  | F-09 | 정보 결속 검증이 실패 처리 밖(추상적 가능성) | 미해결. 후속 후보 |
+  | F-10 | K 실행도 worker 기동 때 새 모듈을 적재 | K-LC1 기동 1회 실측으로 기동 가능만 확인. 기동 시간은 미측정 |
+  | U-01 | native 화면·DPI·실제 모니터 | 미확인 유지 |
+  | U-02 | 전체 소스 회귀 | 미확인 유지. 반영 후에는 53구획 부분 회귀만 실행 |
+  | U-03 | 실제 프로세스를 쓰는 기존 시험, K 실제 프로세스 | 일부 실측: 제품에서 V1 짧은 진행 1회와 K-LC1 기동 1회. opt-in 시험 11건은 그대로 SKIP |
+  | U-04 | 동결 빌드에 새 모듈 포함 | 미확인 유지 |
+  | U-05 | FIXED_BOARD·중급 보드·여러 판 연속 Live | 미확인 유지 |
+  | U-06 | 상한에 걸리는 조건의 부하 통제 비용과 최악 시간 | 미확인 유지 |
+  | U-07 | 독립 오라클 자체의 정확성 | 미확인 유지. 재검증하지 않음 |
+  | U-08 | PATCH 적용 결과와 줄바꿈 | 실측으로 해소. 준비본 파일을 직접 복사했고 스테이징한 blob의 원시 바이트가 준비본과 같다. 커밋 뒤 확인은 마감 보고서 |
+
+  근거는 [보완·검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>)와
+  [독립 검토](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/claude_review_01/REVIEW_KO.md>)
+  (지적 원문은 같은 폴더의 `FINDINGS.json`)이고, 커밋 SHA와 원격 확인은
+  [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)에 있다.
 - [UI·전체 소스 회귀 안정화 마감](SOURCE_REGRESSION_STABILIZATION_2026_11_15.md)이 최신 검증의 출발점이다.
   수집 6,539 occurrence에서 동일성을 확인한 중복 233개를 합쳐 고유 6,306개를 검증했다.
   187개 격리 구획, 수집 누락 0, 인프라·회계 오류 0, 소유 Job 188개 정리 완료다.
@@ -212,10 +286,15 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
    - Stage3의 지역 추론, 정밀 계산, worker 결과 수신, 화면 표시 시점을 구분한다.
    - 이후 Stage4 계산 비용과 선택 품질, M/R 차이를 검토한다.
      야간 조사에서 나온 계산 캐시(K1_MEMO2)는 반영했다(위 현재 상태). 선택 품질과 M/R 차이는 남아 있다.
-   - **다음 작업은 Stage3 정보 갱신 후보의 보완이다.** 야간 조사에서 보류한 후보이며 이번에는 착수하지
-     않았다. 범위는 별도 전달문으로 정한다.
+   - 다음 작업으로 두었던 Stage3 정보 갱신 후보의 보완은 마쳤고, V1 표시용 정보 갱신(S3X_INFO_A1)을
+     반영했다(위 현재 상태). 남은 것은 상한에 걸리는 보드의 지연·미표시, K 계열의 같은 지연, 그 항목의
+     후속 보완(F-01·F-02·F-09)과 미확인 사항이다. 모두 후보일 뿐 승인된 범위가 아니다.
    - 그 뒤 Stage3의 나머지 알고리즘 제안과 비교 기능 확장을 검토한다.
    - 전시 기기 확인은 일정상 필요하면 앞당길 수 있다. 배포본 검증은 별도다.
+   - **ZiNi Explorer 재생 단위(후속 계획, 이번에는 구현·시험하지 않음):** 깃발 하나마다 별도 인덱스로
+     재생한다. 여러 깃발 뒤의 화음도 별도 인덱스로 재생한다. 자동 재생 기본 간격을 200 ms에서 500 ms로
+     바꾼다. 이전·다음·슬라이더·자동 재생의 상태와 클릭 수 일관성을 유지한다.
+   - 다음 구현은 S3X_INFO_A1 반영 마감 결과를 받은 뒤 조율하며 자동 착수하지 않는다.
 
    Stage3의 정보 갱신 문제를 미리 확정하지 않으며, 매 입력마다 전체 정밀 계산을 강제하는 해법을
    정해 두지 않는다. Stage4 N1의 가속 배율을 Stage3에 옮겨 적용하지 않는다.
@@ -253,6 +332,9 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
 - [수용·Git 반영 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/acceptance_commit_01/REPORT_KO.md>)
 - [실행기 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/runner_followup_01/REPORT_KO.md>)
 - [UI 후속 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/UI_UNIT74_STABILIZATION_2026-11-15/ui_followup_01/REPORT_KO.md>)
+- [Stage3 정보 갱신 보완·검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
+  [그 독립 검토](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/claude_review_01/REVIEW_KO.md>),
+  [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)
 - [현재 마감과 원시 경로 표](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)
 - [Unit74 검토 수용](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/REVIEW_RECEPTION_KO.txt>)
 - [촬영 계획](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/RECORDING_PLAN_KO.txt>)

@@ -8,6 +8,7 @@ from live_policy import (
     LivePolicyError, ack_from_dict, ack_to_dict, plan_snapshot, proposal_to_dict,
     PHASE_FLAG_REVIEW, snapshot_from_dict, validate_ack, validate_start_snapshot,
 )
+from live_policy_info import InfoSupplement
 from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, write_once
 import live_k_policy as k_live
 from stage3_physical import load_timing_table
@@ -25,6 +26,7 @@ def serve(directory, run_id):
     pending = None
     expected_snapshot = None
     review = None
+    info = None  # V1 display-only supplement; this process serves exactly one owner run.
     k_owner = None
     sequence_bound = MAX_V1_SEQUENCE
     while True:
@@ -56,7 +58,8 @@ def serve(directory, run_id):
                 if snapshot.run_id != run_id or snapshot.input_seq != 0:
                     raise LivePolicyError("START identity/input sequence mismatch.")
                 validate_start_snapshot(snapshot)
-                pending = plan_snapshot(snapshot, table=table)
+                info = InfoSupplement()
+                pending = plan_snapshot(snapshot, table=table, info=info)
                 review = pending.review
                 outgoing = message(run_id, sequence, "PROPOSAL", proposal_to_dict(pending))
             elif k_owner is not None:
@@ -96,7 +99,7 @@ def serve(directory, run_id):
                 snapshot = snapshot_from_dict(payload)
                 if snapshot != expected_snapshot:
                     raise LivePolicyError("NEXT differs from the actual acknowledged public state.")
-                pending = plan_snapshot(snapshot, table=table, review=review)
+                pending = plan_snapshot(snapshot, table=table, review=review, info=info)
                 review = pending.review
                 expected_snapshot = None
                 outgoing = message(run_id, sequence, "PROPOSAL", proposal_to_dict(pending))

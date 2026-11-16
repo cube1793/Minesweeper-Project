@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, fields, replace
 from fractions import Fraction
+from hashlib import sha256
 from time import perf_counter_ns
 from uuid import uuid4
 
@@ -9,7 +10,7 @@ from core_engine import Action, CellState, GameStatus
 from live_flag_review import (
     FlagReview, report_from_dict, report_to_dict, review_flags, validate_review_current,
 )
-from simple_algorithm import SimpleMove
+from simple_algorithm import InconsistentObservationError, SimpleMove
 from stage3_physical import PROFILE_SHA256, TABLE_SHA256
 
 
@@ -28,6 +29,12 @@ PHASE_V1 = "V1"
 MAX_BOARD_CELLS = 480
 MAX_V1_INPUTS = 480
 MAX_INPUTS = MAX_V1_INPUTS + MAX_BOARD_CELLS
+# Display-only certainty supplement of a planned V1 proposal (see ProposalInfo).
+# The identifier names this information contract; it is not a policy or a UI choice.
+INFO_ID = "S3X_INFO_A1"
+INFO_NODE_BUDGET = 20000
+INFO_STATUSES = {"local": ("COMPLETE", "PARTIAL", "INCONSISTENT", "FAILED"),
+                 "exact": ("NOT_RUN", "FAILED")}
 
 
 class LivePolicyError(ValueError):
@@ -190,6 +197,81 @@ class OverlayCell:
                  "Probability and overlay kind disagree.")
 
 
+def _state_digest(state):
+    """Identity of one owner input position: run, generation, sequence and public grid."""
+    head = (f"{state.run_id}:{state.board_generation}:{state.input_seq}:{state.input_revision}:"
+            f"{state.width}x{state.height}:{state.num_mines}:")
+    return sha256(head.encode("ascii")
+                  + bytes(glyph + 3 for row in state.observation for glyph in row)).hexdigest()
+
+
+@dataclass(frozen=True)
+class ProposalInfo:
+    """What else is already proven on the public state of one planned V1 proposal.
+
+    Display only. ``safe`` and ``mines`` are HIDDEN cells the proposal's own
+    overlays do not state; they carry no probability, name no input and are
+    never consulted when an input is admitted. ``token`` and ``state_sha256``
+    tie the record to that proposal and its public state.
+
+    route       "local": the frozen decision used local inference only, so a
+                bounded pass looked further. "exact": the frozen exact step ran
+                and its overlays already state every certain cell.
+    supplement  COMPLETE      every component counted and combined with the mine count
+                PARTIAL       the node bound stopped ``skipped`` components; only
+                              finished proofs are listed
+                INCONSISTENT  the pass found the public state contradictory; nothing listed
+                FAILED        the pass raised ``error``; nothing listed
+                NOT_RUN       exact route
+    supplement_ns  time of this information step alone. ``plan_ns`` spans the
+                whole planning call. Proposal.compute_ns keeps its meaning: the
+                frozen decision only.
+    """
+
+    candidate_id: str
+    token: str
+    state_sha256: str
+    route: str
+    supplement: str
+    error: str
+    node_budget: int
+    nodes: int
+    skipped: int
+    supplement_ns: int
+    plan_ns: int
+    safe: tuple
+    mines: tuple
+
+    def __post_init__(self):
+        _require(type(self.candidate_id) is str and self.candidate_id == INFO_ID,
+                 "Unknown information candidate.")
+        _require(_identity(self.token) and type(self.state_sha256) is str
+                 and len(self.state_sha256) == 64
+                 and all(character in "0123456789abcdef" for character in self.state_sha256),
+                 "Invalid information binding.")
+        _require(type(self.route) is str and self.route in INFO_STATUSES
+                 and type(self.supplement) is str and self.supplement in INFO_STATUSES[self.route],
+                 "Invalid information route/status.")
+        _require(type(self.error) is str and (
+            0 < len(self.error) <= 64 and self.error.isascii() and self.error.isidentifier()
+            if self.supplement == "FAILED" else self.error == ""), "Invalid information failure record.")
+        _require(type(self.node_budget) is int and self.node_budget == INFO_NODE_BUDGET,
+                 "Information node budget differs from the fixed bound.")
+        _require(_integer(self.nodes, 0, INFO_NODE_BUDGET) and _integer(self.skipped, 0, MAX_BOARD_CELLS)
+                 and _integer(self.supplement_ns) and _integer(self.plan_ns)
+                 and self.supplement_ns <= self.plan_ns, "Invalid information cost record.")
+        for cells in (self.safe, self.mines):
+            _require(type(cells) is tuple and len(cells) <= MAX_BOARD_CELLS
+                     and all(_coordinate(cell, 30, 16) for cell in cells)
+                     and all((a[1], a[0]) < (b[1], b[0]) for a, b in zip(cells, cells[1:])),
+                     "Information cells must be unique row-major coordinates.")
+        _require(not set(self.safe) & set(self.mines), "Information cell is both safe and mine.")
+        _require((self.skipped > 0) == (self.supplement == "PARTIAL")
+                 and (self.supplement in ("COMPLETE", "PARTIAL")
+                      or not (self.nodes or self.safe or self.mines)),
+                 "Information status and content disagree.")
+
+
 @dataclass(frozen=True)
 class Proposal:
     snapshot: PublicSnapshot
@@ -206,6 +288,7 @@ class Proposal:
     phase: str = PHASE_V1
     review: FlagReview | None = None
     review_compute_ns: int = 0
+    info: ProposalInfo | None = None
 
     def __post_init__(self):
         _require(type(self.snapshot) is PublicSnapshot, "Proposal needs a public snapshot.")
@@ -248,6 +331,8 @@ class Proposal:
                      and state.observation[cell.y][cell.x] == CellState.HIDDEN
                      and target not in seen, "Overlay must identify a unique current HIDDEN cell.")
             seen.add(target)
+        if self.info is not None:
+            _validate_info_binding(self, seen)
         if self.is_flag_review:
             _require(state.review_inputs < state.initial_flag_count
                      and state.observation[self.y][self.x] == CellState.FLAGGED,
@@ -281,6 +366,29 @@ class Proposal:
     @property
     def is_flag_review(self):
         return self.phase == PHASE_FLAG_REVIEW
+
+
+def _validate_info_binding(proposal, stated):
+    """The record must describe this proposal's own state and add only unstated cells.
+
+    Nothing here widens an input: _validate_projection_move reads overlays only.
+    """
+    info, state = proposal.info, proposal.snapshot
+    _require(type(info) is ProposalInfo, "Invalid proposal information record.")
+    info.__post_init__()
+    _require(proposal.kind in ("certain", "guess") and proposal.phase == PHASE_V1,
+             "Only a planned V1 decision carries information.")
+    _require(info.token == proposal.token and info.state_sha256 == _state_digest(state),
+             "Information belongs to another proposal or public state.")
+    exact = [cell.mine_worlds is not None for cell in proposal.overlays]
+    _require(bool(exact) and (all(exact) if info.route == "exact" else not any(exact)),
+             "Information route differs from the decision evidence.")
+    _require(proposal.compute_ns + info.supplement_ns <= info.plan_ns,
+             "Information timing exceeds its planning call.")
+    _require(all(x < state.width and y < state.height
+                 and state.observation[y][x] == CellState.HIDDEN and (x, y) not in stated
+                 for x, y in (*info.safe, *info.mines)),
+             "Information must add current HIDDEN cells the overlays do not state.")
 
 
 def _validate_review_binding(state, report):
@@ -339,12 +447,52 @@ def admit_proposal(proposal, current_snapshot):
     return proposal
 
 
-def plan_snapshot(snapshot, *, table=None, review=None):
+def _plan_info(source, snapshot, evidence, overlays, token, compute_ns, entered):
+    """Record what the owner's supplement adds to an already selected decision.
+
+    Display only. A failure in here is recorded, costs the supplement its
+    state, and leaves the frozen decision exactly as it was selected.
+    """
+    route = "local" if evidence.probability_result is None else "exact"
+    began = perf_counter_ns()
+
+    def record(status, error="", nodes=0, skipped=0, safe=(), mines=()):
+        now = perf_counter_ns()
+        return ProposalInfo(INFO_ID, token, _state_digest(snapshot), route, status, error,
+                            INFO_NODE_BUDGET, nodes, skipped, now - began, now - entered, safe, mines)
+
+    try:
+        outcome = source.supplement(snapshot, evidence)
+        if outcome is None:
+            return record("NOT_RUN")
+        stated = {(cell.x, cell.y) for cell in overlays}
+        added = [tuple(sorted((cell for cell in cells if cell not in stated
+                               and snapshot.observation[cell[1]][cell[0]] == CellState.HIDDEN),
+                              key=lambda cell: (cell[1], cell[0])))
+                 for cells in (outcome.safe, outcome.mines)]
+        return record(outcome.status, "", outcome.nodes, outcome.skipped, *added)
+    except InconsistentObservationError as exc:
+        status, error = ("INCONSISTENT", "") if route == "local" else ("FAILED", type(exc).__name__)
+    except Exception as exc:
+        name = type(exc).__name__
+        status = "FAILED"
+        error = name if name.isascii() and name.isidentifier() and len(name) <= 64 else "Exception"
+    source.discard()
+    return record(status, error)
+
+
+def plan_snapshot(snapshot, *, table=None, review=None, info=None):
     """Review in the worker, or plan frozen V1 once and retain only its first input.
 
     A cached review is usable only along its exact acknowledged toggle prefix.
     V1 input uses the physical current observation after preparation completes.
+
+    ``info`` is the caller's own supplement for this owner run, or None. It is
+    consulted after the frozen decision is selected and validated, and only
+    describes that decision's public state (ProposalInfo). It never changes the
+    decision, its overlays or ``compute_ns``.
     """
+    entered = perf_counter_ns()
     from simple_decision import DecisionKind
     from stage3_physical import action_cost, load_timing_table
     from stage3_planner import plan_position
@@ -403,9 +551,12 @@ def plan_snapshot(snapshot, *, table=None, review=None):
                          else "guess_candidate" if minimum is not None and cell.probability == minimum else "uncertain")
                 overlays.append(OverlayCell(x, y, label, cell.mine_worlds, cell.total_worlds))
     _validate_execution(snapshot.observation, move, decision)
-    return Proposal(snapshot, uuid4().hex, move.action.name, move.x, move.y, kind,
+    token = uuid4().hex
+    record = (None if info is None or decision is None else
+              _plan_info(info, snapshot, decision.evidence, overlays, token, compute_ns, entered))
+    return Proposal(snapshot, token, move.action.name, move.x, move.y, kind,
                     action_cost(table, snapshot.cursor, (move.x, move.y)), compute_ns, tuple(overlays),
-                    phase=PHASE_V1, review=review, review_compute_ns=review_compute_ns)
+                    phase=PHASE_V1, review=review, review_compute_ns=review_compute_ns, info=record)
 
 
 @dataclass(frozen=True)
@@ -526,22 +677,42 @@ def snapshot_from_dict(value):
     return PublicSnapshot(**data)
 
 
+# Two exact wire forms and no other: the plain proposal, which is every proposal
+# without a supplement record, and the same object plus one "info" object.
+# A null "info" or any further key is rejected.
+_PROPOSAL_WIRE = tuple(field.name for field in fields(Proposal) if field.name != "info")
+
+
 def proposal_to_dict(value):
     _require(type(value) is Proposal, "Expected Proposal.")
     value.__post_init__()
-    result = {field.name: getattr(value, field.name) for field in fields(Proposal)}
+    result = {name: getattr(value, name) for name in _PROPOSAL_WIRE}
     result["snapshot"] = snapshot_to_dict(value.snapshot)
     result["overlays"] = [{field.name: getattr(cell, field.name) for field in fields(OverlayCell)} for cell in value.overlays]
     result["review"] = None if value.review is None else report_to_dict(value.review)
+    if value.info is not None:
+        result["info"] = {field.name: getattr(value.info, field.name) for field in fields(ProposalInfo)}
+        for name in ("safe", "mines"):
+            result["info"][name] = [list(cell) for cell in result["info"][name]]
     return result
 
 
 def proposal_from_dict(value):
-    data = _object(value, Proposal)
+    _require(type(value) is dict and set(value) in ({*_PROPOSAL_WIRE}, {*_PROPOSAL_WIRE, "info"}),
+             "Invalid Proposal fields.")
+    data = dict(value)
     data["snapshot"] = snapshot_from_dict(data["snapshot"])
     _require(type(data["overlays"]) is list and len(data["overlays"]) <= MAX_BOARD_CELLS, "Invalid wire overlays.")
     data["overlays"] = tuple(OverlayCell(**_object(cell, OverlayCell)) for cell in data["overlays"])
     data["review"] = None if data["review"] is None else report_from_dict(data["review"])
+    if "info" in data:
+        info = _object(data["info"], ProposalInfo)
+        for name in ("safe", "mines"):
+            _require(type(info[name]) is list and len(info[name]) <= MAX_BOARD_CELLS
+                     and all(type(cell) is list for cell in info[name]),
+                     "Wire information cells must be bounded JSON arrays.")
+            info[name] = tuple(tuple(cell) for cell in info[name])
+        data["info"] = ProposalInfo(**info)
     return Proposal(**data)
 
 

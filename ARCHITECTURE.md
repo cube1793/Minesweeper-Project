@@ -27,6 +27,7 @@ main.py ── engine 생성 → UI에 주입
                          ├─ V1/K Live public worker ▶ live_policy_job.py / live_policy_transport.py
                          │                            ╰─ live_policy_worker.py
                          │                               ├─ live_flag_review.py (준비 검토)
+                         │                               ├─ live_policy_info.py (V1 표시 전용 보충, 입력 권한 없음)
                          │                               ├─ frozen stage3_planner / runner validator
                          │                               └─ live_k_policy.KOwner → K session/policy
                          ├─ GUI fixed layout/history ▶ live_same_board.py (policy 입력 아님)
@@ -105,6 +106,7 @@ Ops는 8방향으로 연결된 0 영역의 수이고, 3BV는 Ops에 고립 숫�
 | `live_analysis.py` | 계산된 Simple/V1/K 증거를 `LiveAnalysis`/overlay/status로 변환, exact 확률 포맷과 Reduction |
 | `live_k_policy.py` | K snapshot/proposal/permit/ACK·safe_cells DTO, exact 추측/확정색 투영, worker-only persistent KOwner |
 | `live_policy_job.py`, `live_policy_worker.py`, `live_policy_transport.py` | public-only V1/K 세션·v10 wire·고정판 provenance·검증·ACK·정리 소유권 |
+| `live_policy_info.py` | V1 worker 전용. frozen 결정이 끝난 뒤 지역 경로에서만 노드 상한 20,000의 확정칸 보충 계산(`CertaintyEngine`)과 소유 실행 단위의 상태(`InfoSupplement`). 공개 관측과 총 지뢰 수만 읽고 입력 권한이 없다 |
 | `live_same_board.py` | GUI-only 불변 FixedLayout/FixedOrigin/CompletedLiveGame, 원 배치 재설정과 분리된 완료판 근거 |
 | `live_auto_cursor.py` | mouse-transparent/NoFocus 가상 셀 좌표 보간, 논리 cursor/Model C와 분리 |
 
@@ -697,6 +699,8 @@ worker는 원 session.M·decision/selection identity로 VALIDATE→ADMITTED를 �
 
 현재 공통 wire v10이며 KSnapshot의 game_id와 V1 fixed_game_id/고정판 정의를 entry provenance에 결속한다. 정책/정의/entry/phase와 game/run/generation/token/nonce/시작·M revision이 끝까지 결속된다. K 일반 입력≤480, 준비≤480, 합계≤960, pending VALIDATE≤64, V1 seq≤1921, 기존 K envelope≤31681, FLAG 준비 포함 envelope≤63362, 메시지≤2MiB와 compute30/ACK5/exit5/drain0.75초를 유지한다. 게임 전체 revision/event 수가 480에 묶인다는 뜻은 아니다. V1의 준비 FLAG-free proof·입력 경계를 변경하지 않는다.
 
+2026-11-16 V1 표시용 정보 갱신(`S3X_INFO_A1`, 정보 계약의 이름이며 정책이나 UI 선택이 아니다): worker는 V1 START마다 `InfoSupplement` 하나를 만들어 `plan_snapshot(..., info=)`에 넘긴다. `plan_snapshot`은 frozen `plan_position`을 한 번 호출해 결정·overlays·`_validate_execution`을 기존대로 끝낸 뒤에만 정보 단계를 부른다. 지역 경로(정밀 계산이 실행되지 않은 결정)에서만 노드 상한 20,000의 보충 계산을 하고, 정밀 경로에서는 frozen 결과를 받아 적기만 한다. 결과는 `Proposal.info`(`ProposalInfo`)다. 제안 token과 공개 상태 해시에 결속되고, overlays에 없는 현재 HIDDEN 칸의 안전·지뢰 좌표만 담으며, 상태는 COMPLETE/PARTIAL/INCONSISTENT/FAILED/NOT_RUN이다. `_validate_projection_move`·`admit_proposal`·ACK 검증은 overlays만 읽으므로 info는 입력 허가도 추천 행동도 아니다. `compute_ns`는 frozen 결정 시간 그대로이고 보충 시간과 전체 계획 시간은 info에 따로 있다. 보충의 예외는 FAILED/INCONSISTENT로 기록하고 그 상태를 버리며 결정은 유지한다. planner의 오류와 중단은 그대로 전파한다. 상한에 걸리면 끝까지 센 성분의 증명과 이월분만 내고 전역 지뢰 수 결합을 하지 않는다. 이월은 같은 소유 실행의 연속 입력에서 공개 상태가 단조 증가할 때만 유지한다. 준비 단계와 canonical 첫 입력에는 info가 없다. PROPOSAL payload는 정보 없는 기존 14키 형식과 거기에 `info`를 더한 형식 둘만 받고 null·누락·알 수 없는 키를 거부한다. wire 버전은 10을 유지하므로 부모와 worker는 같은 소스 버전으로 새로 시작해야 하며 구버전 부모와 신버전 worker의 혼용은 지원하지 않는다. `present_v1_proposal`은 info 칸을 확률·추천 없는 SAFE/MINE 색으로만 더하고 그 뒤의 표시는 기존 `CertaintyFrame` 경로다. K 분기는 `InfoSupplement`를 만들지 않으며 K에는 이 개선을 적용하지 않았다. 다만 worker 모듈이 `live_policy_info`를 공통으로 import한다. FAILED/INCONSISTENT/PARTIAL 상태는 제안 메시지에만 있고 부모 기록과 화면 문구에는 남지 않는다. 검증 범위와 남은 한계는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)의 S3X_INFO_A1 항목에 있다.
+
 Simple Main 준비는 live_simple_preparation.py에서 공개 FLAG-masked 직접 zero/all·전체 지뢰 수로 기존 FLAG를 확인한다. 기존 Simple planner는 불변이다. 수동 입력은 준비 epoch를 폐기하고 Auto를 끈다. 실제 준비 입력은 event를 남긴다. Model C 표 밖(dx≥30 또는 dy≥16) 이동은 null/OUTSIDE_FROZEN_TABLE과 unmodeled 입력 수로 기록하며 0비용이나 완전 합계로 표현하지 않는다.
 
 K_LC0는 같은 normal DecisionAnalysis와 native select_policy를 각 한 번 얻고 원 apply_distance_band(control=False)를 한 번 적용한다. 원 survivors의105% 정수 band와 전체 exact_route D→Fraction E→L→frozen tie를 유지한다. K_LC1은 같은 native 선택에 원 apply_singleton_band를 한 번 적용하며 내부에서 실제 LC0 baseline b를 한 번 구한다. HIDDEN8 성분에서 M을 뺀 집합이 target 하나인 원 survivor의 direct safe OPEN만 105% 초과·110% 이하 및 D(p)<D(b) 조건으로 예외 선택한다. 원 graph/selection/native·물리 검증에 결속하며 첫 입력1회만 실행한다. guess/initial과 native 정책·Model C는 불변이다. 110%는 전체 게임 비용 상한이 아니다.
@@ -1204,6 +1208,7 @@ worker와 부모는 동일 monotonic ns로 permit 기한을 검사한다. 추측
 | Decision analyzer | `test_simple_decision.py` | local 우선과 probability 생략, 세 decision 종류, mine budget, 불변 입력·공개 API 경계 |
 | Runner | `test_simple_runner.py` | 첫 수/guess 정책, 한 행동 후 재분석, 진행 검사·오류, 실제 event 순서, partial/continuation 재생과 정보 격리 |
 | Live Analysis | `test_live_analysis.py` | 순수 presentation, 정확한 후보·확률 포맷, 실제 Qt 표시·갱신·Reduction·오류·첫 수 정책 |
+| Live V1 정보 갱신 | `test_live_policy_info.py` | 상한 열거기와 frozen 열거기의 동등, 완료 결과와 frozen 정밀 확정 집합의 동등, 부분 결과의 범위, 비단조 전이의 이월 폐기, 결정·overlays·frozen 호출 수 불변, info의 입력 권한 없음, 전송 두 형식의 엄격 검사, worker·표시 경로 |
 | Live Auto | `test_live_auto.py` | timeout당 한 행동, fresh 분석·기록, guess 대기/허용, stale 추천·무진행·취소, 실제 QTimer 첫 수 종료 |
 | Replay Analysis pure | `test_replay_analysis.py` | index 의미, 추천 후 event 조회, 숨은 배치 격리, 첫 수·동등 후보·비교 범위, terminal·불변성 |
 | Replay Analysis UI | `test_replay_analysis_ui.py` | 실제 Qt controls, 이동/자동 재생별 갱신, 같은 index 재계산 방지, 표시 전환, 오류 복구·engine ownership·Auto 차단 |
@@ -1229,6 +1234,7 @@ Qt 관련 테스트는 offscreen으로 실행하며 일부는 PyQt5 미설치 �
 ## 7. 현재 한계와 기술 부채
 
 - **Exact probability 비용:** sampling·cutoff·approximate fallback 없이 component를 열거하므로 큰 연결 component에서 지수 시간이 걸린다. Simple Live와 Replay 참고 분석은 UI thread에서 동기 실행한다. Main V1/K의 원 추론은 기존 contained worker에서 수행하고 부모의 검증·입력·표시는 UI thread에 남는다. 전체 Replay 추천 사전 계산은 없다.
+- **V1 표시용 정보 갱신의 범위:** 보충 계산은 지역 경로의 노드 상한 20,000 안에서만 하며 상한에 걸린 보드의 지연·미표시가 남는다. 상한에 걸린 계산은 끝낸 성분만으로 드러나지 않는 전역 모순을 놓칠 수 있다. 정리 단계와 V1의 깃발 규칙 때문에 제품 경로에서는 그런 상태에 도달하지 않는다. 보충의 실패·부분 계산 상태는 제품 기록과 화면에 남지 않는다. K 계열에는 적용하지 않았다. 검증은 개발 보드·offscreen의 부분 검증이고 native 화면·전체 회귀·동결 빌드는 확인하지 않았다.
 - **Live/Replay의 Simple Algorithm 범위:** 닫힌 칸의 OPEN/FLAG만 선택한다. CHORD/UNFLAG, 장기 승률 최적화, 일반적인 오답 깃발 교정은 제공하지 않는다. 검증 범위는 [정보 경계](#public-information)를 따른다.
 - **Replay 저장 표현력:** 중간 합류 및 첫 position 해석의 제약은 [schema v1 한계](#replay-schema-v1)에 정리했다. Event별 human/auto 출처도 구분하지 않는다.
 - **Stage-3 후속 범위:** Milestones 1–9와 Program K 연구 데모 D0–D5는 CLOSED다. Effectiveness는 NOT ESTABLISHED, Phase-1은 PHASE1_INCONCLUSIVE_TRANSFER이며 현재 de-dup timing path는 STOP / DEFER다. Extended 전체는 명시적 project-closeout 판정 전까지 ACTIVE다. Stage-3 Visualizer checkpoint/cache, modeled-time slider, persistence와 Foundation Run/결과 열기 라벨 개선은 DEFER이며 Foundation F-2도 OPTIONAL / DEFER를 유지한다.
