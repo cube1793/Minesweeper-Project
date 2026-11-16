@@ -5,6 +5,7 @@ Physical flags are unknowns. No engine, actual layout, or board seed is read.
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 from hashlib import sha256
 import json
 from math import comb, isfinite
@@ -15,6 +16,7 @@ from stage4_belief import BeliefRequest, FLAGGED, HIDDEN, PRIOR_ID, exact_json
 
 
 SAMPLER_ID = "INTEGER_RANK_POSTERIOR_V1"
+_NEIGHBOR_CACHE_MAX_CELLS = 480  # the largest registered board (KernelLimits / SamplerLimits cell cap)
 
 
 def public_digest(value):
@@ -22,7 +24,7 @@ def public_digest(value):
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def neighbor_indices(width, height):
+def _neighbor_table(width, height):
     return tuple(
         tuple(ny * width + nx
               for ny in range(max(0, y - 1), min(height, y + 2))
@@ -30,6 +32,20 @@ def neighbor_indices(width, height):
               if (nx, ny) != (x, y))
         for y in range(height) for x in range(width)
     )
+
+
+_neighbor_table_cached = lru_cache(maxsize=32)(_neighbor_table)
+
+
+def neighbor_indices(width, height):
+    # The table is a pure function of two exact ints and an immutable tuple of
+    # tuples, so callers may share one object per registered board shape.  Any
+    # other argument form (float, bool, int subclass, unhashable, oversized)
+    # runs the unmemoized body, so its value or exception is unchanged and it
+    # can neither read nor write a cache entry.
+    if type(width) is int and type(height) is int and width * height <= _NEIGHBOR_CACHE_MAX_CELLS:
+        return _neighbor_table_cached(width, height)
+    return _neighbor_table(width, height)
 
 
 @dataclass(frozen=True, slots=True)

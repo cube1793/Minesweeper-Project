@@ -4,6 +4,8 @@ COMPLETE means a fixed point of normalization, extremes and strict subsets.
 Physical flags are unknown variables. Every published fact has a public DAG.
 """
 from dataclasses import dataclass, fields
+from itertools import chain
+from operator import attrgetter, is_
 from time import perf_counter
 
 from stage4_belief import BeliefRequest, PRIOR_ID, exact_json
@@ -16,6 +18,18 @@ from stage4_exact_pilot import (
 PRODUCER = "STAGE4_PUBLIC_KERNEL"
 VERSION = "public_subset_constraints_v1"
 WORK_VERSION = "prepaid_bounded_bitsets_v1"
+
+# Digest memos.  A memo entry is written only for an object graph made of exact immutable
+# values, and it keeps the very field objects the digest was computed from.  A hit requires
+# every current field to be that same object, so it returns exactly the string the unmemoized
+# expression would return now; anything else (a field rebound through object.__setattr__, a
+# changed limits or proof node, another type with an equal value) falls through to the
+# unmemoized expression.  Strong references keep an id() from being reused while its entry
+# exists.  No rule, limit, work unit or check is skipped.
+_IDENTITY_MEMO = {}
+_IDENTITY_MEMO_MAX = 16
+_PROOF_MEMO = [None]
+_INT_ONLY = {int}
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +75,16 @@ class KernelRequest:
 
     @property
     def identity(self):
-        return public_digest((PRODUCER, self.to_payload()))
+        entry = _IDENTITY_MEMO.get(id(self))
+        if entry is not None and entry[0] is self and _request_unchanged(self, entry):
+            return entry[1]
+        parts = _request_parts(self)  # taken before hashing; None unless every part is immutable
+        value = public_digest((PRODUCER, self.to_payload()))
+        if parts is not None:
+            if len(_IDENTITY_MEMO) >= _IDENTITY_MEMO_MAX:
+                _IDENTITY_MEMO.clear()
+            _IDENTITY_MEMO[id(self)] = (self, value) + parts
+        return value
 
     @classmethod
     def from_payload(cls, payload):
@@ -77,6 +100,43 @@ class KernelRequest:
         return cls(**v)
 
 
+def _request_parts(request):
+    """Payload field objects of an all-immutable request in payload order, else None."""
+    if type(request) is not KernelRequest:
+        return None
+    try:
+        observation, limits = request.observation, request.limits
+        parts = (observation, request.num_mines, request.counted_inputs, request.prior_id,
+                 request.version, limits, limits.max_cells, limits.max_constraints,
+                 limits.max_derived, limits.max_work, limits.max_seconds)
+    except AttributeError:
+        return None
+    if (type(observation) is not tuple or type(parts[1]) is not int or type(parts[2]) is not int
+            or type(parts[3]) is not str or type(parts[4]) is not str
+            or type(limits) is not KernelLimits or type(parts[6]) is not int
+            or type(parts[7]) is not int or type(parts[8]) is not int
+            or type(parts[9]) is not int or type(parts[10]) is not float):
+        return None
+    for row in observation:
+        if type(row) is not tuple or set(map(type, row)) != _INT_ONLY:
+            return None
+    return parts
+
+
+def _request_unchanged(request, entry):
+    """True only when every payload field is still the object the memo entry was hashed from."""
+    try:
+        limits = entry[7]
+        return (request.observation is entry[2] and request.num_mines is entry[3]
+                and request.counted_inputs is entry[4] and request.prior_id is entry[5]
+                and request.version is entry[6] and request.limits is limits
+                and limits.max_cells is entry[8] and limits.max_constraints is entry[9]
+                and limits.max_derived is entry[10] and limits.max_work is entry[11]
+                and limits.max_seconds is entry[12])
+    except AttributeError:
+        return False  # the unmemoized expression raises its own error
+
+
 @dataclass(frozen=True, slots=True)
 class ConstraintProof:
     cells: tuple[int, ...]
@@ -84,6 +144,9 @@ class ConstraintProof:
     rule: str
     parents: tuple[int, ...] = ()
     source: int | None = None
+
+
+_NODE_FIELDS = attrgetter("cells", "mines", "rule", "parents", "source")  # ConstraintProof field order
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +217,50 @@ def _mask(cells):
     return sum(1 << c for c in cells)
 
 
+def _proof_parts(safe, mines, nodes):
+    """Flat field objects of every node of an all-immutable proof graph, else None."""
+    if type(safe) is not tuple or type(mines) is not tuple or type(nodes) is not tuple:
+        return None
+    if (safe and set(map(type, safe)) != _INT_ONLY) or (mines and set(map(type, mines)) != _INT_ONLY):
+        return None
+    if nodes and set(map(type, nodes)) != {ConstraintProof}:
+        return None
+    try:
+        parts = tuple(chain.from_iterable(map(_NODE_FIELDS, nodes)))
+    except AttributeError:
+        return None
+    for i in range(0, len(parts), 5):
+        cells, k, rule, parents, source = parts[i:i + 5]
+        if (type(cells) is not tuple or type(parents) is not tuple or type(k) is not int
+                or type(rule) is not str or (source is not None and type(source) is not int)
+                or (cells and set(map(type, cells)) != _INT_ONLY)
+                or (parents and set(map(type, parents)) != _INT_ONLY)):
+            return None
+    return parts
+
+
+def _proof_unchanged(nodes, parts):
+    """True only when every field of every node is still the object the memo entry was hashed from."""
+    try:
+        return all(map(is_, chain.from_iterable(map(_NODE_FIELDS, nodes)), parts))
+    except AttributeError:
+        return False  # the unmemoized expression raises its own error
+
+
 def _proof_identity(request, safe, mines, nodes):
-    return public_digest((PRODUCER, VERSION, request.identity, safe, mines, nodes))
+    # One-entry memo.  The kernel, its own verification, plan_safe and the delivery guard
+    # hash the same immutable proof objects; only the repeated hashing is saved.
+    request_id = request.identity
+    entry = _PROOF_MEMO[0]
+    if (entry is not None and type(request_id) is str and entry[0] == request_id
+            and entry[1] is safe and entry[2] is mines and entry[3] is nodes
+            and _proof_unchanged(nodes, entry[4])):
+        return entry[5]
+    parts = _proof_parts(safe, mines, nodes) if type(request_id) is str else None  # before hashing
+    value = public_digest((PRODUCER, VERSION, request_id, safe, mines, nodes))
+    if parts is not None:
+        _PROOF_MEMO[0] = (request_id, safe, mines, nodes, parts, value)
+    return value
 
 
 def infer_public(request, *, cancelled=None):
