@@ -1133,7 +1133,7 @@ Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API
 
 `stage4_runtime_kernel.infer_public_indexed`는 기존 공개 식과 proof API를 재사용하고 불변 관계와 색인으로 전파한다. 기존 `verify_proof`는 새 work-version을 허용한다. 기본 work 500,000에는 완료 전 검증이 포함된다. 완료 388/857과 검증 단계 퇴행 3건을 유지한다.
 
-`stage4_runtime_model`은 같은 공개 posterior bank와 고정 후속 정책 F로 후보를 비교한다. F는 공개 커널, 안전 비용 계획, Q/UNIT10_SUMMED를 사용한다. F1 보완은 kernel 500,000/Q local 20,000/Unit10 200,000/F 5초를 고정하고, 유효 cache hit 확인 후 miss에서 전량 예약을 검사한다. 자원이 부족한 모델은 RESOURCE_LIMIT이며 완전한 행렬에서만 점수를 발행한다. 모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS`다.
+`stage4_runtime_model`은 같은 공개 posterior bank와 고정 후속 정책 F로 후보를 비교한다. F는 공개 커널, 안전 비용 계획, Q/UNIT10_SUMMED를 사용한다. F1 보완은 kernel 500,000/Q local 20,000/Unit10 200,000/F 5초를 고정하고, 유효 cache hit 확인 후 miss에서 전량 예약을 검사한다. 자원이 부족한 모델은 RESOURCE_LIMIT이며 완전한 행렬에서만 점수를 발행한다. 모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS`다. (이 ID와 "cache hit"의 범위는 당시 값이다. 현재 모델 ID와 관측 기준 재사용은 문서 끝의 "Stage4 가상 F 관측 기준 재사용" 절을 본다.)
 
 `stage4_runtime_policy`는 S/M/R 목적과 판당 quota·공개 count·요청 identity를 결속한다. 전달 검증은 output harness에서 수용됐다. Main/worker/UI 연결은 미구현이다. Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. [상세 마감](docs/stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md)을 참고한다.
 
@@ -1310,3 +1310,71 @@ Stage3에 적용하지 않는다. Stage3의 계산·통신·화면·입력 간�
 Replay를 사용하되 평가 JSONL의 앱 호환/변환/GUI 재현은 별도 확인 사항이다.
 촬영 전용 UI·새 고정 보드 기능·새 벤치마크는 이번 문서 갱신에 포함하지 않는다.
 상세 수치, 적용 한계와 원시 경로는 [Units69–74 마감](docs/stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)에 모았다.
+
+## Stage4 가상 F 관측 기준 재사용 — S4_F_OBS_MEMO1 (2026-11-17)
+
+`stage4_runtime_model`의 모델 판정 한 번 안에서, 같은 공개 상태를 다른 누적 입력 수로 다시 만났을 때 고정 F를
+다시 계산하지 않는다. S4_F_OBS_MEMO1은 구현을 구분하는 이름이며 새 UI 모드나 정책이 아니다. 계산 최적화로 반영했다.
+변경 파일은 `stage4_runtime_model.py`와 그 시험 파일 둘이다.
+
+**식별자.** 모델 ID를 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE`로 올렸다. 같은 모델 요청에 대해
+완료 여부·작업량 회계·최종 행동이 시간과 무관하게 달라질 수 있으므로, 앞선 구현과 기록 수준에서 구분하기 위해서다.
+`F_ID`·`K100K_F_ID`·`V1_F_ID`·`POLICY_ID`, 증명 형식, 전송 형식은 그대로다. 모델 ID는 모델 요청 식별값과 결과 표지에만
+들어가고, 제품이 저장하거나 전송하는 상태(`RuntimeHistory`, worker 메시지, Replay)에는 들어가지 않는다.
+소스가 바뀌었으므로 실행 중이던 앱은 다시 시작한다.
+
+**재사용 계약.**
+
+- `FollowupRequest.reuse_key`는 `logical_key`에서 `counted_inputs`만 뺀 값이다. F 식별자, 공개 관측, 지뢰 수, 추측 설정,
+  prior, kernel·계획·Q 한도는 그대로 구분한다. `logical_key`와 `identity`는 바꾸지 않았다. `reuse_key`는 식별값이 아니다.
+- 근거는 F가 누적 입력 수를 요청·kernel·Q의 식별값과 형식 검증에만 쓰고 결정에는 쓰지 않는다는 점이다.
+- `_FollowupCache`는 `reuse_key`로 조회하고 적중을 검증한다. 캐시는 모델 판정 한 번 안에서 만들고 비운다(용량 2,048 그대로).
+- 저장하고 재사용하는 것은 완결된 결과(`READY`, `GUESS_BLOCKED`)뿐이다. 시간 제한을 거친 결과, 취소·오류·자원 한도
+  결과는 저장하지 않는다.
+- 적중은 저장된 결과 객체를 그대로 돌려준다. 요청 식별값, kernel 요청, 증명, Q 요청은 **원래 요청의 것**이며 현재
+  요청의 것으로 고쳐 쓰지 않는다. 조회 기록 `FollowupCall`의 `request`는 현재 조회, `origin_request_id`는 원래 요청의
+  식별값이고, 읽기 전용 속성 `reuse`가 `MISS`·`SAME_REQUEST`·`OBSERVATION_EQUIVALENT`를 구분한다(저장 필드가 아니어서
+  직렬화 형태는 그대로다).
+- 현재 조회는 재사용 전에 실제 누적 입력 수로 만들어 형식을 검증한다. 취소, 모델 시간 한도, F 시간 0, 조회 수 상한은
+  적중 전에 적용된다. 미스는 kernel·Q local·Q counter 전량과 5초를 예약할 수 있을 때만 실행하고 실제 쓴 만큼만 정산한다.
+  적중은 청구가 없다.
+- 행의 효율은 행 자신의 누적 입력 수로 계산한다. 저장된 요청의 입력 수는 쓰지 않는다.
+- 실제 입력에 쓰는 직접 F는 캐시를 거치지 않고 `logical_key` 결속 검사를 그대로 받는다. 모델이 고른 수의 전달 검증은
+  가상 F의 결과를 읽지 않는다. 재사용된 증명은 실제 입력의 권한이 되지 않는다.
+
+**수용 범위(조율 결정).**
+
+| 유지되는 것 | 달라질 수 있는 것 |
+|---|---|
+| 가상 F의 결정·증명 내용과 직접 F의 요청 결속 | 적중·미스 수와 작업량 |
+| 같은 조건에서 양쪽 모두 완료한 판정의 행·점수·선택 | 모델 완료 여부 |
+| 실제 실행한 미스의 비용만 정산하는 원칙 | 최종 출처(F 또는 MODEL)와 행동 |
+| 추측 OFF와 S의 후보 자격·전달 보호 | 추측 ON의 M/R에서 새로 완료된 모델이 위험 후보를 고르는 경우 |
+| F 정책, 표본·후보·점수 규칙, 한도·예약·취소 규칙 | |
+
+마지막 변화는 기존 M/R 정책을 유지하는 범위에서 허용한다. 계산이 줄어 판정이 끝까지 가면 정책은 F의 수 대신 모델의
+선택을 낸다. 개발 상태 하나(P03, `indexed`, 추측 ON의 M·R)에서는 앞선 구현이 증명된 안전 CHORD를 냈고 이 구현의 모델은
+정확한 생존확률 89/104인 OPEN을 골랐다. 15/104(약 14.4%)는 그 입력 하나의 지뢰 확률이며 판 전체 승률의 변화량이
+아니다. 정렬 키는 (표본 평균, 표본 승리 비율, 정확한 생존확률, 예비 순위)여서 정확한 생존확률은 동률 깨기로만 쓰인다.
+**이 수용은 승률·평균 효율·고점이 개선되거나 유지된다는 뜻이 아니다.** 안전 우선 규칙이나 목표·점수 변경은 이 변경에
+넣지 않았다. M/R의 작은 표본 평가와 정확한 위험 정보의 사용 방식은 후속 과제다.
+
+**근거의 구분.**
+
+- 앞선 후보(모델 ID가 V2이고 실험 표지가 있던 사본)에서 얻은 것: 실제 F 직접 대조 876쌍(결정·증명 내용·작업량 같음),
+  판정 단위 60건(조회 10,393개 대조 불일치 0, 회계·결속 위반 0), 판 8개(입력열 같음), 21개 모듈 부분 회귀.
+  작업량·시간 수치(예: 둘 다 완료된 한 조건의 kernel 작업량 비 0.740)는 모두 그 후보의 측정이다. 판정 단위의 실제 시계
+  시간은 두 군 모두 관찰 래퍼를 설치한 조건이었다. 최종 바이트로는 성능을 다시 재지 않았다.
+- 독립 검토(구현에 참여하지 않은 세션): 수용 전 필수 코드 수정 0건.
+- 최종 바이트(모델 ID V3)의 새 검증: 추측 OFF·논리 시계 판정 10건(기준 5 + 최종 5)에서 조회 1,876개의 공개 상태·F 결정·
+  조회 요청 식별값이 같고 회계·요청·증명 결속 위반이 0이었다. 다섯 조건 모두 두 군에서 완료됐고 행·점수·선택이
+  같았다. 모든 행이 추측 대기로 끝난 `COMPLETE_ALL_ZERO`이며 정책 상태는 `NO_INFORMATION`이다. 새로 완료된 판정은
+  0건이고 선택 후보의 생존확률은 모두 1이었다. 제품 반영 뒤 표준 격리 실행기로 Stage4 21개 모듈과
+  `tests.test_stage4_live_ui`를 실행해 336건 PASS였다(부분 회귀).
+
+**확대하면 안 되는 주장.** 반영 뒤 전체 소스 회귀와 native 화면 확인은 하지 않았다. 승률·평균 효율·고점의 개선이나 유지,
+`indexed`의 초·중반 미완료 해소, 모든 판정의 행동 동일성은 주장하지 않는다. 판 단위에서 `indexed`·M/R과 행동이 달라진
+뒤의 진행은 관측하지 않았다. 추측 OFF의 판 단위 대조도 없다.
+
+근거: `STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16`의 `run_01/REPORT_KO.md`(구현·대조),
+`run_01/claude_review_01/REVIEW_KO.md`·`FINDINGS.json`(독립 검토), `acceptance_commit_01/REPORT_KO.md`(최종 보완·반영·커밋).

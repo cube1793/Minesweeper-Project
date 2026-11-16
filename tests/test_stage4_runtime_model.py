@@ -22,6 +22,22 @@ def query(name="G001", mode="M", **kwargs):
                           "units24-26-independent-planning-v1", limits=TINY, **kwargs)
 
 
+def assert_reuse_binding(test, call):
+    """A lookup record keeps the identity of the request its result was computed for.
+
+    That request may differ from the current one in counted_inputs only, and only
+    for a cache hit; a miss is bound to the current request completely.
+    """
+    test.assertEqual(call.origin_request_id, call.result.request_id)
+    test.assertEqual(call.result.request_id, call.result.request.identity)
+    test.assertEqual(call.request.reuse_key, call.result.request.reuse_key)
+    test.assertEqual(replace(call.result.request, counted_inputs=call.request.counted_inputs).logical_key,
+                     call.request.logical_key)
+    if not call.cache_hit:
+        test.assertEqual(call.request.logical_key, call.result.request.logical_key)
+        test.assertEqual(call.result.request_id, call.request.identity)
+
+
 class RuntimeModelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -42,7 +58,7 @@ class RuntimeModelTests(unittest.TestCase):
             for mode in ("S", "M", "R"):
                 result = self.results[name, mode]
                 self.assertEqual(result.status, "COMPLETE", (name, mode, result.reason, result.error))
-                self.assertEqual(result.model_id, "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS")
+                self.assertEqual(result.model_id, "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE")
                 for call in result.calls:
                     self.assertEqual(call.request.limits, m.FollowupLimits())
                 self.assertEqual({frozenset(s.mines) for s in result.posterior.samples},
@@ -129,7 +145,9 @@ class RuntimeModelTests(unittest.TestCase):
             observed_hits += on.usage.f_hits
             for call in on.calls:
                 self.assertEqual(call.origin_request_id, call.result.request_id)
-                self.assertEqual(call.request.logical_key, call.result.request.logical_key)
+                # S4_F_OBS_MEMO1: a hit may come from the same public state at another
+                # counted-input total; everything else of the logical key still agrees.
+                assert_reuse_binding(self, call)
             if AUDIT:
                 AUDIT.emit("cache_equivalence", dict(name=name, on_usage=on.usage, off_request=q, off_result=off, equal=True))
         self.assertGreater(observed_hits, 0)
@@ -293,7 +311,10 @@ class FixedFollowupLimitsTests(unittest.TestCase):
                 for resource, _, _ in self.CAPS:
                     self.assertEqual(getattr(budget.usage, resource), getattr(before, resource))
                 self.assertEqual(tuple(budget.settlements), settlements)
-                different = replace(fq, counted_inputs=2)
+                # A miss needs another public state: counted_inputs alone is a reuse
+                # since S4_F_OBS_MEMO1 (ObservationReuseTests covers that hit).
+                different = m.FollowupRequest(((H, 0),), 0, 1, False)
+                self.assertNotEqual(different.reuse_key, fq.reuse_key)
                 self.assert_stop("KERNEL_BUDGET", lambda: cache.choose(different, budget, calls))
                 self.assertEqual(backend.call_count, 1)
                 budget.usage = replace(budget.usage, kernel_work=0, q_local=0, unit10_units=0)
@@ -305,10 +326,16 @@ class FixedFollowupLimitsTests(unittest.TestCase):
         with patch.object(m, "perf_counter", return_value=100.0):
             fq = self.followup()
             original = self.fake(fq, cancelled=lambda:False)
-            different = replace(fq, counted_inputs=2)
+            # Results that are consistent with their own request but belong to another
+            # public state, guess setting or F cap must not answer this lookup.
+            different = m.FollowupRequest(((H, 0),), 0, 1, False)
+            guessing = replace(fq, allow_guess=True)
+            capped = replace(fq, limits=replace(fq.limits, plan=m.PlanLimits(max_subsets=1)))
             variants = {
                 "request_id": replace(original, request_id="wrong"),
                 "logical_key": replace(original, request=different, request_id=different.identity),
+                "guess_setting": replace(original, request=guessing, request_id=guessing.identity),
+                "plan_cap": replace(original, request=capped, request_id=capped.identity),
                 "followup_id": replace(original, followup_id="wrong"),
                 "incomplete": replace(original, status="RESOURCE_LIMIT"),
                 "uncacheable": replace(original, cacheable=False),
@@ -320,7 +347,7 @@ class FixedFollowupLimitsTests(unittest.TestCase):
             for name, result in variants.items():
                 with self.subTest(name=name):
                     budget, cache, calls = m._Budget(query(), None), m._FollowupCache(1), []
-                    cache.entries[fq.logical_key] = result
+                    cache.entries[fq.reuse_key] = result
                     with patch.object(m, "choose_followup") as backend, self.assertRaises(ValueError):
                         cache.choose(fq, budget, calls)
                     backend.assert_not_called()
@@ -343,7 +370,7 @@ class FixedFollowupLimitsTests(unittest.TestCase):
                             budget.deadline = 100.0
                         cache, calls = m._FollowupCache(1), []
                         if hit:
-                            cache.entries[fq.logical_key] = original
+                            cache.entries[fq.reuse_key] = original
                         with patch.object(m, "choose_followup") as backend:
                             expected = TypeError if kind == "bad_callback" else RuntimeError if kind == "callback_error" else m._Stop
                             with self.assertRaises(expected) as raised:
@@ -498,7 +525,7 @@ class IndexedK100KTests(unittest.TestCase):
                     mode="S", allow_guess=False, target=None, planning_seed=0,
                     prior_id=m.PRIOR_ID, limits=old_model)
                 self.assertEqual(q.identity, m.public_digest((
-                    "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS", expected)))
+                    "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE", expected)))
                 self.assertEqual(m.ModelRequest.from_payload(q.to_payload()), q)
         self.assertEqual(m.ModelLimits.from_payload({}), m.ModelLimits())
         payload = m.ModelRequest(((0, H),), 0, 1).to_payload()
@@ -543,7 +570,7 @@ class IndexedK100KTests(unittest.TestCase):
             for call in result.calls:
                 self.assertEqual(call.request.limits, m.fixed_followup_limits("indexed_k100k"))
                 self.assertEqual(call.result.followup_id, m.K100K_F_ID)
-                self.assertEqual(call.request.logical_key, call.result.request.logical_key)
+                assert_reuse_binding(self, call)
                 self.assertEqual(call.origin_request_id, call.result.request_id)
                 if call.result.facts:
                     self.assertEqual(call.result.facts.work_version, m.WORK_VERSION)
@@ -556,6 +583,7 @@ class IndexedK100KTests(unittest.TestCase):
         baseline = replace(fq, limits=m.fixed_followup_limits("indexed"))
         self.assertNotEqual(fq.identity, baseline.identity)
         self.assertNotEqual(fq.logical_key, baseline.logical_key)
+        self.assertNotEqual(fq.reuse_key, baseline.reuse_key)
         with patch.object(m, "perf_counter", return_value=100.0):
             budget = m._Budget(replace(query(), limits=self.limits()), None)
             cache, calls = m._FollowupCache(2), []
@@ -566,7 +594,7 @@ class IndexedK100KTests(unittest.TestCase):
                 self.assertEqual(new.followup_id, m.K100K_F_ID)
                 self.assertIs(cache.choose(fq, budget, calls), new)
                 self.assertEqual(backend.call_count, 2)
-            cache.entries[fq.logical_key] = old
+            cache.entries[fq.reuse_key] = old
             with patch.object(m, "choose_followup") as backend, self.assertRaisesRegex(ValueError, "INVALID_CACHED_F"):
                 cache.choose(fq, budget, calls)
             backend.assert_not_called()
@@ -671,6 +699,418 @@ class IndexedK100KTests(unittest.TestCase):
                 (fq.observation, fq.num_mines, fq.counted_inputs, fq.allow_guess, fq.prior_id))
             self.assertEqual((result.facts.proven_safe, result.facts.proven_mines,
                               result.facts.constraints, result.facts.proof_id), ((), (), (), None))
+
+
+class ObservationReuseTests(unittest.TestCase):
+    """S4_F_OBS_MEMO1: inside one model call a public state is given to F once.
+
+    counted_inputs alone no longer forces a second F run. Injected F replies are
+    labelled as such; the real cases use the product F on small exhaustive grids.
+    """
+    RESOURCES = ("kernel_work", "q_local", "unit10_units")
+
+    def followup(self, counted=1, grid=((0, H),), **kwargs):
+        return m.FollowupRequest(grid, 0, counted, False, **kwargs)
+
+    def fake(self, request, *, cancelled=None):
+        usage = m.RuntimeUsage(kernel_calls=1, kernel_work=7, q_calls=1,
+                               q_local=11, unit10_calls=1, unit10_units=13)
+        caps = (("kernel_work", request.limits.kernel.max_work), ("q_local", request.limits.q.local_work),
+                ("unit10_units", request.limits.q.counter_units))
+        return m.FollowupResult(request.limits.followup_id, request.identity, request,
+            "GUESS_BLOCKED", "INJECTED_COMPLETE", (), "EXACT_Q", "GUESS_BLOCKED",
+            None, None, None, None, None, usage,
+            tuple(m.Settlement(name, cap, getattr(usage, name), "SETTLED") for name, cap in caps), True, 0.0)
+
+    def others(self, base):
+        """Requests that differ from base in something F reads."""
+        return {
+            "observation": self.followup(base.counted_inputs, ((H, 0),)),
+            "num_mines": m.FollowupRequest(base.observation, 1, base.counted_inputs, False),
+            "allow_guess": replace(base, allow_guess=True),
+            "kind_v1": replace(base, limits=m.FollowupLimits(kernel_kind="v1")),
+            "kind_k100k": replace(base, limits=m.fixed_followup_limits("indexed_k100k")),
+            "kernel_cap": replace(base, limits=replace(base.limits, kernel=m.KernelLimits(max_work=499_999))),
+            "plan_cap": replace(base, limits=replace(base.limits, plan=m.PlanLimits(max_subsets=1))),
+            "q_cap": replace(base, limits=replace(base.limits, q=m.ExactLimits(counter_units=199_999))),
+        }
+
+    def test_reuse_key_leaves_out_counted_inputs_only(self):
+        base = self.followup(7)
+        self.assertEqual([item for item in base.logical_key if item not in base.reuse_key], [7])
+        self.assertEqual(len(base.reuse_key), len(base.logical_key)-1)
+        for counted in (0, 1, 8, 4096):
+            other = replace(base, counted_inputs=counted)
+            self.assertEqual(base.reuse_key, other.reuse_key)
+            self.assertNotEqual(base.logical_key, other.logical_key)   # still a different request
+            self.assertNotEqual(base.identity, other.identity)
+        others = self.others(base)
+        self.assertEqual(len({base.reuse_key} | {o.reuse_key for o in others.values()}), len(others)+1)
+        for name, other in others.items():
+            with self.subTest(other=name):
+                self.assertNotEqual(base.reuse_key, replace(other, counted_inputs=3).reuse_key)
+        # Wall-time caps were outside the logical key before and stay outside both keys.
+        slow = replace(base, limits=replace(base.limits, max_seconds=1.0))
+        self.assertEqual((base.reuse_key, base.logical_key), (slow.reuse_key, slow.logical_key))
+
+    def test_current_request_is_validated_before_any_reuse(self):
+        for bad in (-1, True, 1.0, "2", None):
+            with self.subTest(bad=bad), self.assertRaises((TypeError, ValueError)):
+                self.followup(bad)
+
+    def test_same_public_state_is_computed_once_for_any_counted_total(self):
+        # New requirement: fails before S4_F_OBS_MEMO1 (three F runs), passes after (one).
+        with patch.object(m, "perf_counter", return_value=100.0):
+            budget, cache, calls = m._Budget(query(), None), m._FollowupCache(4), []
+            with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                results = [cache.choose(self.followup(counted), budget, calls) for counted in (1, 2, 9)]
+            self.assertEqual(backend.call_count, 1)
+            self.assertIs(results[1], results[0])
+            self.assertIs(results[2], results[0])
+            self.assertEqual((budget.usage.f_lookups, budget.usage.f_misses, budget.usage.f_hits), (3, 1, 2))
+            self.assertEqual((budget.usage.kernel_work, budget.usage.q_local, budget.usage.unit10_units), (7, 11, 13))
+
+    def test_reuse_returns_the_original_result_and_records_the_lookup(self):
+        with patch.object(m, "perf_counter", return_value=100.0):
+            budget = m._Budget(query(), None)
+            cache, calls, first = m._FollowupCache(4), [], self.followup(1)
+            with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                original = cache.choose(first, budget, calls)
+                # No work and no five seconds are left: only a reuse can answer now.
+                budget.usage = replace(budget.usage, **{name: getattr(TINY, name) for name in self.RESOURCES})
+                budget.deadline = 100.001
+                before, settlements = budget.usage, tuple(budget.settlements)
+                later = self.followup(2)
+                self.assertNotEqual(later.identity, first.identity)
+                self.assertIs(cache.choose(later, budget, calls), original)
+                self.assertIs(cache.choose(self.followup(9), budget, calls), original)
+                self.assertIs(cache.choose(self.followup(1), budget, calls), original)
+                self.assertEqual(backend.call_count, 1)
+            self.assertEqual([c.cache_hit for c in calls], [False, True, True, True])
+            self.assertEqual([c.reuse for c in calls],
+                             ["MISS", "OBSERVATION_EQUIVALENT", "OBSERVATION_EQUIVALENT", "SAME_REQUEST"])
+            # The record names the current lookup; the result stays the original one.
+            self.assertEqual([c.request.counted_inputs for c in calls], [1, 2, 9, 1])
+            for call in calls:
+                self.assertIs(call.result, original)
+                self.assertEqual(call.result.request.counted_inputs, 1)
+                self.assertEqual(call.origin_request_id, first.identity)
+                self.assertEqual(call.result.request_id, first.identity)
+                assert_reuse_binding(self, call)
+            self.assertEqual(calls[1].request, later)
+            self.assertNotEqual(calls[1].request.identity, calls[1].origin_request_id)
+            self.assertEqual(original.request, first)
+            self.assertEqual((budget.usage.f_lookups, budget.usage.f_misses, budget.usage.f_hits), (4, 1, 3))
+            for resource in self.RESOURCES:
+                self.assertEqual(getattr(budget.usage, resource), getattr(before, resource))
+            self.assertEqual(tuple(budget.settlements), settlements)
+            self.assertEqual(len(cache.entries), 1)
+
+    def test_real_reuse_keeps_the_proof_bound_to_its_original_request(self):
+        from stage4_public_kernel import verify_facts
+        budget, cache, calls = m._Budget(query(), None), m._FollowupCache(4), []
+        first, later = self.followup(1), self.followup(5)
+        original = cache.choose(first, budget, calls)
+        self.assertEqual((original.status, original.source), ("READY", "PUBLIC_KERNEL"), original.error)
+        reused = cache.choose(later, budget, calls)
+        self.assertIs(reused, original)
+        self.assertEqual(calls[-1].reuse, "OBSERVATION_EQUIVALENT")
+        # The certificate is the original request's and verifies for that request.
+        self.assertEqual(reused.request_id, first.identity)
+        self.assertEqual(reused.kernel_request.counted_inputs, 1)
+        self.assertEqual(reused.facts.request_id, reused.kernel_request.identity)
+        self.assertEqual((reused.plan.request_id, reused.plan.proof_id),
+                         (reused.kernel_request.identity, reused.facts.proof_id))
+        verify_facts(reused.kernel_request, reused.facts)
+        # A direct F run for the later request decides and proves the same, under its own identities.
+        direct = m.choose_followup(later)
+        self.assertEqual((direct.status, direct.reason, direct.source, direct.sequence, direct.terminal_outcome),
+                         (reused.status, reused.reason, reused.source, reused.sequence, reused.terminal_outcome))
+        self.assertEqual((direct.facts.proven_safe, direct.facts.proven_mines, direct.facts.constraints,
+                          direct.facts.work, direct.facts.work_by_family),
+                         (reused.facts.proven_safe, reused.facts.proven_mines, reused.facts.constraints,
+                          reused.facts.work, reused.facts.work_by_family))
+        self.assertEqual(direct.usage, reused.usage)
+        self.assertEqual(direct.kernel_request.counted_inputs, 5)
+        self.assertNotEqual(direct.request_id, reused.request_id)
+        self.assertNotEqual(direct.facts.request_id, reused.facts.request_id)
+        self.assertNotEqual(direct.facts.proof_id, reused.facts.proof_id)
+        verify_facts(direct.kernel_request, direct.facts)
+        # The reused proof is never valid as a proof for the later request.
+        with self.assertRaisesRegex(ValueError, "FACT_IDENTITY"):
+            verify_facts(direct.kernel_request, reused.facts)
+
+    def test_other_state_setting_kind_or_cap_is_never_a_hit(self):
+        with patch.object(m, "perf_counter", return_value=100.0):
+            base = self.followup(1)
+            others = self.others(base)
+            budget, cache, calls = m._Budget(query(), None), m._FollowupCache(16), []
+            with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                cache.choose(base, budget, calls)
+                for count, (name, other) in enumerate(others.items(), 2):
+                    with self.subTest(other=name):
+                        cache.choose(replace(other, counted_inputs=3), budget, calls)
+                        self.assertEqual(backend.call_count, count)
+                        self.assertFalse(calls[-1].cache_hit)
+                        self.assertEqual(calls[-1].result.request_id, calls[-1].request.identity)
+                # Each of them is reusable for its own public state and setting only.
+                for name, other in others.items():
+                    with self.subTest(reuse=name):
+                        result = cache.choose(replace(other, counted_inputs=8), budget, calls)
+                        self.assertEqual(calls[-1].reuse, "OBSERVATION_EQUIVALENT")
+                        self.assertEqual(result.request.reuse_key, other.reuse_key)
+                self.assertEqual(backend.call_count, len(others)+1)
+
+    def test_reuse_hit_obeys_current_cancel_deadline_and_lookup_cap(self):
+        with patch.object(m, "perf_counter", return_value=100.0):
+            first, later = self.followup(1), self.followup(2)
+            original = self.fake(first, cancelled=lambda: False)
+            reasons = {"cancel": "CANCELLED", "deadline": "TIME_LIMIT",
+                       "zero_f_seconds": "CURRENT_F_DEADLINE", "lookup_cap": "F_LOOKUPS_LIMIT"}
+            for kind in ("cancel", "bad_callback", "callback_error", "deadline", "zero_f_seconds", "lookup_cap"):
+                with self.subTest(kind=kind):
+                    def cancel():
+                        if kind == "callback_error":
+                            raise RuntimeError("injected external error")
+                        return 1 if kind == "bad_callback" else kind == "cancel"
+                    limits = replace(TINY, kernel_work=0, f_lookups=0 if kind == "lookup_cap" else TINY.f_lookups)
+                    budget = m._Budget(replace(query(), limits=limits), cancel)
+                    if kind == "deadline":
+                        budget.deadline = 100.0
+                    cache, calls = m._FollowupCache(1), []
+                    cache.entries[first.reuse_key] = original
+                    lookup = (replace(later, limits=replace(later.limits, max_seconds=0.0))
+                              if kind == "zero_f_seconds" else later)
+                    self.assertEqual(lookup.reuse_key, first.reuse_key)
+                    with patch.object(m, "choose_followup") as backend:
+                        expected = (TypeError if kind == "bad_callback" else
+                                    RuntimeError if kind == "callback_error" else m._Stop)
+                        with self.assertRaises(expected) as raised:
+                            cache.choose(lookup, budget, calls)
+                        if kind in reasons:
+                            self.assertEqual(raised.exception.reason, reasons[kind])
+                        backend.assert_not_called()
+                    self.assertFalse(calls)
+                    self.assertEqual(budget.usage.f_hits, 0)
+            # Without any of those constraints the same entry does answer the later request.
+            budget = m._Budget(replace(query(), limits=replace(TINY, kernel_work=0)), None)
+            cache, calls = m._FollowupCache(1), []
+            cache.entries[first.reuse_key] = original
+            with patch.object(m, "choose_followup") as backend:
+                self.assertIs(cache.choose(later, budget, calls), original)
+                backend.assert_not_called()
+
+    def test_new_state_after_reuse_still_needs_the_full_reservation(self):
+        with patch.object(m, "perf_counter", return_value=100.0):
+            for resource, reason in (("kernel_work", "KERNEL_BUDGET"), ("q_local", "Q_LOCAL_BUDGET"),
+                                     ("unit10_units", "UNIT10_BUDGET"), (None, "F_TIME_RESERVATION")):
+                with self.subTest(gate=reason):
+                    budget, cache, calls = m._Budget(query(), None), m._FollowupCache(4), []
+                    with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                        cache.choose(self.followup(1), budget, calls)
+                        cache.choose(self.followup(2), budget, calls)          # reuse
+                        self.assertEqual(backend.call_count, 1)
+                        if resource is None:
+                            budget.deadline = 100.0+4.999
+                        else:
+                            cap = getattr(self.followup().limits.kernel if resource == "kernel_work"
+                                          else self.followup().limits.q,
+                                          {"kernel_work": "max_work", "q_local": "local_work",
+                                           "unit10_units": "counter_units"}[resource])
+                            budget.usage = replace(budget.usage, **{resource: getattr(TINY, resource)-cap+1})
+                        settled = tuple(budget.settlements)
+                        with self.assertRaises(m._Stop) as stopped:
+                            cache.choose(self.followup(3, ((H, 0),)), budget, calls)
+                        self.assertEqual((stopped.exception.status, stopped.exception.reason),
+                                         ("RESOURCE_LIMIT", reason))
+                        self.assertEqual(backend.call_count, 1)
+                        self.assertEqual((budget.usage.f_misses, len(calls), tuple(budget.settlements)),
+                                         (1, 2, settled))
+                        # The already computed state is still answered without a reservation.
+                        cache.choose(self.followup(4), budget, calls)
+                        self.assertEqual((backend.call_count, calls[-1].reuse), (1, "OBSERVATION_EQUIVALENT"))
+
+    def test_reuse_rejects_tampered_or_foreign_entries(self):
+        with patch.object(m, "perf_counter", return_value=100.0):
+            first, later = self.followup(1), self.followup(2)
+            original = self.fake(first, cancelled=lambda: False)
+            foreign = self.followup(1, ((H, 0),))
+            guessing = replace(first, allow_guess=True)
+            other_kind = replace(first, limits=m.fixed_followup_limits("indexed_k100k"))
+            variants = {
+                # rewritten to look as if it had been computed for the current request
+                "relabelled_as_current": replace(original, request_id=later.identity),
+                "request_id": replace(original, request_id="wrong"),
+                "foreign_state": replace(original, request=foreign, request_id=foreign.identity),
+                "guess_setting": replace(original, request=guessing, request_id=guessing.identity),
+                "other_kind_request": replace(original, request=other_kind, request_id=other_kind.identity),
+                "followup_id": replace(original, followup_id=m.K100K_F_ID),
+                "incomplete": replace(original, status="RESOURCE_LIMIT"),
+                "cancelled": replace(original, status="CANCELLED"),
+                "uncacheable": replace(original, cacheable=False),
+                "error": replace(original, error="backend error"),
+                "unknown_usage": replace(original, usage=replace(original.usage, accounting_complete=False)),
+                "unknown_settlement": replace(original,
+                    settlements=(m.Settlement("kernel_work", 500000, None, "UNKNOWN_SPEND"),)),
+                "wrong_total": replace(original, usage=replace(original.usage, kernel_work=8)),
+                "over_cap": replace(original, settlements=(m.Settlement("kernel_work", 500001, 7, "SETTLED"),)
+                                    + original.settlements[1:]),
+                "foreign_resource": replace(original, settlements=original.settlements
+                                            + (m.Settlement("sampler_work", 1, 0, "SETTLED"),)),
+            }
+            for name, result in variants.items():
+                with self.subTest(name=name):
+                    budget, cache, calls = m._Budget(query(), None), m._FollowupCache(1), []
+                    cache.entries[later.reuse_key] = result
+                    with patch.object(m, "choose_followup") as backend, self.assertRaises(ValueError):
+                        cache.choose(later, budget, calls)
+                    backend.assert_not_called()
+                    self.assertFalse(calls)
+                    self.assertEqual(budget.usage.f_hits, 0)
+            budget, cache, calls = m._Budget(query(), None), m._FollowupCache(1), []
+            cache.entries[later.reuse_key] = original
+            with patch.object(m, "choose_followup") as backend:
+                self.assertIs(cache.choose(later, budget, calls), original)
+                backend.assert_not_called()
+
+    def test_time_limited_or_failed_F_result_is_never_stored_or_reused(self):
+        # A result reached through a wall-time fallback, a cancellation or an error is not
+        # a completed logical choice: no later request may reuse it, whatever its total.
+        with patch.object(m, "perf_counter", return_value=100.0):
+            for kind, status in (("time_fallback", "READY"), ("cancelled", "CANCELLED"), ("error", "ERROR")):
+                with self.subTest(kind=kind):
+                    def backend(request, **kwargs):
+                        return replace(self.fake(request, **kwargs), status=status,
+                                       reason="INJECTED_" + kind.upper(), cacheable=False)
+                    budget, cache, calls = m._Budget(query(), None), m._FollowupCache(4), []
+                    with patch.object(m, "choose_followup", side_effect=backend) as spy:
+                        cache.choose(self.followup(1), budget, calls)
+                        self.assertFalse(cache.entries)
+                        cache.choose(self.followup(2), budget, calls)     # same state, another total
+                        cache.choose(self.followup(1), budget, calls)     # even the same request
+                        self.assertEqual(spy.call_count, 3)
+                    self.assertEqual([c.cache_hit for c in calls], [False, False, False])
+                    self.assertEqual((budget.usage.f_misses, budget.usage.f_hits, budget.usage.kernel_work), (3, 0, 21))
+                    self.assertFalse(cache.entries)
+
+    def test_cache_lives_for_one_model_call_and_keeps_its_capacity(self):
+        made = []
+
+        class Recording(m._FollowupCache):
+            def __init__(self, capacity):
+                super().__init__(capacity)
+                made.append(self)
+
+        with patch.object(m, "_FollowupCache", Recording):
+            first = m.evaluate_model(query())
+            second = m.evaluate_model(query())
+        self.assertEqual((first.status, second.status), ("COMPLETE", "COMPLETE"), (first.error, second.error))
+        self.assertEqual(len(made), 2)
+        self.assertIsNot(made[0], made[1])
+        self.assertTrue(all(not cache.entries for cache in made))       # cleared when the call returns
+        self.assertFalse(second.calls[0].cache_hit)                     # nothing is carried over
+        self.assertEqual((first.rows, first.scores, first.usage), (second.rows, second.scores, second.usage))
+        with patch.object(m, "perf_counter", return_value=100.0):
+            state_a, state_b = ((0, H),), ((H, 0),)
+            for capacity, expected in ((0, 4), (1, 4), (2, 2)):
+                with self.subTest(capacity=capacity):
+                    budget, cache, calls = m._Budget(query(), None), m._FollowupCache(capacity), []
+                    with patch.object(m, "choose_followup", side_effect=self.fake) as backend:
+                        for counted, grid in ((1, state_a), (2, state_b), (3, state_a), (4, state_b)):
+                            cache.choose(self.followup(counted, grid), budget, calls)
+                        self.assertEqual(backend.call_count, expected)
+                    self.assertLessEqual(len(cache.entries), capacity)
+                    self.assertEqual(budget.usage.cache_peak, capacity)
+                    self.assertEqual(budget.usage.f_misses, expected)
+                    self.assertEqual(budget.usage.f_hits, 4-expected)
+
+    def test_rows_are_scored_with_their_own_counted_inputs(self):
+        reused = 0
+        for name, (grid, prefix) in WITNESSES.items():
+            for mode in ("S", "M", "R"):
+                q = query(name, mode)
+                result = m.evaluate_model(q)
+                self.assertEqual(result.status, "COMPLETE", result.error)
+                for row in result.rows:
+                    sample = result.posterior.samples[row.sample_index]
+                    replay = oracle.replay(grid, 1, sample.mines,
+                        [(a.action, a.x, a.y) for a in row.actions], prefix)
+                    self.assertEqual((replay["outcome"], replay["X"], replay["added_inputs"]),
+                                     (row.outcome, row.value_x, row.added_inputs))
+                    if row.outcome == "WON":
+                        self.assertEqual(row.value_x, Fraction(row.virtual_b, prefix+row.added_inputs))
+                    for index in row.f_call_indices:
+                        call = result.calls[index]
+                        assert_reuse_binding(self, call)
+                        if call.reuse == "OBSERVATION_EQUIVALENT":
+                            reused += 1
+                            # The stored request's total is another row's; it is never this row's cost.
+                            self.assertNotEqual(call.request.counted_inputs, call.result.request.counted_inputs)
+                            self.assertLessEqual(call.request.counted_inputs, prefix+row.added_inputs)
+        self.assertGreater(reused, 0)
+
+    def test_reuse_changes_work_but_not_rows_scores_or_selection(self):
+        saved = 0
+        for name in WITNESSES:
+            for mode in ("S", "M", "R"):
+                q = query(name, mode)
+                reuse = m.evaluate_model(q)
+                # Control: the key as it was before S4_F_OBS_MEMO1 (counted_inputs included).
+                with patch.object(m.FollowupRequest, "reuse_key", m.FollowupRequest.logical_key):
+                    strict = m.evaluate_model(q)
+                self.assertEqual((reuse.status, strict.status), ("COMPLETE", "COMPLETE"), (reuse.error, strict.error))
+                self.assertEqual((reuse.rows, reuse.scores, reuse.sequence, reuse.selected_candidate_id,
+                                  reuse.posterior.samples, reuse.target_status),
+                                 (strict.rows, strict.scores, strict.sequence, strict.selected_candidate_id,
+                                  strict.posterior.samples, strict.target_status))
+                self.assertEqual(reuse.usage.f_lookups, strict.usage.f_lookups)
+                self.assertLessEqual(reuse.usage.f_misses, strict.usage.f_misses)
+                for result in (reuse, strict):
+                    # Every F run is charged exactly once; a hit charges nothing.
+                    ran = [call.result for call in result.calls if not call.cache_hit]
+                    self.assertEqual(result.usage.f_lookups, result.usage.f_hits+result.usage.f_misses)
+                    self.assertEqual(result.usage.f_misses, len(ran))
+                    self.assertEqual(result.usage.kernel_calls, sum(r.usage.kernel_calls for r in ran))
+                    self.assertEqual(result.usage.q_calls, sum(r.usage.q_calls for r in ran))
+                    for resource in self.RESOURCES:
+                        self.assertEqual(getattr(result.usage, resource), sum(getattr(r.usage, resource) for r in ran))
+                        self.assertEqual(getattr(result.usage, resource),
+                                         sum(s.actual for s in result.settlements if s.resource == resource))
+                    self.assertTrue(result.usage.accounting_complete)
+                    self.assertTrue(all(c.reuse != "OBSERVATION_EQUIVALENT" for c in strict.calls))
+                for resource in self.RESOURCES:
+                    self.assertLessEqual(getattr(reuse.usage, resource), getattr(strict.usage, resource))
+                saved += strict.usage.f_misses-reuse.usage.f_misses
+        self.assertGreater(saved, 0)
+
+    def test_direct_F_for_real_inputs_keeps_the_full_request_binding(self):
+        import stage4_runtime_policy as p
+        grid, prefix = WITNESSES["G001"]
+        request = p.RuntimeRequest(grid, 1, prefix, "M", True, limits=p.RuntimeLimits(max_model_attempts=0))
+        real = m.choose_followup
+
+        def other_total(fq, **kwargs):
+            # The same public state decided at another counted total and relabelled
+            # with the current request id: the direct path must still refuse it.
+            foreign = real(replace(fq, counted_inputs=fq.counted_inputs+1), **kwargs)
+            return replace(foreign, request_id=fq.identity)
+
+        for backend, expected in ((real, "HEURISTIC_FALLBACK"), (other_total, "ERROR")):
+            with self.subTest(expected=expected):
+                policy = p.RuntimePolicy()
+                try:
+                    with patch.object(p, "choose_followup", side_effect=backend):
+                        result = policy.choose(request)
+                finally:
+                    policy.close()
+                self.assertEqual(result.status, expected, (result.reason, result.error))
+                self.assertFalse(result.model_attempted)
+                if expected == "ERROR":
+                    self.assertEqual((result.sequence, result.proposal_id), ((), None))
+                    self.assertIn("F_BINDING_OR_UNKNOWN_ACCOUNTING", result.error)
+                else:
+                    self.assertEqual(result.followup.request.counted_inputs, prefix)
+                    self.assertEqual(result.followup.request_id, result.followup.request.identity)
 
 
 if __name__ == "__main__":

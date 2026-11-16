@@ -1,6 +1,8 @@
 # Current Project Handoff
 
-Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용,
+Updated: **2026-11-17 (Asia/Seoul)** — Stage4 모델의 가상 F 관측 기준 재사용(S4_F_OBS_MEMO1)을 계산 최적화로
+반영하고 모델 ID를 올렸다(부분 검증, 아래 현재 상태). 이하는 2026-11-16까지의 갱신이다.
+UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용,
 실행기 후속 보완(FU-01)과 UI 후속 보완(FU-04·FU-08) 추가.
 같은 날 Stage3 정보 갱신 진단을 마치고, 이미 증명된 확정칸의 Live 표시 유지를 반영했다(부분 검증).
 이어서 파일 통신 비용을 진단하고, 메시지가 없을 때의 폴더 검사 비용을 검사 의미는 그대로 두고 줄였다(부분 검증).
@@ -9,6 +11,8 @@ Updated: **2026-11-16 (Asia/Seoul)** — UI 시험 2건 및 전체 소스 회귀
 보완한 표준 실행기에서 **6,295 PASS / 11 opt-in SKIP / FAIL·ERROR·미시작·미완료 0**을 확인했다.
 독립 검토의 수용 전 필수 수정은 0건이며, 검토된 코드와 offscreen Qt 소스 회귀 범위에서 수용한다.
 이 전체 회귀 수치는 FU-01·FU-04 보완 전 코드의 기록이며, 두 보완 뒤에는 전체 회귀를 실행하지 않았다.
+그 뒤의 반영(확정칸 표시 유지, 폴더 검사 비용, K1_MEMO2, S3X_INFO_A1, S4_F_OBS_MEMO1)도 각각 부분 회귀만 거쳤다.
+위 수치를 그 변경들 뒤의 전체 회귀 결과로 읽지 않는다.
 Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한다.
 제출용 영상 제작·메일 제출은 사용자 보고로 완료됐다.
 
@@ -131,6 +135,63 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   근거는 [보완·검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_K1_MEMO_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
   커밋 SHA와 원격 확인은
   [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_K1_MEMO_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)에 있다.
+- **Stage4 가상 F 관측 기준 재사용(S4_F_OBS_MEMO1, 2026-11-17):**
+  모델 판정 한 번 안에서, 같은 공개 상태·같은 F 설정이면 누적 입력 수가 달라도 앞서 계산한 가상 F 결과를 다시 쓴다.
+  S4_F_OBS_MEMO1은 구현을 구분하는 이름이며 새 UI 알고리즘이나 정책이 아니다. 계산 최적화로 반영했다.
+  변경은 `stage4_runtime_model.py`와 `tests/test_stage4_runtime_model.py` 두 파일이다.
+  **식별자:** 모델 ID를 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE`로 올렸다(이전
+  `…_V2_FIXED_LIMITS`). K1_MEMO2와 달리 이 변경은 같은 시간 진행에서도 작업량 회계·완료 여부·최종 행동이 달라질 수
+  있어서다. `F_ID`·`K100K_F_ID`·`V1_F_ID`·`POLICY_ID`, 증명 형식, 전송 형식은 그대로다. 모델 ID는 제품이 저장·전송하는
+  상태에 들어가지 않는다. 소스를 바꿨으므로 실행 중이던 앱은 다시 시작한다.
+  **재사용 계약:** `FollowupRequest.reuse_key`는 `logical_key`에서 누적 입력 수만 뺀 값이고 식별값이 아니다. 관측, 지뢰 수,
+  추측 설정, prior, F 종류, 한도는 계속 구분한다. 재사용하는 것은 완결된 결과뿐이며 시간 제한을 거친 결과와 취소·오류
+  결과는 저장하지 않는다. 적중은 저장된 결과를 그대로 돌려주므로 요청 식별값과 증명은 원래 요청의 것이고, 조회 기록의
+  `reuse`가 `MISS`·`SAME_REQUEST`·`OBSERVATION_EQUIVALENT`를 구분한다. 적중은 청구가 없고 미스는 전량 예약 뒤 실제 쓴
+  만큼만 정산한다. 행의 효율은 행 자신의 입력 수로 계산한다. 실제 입력에 쓰는 직접 F는 캐시를 거치지 않고 기존 결속
+  검사를 그대로 받는다. 상세는 `ARCHITECTURE.md`의 같은 이름 절에 있다.
+  **수용 기준(조율 결정):** 유지되는 것은 가상 F의 결정·증명 내용과 직접 F의 요청 결속, 같은 조건에서 양쪽 모두 완료한
+  판정의 행·점수·선택, 실제 실행한 미스의 비용만 정산하는 원칙, 추측 OFF와 S의 후보 자격·전달 보호, F 정책과
+  표본·후보·점수 규칙과 한도·예약·취소 규칙이다. 달라질 수 있는 것은 적중·미스 수와 작업량, 모델 완료 여부, 최종 출처와
+  행동, 그리고 추측 ON의 M/R에서 새로 완료된 모델이 위험 후보를 고르는 경우다. 마지막 변화는 기존 M/R 정책을 유지하는
+  범위에서 허용했다. **이는 승률·평균 효율·고점이 개선되거나 유지된다는 수용이 아니다.** 안전 우선 규칙이나
+  목표·점수 변경은 넣지 않았다.
+  **행동 변화의 실제 사례(앞선 후보의 판정 단위 기록):** 개발 상태 하나(P03, `indexed`, 추측 ON)의 M·R에서 기준은 모델이
+  작업량 한도로 끝나 F의 증명된 안전 CHORD를 냈고, 후보는 모델이 완료돼 정확한 생존확률 89/104인 OPEN을 골랐다.
+  15/104(약 14.4%)는 그 입력 하나의 지뢰 확률이며 판 전체 승률의 변화량이 아니다. 그 판정의 표본 8개에는 그 칸이
+  지뢰인 배치가 없었고, 정확한 생존확률은 정렬 키의 세 번째 동률 깨기로만 쓰인다. 다른 한 조건(P05, `indexed_k100k`, S)은
+  F와 다른 안전 수를 골랐다. 추측 OFF와 S에서는 즉시 위험이 늘지 않는다. 이 세 판정 뒤의 판 진행은 보지 않았다.
+  **앞선 후보의 근거(모델 ID가 V2이고 실험 표지가 있던 사본, 이번에 재사용):** 실제 F를 입력 수만 바꿔 직접 호출한
+  876쌍에서 결정·증명 내용·작업량이 같았고 요청·증명 식별값은 달랐다. 판정 단위 60건과 판 8개에서 회계·결속 위반이
+  0건이었고 조회 10,393개 대조에서 상태·결정 불일치가 0건이었다. 실제 시계 21개 조건은 둘 다 완료 14, 둘 다 미완료 3,
+  미완료 → 완료 4였다. 판 8개(개발 보드 2개, 조건당 1판)는 입력열이 같았다.
+  **성능 수치는 모두 앞선 후보의 측정이다:** 둘 다 완료된 P03·`indexed_k100k`·M/R에서 kernel 작업량 비 0.740, 재계산이 있던
+  9x9 네 조건 0.930~0.991, 판 계산 시간 비 0.910~0.989였다. 판정 단위의 실제 시계 시간은 두 군 모두 관찰 래퍼를 설치한 조건이었다.
+  부하 정리는 사용자 보고 기준이고 한 PC의 값이다. 미완료 → 완료 조건의 시간은 같은 계산의 비교가 아니다.
+  최종 바이트로는 성능을 다시 재지 않았다.
+  **독립 검토:** 구현에 참여하지 않은 Claude Code 세션의 검토에서 수용 전 필수 코드 수정은 0건이었다. 조율 결정 4건
+  (행동 변화 수용, 모델 ID, 수용 기준 문구, 검증 범위)은 위와 같이 정했다.
+  **최종 바이트의 새 검증(부분 검증):** 최종 준비본은 검토받은 준비본에서 모델 ID 1행과 시험 리터럴 2행만 다르다.
+  추측 OFF·논리 시계 판정 10건(P03·`indexed` S·M·R, P03·`indexed_k100k` M, P05·`indexed_k100k` S × 기준·최종)은 실행 전에
+  기준을 고정했고, 조회 1,876개의 공개 상태·F 결정·조회 요청 식별값 불일치 0, 회계·요청·증명 결속 위반 0이었다.
+  다섯 조건 모두 두 군에서 완료돼 행·점수·선택이 같았고 **새로 완료된 판정은 0건**이었다. 모든 행이 추측 대기로 끝난
+  `COMPLETE_ALL_ZERO`여서 정책 상태는 `NO_INFORMATION`이다. 이를 성공한 모델 선택으로 세지 않는다. 선택 후보의
+  생존확률은 모두 1이었다. 모델 요청 식별값은 군마다 자기 모델 ID로 계산한 값과 같고 서로 달랐다.
+  사전 예상 하나(관측 동치 적중 수 = 기준의 재계산 미스 수)는 `indexed` 세 조건에서 94 대 88로 틀렸다. 기준이 같은
+  요청으로 적중하던 조회 6건이 최종에서는 다른 입력 수의 저장 결과로 답해진 것이며 판정 기준 위반이 아니다.
+  최종 준비본 사본에서 `tests.test_stage4_runtime_model` 40건 PASS였다.
+  **반영 후 검증(제품 저장소, 부분 검증):** 두 파일의 바이트가 최종 준비본과 같다. 표준 격리 실행기로 Stage4 21개 모듈과
+  `tests.test_stage4_live_ui`를 실행해 선택 336 = 시작 = 완료, 336 PASS, FAIL·ERROR·SKIP·미시작·미완료 0,
+  journal·receipt 일치 22/22다. UI 시험은 offscreen과 시험별 임시 설정으로 돌았고 사용자 범위 설정 키는 쓰이지 않았다.
+  **이 반영 뒤 전체 소스 회귀, native 화면 확인, `main.py` 수동 실행은 하지 않았다.**
+  **확대하면 안 되는 주장:** 승률·평균 효율·고점의 개선 또는 유지, 모든 판정의 행동 동일성, `indexed` 초·중반 미완료의
+  해소, 작업량 한도로 끝나는 kernel·root 중단·가상 F 실패의 해결. `indexed`·M/R의 판 단위와 추측 OFF의 판 단위는
+  관측하지 않았다.
+  **남은 것:** M/R의 작은 표본 평가와 정확한 위험 정보의 사용 방식(후속 과제), `RuntimeUsage`에 관측 동치 적중의 별도
+  계수가 없는 점, 발생 빈도의 표본(판 8개뿐), 독립 검토의 미확인 항목. 모두 후보일 뿐 승인된 범위가 아니다.
+  근거는 [구현·대조 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
+  [독립 검토](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/run_01/claude_review_01/REVIEW_KO.md>)
+  (지적 원문은 같은 폴더의 `FINDINGS.json`)이고, 최종 보완·추측 OFF 검증·커밋 SHA와 원격 확인은
+  [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)에 있다.
 - **Stage3 V1 표시용 정보 갱신(S3X_INFO_A1, 2026-11-16):**
   위 진단의 원인 (1), 곧 지역 수가 남아 있는 동안 정밀 계산으로만 증명되는 칸이 계산되지 않는 문제를
   V1의 표시에 한해 줄였다. S3X_INFO_A1은 정보 계약을 구분하는 이름이며 새 UI 알고리즘이나 정책이 아니다.
@@ -285,7 +346,10 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
    - 계산, 통신, 화면 갱신, 설정된 입력 대기를 분리해 공통 병목을 확인한다.
    - Stage3의 지역 추론, 정밀 계산, worker 결과 수신, 화면 표시 시점을 구분한다.
    - 이후 Stage4 계산 비용과 선택 품질, M/R 차이를 검토한다.
-     야간 조사에서 나온 계산 캐시(K1_MEMO2)는 반영했다(위 현재 상태). 선택 품질과 M/R 차이는 남아 있다.
+     야간 조사에서 나온 계산 캐시(K1_MEMO2)는 반영했다(위 현재 상태). 가상 F의 관측 기준 재사용(S4_F_OBS_MEMO1)도
+     반영했다(위 현재 상태). 선택 품질과 M/R 차이는 남아 있다. 특히 M/R이 표본 8개(또는 4개)의 평균으로 고르고
+     정확한 즉시 생존확률을 동률 깨기로만 쓰는 방식, 곧 작은 표본 평가와 정확한 위험 정보의 사용 방식은 후속 과제다.
+     S4_F_OBS_MEMO1 뒤에는 `indexed`의 일부 상태에서도 M/R의 그 선택이 실제로 나올 수 있다. 후보일 뿐 승인된 범위가 아니다.
    - 다음 작업으로 두었던 Stage3 정보 갱신 후보의 보완은 마쳤고, V1 표시용 정보 갱신(S3X_INFO_A1)을
      반영했다(위 현재 상태). 남은 것은 상한에 걸리는 보드의 지연·미표시, K 계열의 같은 지연, 그 항목의
      후속 보완(F-01·F-02·F-09)과 미확인 사항이다. 모두 후보일 뿐 승인된 범위가 아니다.
@@ -294,7 +358,7 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
    - **ZiNi Explorer 재생 단위(후속 계획, 이번에는 구현·시험하지 않음):** 깃발 하나마다 별도 인덱스로
      재생한다. 여러 깃발 뒤의 화음도 별도 인덱스로 재생한다. 자동 재생 기본 간격을 200 ms에서 500 ms로
      바꾼다. 이전·다음·슬라이더·자동 재생의 상태와 클릭 수 일관성을 유지한다.
-   - 다음 구현은 S3X_INFO_A1 반영 마감 결과를 받은 뒤 조율하며 자동 착수하지 않는다.
+   - 다음 구현은 S3X_INFO_A1과 S4_F_OBS_MEMO1의 반영 마감 결과를 받은 뒤 조율하며 자동 착수하지 않는다.
 
    Stage3의 정보 갱신 문제를 미리 확정하지 않으며, 매 입력마다 전체 정밀 계산을 강제하는 해법을
    정해 두지 않는다. Stage4 N1의 가속 배율을 Stage3에 옮겨 적용하지 않는다.
@@ -335,6 +399,9 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
 - [Stage3 정보 갱신 보완·검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
   [그 독립 검토](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/run_01/claude_review_01/REVIEW_KO.md>),
   [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE3_INFO_UPDATE_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)
+- [Stage4 가상 F 재사용 구현·대조 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/run_01/REPORT_KO.md>),
+  [그 독립 검토](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/run_01/claude_review_01/REVIEW_KO.md>),
+  [반영 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_F_OBSERVATION_MEMO_ADOPTION_CHECK_2026-11-16/acceptance_commit_01/REPORT_KO.md>)
 - [현재 마감과 원시 경로 표](stage4/STAGE4_N1_FA1K_AND_SMR_UNITS69_74_CLOSEOUT.md)
 - [Unit74 검토 수용](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/REVIEW_RECEPTION_KO.txt>)
 - [촬영 계획](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_SMR_OVERNIGHT_EVALUATION_UNIT74_2026-11-15/coordinator_06/RECORDING_PLAN_KO.txt>)

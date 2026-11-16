@@ -23,7 +23,7 @@ from stage4_public_kernel import KernelLimits, KernelRequest, infer_public
 from stage4_runtime_kernel import WORK_VERSION, infer_public_indexed
 from stage4_rollout import VirtualBoard
 
-MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS"
+MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE"
 F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1:FA1K_U71"
@@ -129,6 +129,19 @@ class FollowupRequest:
                      for part in (self.limits.kernel, self.limits.plan, self.limits.q))
         return (self.limits.followup_id, self.observation, self.num_mines,
                 self.counted_inputs, self.allow_guess, self.prior_id, caps)
+
+    @property
+    def reuse_key(self):
+        """Equivalence for reusing one finished fixed-F result inside a model call.
+
+        The fixed F reads the public observation, mine count, guess setting,
+        prior and its registered caps. counted_inputs enters the request, kernel
+        and Q identities and their validation, never the decision, so it is the
+        only logical_key item left out. This is not an identity: a reused result
+        keeps the identity of the request it was computed for.
+        """
+        fid, observation, num_mines, _counted, allow_guess, prior_id, caps = self.logical_key
+        return (fid, observation, num_mines, allow_guess, prior_id, caps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,6 +447,21 @@ class FollowupCall:
     cache_hit: bool
     origin_request_id: str
 
+    @property
+    def reuse(self):
+        """How this lookup relates to the result it returned (derived, not stored).
+
+        MISS: F ran for this request. SAME_REQUEST: a hit on a result computed for
+        the same logical request. OBSERVATION_EQUIVALENT: a hit on a result that
+        was computed for the same public state at another counted-input total;
+        result.request and origin_request_id are that original request's.
+        """
+        if not self.cache_hit:
+            return "MISS"
+        if self.request.logical_key == self.result.request.logical_key:
+            return "SAME_REQUEST"
+        return "OBSERVATION_EQUIVALENT"
+
 
 @dataclass(frozen=True, slots=True)
 class ModelResult:
@@ -492,7 +520,15 @@ class _Budget(_Clock):
 
 
 class _FollowupCache:
-    """Created and cleared inside a single model call; stores no input permit."""
+    """Created and cleared inside a single model call; stores no input permit.
+
+    Entries are keyed by FollowupRequest.reuse_key: the same public state under
+    the same fixed F is computed once per model call, whatever counted-input
+    total a row had when it reached that state. A hit does no new F work and
+    charges none. The stored result is returned as it is, bound to the request
+    it was computed for; the lookup is recorded as a FollowupCall whose request
+    is the current query and whose origin_request_id is the original request's.
+    """
     def __init__(self, capacity):
         self.capacity, self.entries = capacity, OrderedDict()
 
@@ -502,7 +538,7 @@ class _FollowupCache:
     def choose(self, query, budget, calls):
         limits = budget.request.limits
         budget.increment("f_lookups", limits.f_lookups)
-        key = query.logical_key
+        key = query.reuse_key
         found = self.entries.get(key)
         if found is not None:
             budget.check()
@@ -512,7 +548,7 @@ class _FollowupCache:
                     found.status not in ("READY", "GUESS_BLOCKED") or found.error is not None or
                     found.request_id != found.request.identity or
                     found.followup_id != query.limits.followup_id or
-                    found.request.logical_key != key or not found.usage.accounting_complete):
+                    found.request.reuse_key != key or not found.usage.accounting_complete):
                 raise ValueError("INVALID_CACHED_F")
             caps = {"kernel_work": found.request.limits.kernel.max_work,
                     "q_local": found.request.limits.q.local_work,
@@ -531,6 +567,8 @@ class _FollowupCache:
             calls.append(FollowupCall(query, found, True, found.request_id))
             # The result keeps the original certificate/request identity. This
             # is a reuse receipt, never a fabricated new kernel or Q response.
+            # The original request may carry another counted-input total than
+            # the query; FollowupCall.reuse tells the two kinds of hit apart.
             return found
         # A miss must be able to run the entire registered F. Remaining model
         # resources constrain whether it starts, never F's logical limits.
