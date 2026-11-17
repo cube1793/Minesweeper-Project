@@ -58,7 +58,7 @@ class RuntimeModelTests(unittest.TestCase):
             for mode in ("S", "M", "R"):
                 result = self.results[name, mode]
                 self.assertEqual(result.status, "COMPLETE", (name, mode, result.reason, result.error))
-                self.assertEqual(result.model_id, "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE")
+                self.assertEqual(result.model_id, "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL")
                 for call in result.calls:
                     self.assertEqual(call.request.limits, m.FollowupLimits())
                 self.assertEqual({frozenset(s.mines) for s in result.posterior.samples},
@@ -525,7 +525,7 @@ class IndexedK100KTests(unittest.TestCase):
                     mode="S", allow_guess=False, target=None, planning_seed=0,
                     prior_id=m.PRIOR_ID, limits=old_model)
                 self.assertEqual(q.identity, m.public_digest((
-                    "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE", expected)))
+                    "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL", expected)))
                 self.assertEqual(m.ModelRequest.from_payload(q.to_payload()), q)
         self.assertEqual(m.ModelLimits.from_payload({}), m.ModelLimits())
         payload = m.ModelRequest(((0, H),), 0, 1).to_payload()

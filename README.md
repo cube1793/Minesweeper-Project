@@ -17,6 +17,22 @@ Stage4 S/M/R은 Main/Live에서 사용할 수 있습니다. Unit73에서 **N1 �
   그 기록은 보존합니다. 이후 2026-11-16의 UI·전체 소스 회귀 안정화가 그 시점 코드에 대해 수용됐으며
   ([안정화 마감](docs/SOURCE_REGRESSION_STABILIZATION_2026_11_15.md)), 그 뒤의 변경은 각각 부분 회귀만 거쳤습니다.
   최신 검증 상태와 근거는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 봅니다. 배포 완료는 아닙니다.
+- **M/R 점수 정책(2026-11-17):** 추측 ON의 M/R이 표본으로 후보를 비교할 때, 즉시 죽을 수 있는 후보의 점수를
+  "정확한 즉시 공동 생존확률 × 그 후보가 살아남은 표본의 평균"으로 계산합니다. 살아남은 뒤의 패배는 0점으로 평균에 남고,
+  살아남은 표본이 없으면 0점입니다. 종전에는 그 위험이 표본에 우연히 뽑힌 횟수로만 반영됐습니다.
+  S, 추측 OFF, 가능한 배치를 전부 쓰는 경우, 후보가 모두 안전한 판정은 종전 점수 그대로입니다.
+  두 프로파일(표본 상한 8·후보 4, 표본 상한 4·후보 2)에 모두 적용하며 표본 상한과 예산은 바꾸지 않았습니다.
+  모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL`입니다.
+  작은 전수 상태 84개에서 선택의 평균 후회가 줄어든 것(0.0290 → 0.0086, 표본 8)을 근거로 한 제한된 정책 수용이며,
+  **판 전체의 승률·평균 효율·고점·계산 시간이 좋아지거나 유지된다는 것은 입증되지 않았습니다.**
+  가치 있는 위험을 놓치는 경우가 늘 수 있고, 살아남은 표본이 없을 수 있어 점수가 아래로 치우치며,
+  표본 4에서는 위험 후보의 사망 표본이 은행에 2~3개 뽑힌 판정에서 종전보다 나쁜 구간이 확인됐습니다.
+  표본 8의 같은 집계는 위험 후보가 하나인 작은 상태 4개에 한정돼 있어 악화가 없다고 결론 내리지 않습니다.
+  반영 뒤 제품 경로에서 Stage4 관련 23개 모듈 367건이 통과했습니다(부분 회귀). 전체 소스 회귀, 실제 화면 확인,
+  판 평가는 하지 않았습니다. RV1은 제품에 반영됐으며, 커밋 SHA와 원격 확인 결과는 CURRENT_HANDOFF에 연결된
+  RV1 Git 마감 보고서에서 확인합니다.
+  식과 한계는 [ARCHITECTURE](ARCHITECTURE.md)의 "Stage4 M/R 자기 생존확률 점수" 절,
+  검증 상태는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)를 봅니다.
 
 제출용 영상의 녹화·편집·메일 제출은 사용자 보고로 완료됐습니다. 다음 단계는 전시회 준비입니다.
 평균 120%는 중간 이정표이며 평균·고점 개선의 상한이 아닙니다. 도움말·통계 툴팁·도구 메뉴 정리는
@@ -566,6 +582,7 @@ Minesweeper-Project/
 ├─ stage4_posterior.py          # 공개 일관 배치의 정확한 정수 rank 표본
 ├─ stage4_rollout.py            # 가상 환경과 공개 정보만 받는 고정 P0
 ├─ stage4_policy.py             # S/M/R 선택·fallback·인스턴스 내 원자 입력
+├─ stage4_risk_value.py         # M/R 위험 후보의 정확한 즉시 생존확률 점수(자기 생존 표본 평균)
 ├─ live_analysis.py             # Simple/V1/K의 계산된 증거 표시와 Reduction
 ├─ live_k_policy.py             # K public DTO와 worker-only persistent owner
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup

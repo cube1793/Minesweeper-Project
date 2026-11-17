@@ -3,6 +3,8 @@
 Values describe only the declared shortlist, common bank and fixed F. They
 are neither full-game optima nor expectations of subsequent S/M/R replanning.
 The evaluator owns sampled layouts; F never receives a layout or reward.
+M/R scores of a guessing request on a sampled bank use the exact immediate
+survival of each candidate (stage4_risk_value); see MODEL_ID.
 """
 from collections import OrderedDict
 from contextvars import ContextVar
@@ -20,10 +22,11 @@ from stage4_objective_pilot import _complete_scores
 from stage4_policy import _shortlist, _validate_root, model_order
 from stage4_posterior import PosteriorRequest, SamplerLimits, public_digest, sample_posterior
 from stage4_public_kernel import KernelLimits, KernelRequest, infer_public
+from stage4_risk_value import applies as own_survival_applies, own_survival_scores, risky_candidates
 from stage4_runtime_kernel import WORK_VERSION, infer_public_indexed
 from stage4_rollout import VirtualBoard
 
-MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V3_OBSERVATION_REUSE"
+MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL"
 F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1:FA1K_U71"
@@ -748,6 +751,13 @@ def evaluate_model(request, *, cancelled=None):
                 if stopped is not None:
                     raise stopped
         scores = _complete_scores(chosen, posterior.samples, rows, request.target, fid)
+        # M/R with guessing on a sampled bank: when the shortlist holds a candidate that can die at
+        # once, every score is exact joint survival x mean over that candidate's own survivors.
+        # The plain scores above still validate the matrix; all other cases keep them unchanged.
+        if (own_survival_applies(request.mode, request.allow_guess, root.base.total_worlds, request.limits.samples)
+                and risky_candidates(chosen, root.base.total_worlds)):
+            scores = own_survival_scores(chosen, posterior.samples, rows, request.target, fid,
+                                         root.base.total_worlds)
         fallback_indices = {c.candidate_id:i for i, c in enumerate(eligible)}
         by_id = {s.candidate_id:s for s in scores}
         selected = max(chosen, key=lambda c:model_order(by_id[c.candidate_id], c.survival_probability,
