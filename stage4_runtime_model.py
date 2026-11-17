@@ -5,6 +5,7 @@ are neither full-game optima nor expectations of subsequent S/M/R replanning.
 The evaluator owns sampled layouts; F never receives a layout or reward.
 M/R scores of a guessing request on a sampled bank use the exact immediate
 survival of each candidate (stage4_risk_value); see MODEL_ID.
+root 후보 분석은 이 모델에서만 기본 계산 재사용(reuse_base=True)을 켠다. 재사용은 한 번의 root 분석 안에 한한다.
 """
 from collections import OrderedDict
 from contextvars import ContextVar
@@ -26,7 +27,7 @@ from stage4_risk_value import applies as own_survival_applies, own_survival_scor
 from stage4_runtime_kernel import WORK_VERSION, infer_public_indexed
 from stage4_rollout import VirtualBoard
 
-MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL"
+MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V5_ROOT_BASE_REUSE"
 F_ID = "PUBLIC_F_INDEXED_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 K100K_F_ID = "PUBLIC_F_INDEXED_K100K_COVER_UNIT10_V1:" + WORK_VERSION + ":FA1K_U71"
 V1_F_ID = "PUBLIC_F_V1_COVER_UNIT10_V1:prepaid_bounded_bitsets_v1:FA1K_U71"
@@ -704,7 +705,8 @@ def evaluate_model(request, *, cancelled=None):
         limits = replace(request.limits.root, max_seconds=min(request.limits.root.max_seconds, budget.remaining()))
         query = CandidateRequest(request.observation, request.num_mines, limits, request.prior_id)
         try:
-            root = analyze_candidates(query, cancelled=budget.relay)
+            # 기본 계산 재사용은 이 호출에서만 켠다. 한도·취소 전달·검증·정산은 그대로다.
+            root = analyze_candidates(query, cancelled=budget.relay, reuse_base=True)
         finally:
             d = getattr(root, "diagnostics", None)
             known = d is not None and d.work_accounting_complete

@@ -618,3 +618,209 @@ def count_public(request, *, cancelled=None):
             events[index] = EventResult(event, "ERROR", "INTERNAL_ERROR")
             return result("PARTIAL", "INTERNAL_ERROR")
     return result("COMPLETE", "PUBLIC_COUNTS")
+
+
+# ---------------------------------------------------------------------------
+# 한 번의 분석이 소유하는 계수 세션
+#
+# count_public은 호출마다 기본 계산(_base)을 다시 한다. 아래 세션은 기본 계산을 한 번 하고,
+# 사건 계산(_event_count)이 실제로 읽는 최소 값만 읽기 전용으로 봉인해 보관했다가 같은 공개
+# 상태의 사건 요청에 다시 쓴다. count_public, _base, _event_count와 예산·열거 함수는 그대로다.
+# 세션은 호출자가 지역 객체로 소유한다. 모듈 전역 상태도 세션 사이의 공유도 없다.
+# ---------------------------------------------------------------------------
+
+from types import MappingProxyType
+
+SESSION_FORMAT = "public_count_session_v1"
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionState:
+    """완료된 정확한 기본 계산에서 사건 계산에 필요한 값만 담는다. mine_ways와 DP 중간값은 담지 않는다."""
+    observation: tuple
+    num_mines: int
+    prior_id: str
+    base: BaseResult
+    components: tuple
+    floating: tuple
+    counts: tuple  # 구성요소별 (읽기 전용 ways, None). _event_count는 counts[i][0]만 읽는다.
+    component_sizes: tuple
+    base_request_id: str
+    seal: str
+
+
+def _session_seal(observation, num_mines, prior_id, base, components, floating, counts):
+    """보관 값의 정규 인코딩에 대한 SHA-256.
+
+    사건 계산의 결과나 응답 내용에 영향을 주는 값이 모두 들어간다: 형식 표지와 계수 버전,
+    공개 상태(실제 깃발 표현 포함), 공개 기본값 전체, 구성요소와 제약, 제약 없는 칸,
+    구성요소별 ways의 (지뢰 수, 배치 수) 쌍. 정수는 exact_json이 10진 문자열로 바꾼다.
+    """
+    ways = [[[mines, count] for mines, count in sorted(pair[0].items())] for pair in counts]
+    content = (SESSION_FORMAT, COUNTER_VERSION, NORMALIZATION_POLICY, observation, num_mines, prior_id,
+               base, components, floating, ways)
+    encoded = json.dumps(exact_json(content), sort_keys=True, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _session_arguments(request, cancelled):
+    if type(request) is not BeliefRequest:
+        raise TypeError("BeliefRequest required")
+    if cancelled is not None and not callable(cancelled):
+        raise TypeError("cancelled must be a callable or None")
+
+
+def _session_refusal(request, reason):
+    """계산 없이 거부한다. 요청 자신의 식별값, ERROR, 수치 없음, 작업량 0."""
+    return BeliefResult(request.identity, "ERROR", reason, BaseResult("ERROR", reason),
+                        tuple(EventResult(event) for event in request.events),
+                        Diagnostics(0, 0.0, 0, "session.refused", (), None, (), reason))
+
+
+class PublicCountSession:
+    """기본 계산을 한 번 하고 같은 공개 상태의 사건 요청에 재사용한다.
+
+    count_base는 사건이 없는 요청으로 기본 계산을 하고, 준비·봉인 단계가 끝 검사까지 통과한
+    뒤에만 상태를 확정한다. 도중에 멈추면 재사용할 상태를 남기지 않으며, 그때까지 쓴 작업량은
+    응답의 진단에 그대로 남는다. count_events는 결속 검사와 봉인 대조를 한 뒤 기본 계산 없이
+    사건을 센다. 응답의 request_id는 언제나 들어온 요청 자신의 식별값이다.
+    준비·봉인·결속·대조는 작업량 단위(열거 시도, DP 곱셈)를 늘리지 않지만 그 호출의 시간 한도와
+    취소 콜백 안에서 수행한다.
+    """
+    __slots__ = ("_state", "_closed")
+
+    def __init__(self):
+        self._state = None
+        self._closed = False
+
+    @property
+    def prepared(self):
+        return self._state is not None and not self._closed
+
+    def close(self):
+        """보관 값을 버린다. 닫힌 세션은 다시 쓸 수 없다."""
+        self._state = None
+        self._closed = True
+
+    def count_base(self, request, *, cancelled=None):
+        _session_arguments(request, cancelled)
+        if self._closed:
+            return _session_refusal(request, "SESSION_CLOSED")
+        if self._state is not None:
+            return _session_refusal(request, "SESSION_BASE_ALREADY_PREPARED")
+        if request.events:
+            return _session_refusal(request, "SESSION_BASE_REQUEST_HAS_EVENTS")
+        budget = _Budget(request.limits, cancelled)
+        identity = request.identity
+        base = BaseResult("NOT_EVALUATED", "NOT_STARTED")
+
+        def result(status, reason):
+            return BeliefResult(identity, status, reason, base, (), budget.diagnostics())
+
+        unsupported = None
+        if len(request.observation) * len(request.observation[0]) > request.limits.max_cells:
+            unsupported = "CELL_LIMIT"
+        elif request.prior_id != PRIOR_ID:
+            unsupported = "PRIOR_UNSUPPORTED"
+        if unsupported:
+            base = BaseResult("UNSUPPORTED", unsupported)
+            return result("UNSUPPORTED", unsupported)
+        try:
+            computed, components, floating, counts = _base(request, budget)
+        except _Contradiction:
+            base = BaseResult("INCONSISTENT_INPUT", "NO_CONSISTENT_PLACEMENTS", 0)
+            return result("INCONSISTENT_INPUT", base.reason)
+        except _Stop as exc:
+            base = BaseResult(exc.status, exc.reason)
+            return result(exc.status, exc.reason)
+        except Exception as exc:
+            budget.error = f"{type(exc).__name__}: {exc}"
+            base = BaseResult("ERROR", "INTERNAL_ERROR")
+            return result("ERROR", base.reason)
+        # 준비와 봉인. 단계의 시작과 끝에서 취소와 시간 한도를 검사한다. 여기서 멈추면 기본값을
+        # 공개하지 않고 상태도 남기지 않는다. 이미 쓴 기본 계산량은 진단의 작업량에 남는다.
+        try:
+            with budget.stage("session.prepare"):
+                kept = tuple((MappingProxyType(dict(ways)), None) for ways, _ in counts)
+                sizes = tuple(len(component.cells) for component in components)
+            with budget.stage("session.seal"):
+                seal = _session_seal(request.observation, request.num_mines, request.prior_id,
+                                     computed, components, floating, kept)
+                state = _SessionState(request.observation, request.num_mines, request.prior_id, computed,
+                                      components, floating, kept, sizes, identity, seal)
+        except _Stop as exc:
+            base = BaseResult(exc.status, exc.reason)
+            return result(exc.status, exc.reason)
+        except Exception as exc:
+            budget.error = f"{type(exc).__name__}: {exc}"
+            base = BaseResult("ERROR", "INTERNAL_ERROR")
+            return result("ERROR", base.reason)
+        base = computed
+        self._state = state
+        return result("COMPLETE", "PUBLIC_COUNTS")
+
+    def count_events(self, request, *, cancelled=None):
+        _session_arguments(request, cancelled)
+        if self._closed:
+            return _session_refusal(request, "SESSION_CLOSED")
+        state = self._state
+        if state is None:
+            return _session_refusal(request, "SESSION_BASE_NOT_PREPARED")
+        budget = _Budget(request.limits, cancelled)
+        identity = request.identity
+        events = [EventResult(event) for event in request.events]
+        base = BaseResult("NOT_EVALUATED", "NOT_STARTED")
+
+        def result(status, reason):
+            return BeliefResult(identity, status, reason, base, tuple(events), budget.diagnostics())
+
+        unsupported = None
+        if len(request.observation) * len(request.observation[0]) > request.limits.max_cells:
+            unsupported = "CELL_LIMIT"
+        elif len(request.events) > request.limits.max_events:
+            unsupported = "EVENT_LIMIT"
+        elif request.prior_id != PRIOR_ID:
+            unsupported = "PRIOR_UNSUPPORTED"
+        if unsupported:
+            base = BaseResult("UNSUPPORTED", unsupported)
+            return result("UNSUPPORTED", unsupported)
+        # 재사용 전의 결속 검사와 봉인 대조. 끝내지 못하면 보관한 기본값을 내보내지 않는다.
+        try:
+            with budget.stage("session.bind"):
+                bound = (request.observation == state.observation and request.num_mines == state.num_mines
+                         and request.prior_id == state.prior_id)
+            if not bound:
+                return _session_refusal(request, "SESSION_BINDING_MISMATCH")
+            with budget.stage("session.verify"):
+                intact = _session_seal(state.observation, state.num_mines, state.prior_id, state.base,
+                                       state.components, state.floating, state.counts) == state.seal
+            if not intact:
+                return _session_refusal(request, "SESSION_STATE_CORRUPT")
+        except _Stop as exc:
+            base = BaseResult(exc.status, exc.reason)
+            return result(exc.status, exc.reason)
+        except Exception as exc:
+            budget.error = f"{type(exc).__name__}: {exc}"
+            base = BaseResult("ERROR", "INTERNAL_ERROR")
+            return result("ERROR", base.reason)
+        base = state.base
+        budget.component_sizes = state.component_sizes
+        budget.unconstrained_count = len(state.floating)
+        # 사건 반복은 count_public과 같은 규칙이다: 끝난 사건은 정확값, 멈춘 사건은 그 상태, 뒤는 미평가.
+        events = [EventResult(event, reason="PREVIOUS_EVENT_UNFINISHED") for event in request.events]
+        for index, event in enumerate(request.events):
+            try:
+                numerator = _event_count(event, index, request, base.total_worlds,
+                                         state.components, state.floating, state.counts, budget)
+                with budget.stage(f"event.{index}.publish"):
+                    row = EventResult(event, "EXACT", "IMPOSSIBLE_EVENT" if numerator == 0 else "PUBLIC_COUNTS",
+                                      numerator, Fraction(numerator, base.total_worlds))
+                events[index] = row
+            except _Stop as exc:
+                events[index] = EventResult(event, exc.status, exc.reason)
+                return result("PARTIAL", exc.reason)
+            except Exception as exc:
+                budget.error = f"{type(exc).__name__}: {exc}"
+                events[index] = EventResult(event, "ERROR", "INTERNAL_ERROR")
+                return result("PARTIAL", "INTERNAL_ERROR")
+        return result("COMPLETE", "PUBLIC_COUNTS")

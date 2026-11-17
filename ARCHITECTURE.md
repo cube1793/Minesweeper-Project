@@ -1027,13 +1027,13 @@ S는 안전 조건 안에서, M은 추측 설정 안에서 완주 성과 E[X]를
 
 Unit 3은 신규 17개 시험과 독립 실제 정책 174시도 재생으로 한정 수용됐다. 최종 36설정 MATCH, 123건은 신규 113 + 동결 전 재사용 10이고 4설정은 전량 재사용이다. 낮춘 depth 3/5의 8사례는 FLAG 뒤 미완료를 재현했고, 기본 12의 28배치는 모두 종결했다. 이는 일반적인 재계획 연속성 증명이 아니다. 제품 필수 수정은 0이며, 응답 형식·emit 실패의 일부 예외 경로는 기록된 UNRESOLVED 대신 예외로 나갈 수 있다는 비차단 한계가 있다. 상세 처분과 U3-H01 영구 공백은 [평가기 closeout](docs/stage4/STAGE4_EVALUATION_UNIT3_CLOSEOUT.md)을 따른다.
 
-stage4_belief.count_public(BeliefRequest, cancelled=...)는 독립된 공개 계수기다. 물리 FLAG를 identity에 보존하면서 미지수로 취급하고, 숫자 제약의 component별 정수 histogram·prefix/suffix 합성곱·비제약 칸 조합 수로 D/M/W를 구한다. W는 여러 칸이 동시에 안전/지뢰인 공동 사건이며 주변확률의 곱이 아니다. 정수와 Fraction은 손실 없는 문자열로 직렬화한다. action·E[X]·목표 도달 확률을 반환하지 않으며 기존 계획기와 UI의 import 경로에 연결하지 않았다.
+stage4_belief.count_public(BeliefRequest, cancelled=...)는 독립된 공개 계수기다. 물리 FLAG를 identity에 보존하면서 미지수로 취급하고, 숫자 제약의 component별 정수 histogram·prefix/suffix 합성곱·비제약 칸 조합 수로 D/M/W를 구한다. W는 여러 칸이 동시에 안전/지뢰인 공동 사건이며 주변확률의 곱이 아니다. 정수와 Fraction은 손실 없는 문자열로 직렬화한다. action·E[X]·목표 도달 확률을 반환하지 않으며 기존 계획기와 UI의 import 경로에 연결하지 않았다. (2026-11-17 추가: 같은 계수 수학으로 기본 계산을 한 번만 하고 사건 묶음에 재사용하는 `PublicCountSession`이 더해졌다. `count_public`은 그대로다. 문서 끝의 "Stage4 root 기본 계산 재사용" 절을 본다.)
 
 Unit 4의 상한은 480칸/정준 사건 16개/work 200,000/협력 시간 2초다. base와 모든 사건이 한 예산을 공유하고 열거·DP 곱셈마다 검사한다. base D/M은 전체 완료 뒤 원자적으로 공개하며, 사건 중단 시 PARTIAL로 exact base와 완료된 사건만 남긴다. D=0 모순, W=0 불가능 사건, null 미완료를 구분한다. 0 한도와 비활성 CHORD의 None도 명시된 API다. 요청 생성·identity·publish 일부·직렬화에 비중단 구간이 있고, 현재 Windows/Python 3.12.10 monotonic은 약 15.6 ms 단위이므로 2초는 실시간 응답 보장이 아니다.
 
 독립 검토는 작은 32관측/13,627 bitmask, 분석해 7요청과 Replay 6관측의 D/M/W를 모두 재계산했다. Replay의 M 1,956개와 공동 사건 37개가 일치했고 component M 346개는 두 번째 방법으로 확인했다. EXACT 37개 중 W=0은 19개, W=D는 7개, 중간 확률은 11개여서 일반 큰 frontier 비용 근거로 확대하지 않는다. 새 시험은 A 17개와 B 4개의 별도 실행이다. 예상 UTC의 원시 오류 등 5개 비차단 처분은 [Unit 4 closeout](docs/stage4/STAGE4_PUBLIC_COUNTS_UNIT4_CLOSEOUT.md)에 남겼다. 일반 상급판 지원·효율·Main/Live 통합은 후속 범위다.
 
-`stage4_candidates.analyze_candidates(CandidateRequest, cancelled=...)`는 Unit 4의 공개 API만 사용해 `progress_preparations_evidence_v1` 후보를 만든다. 모든 닫힌 OPEN과 해제 OPEN, 양수 숫자의 최종 FLAG 조합·대칭차 편집·CHORD를 열거하고 전체 sequence 길이를 비용으로 센다. 기존 1대상 CHORD와 생존 0 후보를 보존하며 편집 1대상 CHORD는 제외한다. Ws는 모든 직접 대상 T의 공동 안전, Zt는 T와 각 대상의 이웃 전체가 안전한 공동 사건이다. S/M/R의 위험 eligibility만 표시하며 최종 선택/종단/E[X]는 반환하지 않는다.
+`stage4_candidates.analyze_candidates(CandidateRequest, cancelled=...)`는 Unit 4의 공개 API만 사용해 `progress_preparations_evidence_v1` 후보를 만든다. 모든 닫힌 OPEN과 해제 OPEN, 양수 숫자의 최종 FLAG 조합·대칭차 편집·CHORD를 열거하고 전체 sequence 길이를 비용으로 센다. 기존 1대상 CHORD와 생존 0 후보를 보존하며 편집 1대상 CHORD는 제외한다. Ws는 모든 직접 대상 T의 공동 안전, Zt는 T와 각 대상의 이웃 전체가 안전한 공동 사건이다. S/M/R의 위험 eligibility만 표시하며 최종 선택/종단/E[X]는 반환하지 않는다. (2026-11-17 추가: 키워드 인자 `reuse_base`가 더해졌다. 기본값 `False`는 종전 경로이고, `True`는 `stage4_runtime_model.evaluate_model`만 쓴다.)
 
 후보/사건에 하나의 한도를 적용하고 exact base와 완성된 근거만 보존한다. 상한은 생성 4,096/후보 2,048/새 사건 512/backend 33/work 500,000/협력 10초이며 각 backend는 기존 상한과 남은 예산을 따른다. 중단 뒤의 제한된 materialize는 시간 한도 밖이므로 hard real-time 보장이 아니다. S의 안전 칸 부재 규칙도 생존 가능한 최소 M의 직접 OPEN만 허용한다.
 
@@ -1133,7 +1133,7 @@ Units21–23은 공개 부분집합 추론과 여러 안전 성분의 비용 API
 
 `stage4_runtime_kernel.infer_public_indexed`는 기존 공개 식과 proof API를 재사용하고 불변 관계와 색인으로 전파한다. 기존 `verify_proof`는 새 work-version을 허용한다. 기본 work 500,000에는 완료 전 검증이 포함된다. 완료 388/857과 검증 단계 퇴행 3건을 유지한다.
 
-`stage4_runtime_model`은 같은 공개 posterior bank와 고정 후속 정책 F로 후보를 비교한다. F는 공개 커널, 안전 비용 계획, Q/UNIT10_SUMMED를 사용한다. F1 보완은 kernel 500,000/Q local 20,000/Unit10 200,000/F 5초를 고정하고, 유효 cache hit 확인 후 miss에서 전량 예약을 검사한다. 자원이 부족한 모델은 RESOURCE_LIMIT이며 완전한 행렬에서만 점수를 발행한다. 모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS`다. (이 ID와 "cache hit"의 범위는 당시 값이다. 현재 모델 ID와 관측 기준 재사용은 문서 끝의 "Stage4 가상 F 관측 기준 재사용" 절과 그 뒤의 "Stage4 M/R 자기 생존확률 점수" 절을 본다.)
+`stage4_runtime_model`은 같은 공개 posterior bank와 고정 후속 정책 F로 후보를 비교한다. F는 공개 커널, 안전 비용 계획, Q/UNIT10_SUMMED를 사용한다. F1 보완은 kernel 500,000/Q local 20,000/Unit10 200,000/F 5초를 고정하고, 유효 cache hit 확인 후 miss에서 전량 예약을 검사한다. 자원이 부족한 모델은 RESOURCE_LIMIT이며 완전한 행렬에서만 점수를 발행한다. 모델 ID는 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V2_FIXED_LIMITS`다. (이 ID와 "cache hit"의 범위는 당시 값이다. 현재 모델 ID와 관측 기준 재사용은 문서 끝의 "Stage4 가상 F 관측 기준 재사용" 절, 그 뒤의 "Stage4 M/R 자기 생존확률 점수" 절과 "Stage4 root 기본 계산 재사용" 절을 본다.)
 
 `stage4_runtime_policy`는 S/M/R 목적과 판당 quota·공개 count·요청 identity를 결속한다. 전달 검증은 output harness에서 수용됐다. Main/worker/UI 연결은 미구현이다. Units24–26과 F1 보완을 검토된 미연결 실험 코드로 보존한다. F1_FIXED_BOUNDED는 수용됐으며, 가용성 AVAILABILITY_NOT_MET·통합 INTEGRATION_NOT_READY·효율과 실전 목적 차이 NOT_ESTABLISHED를 유지한다. [상세 마감](docs/stage4/STAGE4_RUNTIME_SMR_UNITS24_26_CLOSEOUT.md)을 참고한다.
 
@@ -1202,6 +1202,7 @@ worker와 부모는 동일 monotonic ns로 permit 기한을 검사한다. 추측
 | Stage 4 evaluator | `test_stage4_evaluation.py` | 공개 prefix 전수 재생, 한 입력 후 재계획, 미완료/미시작·분모·구간·정확 산술, 실제 planner 연결. 별도 17개 시험 |
 | Stage 4 public counts | `test_stage4_belief.py`, `stage4_belief_oracle.py` | 공개 D/M/W, 물리 FLAG, 전역 지뢰 수, 공동 사건, 한도·취소·부분 결과·원자적 확정. 새 21개 시험은 A 17/B 4로 별도 실행 |
 | Stage 4 candidate evidence | `test_stage4_candidates.py`, `stage4_candidates_oracle.py` | 정준 수순·전체 비용·공동 생존/0 사건·eligibility·미완료·engine macro. A 25/B 1 별도 실행과 6 snapshot 대조 |
+| Stage 4 root 기본 계산 재사용 | `test_stage4_belief_session.py`, `test_stage4_candidates_reuse.py`, `test_stage4_root_reuse_model.py` | 세션의 결속·준비·봉인·수명, 두 경로의 정확값·한도·보호 계약·중단, 모델·정책 연결과 오류 전파, 시간 계약(root가 시간으로 멈추는 경우와 두 root가 모두 끝나는 경우). 56개 시험. 독립 정답 대조는 기존 `stage4_belief_oracle.py`·`stage4_candidates_oracle.py`를 쓴다 |
 | Stage 4 rollout policy | `test_stage4_posterior.py`, `test_stage4_rollout.py`, `test_stage4_policy.py`, `stage4_policy_oracle.py` | A 13/B 11(v01)+추가 B 4(v02) 별도 실행. 정수 rank·공개 P0·원자 선택·fallback·continuation·작은 25시도/큰 첫 선택 18회 |
 | Stage 4 indexed P0 | `test_stage4_rollout_indexed.py`, `stage4_rollout_reference.py` | 기존 P0 의미·새 work·한도·fixture. 고유 PASS 34=5+29 별도 실행, 독립 재구현 354건, 10M/30M profile 구분. reference는 사본 |
 | Stage 4 exact/objective pilot | `test_stage4_exact_pilot.py`, `test_stage4_objective_pilot.py`, `stage4_pilot_oracle.py` | 공개 확률 후속·S/M/R·한도/캐시·원자적 null; Q 15/G 14 별도 실행, 작은 engine 24 trial; 큰 base 전수 재계수 없음 |
@@ -1393,6 +1394,7 @@ S4_MR_RV1_OWN_SURVIVAL은 구현을 구분하는 이름이며 새 UI 모드가 �
 같은 요청에서 점수와 선택이 달라지기 때문이다. 모델 요청 식별값은 이 ID에서 파생되므로 함께 달라진다.
 `F_ID`·`K100K_F_ID`·`V1_F_ID`·`POLICY_ID`, 정책 요청 식별값, 증명 형식, 전송 형식은 그대로다. S4_F_OBS_MEMO1의 관측 기준
 재사용도 그대로다. 소스가 바뀌었으므로 실행 중이던 앱은 다시 시작한다.
+(이 ID는 당시 값이다. 현재 모델 ID는 문서 끝의 "Stage4 root 기본 계산 재사용" 절을 본다.)
 
 **적용 조건.** 네 가지가 모두 참일 때만 새 점수를 쓴다.
 
@@ -1495,4 +1497,128 @@ R = M의 일반화, 표본 8에 악화가 없다는 결론. 반영 뒤 전체 �
 근거: `STAGE4_MR_RISK_VALUE_RESEARCH_2026-11-17`의 `run_01/REPORT_KO.md`(연구), `run_01/claude_review_01/REVIEW_KO.md`·`FINDINGS.json`
 (독립 검토), `STAGE4_RV1_PREPARATION_2026-11-17`의 `run_01/REPORT_KO.md`·`RESULTS.json`(준비본 검증),
 `adoption_01/REPORT_KO.md`·`RESULTS.json`(제품 작업 트리 반영과 부분 회귀),
+`acceptance_commit_01/REPORT_KO.md`·`RESULTS.json`(Git 마감: 커밋 SHA와 원격 확인).
+
+## Stage4 root 기본 계산 재사용 — S4_ROOT_BASE_REUSE (2026-11-17)
+
+`stage4_runtime_model.evaluate_model`의 root 후보 분석에서, 공개 계수의 기본 계산을 한 번만 하고 그 뒤의 사건 묶음 계산에
+재사용한다. 종전에는 `analyze_candidates`가 사건을 16개씩 묶어 `count_public`을 부를 때마다 같은 기본 계산을 다시 했다.
+S4_ROOT_BASE_REUSE는 구현을 구분하는 이름이며 새 UI 모드나 정책이 아니다. 계산 방식의 변경이며 제한적으로 수용했다.
+변경 파일은 `stage4_belief.py`, `stage4_candidates.py`, `stage4_runtime_model.py`, 시험 `tests/test_stage4_runtime_model.py`
+(리터럴 2행), `tests/test_stage4_risk_value.py`(리터럴 1행), 새 시험 `tests/test_stage4_belief_session.py`,
+`tests/test_stage4_candidates_reuse.py`, `tests/test_stage4_root_reuse_model.py`다.
+
+**식별자.** 모델 ID를 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V5_ROOT_BASE_REUSE`로 올렸다(이전 `…_V4_RV1_OWN_SURVIVAL`).
+같은 모델 요청에서 root 작업량 회계, 모델의 완료 여부, 최종 행동이 달라질 수 있기 때문이다. 모델 요청 식별값은 이 ID에서
+파생되므로 함께 달라진다. `COUNTER_VERSION`, `NORMALIZATION_POLICY`, `FAMILY_ID`, `SCHEMA_VERSION`, `F_ID`·`K100K_F_ID`·`V1_F_ID`,
+`POLICY_ID`, 요청·결과 DTO의 형식, root 요청 식별값, 정책 요청 식별값, 증명 형식, 전송 형식은 그대로다.
+S4_F_OBS_MEMO1의 관측 기준 재사용과 S4_MR_RV1_OWN_SURVIVAL의 점수 규칙도 그대로다. 소스가 바뀌었으므로 실행 중이던 앱은
+다시 시작한다.
+
+**범위.** 재사용은 **한 번의 root 분석 안**에 한한다.
+
+- `stage4_belief.PublicCountSession`이 기본 계산을 한 번 하고(`count_base`), 사건 계산에 필요한 최소 값만 보관해
+  사건 묶음을 센다(`count_events`). 세션은 `analyze_candidates` 한 호출의 지역 객체이고 정상 반환·중단·오류의 모든 경로에서
+  닫힌다. 호출 사이, 모델 판정 사이, 판 사이에 남는 상태는 없다. 모듈 수준 캐시도 없다.
+- 켜는 곳은 `evaluate_model`의 root 호출 하나(`reuse_base=True`)다. `analyze_candidates`의 기본값은 `reuse_base=False`이며
+  그때는 종전과 같은 코드 경로(`count_public`)다. 다른 호출처(`stage4_policy`, `stage4_objective_pilot`, `stage4_exact_pilot`,
+  `stage4_runtime_policy`)는 바뀌지 않았다. 두 프로파일(`indexed`, `indexed_k100k`)은 같은 `evaluate_model`을 쓰므로 함께 적용된다.
+- 직접 F와 가상 F는 `stage4_belief_counter.count_base` 경로이며 이 변경과 무관하다.
+- `count_public`, `_base`, `_event_count`의 본문은 바꾸지 않았다. 계수 수학은 같다.
+
+**유지한 한도와 보호.**
+
+- 한도는 하나도 올리지 않았다: root 작업량 500,000, 호출 33, 사건 512, 시간 10초, 개별 호출 `min(200,000, 남은 작업량)`·
+  `min(2초, 남은 시간)`·16사건, 모델 30초, 정책 35초, F 5초. 모델의 남은 시간이 root 시간 한도를 줄이는 관계도 같다.
+- 청구: 기본 호출은 기본 계산량, 묶음 호출은 사건 계산량만 청구한다. 종전에는 묶음마다 기본 계산량이 다시 청구됐다.
+  기본 계산을 실제로 반복하면서 장부에서만 빼는 일은 없다. 호출 수의 규칙, 호출 기록의 형식, 모델의 `unit4_calls`·`unit4_work`
+  정산은 같은 코드다.
+- 요청 결속: 사건 요청의 관측(깃발 표현 포함)·지뢰 수·prior가 세션의 것과 정확히 같아야 한다. 다르면 `ERROR`·
+  `SESSION_BINDING_MISMATCH`이고 수치를 내지 않는다. root의 응답 검증(요청 결속, 첫 기본값과의 비교, 사건 응답의 키·누락·중복·
+  수치 검사, 부분 묶음 반영)은 두 경로가 같은 코드를 쓴다.
+- 오류: 세션의 거부(`SESSION_CLOSED`, `SESSION_BASE_NOT_PREPARED`, `SESSION_BASE_ALREADY_PREPARED`,
+  `SESSION_BASE_REQUEST_HAS_EVENTS`, `SESSION_BINDING_MISMATCH`, `SESSION_STATE_CORRUPT`)는 root `ERROR`, 모델 `ERROR`·`ROOT_<사유>`,
+  정책 `ERROR`·`MODEL_BLOCKED:ROOT_<사유>`로 올라간다. 세션이 예외를 내면 root `ERROR`·`BACKEND_ERROR`, 모델 `MODEL_ERROR`,
+  정책 `RUNTIME_POLICY_ERROR`다. 어느 쪽도 자원 한도 종료나 직접 F 대체로 바뀌지 않는다.
+- 취소와 시간: 세션의 새 작업(읽기 전용 사본 `session.prepare`, 봉인 `session.seal`, 결속 `session.bind`, 대조 `session.verify`)은
+  그 호출의 예산이 관리하는 단계 안에서 하고, 단계는 시작과 끝에서 취소와 시간 한도를 검사한다. 준비·봉인 중에 멈추면 세션에
+  재사용 상태가 남지 않고, 그때까지 실제로 쓴 작업량은 응답에 남아 root 장부에 더해진다.
+- 이 변경 때문에 root의 검사 지점 수와 단계 기록이 종전과 다르다(`session.*` 단계가 더해지고 기본 계산의 검사가 묶음마다
+  반복되지 않는다). `count_public` 경로의 검사 지점은 그대로다.
+
+**사라진 확인과 대신하는 것.** 종전의 묶음별 재계산은 "같은 입력의 기본 계산이 매번 같은 값을 낸다"는 재실행 확인을 겸했다.
+재사용 경로에는 이 확인이 없다. 대신 (1) 분자(사건 배치 수)가 분모를 만든 것과 같은 보관 값에서 나온다는 구조, (2) 보관 값의
+읽기 전용 보관(동결 dataclass, 튜플, 읽기 전용 매핑), (3) `count_events`마다 보관 값 전체의 SHA-256 봉인을 다시 계산해
+대조하는 검사가 있다. 이것은 종전의 재실행 확인과 같은 검사가 아니다. root 끝에서 기본값을 다시 계산하는 검사는 넣지 않았다.
+봉인이 겨냥하는 것은 보관 중의 우발적 변경이며, 같은 프로세스 안에서 보관 값과 봉인 값을 함께 바꾸는 의도적 조작은 막지 못한다.
+
+**수용한 행동 변화(조율 결정).** RV1의 점수 규칙, 표본, 후보 선별, R 목표, F, 추측 OFF의 후보 자격(정확히 안전한 후보만),
+제안의 단일 사용·만료·전달 검증은 그대로다. 그 위에서 다음을 알고 반영했다.
+
+- 종전에 root가 작업량 한도로 멈춰 모델이 `RESOURCE_LIMIT`으로 끝나고 직접 F로 가던 상태에서, root가 끝나 모델이 완료되고
+  **최종 선택이 달라질 수 있다.**
+- 두 방식 모두 root가 끝나는 상태에서도, root에 쓰는 시간이 달라지면 모델의 남은 시간이 달라지고 그 뒤의 한도(표본 추출 시간,
+  가상 F의 5초 예약, 모델·정책 기한)에서 완료 여부와 최종 출처가 달라질 수 있다.
+- 반대 방향도 있다: root가 풀려 모델이 더 진행한 뒤 다른 한도에서 멈추면 직접 F로 간다. 최종 수는 종전과 같을 수 있으나
+  그 판정의 **계산 시간은 늘어난다.** 이 지연의 크기와 빈도는 측정하지 않았다.
+
+**알려진 한계.**
+
+- **실제 속도, 판 전체의 승률·효율·고점·계산 시간이 좋아지거나 유지된다는 것은 입증되지 않았다.**
+- 준비·봉인·대조의 실제 시간과 메모리 비용은 작업량 단위에 잡히지 않으며 측정하지 않았다.
+- root가 작업량 한도에 걸리는 상태, 위 행동 변화가 일어나는 상태가 실제 게임에서 얼마나 자주 나오는지 모른다.
+- 종전의 재실행 확인이 사라진 점과 봉인의 한계는 위와 같다.
+
+**근거의 구분.** 실험 구현, 시간 경계 보완, 준비본 검증, 제품 반영 뒤 검증을 구분한다. 서로 다른 위치에서 수행한 시험은
+별개의 실행이다. 앞선 세 단계의 과거 실행 결과는 재사용했다. 다만 이번 부분 회귀에 포함된 독립 정답 대조 시험과
+시간 경계 시험은 제품 경로에서 다시 실행했다. G3의 상태 재실행, G5의 논리 시계 비교와 별도 시간 경계 관측 도구는
+다시 실행하지 않았다.
+
+- 실험 구현(기준 사본과 후보 사본, 2026-11-17):
+  - 새 시험 51건 통과. 제품 계수기를 쓰지 않는 전수 계산과의 독립 대조는 소형 공개 상태 32개(세션)와 공개 관측 24개(root 재사용)다.
+    그 밖의 비교는 같은 계수 코드에서 나온 값끼리의 재현이다.
+  - root 재실행(앞선 관측에서 고른 개발 공개 상태 5개 × 두 경로, 10회): 종전에 `PARTIAL`·`WORK_LIMIT`(500,000, 27회 / 21회 호출)으로
+    멈추던 두 상태가 `COMPLETE`가 됐다(407,009·29회, 356,394·22회). 대기 사건의 정확값은 402 → 438/438, 317 → 333/333이며
+    참조값과 불일치 0이다. 종전 500,000은 **끝내지 못한 계산**의 값이므로 두 수의 비를 같은 작업의 절감률로 읽지 않는다.
+    두 경로가 모두 끝낸 세 상태의 작업량은 400,330 → 290,794, 407,107 → 275,304, 471,873 → 351,805이고, 차이는 반복되던
+    기본 계산과 정확히 같다. 이 대조의 참조값은 종전 경로의 값이며 독립 정답 대조가 아니다. 다섯 상태는 개발 자료이고
+    독립 검증 표본이 아니다.
+  - 논리 시계 기능 대조(공개 상태 4개, 8조건: `indexed` 4·`indexed_k100k` 4, 모드 S·M·R, 추측 ON·OFF, 16회): 모든 시각 조회를
+    조회마다 1ns 진행하는 시계로 바꾼 조건에서, 후보·표본·행·점수·선택·F 조회·kernel 작업량·최종 수가 기준 사본과 같았다.
+    차이는 모델 ID와 그 파생 식별값, root 작업량과 그 파생 진단, root 호출 인자, 논리 시계 조회 수, 바뀐 모듈의 해시뿐이었다.
+    여덟 조건은 모두 두 경로가 root를 끝내는 작은 상태다. **시간을 배제한 기능 비교**이며 실제 시간에서의 동일성을 뜻하지 않는다.
+  - 부분 회귀 12개 모듈 246건 PASS(후보 사본에서의 실행).
+- 시간 경계 보완(후속 후보 사본, 2026-11-17): 읽어도 흐르지 않는 시계에 단계별로 시간을 준 시험이다. 작은 공개 상태 하나,
+  모드 M, 기본 프로파일, 기본 한도에서 두 경로의 root가 모두 `COMPLETE`인데도, root에서 쓴 시간의 차이가 모델의 남은 시간에
+  그대로 남아 종전 경로만 가상 F의 5초 예약을 채우지 못했다. 모델은 `RESOURCE_LIMIT`·`F_TIME_RESERVATION`, 정책은 직접 F로
+  처리했고, 재사용 경로는 모델이 완료됐다. **주어진 시간 차이가 기존 계약대로 처리됨**을 본 시험이다. 시험이 준 시간 값은
+  실측이 아니며, 이 상태에서 두 경로의 최종 입력은 같았다(갈린 것은 출처와 처리 경로다). 해당 시험 모듈 15건 PASS(별개의 실행).
+- 최종 준비본(수용된 후보에서 `stage4_runtime_model.py`의 모듈 설명 한 줄만 고친 사본)의 검증: 수용된 후보와의 차이는 그 파일
+  하나이고, 모듈 설명 문자열을 뺀 구문 구조와 토큰이 같다. 준비본 사본에서 12개 모듈을 실행해 선택 251 = 시작 = 완료,
+  251 PASS, FAIL·ERROR·SKIP·미시작·미완료 0, 실행기와 구획 12개의 종료 코드 0, journal·receipt 일치 12/12였다. 시험 ID 집합은
+  실험 구현의 246개와 시간 경계 보완의 5개를 합친 251개와 같다. root 재실행, 논리 시계 대조, 시간 경계 관측은 준비본에서
+  다시 실행하지 않았다.
+- 제품 반영 뒤(2026-11-17, 제품 저장소 경로, 부분 검증): 코드·시험 8개 파일의 SHA-256이 준비본의 최종값과 같다(반영 직후와 시험
+  뒤 모두). 핵심 모듈과 시험 모듈이 제품 저장소에서 적재됨을 확인했다. 제품 저장소의 표준 격리 실행기로 Stage4 12개 모듈
+  (`test_stage4_belief`, `test_stage4_belief_session`, `test_stage4_candidates`, `test_stage4_candidates_reuse`, `test_stage4_exact_pilot`,
+  `test_stage4_live_delivery`, `test_stage4_objective_pilot`, `test_stage4_policy`, `test_stage4_risk_value`,
+  `test_stage4_root_reuse_model`, `test_stage4_runtime_model`, `test_stage4_runtime_policy`)을 실행해 선택 251 = 시작 = 완료,
+  251 PASS, FAIL·ERROR·SKIP·미시작·미완료 0, 실행기·발견 단계·구획 12개의 종료 코드 0, journal·receipt 일치 12/12였다.
+  시험 ID 집합은 준비본 실행의 251개와 같다. `indexed_k100k`에서 정책이 직접 F를 시작하기 전에 5초 전량을 요구하는 기존 시험
+  (`IndexedK100KPolicyTests.test_runtime_K100K_requires_all_five_seconds`)도 이 251건에 들어 있고 통과했다. 이 251 PASS는
+  준비본 사본의 251 PASS와 별개의 실행이다.
+
+**확대하면 안 되는 주장.** 실제 속도 향상, 판 전체의 승률·효율·고점·시간 효과, 한도에 걸리는 상태의 빈도, 실제 시간에서
+두 경로의 행동이 같다는 결론, 시간 경계 시험의 시간 값을 실측으로 읽는 것, 500,000과 완료 작업량의 비를 절감률로 읽는 것,
+현재 코드의 전체 소스 회귀 성공. 반영 뒤 전체 소스 회귀, native 화면 확인, `main.py` 수동 실행, 새 판 평가, 성능 측정은
+하지 않았다.
+
+**반영 상태.** 2026-11-17에 제품 작업 트리에 반영했고(기준 HEAD `596ed0e`) 관련 부분 회귀를 통과했다. 부분 회귀를 실행한
+시점에는 스테이징·커밋·푸시하지 않은 작업 트리 상태였다. 현재 반영 상태, 커밋 SHA와 원격 확인 결과는 S4_ROOT_BASE_REUSE
+Git 마감 보고서(`STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17`의 `acceptance_commit_01/REPORT_KO.md`)에서 확인한다.
+
+근거: `STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17`의 `run_01/REPORT_KO.md`(검토), `observation_01/REPORT_KO.md`(구현 전 관측),
+`design_01/DESIGN_KO.md`(최소 설계), `implementation_01/REPORT_KO.md`·`RESULTS.json`(실험 구현과 검증),
+`time_contract_followup_01/REPORT_KO.md`·`RESULTS.json`(시간 경계 보완), `product_preparation_01/REPORT_KO.md`·`RESULTS.json`·
+`ADOPTION_PLAN_KO.md`(준비본 검증과 반영안), `adoption_01/REPORT_KO.md`·`RESULTS.json`(제품 작업 트리 반영과 부분 회귀),
 `acceptance_commit_01/REPORT_KO.md`·`RESULTS.json`(Git 마감: 커밋 SHA와 원격 확인).

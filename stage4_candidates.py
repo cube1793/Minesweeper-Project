@@ -22,7 +22,7 @@ from time import perf_counter
 
 from stage4_belief import (
     BaseResult, BeliefLimits, BeliefRequest, BeliefResult, COUNTER_VERSION,
-    EventQuery, FLAGGED, HIDDEN, NORMALIZATION_POLICY, PRIOR_ID, count_public,
+    EventQuery, FLAGGED, HIDDEN, NORMALIZATION_POLICY, PRIOR_ID, PublicCountSession, count_public,
     exact_json,
 )
 
@@ -216,8 +216,10 @@ class _Stop(Exception):
 
 
 class _Budget:
-    def __init__(self, limits, cancelled):
+    def __init__(self, limits, cancelled, session=None):
         self.limits, self.cancelled = limits, cancelled
+        # 기본 계산을 재사용하는 계수 세션. None이면 호출마다 count_public을 쓰는 기존 경로다.
+        self.session = session
         self.started = perf_counter()
         self.elapsed = 0.0
         self.checkpoints = self.generated = self.calls = self.work = 0
@@ -276,7 +278,13 @@ class _Budget:
         self.calls += 1
         work, status, reason = None, "ERROR", "BACKEND_EXCEPTION"
         try:
-            reply = count_public(query, cancelled=self.backend_cancelled)
+            if self.session is None:
+                reply = count_public(query, cancelled=self.backend_cancelled)
+            elif events:
+                # 세션이 보관한 기본값으로 사건만 센다. 아래의 응답 검증은 두 경로가 같다.
+                reply = self.session.count_events(query, cancelled=self.backend_cancelled)
+            else:
+                reply = self.session.count_base(query, cancelled=self.backend_cancelled)
             if type(reply) is not BeliefResult:
                 raise ValueError("BeliefResult required from backend")
             work = reply.diagnostics.work
@@ -369,8 +377,12 @@ def _eligibility(spec, worlds, denominator, counts, has_safe):
     return Eligibility(safe, s_allowed, viable, viable)
 
 
-def analyze_candidates(request, *, cancelled=None):
+def analyze_candidates(request, *, cancelled=None, reuse_base=False):
     """Return canonical sequence evidence, exact counts and explicit coverage.
+
+    reuse_base(키워드 전용, 실제 bool): False면 사건 묶음마다 count_public을 부르는 기존 경로다.
+    True면 이 호출이 소유하는 계수 세션이 기본 계산을 한 번만 하고 사건 묶음에 재사용한다.
+    한도, 요청·응답 검증, 호출 기록은 두 경로가 같다. 세션은 반환 전에 닫고 결과에 싣지 않는다.
 
     Zero calls/work/time block the base. Zero generation/candidate limits block
     the first applicable catalogue item. Zero event capacity permits evidence
@@ -382,7 +394,9 @@ def analyze_candidates(request, *, cancelled=None):
         raise TypeError("CandidateRequest required")
     if cancelled is not None and not callable(cancelled):
         raise TypeError("cancelled must be callable or None")
-    budget = _Budget(request.limits, cancelled)
+    if type(reuse_base) is not bool:
+        raise TypeError("reuse_base must be bool")
+    budget = _Budget(request.limits, cancelled, PublicCountSession() if reuse_base else None)
     identity, observation_id = request.identity, request.observation_id
     grid = request.observation
     base = BaseResult("NOT_EVALUATED", "NOT_STARTED")
@@ -563,6 +577,10 @@ def analyze_candidates(request, *, cancelled=None):
     except Exception as exc:
         status, reason, stop_stage = "ERROR", "EVIDENCE_ERROR", budget.stage
         budget.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        # 정상 반환·중단·오류 어느 경로에서도 세션을 닫는다. 이 뒤에는 backend 호출이 없다.
+        if budget.session is not None:
+            budget.session.close()
 
     if not candidates and specs:
         # Output construction preserves completed facts even after a stop.

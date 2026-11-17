@@ -1,6 +1,8 @@
 # Current Project Handoff
 
-Updated: **2026-11-17 (Asia/Seoul)** — Stage4 M/R의 점수에 정확한 즉시 생존확률을 쓰는 정책 변경(S4_MR_RV1_OWN_SURVIVAL)을
+Updated: **2026-11-17 (Asia/Seoul)** — Stage4 모델의 root 후보 분석에서 기본 계산을 한 번만 하고 재사용하는 변경
+(S4_ROOT_BASE_REUSE)을 제품에 반영하고 모델 ID를 V5로 올렸다(부분 검증, 아래 현재 상태. 현재 반영 상태·커밋 SHA·원격 확인은 S4_ROOT_BASE_REUSE Git 마감 보고서).
+같은 날 그에 앞서 Stage4 M/R의 점수에 정확한 즉시 생존확률을 쓰는 정책 변경(S4_MR_RV1_OWN_SURVIVAL)을
 제품에 반영하고 모델 ID를 V4로 올렸다(부분 검증, 아래 현재 상태. 커밋 SHA와 원격 확인은 RV1 Git 마감 보고서).
 같은 날 그에 앞서 Stage4 모델의 가상 F 관측 기준 재사용(S4_F_OBS_MEMO1)을 계산 최적화로
 반영하고 모델 ID를 올렸다(부분 검증, 아래 현재 상태). 이하는 2026-11-16까지의 갱신이다.
@@ -13,7 +15,7 @@ UI 시험 2건 및 전체 소스 회귀 안정화 완료, 독립 검토 수용,
 보완한 표준 실행기에서 **6,295 PASS / 11 opt-in SKIP / FAIL·ERROR·미시작·미완료 0**을 확인했다.
 독립 검토의 수용 전 필수 수정은 0건이며, 검토된 코드와 offscreen Qt 소스 회귀 범위에서 수용한다.
 이 전체 회귀 수치는 FU-01·FU-04 보완 전 코드의 기록이며, 두 보완 뒤에는 전체 회귀를 실행하지 않았다.
-그 뒤의 반영(확정칸 표시 유지, 폴더 검사 비용, K1_MEMO2, S3X_INFO_A1, S4_F_OBS_MEMO1, S4_MR_RV1_OWN_SURVIVAL)도 각각 부분 회귀만 거쳤다.
+그 뒤의 반영(확정칸 표시 유지, 폴더 검사 비용, K1_MEMO2, S3X_INFO_A1, S4_F_OBS_MEMO1, S4_MR_RV1_OWN_SURVIVAL, S4_ROOT_BASE_REUSE)도 각각 부분 회귀만 거쳤다.
 위 수치를 그 변경들 뒤의 전체 회귀 결과로 읽지 않는다.
 Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한다.
 제출용 영상 제작·메일 제출은 사용자 보고로 완료됐다.
@@ -205,6 +207,7 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   [RV1 Git 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_RV1_PREPARATION_2026-11-17/acceptance_commit_01/REPORT_KO.md>)에서
   확인한다. 소스를 바꿨으므로 실행 중이던 앱은 다시 시작해야 새 코드가 적용된다.
   **식별자:** 모델 ID를 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL`로 올렸다(이전 `…_V3_OBSERVATION_REUSE`).
+  (이 ID는 당시 값이다. 현재 모델 ID는 아래 S4_ROOT_BASE_REUSE 항목을 본다.)
   모델 요청 식별값이 함께 달라진다. `F_ID`·`K100K_F_ID`·`V1_F_ID`·`POLICY_ID`, 정책 요청 식별값, 증명 형식, 전송 형식은 그대로다.
   모델 ID는 제품이 저장·전송하는 상태에 들어가지 않는다.
   **적용 조건:** M 또는 R, 추측 ON, 복원추출(가능한 배치 수가 설정된 표본 상한보다 큼), shortlist에 0 < p < 1인 후보가 있을 때.
@@ -265,6 +268,65 @@ Unit73 제품 반영과 Unit74 S/M/R 평가의 기존 수용 범위는 유지한
   [준비본 검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_RV1_PREPARATION_2026-11-17/run_01/REPORT_KO.md>),
   [작업 트리 반영·부분 회귀 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_RV1_PREPARATION_2026-11-17/adoption_01/REPORT_KO.md>)에 있고,
   커밋 SHA와 원격 확인은 위 RV1 Git 마감 보고서에 있다.
+- **Stage4 root 기본 계산 재사용(S4_ROOT_BASE_REUSE, 2026-11-17):**
+  `evaluate_model`의 root 후보 분석에서 공개 계수의 기본 계산을 한 번만 하고 사건 묶음 계산에 재사용한다.
+  S4_ROOT_BASE_REUSE는 구현을 구분하는 이름이며 새 UI 모드나 정책이 아니다. **계산 방식의 변경으로 제한적으로 수용했다**(조율 결정).
+  변경은 `stage4_belief.py`, `stage4_candidates.py`, `stage4_runtime_model.py`, `tests/test_stage4_runtime_model.py`(리터럴 2행),
+  `tests/test_stage4_risk_value.py`(리터럴 1행), 새 `tests/test_stage4_belief_session.py`·`tests/test_stage4_candidates_reuse.py`·
+  `tests/test_stage4_root_reuse_model.py` 여덟 파일이다.
+  **반영 상태:** 2026-11-17에 제품 작업 트리에 반영했고(기준 HEAD `596ed0e`) 관련 부분 회귀를 통과했다.
+  부분 회귀를 실행한 시점에는 스테이징·커밋·푸시하지 않은 상태였다. 현재 반영 상태, 커밋 SHA와 원격 확인 결과는
+  [S4_ROOT_BASE_REUSE Git 마감 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/acceptance_commit_01/REPORT_KO.md>)에서
+  확인한다.
+  소스를 바꿨으므로 실행 중이던 앱은 다시 시작해야 새 코드가 적용된다.
+  **식별자:** 모델 ID를 `RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V5_ROOT_BASE_REUSE`로 올렸다(이전 `…_V4_RV1_OWN_SURVIVAL`).
+  모델 요청 식별값이 함께 달라진다. `COUNTER_VERSION`·`FAMILY_ID`·`SCHEMA_VERSION`, `F_ID`·`K100K_F_ID`·`V1_F_ID`·`POLICY_ID`,
+  root 요청 식별값, 정책 요청 식별값, 증명 형식, 전송 형식은 그대로다. 모델 ID는 제품이 저장·전송하는 상태에 들어가지 않는다.
+  **범위:** 재사용은 한 번의 root 분석 안에 한한다. `stage4_belief.PublicCountSession`은 `analyze_candidates` 한 호출의 지역 객체이고
+  모든 경로에서 닫힌다. 켜는 곳은 `evaluate_model`의 root 호출 하나이며(`reuse_base=True`) `analyze_candidates`의 기본값은 종전
+  경로다. 두 프로파일(`indexed`, `indexed_k100k`)에 같은 연결이 적용된다. 직접 F·가상 F의 계수 경로와 다른 호출처는 바뀌지 않았다.
+  **유지한 것:** root 작업량 500,000·호출 33·사건 512·10초, 개별 호출 200,000·2초·16사건, 모델 30초, 정책 35초, F 5초.
+  요청 결속 검사, 응답 검증, 취소 전달, 정산. RV1 점수 규칙, 표본·후보 선별·R 목표, 추측 OFF의 안전 후보 자격, 제안의 단일 사용·
+  만료·전달 검증. 세션의 정합성 오류는 root·모델·정책의 `ERROR`로 끝나고 자원 한도 종료나 직접 F 대체로 바뀌지 않는다.
+  **달라진 확인 방식:** 종전의 묶음별 재계산이 겸하던 재실행 확인은 없다. 보관 값의 읽기 전용 보관과, 사건 호출마다의 봉인(SHA-256)
+  대조로 대신하지만 같은 검사는 아니다. root 끝의 기본값 재계산은 없다. 봉인은 같은 프로세스 안의 의도적 조작을 막지 못한다.
+  **수용 범위(조율 결정):** 다음을 알고 반영했다.
+  (1) 종전에 root가 작업량 한도로 멈추던 상태에서 모델이 완료되어 최종 선택이 달라질 수 있다.
+  (2) 두 방식 모두 root가 끝나는 상태에서도 남은 시간이 달라져 완료 여부와 최종 출처가 달라질 수 있다.
+  (3) 더 진행한 뒤 다른 한도에서 멈추면 같은 직접 F 선택을 더 늦게 낼 수 있다. 그 지연의 크기와 빈도는 측정하지 않았다.
+  **실제 속도, 준비·봉인·대조 비용, 판 전체의 승률·효율·고점·계산 시간의 개선이나 유지, 이런 상황의 빈도는 확인되지 않았다.**
+  **실험 구현의 근거(후보 사본, 재사용):** 새 시험 51건, 독립 전수 계산과의 대조(소형 공개 상태 32개, 공개 관측 24개).
+  개발 공개 상태 5개의 root 재실행에서 종전에 `PARTIAL`·`WORK_LIMIT`(500,000)이던 두 상태가 `COMPLETE`(407,009·29회, 356,394·22회),
+  대기 사건 정확값 402 → 438/438, 317 → 333/333, 참조값 불일치 0. 종전 500,000은 끝내지 못한 계산의 값이며 절감률을 계산하지
+  않는다. 두 경로가 모두 끝낸 세 상태는 400,330 → 290,794, 407,107 → 275,304, 471,873 → 351,805(차이는 반복되던 기본 계산과 같음).
+  참조값은 종전 경로의 값이고 다섯 상태는 개발 자료다. 논리 시계 기능 대조 8조건(공개 상태 4개, 두 프로파일, S·M·R, 추측 ON·OFF)은
+  모델 ID와 그 파생 식별값·root 작업량과 그 파생·root 호출 인자·논리 시계 조회 수·해당 모듈 해시 외에 차이가 없었다(시간을 배제한 비교).
+  부분 회귀 12개 모듈 246건 PASS(후보 사본에서의 실행).
+  **시간 경계 보완(후속 후보 사본, 재사용):** 두 root가 모두 `COMPLETE`인 작은 상태에서, 시험이 준 root 시간 차이가 모델의 남은
+  시간에 반영되어 종전 경로만 가상 F의 5초 예약을 채우지 못했다(모델 `RESOURCE_LIMIT`·`F_TIME_RESERVATION`, 정책은 직접 F).
+  시간 값은 실측이 아니고, 이 상태에서 두 경로의 최종 입력은 같았다. 해당 모듈 15건 PASS(별개의 실행).
+  **최종 준비본의 검증(준비본 사본, 재사용):** 준비본은 수용된 후보에서 `stage4_runtime_model.py`의 모듈 설명 한 줄만 고친 것이다
+  (구문 구조와 토큰은 그 문자열 외에 같음). 준비본 사본에서 12개 모듈 251건 PASS, FAIL·ERROR·SKIP·미시작·미완료 0, 종료 코드 0,
+  journal·receipt 일치 12/12. 시험 ID 집합은 246개와 5개의 합집합과 같다. root 재실행·논리 시계 대조·시간 경계 관측은 준비본에서
+  다시 실행하지 않았다.
+  **반영 후 검증(제품 저장소 경로, 부분 검증):** 코드·시험 8개 파일의 SHA-256이 준비본의 최종값과 같다(반영 직후와 시험 뒤 모두).
+  핵심 모듈과 시험 모듈이 제품 저장소에서 적재됨을 확인했다. 제품 저장소의 표준 격리 실행기로 Stage4 12개 모듈을 실행해
+  선택 251 = 시작 = 완료, 251 PASS(기존 9개 모듈 195 + 새 3개 모듈 56), FAIL·ERROR·SKIP·미시작·미완료 0, 실행기·발견 단계·
+  구획 12개의 종료 코드 0, journal·receipt 일치 12/12였다. 시험 ID 집합은 준비본 실행의 251개와 같다. `indexed_k100k`의 직접 F
+  5초 예약을 보는 기존 시험(`IndexedK100KPolicyTests.test_runtime_K100K_requires_all_five_seconds`)이 포함돼 통과했다.
+  이 251 PASS는 준비본 사본의 251 PASS와 별개의 실행이다.
+  **이 반영 뒤 전체 소스 회귀, native 화면 확인, `main.py` 수동 실행, 새 판 평가, 성능 측정은 하지 않았다.**
+  **확대하면 안 되는 주장:** 실제 속도 향상, 승률·평균 효율·고점·계산 시간의 개선 또는 유지, 한도에 걸리는 상태의 빈도,
+  실제 시간에서 두 경로의 행동이 같다는 결론, 시험이 준 시간 값을 실측으로 읽는 것, 현재 코드의 전체 소스 회귀 성공.
+  **남은 것:** 실제 속도·메모리와 준비·봉인·대조 비용의 측정, 한도에 걸리는 상태의 빈도, 판 단위 관측.
+  모두 후보일 뿐 승인된 범위가 아니다. 커밋·푸시의 상태는 남은 항목이 아니며 위 S4_ROOT_BASE_REUSE Git 마감 보고서에서 확인한다.
+  근거는 [검토 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/run_01/REPORT_KO.md>),
+  [구현 전 관측](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/observation_01/REPORT_KO.md>),
+  [실험 구현 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/implementation_01/REPORT_KO.md>),
+  [시간 경계 보완 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/time_contract_followup_01/REPORT_KO.md>),
+  [준비본 검증 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/product_preparation_01/REPORT_KO.md>),
+  [작업 트리 반영·부분 회귀 보고서](<C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/STAGE4_POST_RV1_COST_SELECTION_REVIEW_2026-11-17/adoption_01/REPORT_KO.md>)에 있고,
+  커밋 SHA와 원격 확인은 위 S4_ROOT_BASE_REUSE Git 마감 보고서에 있다.
 - **Stage3 V1 표시용 정보 갱신(S3X_INFO_A1, 2026-11-16):**
   위 진단의 원인 (1), 곧 지역 수가 남아 있는 동안 정밀 계산으로만 증명되는 칸이 계산되지 않는 문제를
   V1의 표시에 한해 줄였다. S3X_INFO_A1은 정보 계약을 구분하는 이름이며 새 UI 알고리즘이나 정책이 아니다.
@@ -426,6 +488,8 @@ M/R은 관측한 120쌍과 smoke 2쌍에서 같았다. R 목표 130%가 정상 �
      (2026-11-17 추가: 이 가운데 정확한 즉시 생존확률의 사용은 S4_MR_RV1_OWN_SURVIVAL로 제품 작업 트리에 반영했다(위 현재 상태).
      표본 수 자체는 바꾸지 않았고 판 전체 효과는 미확인이다. 남은 후보는 `indexed_k100k`·추측 ON의 판 단위 관측과 상급에서 위험이
      최선인 판정의 빈도 조사이며 승인된 범위가 아니다.)
+     (2026-11-17 추가: 계산 비용 가운데 root 후보 분석의 기본 계산 반복은 S4_ROOT_BASE_REUSE로 제품 작업 트리에 반영했다(위 현재 상태).
+     실제 속도와 판 전체 효과는 미확인이다. 남은 후보는 실제 시간·메모리 측정과 한도에 걸리는 상태의 빈도 조사이며 승인된 범위가 아니다.)
    - 다음 작업으로 두었던 Stage3 정보 갱신 후보의 보완은 마쳤고, V1 표시용 정보 갱신(S3X_INFO_A1)을
      반영했다(위 현재 상태). 남은 것은 상한에 걸리는 보드의 지연·미표시, K 계열의 같은 지연, 그 항목의
      후속 보완(F-01·F-02·F-09)과 미확인 사항이다. 모두 후보일 뿐 승인된 범위가 아니다.

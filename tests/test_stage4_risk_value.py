@@ -33,7 +33,7 @@ SAFE_PAIR_STATE = (((0, 1, H, H, H, H), (0, 1, 1, H, H, H), (1, 1, H, H, H, H), 
 RARE_SURVIVOR_STATE = (((0, 1, 1, 1, 1, 1, 1), (1, 2, H, 1, 1, FL, 1), (H, H, 2, 1, 1, 1, 1), (H, H, 1, 0, 1, 2, 2),
                         (H, 2, 2, 1, 1, FL, H), (H, H, H, 2, 2, 3, H), (H, H, H, H, H, H, H)), 10, 14)
 NARROW = dict(samples=4, shortlist=2, rows=8)
-MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V4_RV1_OWN_SURVIVAL"
+MODEL_ID = "RUNTIME_COMMON_POSTERIOR_THEN_PUBLIC_F_V5_ROOT_BASE_REUSE"
 
 
 def brute(observation, num_mines):
