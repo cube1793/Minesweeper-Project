@@ -856,17 +856,26 @@ class WorkerTests(unittest.TestCase):
             code, _kinds, proposals, _sent, _calls, _status = serve(CASE_A)
         self.assertEqual((code, len(made)), (0, 1))
         self.assertGreater(len(proposals), 5)
-        start = singleton_start()
-        sent = []
-        requests = [transport.message(start.run_id, 0, "START", k_live.to_dict(start)), RuntimeError("stop")]
-        with patch.object(worker, "read_next", side_effect=requests), \
-                patch.object(worker, "write_once", side_effect=lambda _d, _s, _q, item: sent.append(item)), \
-                patch.object(worker, "InfoSupplement", side_effect=AssertionError("K has no supplement")), \
-                patch.object(worker, "plan_snapshot", side_effect=AssertionError("K has no V1 plan")):
-            self.assertEqual(worker.serve("synthetic", start.run_id), 1)
-        self.assertEqual([item["kind"] for item in sent], ["PROPOSAL", "ERROR"])
-        self.assertNotIn("info", sent[0]["payload"])
-        self.assertIn("stop", sent[1]["payload"]["detail"])
+        # KLC1_INFO_D1 changes the K-LC1 display contract only: its decision proposal
+        # now carries the K-specific info. The V1 supplement and V1 planner stay
+        # unused for every K policy, and K-P0 / K-LC0 still send no info at all.
+        for policy_id in (k_live.POLICY_K, k_live.POLICY_K_LC0, k_live.POLICY_K_LC1):
+            with self.subTest(policy=policy_id):
+                start = singleton_start(policy_id)
+                sent = []
+                requests = [transport.message(start.run_id, 0, "START", k_live.to_dict(start)), RuntimeError("stop")]
+                with patch.object(worker, "read_next", side_effect=requests), \
+                        patch.object(worker, "write_once", side_effect=lambda _d, _s, _q, item: sent.append(item)), \
+                        patch.object(worker, "InfoSupplement", side_effect=AssertionError("K has no supplement")), \
+                        patch.object(worker, "plan_snapshot", side_effect=AssertionError("K has no V1 plan")):
+                    self.assertEqual(worker.serve("synthetic", start.run_id), 1)
+                self.assertEqual([item["kind"] for item in sent], ["PROPOSAL", "ERROR"])
+                if policy_id == k_live.POLICY_K_LC1:
+                    self.assertEqual(sent[0]["payload"]["info"]["candidate_id"], "KLC1_INFO_D1")
+                    self.assertNotIn("supplement", sent[0]["payload"]["info"])   # not the V1 info record
+                else:
+                    self.assertNotIn("info", sent[0]["payload"])
+                self.assertIn("stop", sent[1]["payload"]["detail"])
 
     def test_ack_for_an_information_cell_is_rejected(self):
         def forge(proposal):

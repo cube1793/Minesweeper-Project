@@ -8,13 +8,15 @@ more M. Discarding that decision means retiring the entire owner.
 """
 
 from dataclasses import dataclass, field, fields, replace
+import hashlib
+import json
 from time import perf_counter_ns
 from uuid import uuid4
 
 from core_engine import Action, CellState, GameStatus
 from live_policy import (
     ADOPT_CURRENT, CANONICAL_NEW, FIXED_BOARD, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
-    _coordinate, _detach_grid, _grid, _identity, _integer, _object,
+    LivePolicyError, _coordinate, _detach_grid, _grid, _identity, _integer, _object,
     _require, _neighbors, supports_v1_board,
 )
 from simple_algorithm import SimpleMove
@@ -519,6 +521,206 @@ def from_dict(value, cls):
         _require(type(data['cursor']) is list, "K wire cursor must be an array.")
         data['cursor'] = tuple(data['cursor'])
     return cls(**data)
+
+
+# ---- KLC1_INFO_D1 (experiment candidate): display-only certainty for K-LC1.
+# The info travels beside a KProposal, never inside it. Nothing here selects,
+# validates or authorizes an input, and no solver is imported or called: the
+# parent rebuilds the binding from the proposal it received and checks format.
+INFO_CANDIDATE_ID = "KLC1_INFO_D1"
+INFO_BASIS_FORMAT = 1
+K_INFO_NODE_BUDGET = 20_000
+INFO_STATUSES = ("COMPLETE", "PARTIAL", "NOT_RUN", "FAILED")
+INFO_NOT_APPLICABLE = "NOT_APPLICABLE"
+INFO_ROUTES = {"LOCAL_SAFE": "local", "EXACT_SAFE": "exact", "EXACT_GUESS": "exact"}
+INFO_ROUTE_STATUSES = {"local": ("COMPLETE", "PARTIAL", "FAILED"), "exact": ("NOT_RUN", "FAILED")}
+INFO_ERROR_CODES = ("CONTRADICTION", "SENDER_INVALID", "RECEIVED_INVALID", "MISSING", "UNEXPECTED")
+
+
+def info_error(code, detail):
+    """An integrity error that ends the owner run through the existing path."""
+    _require(code in INFO_ERROR_CODES, "Unknown K info error code.")
+    return LivePolicyError(f"{INFO_CANDIDATE_ID}:{code} {detail}"[:4096])
+
+
+def info_error_code(text):
+    """The first KLC1_INFO_D1 error code named in a failure string, or None."""
+    if type(text) is not str:
+        return None
+    marker = INFO_CANDIDATE_ID + ":"
+    start = text.find(marker)
+    while start >= 0:
+        rest = text[start + len(marker):]
+        for code in INFO_ERROR_CODES:
+            if rest.startswith(code):
+                return code
+        start = text.find(marker, start + 1)
+    return None
+
+
+def info_required(proposal):
+    """True exactly for a K-LC1 decision proposal: not initial, not preparation."""
+    _require(type(proposal) is KProposal, "K info rule requires a KProposal.")
+    return (proposal.snapshot.policy_id == POLICY_K_LC1
+            and not proposal.is_preparation and not proposal.initial)
+
+
+def _info_cells(value, width, height):
+    return (type(value) is tuple and len(value) <= MAX_K_INPUTS
+            and all(_coordinate(cell, width, height) for cell in value)
+            and value == _ordered(set(value)))
+
+
+def info_basis(proposal):
+    """(facts_safe, facts_mines, basis_sha256) for one finished K proposal.
+
+    The two fact sets are exactly what the display engine is given for this
+    proposal; the same call produces the digest that binds them. One function,
+    so the sets used and the sets hashed cannot drift apart.
+    """
+    _require(type(proposal) is KProposal, "K info basis requires a KProposal.")
+    s = proposal.snapshot
+    _require(_grid(s.observation, s.width, s.height), "K info basis requires a public grid.")
+    facts_safe = proposal.safe_cells
+    facts_mines = tuple(cell for cell in proposal.preinput_m
+                        if s.observation[cell[1]][cell[0]] == -2)
+    _require(_info_cells(facts_safe, s.width, s.height) and _info_cells(facts_mines, s.width, s.height)
+             and not set(facts_safe) & set(facts_mines)
+             and all(s.observation[y][x] == -2 for x, y in facts_safe),
+             "K info facts must be ordered, unique, disjoint HIDDEN cells.")
+    for value in (s.board_generation, s.input_seq, s.input_revision, s.width, s.height, s.num_mines):
+        _require(_integer(value), "K info basis integer.")
+    for value in (s.run_id, s.policy_id, proposal.continuation, proposal.token):
+        _require(type(value) is str, "K info basis text.")
+    basis = {
+        "basis_format": INFO_BASIS_FORMAT, "candidate_id": INFO_CANDIDATE_ID,
+        "run_id": s.run_id, "board_generation": s.board_generation,
+        "input_seq": s.input_seq, "input_revision": s.input_revision,
+        "policy_id": s.policy_id, "continuation": proposal.continuation, "token": proposal.token,
+        "width": s.width, "height": s.height, "num_mines": s.num_mines,
+        "observation": [list(row) for row in s.observation],
+        "facts_safe": [list(cell) for cell in facts_safe],
+        "facts_mines": [list(cell) for cell in facts_mines],
+        "node_budget": K_INFO_NODE_BUDGET,
+    }
+    encoded = json.dumps(basis, ensure_ascii=True, allow_nan=False,
+                         sort_keys=True, separators=(",", ":")).encode("ascii")
+    return facts_safe, facts_mines, hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class KProposalInfo:
+    """Extra cells proven for one K-LC1 proposal's public state. Colors only."""
+
+    candidate_id: str
+    token: str
+    basis_sha256: str
+    route: str
+    status: str
+    error: str
+    node_budget: int
+    nodes: int
+    skipped: int
+    supplement_ns: int
+    safe: tuple
+    mines: tuple
+
+    def __post_init__(self):
+        _require(type(self.candidate_id) is str and self.candidate_id == INFO_CANDIDATE_ID
+                 and _identity(self.token), "Invalid K info identity.")
+        _require(type(self.basis_sha256) is str and len(self.basis_sha256) == 64
+                 and all(character in "0123456789abcdef" for character in self.basis_sha256),
+                 "Invalid K info basis digest.")
+        _require(type(self.route) is str and self.route in INFO_ROUTE_STATUSES
+                 and type(self.status) is str and self.status in INFO_ROUTE_STATUSES[self.route],
+                 "Invalid K info route/status.")
+        _require(type(self.error) is str and len(self.error) <= 64
+                 and ((self.status == "FAILED" and self.error.isascii() and self.error.isidentifier())
+                      or (self.status != "FAILED" and self.error == "")),
+                 "Invalid K info error name.")
+        _require(_integer(self.node_budget) and self.node_budget == K_INFO_NODE_BUDGET
+                 and _integer(self.nodes, 0, self.node_budget)
+                 and _integer(self.skipped, 0, MAX_K_INPUTS) and _integer(self.supplement_ns),
+                 "Invalid K info budget/accounting.")
+        _require((self.status != "PARTIAL" or self.skipped > 0)
+                 and (self.status != "COMPLETE" or self.skipped == 0)
+                 and (self.status in ("COMPLETE", "PARTIAL") or self.nodes == self.skipped == 0),
+                 "K info status contradicts its accounting.")
+        _require(_info_cells(self.safe, 30, 16) and _info_cells(self.mines, 30, 16)
+                 and not set(self.safe) & set(self.mines), "Invalid K info cells.")
+        _require(self.status in ("COMPLETE", "PARTIAL") or not (self.safe or self.mines),
+                 "Only a finished or partial K info pass carries cells.")
+
+
+def validate_info(proposal, info):
+    """Bind an info record to the one proposal it was computed for. No solving.
+
+    Format, range and binding only: whether a listed cell is truly proven is
+    the worker engine's responsibility, not something the parent recomputes.
+    """
+    _require(type(proposal) is KProposal and type(info) is KProposalInfo, "Invalid K info values.")
+    _require(info_required(proposal), "This K proposal must not carry display info.")
+    info.__post_init__()
+    s = proposal.snapshot
+    facts_safe, facts_mines, digest = info_basis(proposal)
+    _require(info.token == proposal.token, "K info token differs from its proposal.")
+    _require(info.basis_sha256 == digest, "K info basis differs from the proposal's facts/state.")
+    _require(proposal.continuation in INFO_ROUTES and info.route == INFO_ROUTES[proposal.continuation],
+             "K info route differs from the proposal continuation.")
+    _require(_info_cells(info.safe, s.width, s.height) and _info_cells(info.mines, s.width, s.height)
+             and all(s.observation[y][x] == -2 for x, y in info.safe + info.mines),
+             "K info cells must be HIDDEN cells of the proposal grid.")
+    # Separation only: an extra display cell is never an input basis cell.
+    _require(not set(info.safe + info.mines) & (set(proposal.safe_cells) | set(proposal.preinput_m)),
+             "K info cells overlap the proposal's own safe cells or M.")
+    _require(len(info.mines) + len(proposal.preinput_m) <= s.num_mines,
+             "K info mines exceed the public mine count.")
+    return info
+
+
+def info_to_dict(info):
+    _require(type(info) is KProposalInfo, "Unknown K info DTO.")
+    info.__post_init__()
+    result = {f.name: getattr(info, f.name) for f in fields(info)}
+    for name in ("safe", "mines"):
+        result[name] = [list(cell) for cell in result[name]]
+    return result
+
+
+def info_from_dict(value):
+    data = _object(value, KProposalInfo)
+    for name in ("safe", "mines"):
+        _require(type(data[name]) is list and len(data[name]) <= MAX_K_INPUTS
+                 and all(type(cell) is list and len(cell) == 2 for cell in data[name]),
+                 "Invalid K info wire array.")
+        data[name] = tuple(tuple(cell) for cell in data[name])
+    return KProposalInfo(**data)
+
+
+def split_proposal_payload(payload):
+    """(KProposal, has_info, raw_info): the 14 proposal keys stay strict."""
+    _require(type(payload) is dict, "K PROPOSAL payload must be an object.")
+    proposal = from_dict({name: value for name, value in payload.items() if name != "info"}, KProposal)
+    return proposal, "info" in payload, payload.get("info")
+
+
+def receive_info(proposal, has_info, raw_info):
+    """Parent-side presence rule and strict check. Returns KProposalInfo or None.
+
+    Required info that is absent, or info where none may exist, is an integrity
+    error and never a silent omission.
+    """
+    required = info_required(proposal)
+    if required and not has_info:
+        raise info_error("MISSING", "K-LC1 decision proposal arrived without display info.")
+    if has_info and not required:
+        raise info_error("UNEXPECTED", "Display info arrived on a proposal that must not carry it.")
+    if not has_info:
+        return None
+    try:
+        return validate_info(proposal, info_from_dict(raw_info))
+    except Exception as exc:
+        raise info_error("RECEIVED_INVALID", f"{type(exc).__name__}: {exc}") from exc
 
 
 class KOwner:

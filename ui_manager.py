@@ -4021,7 +4021,9 @@ class MinesweeperUI(QWidget):
         proposal = self._v1_pending
         if proposal is None:
             return
-        self._analysis_result = (present_k_proposal(proposal) if k_live.is_k_policy(self._live_policy)
+        # KLC1_INFO_D1: the job keeps the validated display info beside its pending.
+        self._analysis_result = (present_k_proposal(proposal, self._v1_job.pending_info)
+                                 if k_live.is_k_policy(self._live_policy)
                                  else present_v1_proposal(proposal))
         self._analysis_observation = proposal.snapshot.observation
         self._analysis_first_click = proposal.kind == "initial"
@@ -4385,6 +4387,7 @@ class MinesweeperUI(QWidget):
             admitted = self._v1_job.mark_applying(proposal.token, permit.nonce)
             if admitted != proposal:
                 raise ValueError("K 소비 token이 승인과 다릅니다.")
+            display_info = self._v1_job.pending_info   # KLC1_INFO_D1: record only, never a basis
             self._v1_pending = None
             before_events = len(self._replay_recorder.events)
             counters = self.engine.get_counter_snapshot()
@@ -4413,6 +4416,7 @@ class MinesweeperUI(QWidget):
                 'event_index': None, 'actual_input_confirmed': False,
                 'ack_sent': False, 'ack_state': 'NOT_SENT', 'incomplete_reason': None,
                 'end_reason': None, 'cleanup': None,
+                'info_status': None if display_info is None else display_info.status,
             }
             self.live_action_records.append(record)
             owner_record['k_actions'].append(record)

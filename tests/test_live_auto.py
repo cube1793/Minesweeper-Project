@@ -1012,6 +1012,7 @@ class LiveAutoUITests(unittest.TestCase):
 if QApplication is not None:
     class SyntheticLivePolicyJob(QObject):
         """UI seam only: no subprocess and no automatic policy execution."""
+        pending_info = None  # KLC1_INFO_D1: the real job's display-info seam; this fake holds none.
         proposal_ready = pyqtSignal(object)
         admitted = pyqtSignal(object)
         bootstrapped = pyqtSignal(object)

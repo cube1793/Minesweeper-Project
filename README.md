@@ -132,7 +132,9 @@ Auto OFF는 일시정지입니다. 모든 정책은 수동 첫 입력에서 Auto
 
 K 확률은 이미 계산된 exact 수치이며, 확정 안전은 초록·HIDDEN 논리 지뢰는 빨강으로 표시합니다. 확률 OFF에도 확정색은 남습니다. 같은 Auto 세션의 다음 계산을 기다리는 동안 유효한 확정색만 유지하고, 열린 칸과 깃발 칸의 색은 즉시 지웁니다. 새 결과가 오면 통째로 교체하며 이전 추천·확률을 다음 입력으로 재사용하지 않습니다. V1/K의 **자동 커서 표시**는 가상 원형입니다. 승인 대기 중 실제 입력보다 먼저 도착할 수 있고 간격 0은 점프합니다. OS 마우스·Model C·인간 Mouse Trace에 합성 경로를 만들지 않습니다.
 
-2026-11-16 추가한 **Stage3 V1 확정칸 표시 보강(S3X_INFO_A1)**은 V1이 지역 추론만으로 다음 수를 정한 상태에서도, 그 공개 상태에서 이미 증명할 수 있는 다른 닫힌 칸을 초록(안전)·빨강(지뢰) 색으로 함께 표시합니다. worker가 frozen V1 결정을 끝낸 뒤 노드 상한 20,000의 표시용 계산을 따로 하며, V1의 결정·입력 순서·입력 검증은 그대로입니다. 더해진 색은 `Proposal.info`로 전달되는 표시 정보일 뿐 추천이나 입력 허가가 아니고 확률 숫자도 없습니다. 상한에 걸리는 보드에서는 일부 칸이 여전히 늦게 표시되거나 표시되지 않을 수 있습니다. K-P0/K-LC0/K-LC1에는 적용하지 않았습니다. 전송 버전은 10 그대로이고 부모와 worker는 같은 소스 버전이어야 하므로, 소스를 바꾼 뒤에는 앱을 다시 시작합니다. 검증은 개발 보드와 offscreen 범위의 부분 검증이며 native 화면·전체 회귀·빌드는 확인하지 않았습니다. 근거와 한계는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)에 있습니다.
+2026-11-16 추가한 **Stage3 V1 확정칸 표시 보강(S3X_INFO_A1)**은 V1이 지역 추론만으로 다음 수를 정한 상태에서도, 그 공개 상태에서 이미 증명할 수 있는 다른 닫힌 칸을 초록(안전)·빨강(지뢰) 색으로 함께 표시합니다. worker가 frozen V1 결정을 끝낸 뒤 노드 상한 20,000의 표시용 계산을 따로 하며, V1의 결정·입력 순서·입력 검증은 그대로입니다. 더해진 색은 `Proposal.info`로 전달되는 표시 정보일 뿐 추천이나 입력 허가가 아니고 확률 숫자도 없습니다. 상한에 걸리는 보드에서는 일부 칸이 여전히 늦게 표시되거나 표시되지 않을 수 있습니다. 이 V1 보강(S3X_INFO_A1)은 K-P0/K-LC0/K-LC1에 적용하지 않았습니다(K-LC1은 아래의 별도 보강입니다). 전송 버전은 10 그대로이고 부모와 worker는 같은 소스 버전이어야 하므로, 소스를 바꾼 뒤에는 앱을 다시 시작합니다. 검증은 개발 보드와 offscreen 범위의 부분 검증이며 native 화면·전체 회귀·빌드는 확인하지 않았습니다. 근거와 한계는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)에 있습니다.
+
+2026-11-18 추가한 **Stage3 K-LC1 확정칸 표시 보강(KLC1_INFO_D1)**은 K-LC1이 지역 추론(LOCAL_SAFE)으로 다음 수를 정한 상태에서도, 그 공개 상태에서 이미 증명할 수 있는 다른 닫힌 칸을 초록(안전)·빨강(지뢰) 색으로 함께 표시합니다. worker가 K-LC1의 원 결정을 끝낸 뒤 V1 보강과 같은 계산기를 고치지 않고 다시 써서 노드 상한 20,000의 표시용 계산을 따로 합니다(`live_k_info.py`). 이 20,000노드는 이번에 K-LC1의 표시 계산에 새로 둔 상한이며 기존 K-LC1에 있던 상한이 아닙니다. 정밀 경로의 제안에서는 추가 계산을 하지 않습니다. K-LC1의 결정·입력 순서·입력 검증·정책은 그대로입니다. worker·job·표시·UI의 공용 파일을 수정했지만 다른 정책의 결정과 전송 내용은 그대로입니다. 더해진 색은 제안과 따로 전달되는 표시 정보일 뿐 추천이나 입력 허가가 아니고 확률 숫자도 없습니다. K-LC1의 다음 행동을 고르는 새 알고리즘이 아니며, K-P0·K-LC0·V1·Stage4에는 적용하지 않았습니다. 상한에 걸리는 상태에서는 일부 칸이 여전히 늦게 표시되거나 표시되지 않을 수 있습니다. 표시 계산이 모순이나 무결성 오류를 내거나, 원 결정·표시 계산·전송을 합친 시간이 30초를 넘기면 그 제안은 적용되지 않고 Auto가 “중단 · 새 게임이 필요합니다”로 끝납니다. 이 보강이 없었다면 계속되었을 실행이 끝날 수 있다는 뜻이며 자동으로 다시 시작하지 않습니다. 전송 버전은 10 그대로이고 부모와 worker는 같은 소스 버전이어야 하므로, 소스를 바꾼 뒤에는 앱을 다시 시작합니다. 검증은 부분 검증입니다. 표시 효과와 시간은 실험 사본에서 재사용한 개발 보드 두 판(offscreen)으로 관측한 결과를 그대로 썼고, 제품 반영 때 새로 관측하지 않았습니다. 제품 반영 뒤에는 41개 모듈의 부분 회귀만 실행했습니다(선택 826건, 815 PASS, 11 opt-in SKIP). native 화면·전체 회귀·빌드는 확인하지 않았습니다. 근거와 한계는 [CURRENT_HANDOFF](docs/CURRENT_HANDOFF.md)에 있습니다.
 
 현재 기능·버전별 검증·실패 이력과 B/C 근거는 [같은 보드/Replay closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_SAME_BOARD_CLOSEOUT.md)에 정리했습니다. [관람 속도/CPS closeout](docs/stage3-extended/STAGE3_MAIN_LIVE_PACING_CLOSEOUT.md)은 이전 수용 checkpoint이며 원 속도 계약은 유지합니다. [LC1 및 표시 개선](docs/stage3-extended/STAGE3_MAIN_LIVE_K_LC1_DISPLAY_CLOSEOUT.md)과 [K 인수/UI](docs/stage3-extended/STAGE3_MAIN_LIVE_K_ADOPTION_UI_CLOSEOUT.md)는 이전 checkpoint입니다. Main의 세 K 정책에서 “(실험적)”을 제거했지만 F02 NOT_VERIFIED·과거 Qt FileDialog 보존 FAIL·effectiveness NOT ESTABLISHED·Production K/Gate P 미승인은 그대로입니다.
 
@@ -606,6 +608,7 @@ Minesweeper-Project/
 ├─ live_policy_job.py           # Live V1/K owner·검증·ACK·cleanup
 ├─ live_policy_worker.py        # public-only V1/K worker dispatch
 ├─ live_policy_info.py          # V1 표시 전용 확정칸 보충(노드 상한 20,000, 입력 권한 없음)
+├─ live_k_info.py               # K-LC1 worker 전용 표시 확정칸 보충(같은 계산기 재사용, 노드 상한 20,000, 입력 권한 없음)
 ├─ live_policy_transport.py     # v10 strict wire·sequence·payload 경계(V1 PROPOSAL은 기존 형식과 info 포함 형식 둘)
 ├─ live_auto_cursor.py          # 입력과 분리된 가상 원형 커서
 ├─ live_distance_pacing.py      # 별도 거리 관람 수식·배속·정확한 대기 deadline
@@ -673,7 +676,8 @@ Expert seed 1003의 알려진 **120-click trace**는 `tests/test_zini_core.py`�
 
 - Simple/Replay 분석은 FLAG를 지뢰로 가정합니다. V1 인수의 별도 FLAG 검토는 제한된 공개 직접 증명만 인정하며, 모든 오답 깃발 탐지나 최대 증명력을 보장하지 않습니다.
 - 큰 constraint component의 exact probability는 지수 시간이 걸릴 수 있습니다. Simple Live/Replay 분석은 UI thread에서 동기 실행되어 지연될 수 있습니다. V1 계획/FLAG 검토는 별도 bounded public-only worker입니다.
-- V1의 추가 확정칸 표시(S3X_INFO_A1)는 지역 경로에서 노드 상한 20,000 안의 계산만 합니다. 상한에 걸린 보드의 지연·미표시는 남아 있고, 계산 실패나 부분 계산 상태는 화면에 따로 표시되지 않습니다. K 계열의 같은 지연은 다루지 않았습니다.
+- V1의 추가 확정칸 표시(S3X_INFO_A1)는 지역 경로에서 노드 상한 20,000 안의 계산만 합니다. 상한에 걸린 보드의 지연·미표시는 남아 있고, 계산 실패나 부분 계산 상태는 화면에 따로 표시되지 않습니다. K 계열에서는 K-LC1만 아래 항목의 별도 보강으로 다뤘고 K-P0·K-LC0의 같은 지연은 다루지 않았습니다.
+- K-LC1의 추가 확정칸 표시(KLC1_INFO_D1)는 지역 경로(LOCAL_SAFE) 제안에서 노드 상한 20,000 안의 계산만 합니다. 상한에 걸리는 상태의 지연·미표시는 남아 있고, 부분 계산(PARTIAL)과 보충 실패(FAILED) 상태는 화면에 따로 표시되지 않습니다. 표시 계산의 모순·무결성 오류나 30초 응답 한도 초과는 그 판의 K-LC1 Auto를 끝냅니다. 계산기 결함으로 생긴 거짓 모순도 같은 결과를 내며 그 빈도는 확인하지 않았습니다. 효과와 시간은 재사용한 개발 보드 두 판에서만 관측했습니다. 다른 보드의 효과, 상한에 걸리는 빈도, 성능 저하율, 실제 모니터의 표시, 실제 worker 프로세스에서의 오류 종료는 확인하지 않았습니다.
 - Simple Algorithm은 닫힌 칸의 OPEN/FLAG만 추천합니다. CHORD·UNFLAG는 추천 범위 밖입니다.
 - Replay schema v1은 full-game과 continuation/suffix를 구분할 metadata가 없습니다. 중간부터 기록한 구간의 복원·분석에는 [schema v1 한계](ARCHITECTURE.md#replay-schema-v1)가 적용됩니다.
 - 향후 후보는 UI controller/worker 관리 분리, 분석 성능 개선, Replay checkpoint, subprocess 실패·취소 검증 확대입니다. AI 학습 환경은 아직 구현하지 않았습니다.

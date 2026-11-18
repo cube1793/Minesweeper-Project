@@ -187,8 +187,12 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
     return LiveAnalysis(None, proposal.move, status, overlays)
 
 
-def present_k_proposal(proposal) -> LiveAnalysis:
-    """Display the actual retained K-family choice, without another analysis."""
+def present_k_proposal(proposal, info=None) -> LiveAnalysis:
+    """Display the actual retained K-family choice, without another analysis.
+
+    ``info`` (KLC1_INFO_D1) is the record the parent job validated for this very
+    proposal: extra proven cells, shown as a color only.
+    """
     from live_k_policy import policy_label
     label = policy_label(proposal.snapshot.policy_id)
     if proposal.is_preparation:
@@ -211,6 +215,13 @@ def present_k_proposal(proposal) -> LiveAnalysis:
             overlays[coordinate] = CellOverlay(
                 kind, coordinate == recommended, CellProbability(coordinate, numerator, exact.total_worlds))
         status += f" | 지뢰 확률 {format_mine_probability(overlays[recommended].probability)}"
+    if info is not None:
+        if info.token != proposal.token:
+            raise ValueError("K display info belongs to another proposal.")
+        # No probability, no recommendation, and never over a decision overlay.
+        for cells, kind in ((info.safe, OverlayKind.SAFE), (info.mines, OverlayKind.MINE)):
+            for coordinate in cells:
+                overlays.setdefault(coordinate, CellOverlay(kind))
     # A revealed CHORD target gets a border only. A selected HIDDEN FLAG target
     # keeps its logical mine color; neither color writes a physical FLAG.
     previous = overlays.get(recommended, CellOverlay())
