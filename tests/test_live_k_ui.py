@@ -93,7 +93,7 @@ class PolicyCatalogRegressionTests(unittest.TestCase):
         try:
             ui=case.ui;combo=ui.live_policy_combo
             self.assertEqual([combo.itemData(i) for i in range(combo.count())],
-                ['S2_SIMPLE','STAGE3_V1','K_P0','K_LC0','K_LC1','STAGE4_S','STAGE4_M','STAGE4_R'])
+                ['S2_SIMPLE','STAGE3_V1','K_P0','K_LC0','K_LC1','K_D23','STAGE4_S','STAGE4_M','STAGE4_R'])
             for policy,label in [('K_P0','K-P0'),('K_LC0','K-LC0'),('K_LC1','K-LC1')]:
                 self.assertTrue(combo.model().item(combo.findData(policy)).isEnabled())
                 self.assertEqual(combo.itemText(combo.findData(policy)),label)

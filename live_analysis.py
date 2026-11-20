@@ -187,11 +187,13 @@ def present_v1_proposal(proposal) -> LiveAnalysis:
     return LiveAnalysis(None, proposal.move, status, overlays)
 
 
-def present_k_proposal(proposal, info=None) -> LiveAnalysis:
+def present_k_proposal(proposal, info=None, basis=None) -> LiveAnalysis:
     """Display the actual retained K-family choice, without another analysis.
 
     ``info`` (KLC1_INFO_D1) is the record the parent job validated for this very
-    proposal: extra proven cells, shown as a color only.
+    proposal: extra proven cells, shown as a color only. ``basis`` (K_D23) is the record the parent job
+    validated for this very proposal: its short reason, which names the risk of the ACTUAL target, ends
+    the status line. The probability table stays the original K-LC1 projection.
     """
     from live_k_policy import policy_label
     label = policy_label(proposal.snapshot.policy_id)
@@ -214,7 +216,12 @@ def present_k_proposal(proposal, info=None) -> LiveAnalysis:
                     else OverlayKind.UNCERTAIN)
             overlays[coordinate] = CellOverlay(
                 kind, coordinate == recommended, CellProbability(coordinate, numerator, exact.total_worlds))
-        status += f" | 지뢰 확률 {format_mine_probability(overlays[recommended].probability)}"
+        if basis is None:
+            status += f" | 지뢰 확률 {format_mine_probability(overlays[recommended].probability)}"
+    if basis is not None:
+        if basis.token != proposal.token:
+            raise ValueError("K display basis belongs to another proposal.")
+        status += f" | {basis.short}"
     if info is not None:
         if info.token != proposal.token:
             raise ValueError("K display info belongs to another proposal.")

@@ -19,6 +19,7 @@ POLICY_V1 = "STAGE3_V1"
 POLICY_K = "K_P0"
 POLICY_K_LC0 = "K_LC0"
 POLICY_K_LC1 = "K_LC1"
+POLICY_K_D23 = "K_D23"
 V1_PRESETS = frozenset({(9, 9, 10), (16, 16, 40), (30, 16, 99)})
 PUBLIC_GLYPHS = frozenset({-2, -3, *range(9)})
 CANONICAL_NEW = "CANONICAL_NEW"

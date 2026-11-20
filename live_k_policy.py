@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from core_engine import Action, CellState, GameStatus
 from live_policy import (
-    ADOPT_CURRENT, CANONICAL_NEW, FIXED_BOARD, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
+    ADOPT_CURRENT, CANONICAL_NEW, FIXED_BOARD, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23,
     LivePolicyError, _coordinate, _detach_grid, _grid, _identity, _integer, _object,
     _require, _neighbors, supports_v1_board,
 )
@@ -34,11 +34,20 @@ LC0_FLAG_ADOPT_DEFINITION = "K_LC0_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
 LC1_DEFINITION = "K_LC1_SINGLETON_BAND_FIRST_INPUT_V1"
 LC1_ADOPT_DEFINITION = "K_LC1_PUBLIC_ADOPT_SINGLETON_BAND_FIRST_INPUT_V1"
 LC1_FLAG_ADOPT_DEFINITION = "K_LC1_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
+# K_D23: the FT composition S3D23-A (one K-LC1 selection, then D2 for a certain decision or D3 for a guess).
+D23_DEFINITION = "K_D23_OPENING_GUESS_STRUCTURE_FIRST_INPUT_V1"
+D23_ADOPT_DEFINITION = "K_D23_PUBLIC_ADOPT_OPENING_GUESS_STRUCTURE_FIRST_INPUT_V1"
+D23_FLAG_ADOPT_DEFINITION = "K_D23_PUBLIC_FLAG_ADOPT_LOCAL_BOOTSTRAP_V1"
+D23_FIXED_DEFINITION = "K_D23_PUBLIC_FIXED_BOARD_OPENING_GUESS_STRUCTURE_V1"
+D23_GUESS_CATEGORIES = ("EXACT_MINIMUM_RISK_GUESS", "FORCED_5050_GUESS", "TIE_LOOKAHEAD_GUESS")
+D23_OPEN_CATEGORIES = ("DIRECT_SAFE_OPEN", "PROVEN_OPENING_OPEN")
+D23_STAGES = ("SELECTION", "VALIDATION", "PSEUDO", "LINKED", "EXPLANATION")
 PHASE_BOOTSTRAP = "K_BOOTSTRAP"
 PHASE_PREPARATION = "K_PREPARATION"
 PHASE_K = "K_P0"
 PHASE_LC0 = "K_LC0"
 PHASE_LC1 = "K_LC1"
+PHASE_D23 = "K_D23"
 MAX_K_INPUTS = 480
 MAX_VALIDATIONS_PER_INPUT = 64
 MAX_K_SEQUENCE = MAX_K_INPUTS * (MAX_VALIDATIONS_PER_INPUT + 2) + 1
@@ -47,17 +56,18 @@ supports_board = supports_v1_board
 
 
 def is_k_policy(policy_id):
-    return type(policy_id) is str and policy_id in (POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
+    return type(policy_id) is str and policy_id in (POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23)
 
 
 def policy_label(policy_id):
     _require(is_k_policy(policy_id), "Invalid K policy.")
-    return {POLICY_K: "K-P0", POLICY_K_LC0: "K-LC0", POLICY_K_LC1: "K-LC1"}[policy_id]
+    return {POLICY_K: "K-P0", POLICY_K_LC0: "K-LC0", POLICY_K_LC1: "K-LC1", POLICY_K_D23: "K"}[policy_id]
 
 
 def normal_phase(policy_id):
     _require(is_k_policy(policy_id), "Invalid K policy.")
-    return {POLICY_K: PHASE_K, POLICY_K_LC0: PHASE_LC0, POLICY_K_LC1: PHASE_LC1}[policy_id]
+    return {POLICY_K: PHASE_K, POLICY_K_LC0: PHASE_LC0, POLICY_K_LC1: PHASE_LC1,
+            POLICY_K_D23: PHASE_D23}[policy_id]
 
 
 def definition_for_entry(entry_mode, policy_id=POLICY_K):
@@ -67,7 +77,11 @@ def definition_for_entry(entry_mode, policy_id=POLICY_K):
     if entry_mode == FIXED_BOARD:
         return {POLICY_K: "K_P0_PUBLIC_FIXED_BOARD_NATIVE_V1",
                 POLICY_K_LC0: "K_LC0_PUBLIC_FIXED_BOARD_DISTANCE_BAND_V1",
-                POLICY_K_LC1: "K_LC1_PUBLIC_FIXED_BOARD_SINGLETON_BAND_V1"}[policy_id]
+                POLICY_K_LC1: "K_LC1_PUBLIC_FIXED_BOARD_SINGLETON_BAND_V1",
+                POLICY_K_D23: D23_FIXED_DEFINITION}[policy_id]
+    if policy_id == POLICY_K_D23:
+        return {CANONICAL_NEW: D23_DEFINITION, ADOPT_CURRENT: D23_ADOPT_DEFINITION,
+                FLAG_ADOPT: D23_FLAG_ADOPT_DEFINITION}[entry_mode]
     if policy_id == POLICY_K_LC0:
         return {CANONICAL_NEW: LC0_DEFINITION, ADOPT_CURRENT: LC0_ADOPT_DEFINITION,
                 FLAG_ADOPT: LC0_FLAG_ADOPT_DEFINITION}[entry_mode]
@@ -76,6 +90,32 @@ def definition_for_entry(entry_mode, policy_id=POLICY_K):
                 FLAG_ADOPT: LC1_FLAG_ADOPT_DEFINITION}[entry_mode]
     return {CANONICAL_NEW: DEFINITION, ADOPT_CURRENT: ADOPT_DEFINITION,
             FLAG_ADOPT: FLAG_ADOPT_DEFINITION}[entry_mode]
+
+
+def d23_stage_error(stage, exc):
+    """An error of one stage of a K_D23 proposal. The run ends through the existing error path; the stage,
+    the kind of the original error and its message are kept as they are. No other policy takes over."""
+    _require(type(stage) is str and stage in D23_STAGES, "Unknown K_D23 stage.")
+    return LivePolicyError(f"K_D23:{stage} {type(exc).__name__}: {exc}"[:4096])
+
+
+def d23_guess_target_ok(category, target, counts, exact):
+    """Structure only, K_D23 only: the ACTUAL guess target against the ORIGINAL exact table.
+
+    kept: the first minimum-risk cell in reading order (the K-LC1 target); tie change: another
+    minimum-risk cell; forced pair first with a changed target: a cell whose mine worlds are exactly half
+    of all worlds. Whether the pair is proven is the worker's execution validation, not this check."""
+    count, first = counts.get(target), exact.minimum_risk_cells[0]
+    if type(count) is not int:
+        return False
+    if category == "EXACT_MINIMUM_RISK_GUESS":
+        return target == first and count == exact.selected_mine_worlds
+    if category == "TIE_LOOKAHEAD_GUESS":
+        return (target != first and target in exact.minimum_risk_cells
+                and count == exact.selected_mine_worlds)
+    if category == "FORCED_5050_GUESS":
+        return target != first and 2 * count == exact.total_worlds
+    return False
 
 
 def sequence_limit(snapshot):
@@ -329,9 +369,15 @@ class KProposal:
             _require(tuple(c[:2] for c in exact.cells) == unresolved,
                      "Exact probabilities must cover current unresolved cells only.")
             counts = {(x, y): n for x, y, n in exact.cells}
-            _require((self.x, self.y) in exact.minimum_risk_cells
-                     and counts.get((self.x, self.y)) == exact.selected_mine_worlds,
-                     "Selected target/probability mismatch.")
+            if s.policy_id == POLICY_K_D23:
+                # The table stays the ORIGINAL projection (K-LC1 target and minimum risk). The actual
+                # target may be a forced-pair cell whose risk 1/2 is above the minimum.
+                _require(d23_guess_target_ok(self.category, (self.x, self.y), counts, exact),
+                         "Selected K_D23 guess target/probability/category mismatch.")
+            else:
+                _require((self.x, self.y) in exact.minimum_risk_cells
+                         and counts.get((self.x, self.y)) == exact.selected_mine_worlds,
+                         "Selected target/probability mismatch.")
             _require(sum(counts.values()) == (s.num_mines - len(self.preinput_m)) * exact.total_worlds,
                      "Exact marginal mine budget mismatch.")
         else:
@@ -352,9 +398,12 @@ class KProposal:
             _require(not self.is_guess and self.category == "SETUP_CHORD" and glyph == -2
                      and (self.x, self.y) in self.preinput_m, "K FLAG requires owned M and SETUP_CHORD.")
         elif self.action == "OPEN":
+            allowed = ("EXACT_MINIMUM_RISK_GUESS",) if self.is_guess else ("DIRECT_SAFE_OPEN",)
+            if s.policy_id == POLICY_K_D23:
+                allowed = D23_GUESS_CATEGORIES if self.is_guess else D23_OPEN_CATEGORIES
             _require(glyph == -2 and (self.x, self.y) not in self.preinput_m
                      and (self.is_guess or (self.x, self.y) in self.safe_cells)
-                     and self.category == ("EXACT_MINIMUM_RISK_GUESS" if self.is_guess else "DIRECT_SAFE_OPEN"),
+                     and self.category in allowed,
                      "Invalid projected K OPEN.")
         else:
             adjacent = _neighbors(self.x, self.y, s.width, s.height)
@@ -559,9 +608,9 @@ def info_error_code(text):
 
 
 def info_required(proposal):
-    """True exactly for a K-LC1 decision proposal: not initial, not preparation."""
+    """True exactly for a K-LC1 or K_D23 decision proposal: not initial, not preparation."""
     _require(type(proposal) is KProposal, "K info rule requires a KProposal.")
-    return (proposal.snapshot.policy_id == POLICY_K_LC1
+    return (proposal.snapshot.policy_id in (POLICY_K_LC1, POLICY_K_D23)
             and not proposal.is_preparation and not proposal.initial)
 
 
@@ -742,10 +791,16 @@ class KOwner:
             from experiments.program_k_lc0_policy import apply_distance_band, validate_distance_selection
             self._distance_adapter = apply_distance_band
             self._validate_distance = validate_distance_selection
-        elif snapshot.policy_id == POLICY_K_LC1:
+        elif snapshot.policy_id in (POLICY_K_LC1, POLICY_K_D23):
             from experiments.program_k_lc1_policy import apply_singleton_band, validate_singleton_selection
             self._singleton_adapter = apply_singleton_band
             self._validate_singleton = validate_singleton_selection
+        self._combined_adapter = self._validate_combined = None
+        if snapshot.policy_id == POLICY_K_D23:
+            # The accepted composition S3D23-A (FT): ONE K-LC1 record, then D2 or D3. Worker only.
+            from experiments.program_d23_policy import apply_combined
+            from experiments.program_d23_runner import validate_combined_execution
+            self._combined_adapter, self._validate_combined = apply_combined, validate_combined_execution
         self._validate = validate_k_p0_execution
         self._progress = _validate_progress
         self.table = validate_timing_table(table)
@@ -756,6 +811,7 @@ class KOwner:
         self._original_distance_selection = None
         self.singleton_selection = self._original_singleton_selection = None
         self._singleton_binding = self._original_singleton_pending = None
+        self.combined_selection = self._original_combined = None
         self.closed = False
         self._nonces = set()
         self.bootstrap_proof = None
@@ -798,7 +854,7 @@ class KOwner:
                 self.distance_selection = self._distance_adapter(self.native_selection, control=False)
                 self._original_distance_selection = self.distance_selection
                 self.selection = self.distance_selection.selected
-            elif snapshot.policy_id == POLICY_K_LC1:
+            elif snapshot.policy_id in (POLICY_K_LC1, POLICY_K_D23):
                 # This adapter itself computes actual LC0 once. Its baseline is
                 # never a DistanceSelection for the potentially >105% final.
                 choice = self._singleton_adapter(self.native_selection)
@@ -815,8 +871,20 @@ class KOwner:
                 )
             else:
                 self.selection = self.native_selection
+            combined = None
+            if snapshot.policy_id == POLICY_K_D23:
+                # The K-LC1 record made above is the ONE original selection of this decision; FT selects
+                # from it. ``self.selection`` stays that original choice: the original projection and the
+                # K validator read it. An error here ends the run; no other policy takes over.
+                try:
+                    combined = self._combined_adapter(self.singleton_selection, self.table)
+                except Exception as exc:
+                    raise d23_stage_error("SELECTION", exc) from exc
+                self.combined_selection = self._original_combined = combined
             elapsed = perf_counter_ns() - started
             move, category = self.selection.move, self.selection.category
+            if combined is not None:
+                move, category = combined.move, combined.category  # the actual input
             continuation = self.decision.continuation
             kind = 'guess' if continuation == 'EXACT_GUESS' else 'certain'
             _require(self.selection.evidence is self.decision and self.decision.after.M == self.session.M,
@@ -826,7 +894,7 @@ class KOwner:
                                  elapsed, snapshot.base_m_revision + (not initial), _ordered(self.session.M),
                                  project_exact_guess(self.decision, self.selection) if kind == 'guess' else None,
                                  () if initial else _ordered(self.decision.selection_safe_cells))
-        if snapshot.policy_id == POLICY_K_LC1 and not initial:
+        if snapshot.policy_id in (POLICY_K_LC1, POLICY_K_D23) and not initial:
             self._original_singleton_pending = self.pending
         self.expected = None
         self._nonces.clear()
@@ -845,7 +913,7 @@ class KOwner:
             self.bootstrap_proof.validate_target(request.snapshot, (p.x, p.y))
             _require(self.decision is None and self.selection is None, "Preparation has no policy graph.")
         else:
-            if not p.initial and p.snapshot.policy_id == POLICY_K_LC1:
+            if not p.initial and p.snapshot.policy_id in (POLICY_K_LC1, POLICY_K_D23):
                 choice = self.singleton_selection
                 _require(choice is not None and choice is self._original_singleton_selection
                          and p is self._original_singleton_pending
@@ -874,10 +942,23 @@ class KOwner:
                          and choice.selected is self.selection,
                          "LC0 requires its original native graph and distance choice.")
                 self._validate_distance(choice)
-            self._validate(request.snapshot.observation, p.move, status=GameStatus.PLAYING,
-                           num_mines=request.snapshot.num_mines, cursor=request.snapshot.cursor,
-                           current_mines=current_mines, decision=self.decision, selection=self.selection,
-                           initial=p.initial)
+            if not p.initial and p.snapshot.policy_id == POLICY_K_D23:
+                combined = self.combined_selection
+                _require(combined is not None and combined is self._original_combined
+                         and combined.inner is self.singleton_selection,
+                         "K_D23 requires its original combined selection.")
+                # The accepted execution validator of S3D23-A on the CURRENT state, right before the
+                # input: it runs the unchanged K validator on the K-LC1 record and validates the actual
+                # input apart. The validation made before the explanation does not replace this one.
+                self._validate_combined(request.snapshot.observation, p.move, status=GameStatus.PLAYING,
+                                        num_mines=request.snapshot.num_mines, cursor=request.snapshot.cursor,
+                                        current_mines=current_mines, decision=self.decision,
+                                        choice=combined, table=self.table)
+            else:
+                self._validate(request.snapshot.observation, p.move, status=GameStatus.PLAYING,
+                               num_mines=request.snapshot.num_mines, cursor=request.snapshot.cursor,
+                               current_mines=current_mines, decision=self.decision, selection=self.selection,
+                               initial=p.initial)
         _require(_ordered(current_mines) == p.preinput_m, "Current K M differs from pending projection.")
         # DTO checks establish structure, not proof. Bind the displayed safe set
         # to the same original graph that native execution validation just used.
@@ -886,6 +967,19 @@ class KOwner:
         self._nonces.add(request.nonce)
         self.permit = KPermit(p, request.nonce)
         return self.permit
+
+    def validate_pending_execution(self):
+        """K_D23 only: the accepted execution validation of the pending decision proposal on the very
+        state it was made for. Called before its explanation is written; no probability call is made."""
+        p = self.pending
+        _require(not self.closed and p is not None and p.snapshot.policy_id == POLICY_K_D23
+                 and not p.initial and not p.is_preparation and self.combined_selection is not None
+                 and self.combined_selection is self._original_combined,
+                 "No pending K_D23 decision proposal to validate.")
+        self._validate_combined(p.snapshot.observation, p.move, status=GameStatus.PLAYING,
+                                num_mines=p.snapshot.num_mines, cursor=p.snapshot.cursor,
+                                current_mines=self.session.M, decision=self.decision,
+                                choice=self.combined_selection, table=self.table)
 
     def acknowledge(self, ack):
         _require(not self.closed and self.pending is not None and self.permit is not None
@@ -903,4 +997,5 @@ class KOwner:
         self._original_distance_selection = None
         self.singleton_selection = self._original_singleton_selection = None
         self._singleton_binding = self._original_singleton_pending = None
+        self.combined_selection = self._original_combined = None
         return following

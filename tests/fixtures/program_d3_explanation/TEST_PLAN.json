@@ -1,0 +1,327 @@
+{
+ "schema": "LIVE_EXPLANATION_PREP_TEST_PLAN_V1",
+ "written": "2026-11-21",
+ "nature": "설명 모듈과 그 시험을 쓰기 전에 고정한 시험 ID, 문구 틀, 고정 기대값이다. 기대값은 수용된 고정 사례의 손으로 적은 값(test_program_d3_guess_record의 근거, test_program_d3_pseudo_diagnosis의 단언, LINKED_CASES.json의 손 사례)과 이 문서의 문구 틀을 손으로 적용해 얻었다. 어느 코드도 실행하지 않았다. 시험이 실패하면 기대값을 결과에 맞추지 않고 원인을 가린다.",
+ "runs": ["tests.test_program_d3_launch_preflight (기존 16개)", "tests.test_program_d3_explanation (신규 24개)"],
+ "not_run_again": "전체 회귀, 과거 보드 평가, 기존 검증기의 변이 사례. 재사용 근거로만 인용한다.",
+ "forbidden_in_this_module_and_its_tests": ["엔진 생성과 입력", "보드 생성", "게임 실행기 호출"],
+ "format": {
+  "cell": "(x, y) 꼴. 쉼표 뒤 한 칸.",
+  "percent": "소수 첫째 자리. 0과 1이 아닌 값은 0%와 100%로 반올림하지 않는다: 1/1000 미만은 <0.1%, 999/1000 초과는 >99.9%. 0은 0%, 1은 100%.",
+  "ratio": "기약 분수 n/d",
+  "value": "n/d (p%) 꼴. S_c, S_v, 하한에 쓴다.",
+  "points": "두 확률의 차이. 같은 반올림에 %p를 붙인다."
+ },
+ "format_samples": {
+  "percent_text": [[[1, 2], "50.0%"], [[1, 3], "33.3%"], [[2, 3], "66.7%"], [[1, 4], "25.0%"], [[1, 9], "11.1%"],
+                   [[91, 643], "14.2%"], [[2139, 53708], "4.0%"], [[5541467, 27667837], "20.0%"],
+                   [[1, 2000], "<0.1%"], [[1999, 2000], ">99.9%"], [[0, 1], "0%"], [[1, 1], "100%"]],
+  "points_text": [[[1, 2], [1, 4], "25.0%p"], [[1, 2], [2, 7], "21.4%p"], [[1, 3], [1, 3], "0%p"],
+                  [[1, 2], [4999, 10000], "<0.1%p"]],
+  "same_rule_as": "live_analysis.format_mine_probability (제품과 같은 파일의 사본). 시험이 같은 표본으로 대조한다."
+ },
+ "templates": {
+  "short": {
+   "OPENING": "0이 증명된 칸 먼저 열기 · 최소 {n}칸 공개",
+   "CERTAIN_KEPT": "확정 입력 · K-LC1 선택 유지",
+   "FORCED": "불가피한 50/50 먼저 처리 · 이 칸의 지뢰 확률 {p}",
+   "FORCED_ABOVE_MINIMUM": "불가피한 50/50 먼저 처리 · 이 칸의 지뢰 확률 {p} (현재 최소 {q}보다 {d} 높음)",
+   "TIE": "최소 위험 동률 중 전방 비교로 선택 · 이 칸의 지뢰 확률 {p}",
+   "KEPT": "최소 위험 칸 유지 · 이 칸의 지뢰 확률 {p}"
+  },
+  "guess": {
+   "ACTUAL": "실제 입력 대상: OPEN {cell}. 이 입력의 지뢰 확률 {p} ({r}).",
+   "PROPOSED": "제안 대상: OPEN {cell}. 이 칸의 지뢰 확률 {p} ({r}). 추측 허용이 꺼져 있어 입력하지 않았다. 실제 입력이 아니다.",
+   "ORIGINAL_SAME": "원 제안(K-LC1)과 같은 칸이다.",
+   "ORIGINAL_EQUAL_RISK": "원 제안(K-LC1): {cell}, 지뢰 확률 {p} ({r}). 위험은 같다.",
+   "ORIGINAL_OTHER_RISK": "원 제안(K-LC1): {cell}, 지뢰 확률 {p} ({r}). 원 제안의 위험이며 이 칸의 위험이 아니다.",
+   "REASON_FORCED": "선택 이유: 증명된 불가피한 50/50 쌍을 먼저 처리한다. 쌍: {a}-{b}. 두 칸 중 정확히 하나가 지뢰이고, 한쪽에만 닿는 주변 칸이 없거나 모두 확정 지뢰라는 조건이 증명된 쌍이다.",
+   "ABOVE_MINIMUM": "이 칸의 지뢰 확률은 현재 최소 위험 {q}보다 {d} 높다.",
+   "REASON_TIE": "선택 이유: 최소 위험이 같은 칸 {n}개를 제한된 전방 계산으로 비교해 골랐다. 이 칸의 S_c {sc}가 원 제안의 S_v {sv}보다 크다.",
+   "REASON_KEPT": "선택 이유: 계산된 최소 위험 칸(원 제안)을 유지했다.",
+   "LOOKAHEAD_COMPUTED": "전방 계산: 후보 {n}칸, 가정 계산 {c}회(한도 72회).",
+   "LOOKAHEAD_COMPUTED_FORCED_SUFFIX": " 쌍의 칸은 S_c, 입력 비용, 읽기 순서로 순위를 정했다. 이 칸의 S_c {sc}.",
+   "LOOKAHEAD_COMPUTED_KEPT_SUFFIX": " 원 제안의 S_v {sv}보다 큰 S_c를 가진 동률 칸이 없었다.",
+   "LOOKAHEAD_SINGLE": "전방 계산: 후보가 한 칸이라 계산하지 않았다.",
+   "LOOKAHEAD_LIMIT": "전방 계산: 후보가 {n}칸으로 한도 8칸을 넘어 계산하지 않았다. 계산하지 않은 것이며 비교 결과가 아니다.",
+   "LOOKAHEAD_LIMIT_FORCED_SUFFIX": " 쌍의 칸은 입력 비용과 읽기 순서로 순위를 정했다.",
+   "S_NOTE": "S_c와 S_v는 한 입력 뒤까지만 본 제한된 전방 계산값이다. 판 전체 승률이 아니다."
+  },
+  "certain": {
+   "INPUT": "실제 입력: {action} {cell}. 추측이 아닌 확정 입력이다.",
+   "ORIGINAL": "원 제안(K-LC1): {action} {cell}.",
+   "ORIGINAL_SAME": "원 제안(K-LC1)과 같은 입력이다.",
+   "REASON_OPENING": "선택 이유: 이 칸은 0을 보인다는 것이 증명됐다. 열면 주변이 함께 열려 최소 {n}칸이 공개된다. 원 제안이 여는 칸을 모두 포함하고 칸당 입력 비용이 더 낮을 때만 이렇게 바꾼다.",
+   "REASON_NO_PROVEN": "선택 이유: 0이 증명된 칸이 없어 원 제안을 유지했다.",
+   "REASON_NO_ELIGIBLE": "선택 이유: 0이 증명된 칸은 있지만 바꿀 조건을 만족하지 않아 원 제안을 유지했다."
+  },
+  "pseudo": {
+   "HEAD": "pseudo 50/50 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 {cell}.",
+   "PROVEN": "결과: 증명된 거울 쌍의 칸이다. 짝: {partners}.",
+   "PARTNER": "{cell} 고립형 또는 {cell} 조건형, 쉼표로 잇는다",
+   "BOUND": "판 전체에서 이기지 못할 확률의 하한: {value}. 하한일 뿐이며 승률이나 최적 선택의 증명이 아니다. 이 입력 한 번의 지뢰 확률과 수는 같지만 뜻이 다르다.",
+   "REFUTED": "결과: 지원 범위(거리 2 이하의 쌍)에서 실제 대상의 쌍 {n}개가 모두 조건을 만족하지 않았다. 지원하지 않는 구조에 대한 판정이 아니며 하한은 없다.",
+   "NO_PAIR": "결과: 실제 대상에는 지원 범위(거리 2 이하) 안의 쌍이 없어 검사한 것이 없다. 조건 불충족이 아니며 하한은 없다.",
+   "UNDECIDED": "결과: 실제 대상의 후보 쌍 {n}개를 호출 한도 때문에 검사하지 못했다. 조건 불충족이 아니며 하한은 없다.",
+   "SEARCH": "탐색: 범위 안의 쌍 {in_range}개, 후보 {candidate}개, 판정 {decided}개, 한도 미검사 {not_examined}개. 조건부 계산 {calls}회(한도 8회). {status}",
+   "SEARCH_STATUS": {"NO_CANDIDATE_PAIR": "후보 쌍이 없다.", "COMPLETE_SUPPORTED_RANGE": "지원 범위의 후보를 모두 판정했다.", "PARTIAL_CALL_LIMIT": "한도 때문에 일부만 판정했다."},
+   "LIMIT": "한도 미검사: 후보 쌍 {n}개는 검사하지 못했다. 조건 불충족이 아니다.",
+   "FAR": "범위 밖: 실제 대상에서 거리 3 이상인 떠 있는 칸 {n}개와의 관계는 지원하지 않아 검사하지 않았다.",
+   "OTHER": "다른 칸의 증명된 쌍 {n}개: {pairs}. 실제 대상에 대한 증명이 아니다.",
+   "OTHER_PAIRS": "처음 네 쌍까지 (a)-(b)를 쉼표로 잇고, 더 있으면 ' 외 m개'를 붙인다",
+   "FORCED": {"SAME_PAIR_MIRROR_PROVEN": "불가피한 50/50 쌍 {a}-{b}: 이 진단도 같은 쌍을 증명했다.",
+              "OUT_OF_RANGE_NOT_EXAMINED": "불가피한 50/50 쌍 {a}-{b}: 거리 3 이상이라 이 진단의 범위 밖이다. 검사하지 않았다.",
+              "IN_RANGE_NOT_EXAMINED_CALL_LIMIT": "불가피한 50/50 쌍 {a}-{b}: 범위 안이지만 호출 한도 때문에 검사하지 않았다."},
+   "order": ["HEAD", "결과 줄", "BOUND(증명된 경우)", "SEARCH", "LIMIT(미검사가 있을 때)", "FAR(범위 밖 칸이 있을 때)", "OTHER(있을 때)", "FORCED(쌍마다)"]
+  },
+  "linked": {
+   "HEAD": "linked 풀림 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 {cell}. 이 칸을 여는 한 입력의 범위다.",
+   "STRUCTURE": "구조: 나열된 쌍 {pairs}개, 공유 묶음 {bundles}개, 칸 공유 {shares}건, 기하적 연결 {links}건(다른 묶음 사이 {cross}건). 칸 공유와 기하적 연결은 풀림이 아니다.",
+   "PLAN": {"PLANNED": "검사: 기준 칸 {n}개, 정밀 계산 {c}회(한도 54회).",
+            "NO_OTHER_BUNDLE": "검사: 실제 대상이 속하지 않은 묶음이 없어 계산한 것이 없다. 연결 없음의 판정이 아니다.",
+            "NO_LISTED_PAIR": "검사: 나열된 쌍이 없어 계산한 것이 없다. 연결 없음의 판정이 아니다."},
+   "TARGET": {"LINKED_ALL": "실제 대상: 이 칸을 열고 살아남으면, 이 칸이 속하지 않은 어떤 묶음이 모든 생존 결과에서 풀린다. 모든 다른 묶음이 풀린다는 뜻은 아니다.",
+              "LINKED_SOME": "실제 대상: 이 칸을 열고 살아남으면, 이 칸이 속하지 않은 어떤 묶음이 일부 생존 결과에서 풀린다.",
+              "UNDETERMINED": "실제 대상: 풀린 결과가 없고, 숫자 0이 나오는 결과는 주변이 함께 열리기 때문에 이 계산으로 판단하지 않았다(판단 보류).",
+              "NOT_OBSERVED": "실제 대상: 검사한 결과에서는 다른 묶음이 풀리지 않았다. 독립이라는 증명은 아니다.",
+              "NOT_APPLICABLE": "실제 대상: 기준 칸으로 계산하지 않았다."},
+   "LABEL": {"RESOLVED_ALL": "모든 생존 결과에서 풀린다", "RESOLVED_SOME": "일부 생존 결과에서만 풀린다",
+             "RESOLVED_SOME_FLOOD_OPEN": "일부 생존 결과에서 풀리고, 숫자 0의 결과는 판단 보류다",
+             "NOT_RESOLVED_EXAMINED": "검사한 모든 생존 결과에서 풀리지 않는다",
+             "UNDETERMINED_FLOOD": "풀린 결과가 없고, 숫자 0의 결과는 판단 보류다"},
+   "ROW": "묶음 {cells}: {label}. 살아남는 경우 {S} 가운데 풀림 {R}, 풀리지 않음 {N}, 판단 보류 {F}.",
+   "OTHER_HEAD": "다른 기준 칸의 결과(그 칸을 열었을 때의 진단이며 실제 대상의 결과가 아니다):",
+   "OTHER_ROW": "기준 칸 {cell} [{role}] · 묶음 {cells}: {label}. 살아남는 경우 {S} 가운데 풀림 {R}, 풀리지 않음 {N}, 판단 보류 {F}.",
+   "ROLE": {"ORIGINAL_TARGET": "원 대상", "CROSS_BUNDLE_LINK": "다른 묶음으로의 연결 칸"},
+   "LIMIT": "한도 미검사: 기준 칸 한도({n}개) 때문에 검사하지 않은 연결 칸 {cells}. 연결 없음이 아니다.",
+   "OUT_OF_SCOPE": "범위 밖({reason}): {cells}. 기준 칸으로 지원하지 않아 검사하지 않았다. 연결 없음이나 풀리지 않음의 판정이 아니다.",
+   "OUT_REASON": {"IN_BUNDLE_LINK_ONLY": "같은 묶음 안의 연결뿐", "NON_PAIR_DISTINGUISHING_CELL": "쌍에 속하지 않은 구분 칸"},
+   "CLOSE": "이 진단은 이 한 입력 뒤의 범위다. 여러 입력 뒤의 보장이나 판 전체 승률이 아니다.",
+   "order": ["HEAD", "STRUCTURE", "PLAN", "TARGET", "실제 대상의 ROW", "OTHER_HEAD와 OTHER_ROW(다른 기준 칸의 결과가 있을 때)", "LIMIT(있을 때)", "OUT_OF_SCOPE(사유마다)", "CLOSE"]
+  },
+  "loss": {
+   "MIN_RISK": "패배 보조 설명: 당시 계산된 최소 위험 칸을 선택한 추측에서 패배했다. 입력 OPEN {cell}, 입력 전 지뢰 확률 {p} ({r}).",
+   "TIE_LOOKAHEAD": "패배 보조 설명: 당시 최소 위험이 같은 칸들 가운데 제한된 전방 계산으로 고른 추측에서 패배했다. 입력 OPEN {cell}, 입력 전 지뢰 확률 {p} ({r}).",
+   "FORCED_5050": "패배 보조 설명: 증명된 불가피한 50/50 쌍을 먼저 처리한 추측에서 패배했다. 입력 OPEN {cell}, 입력 전 지뢰 확률 {p} ({r}).",
+   "FORCED_NOTE": "쌍의 어느 칸을 열어도 위험이 1/2이었다는 뜻이며, 판 전체의 패배가 정해져 있었다는 뜻이 아니다.",
+   "ABOVE_MINIMUM": "당시 최소 위험은 원 제안 {cell}의 {p} ({r})였다.",
+   "CLOSE": "입력 전에 확인한 범위의 설명이다. 패배 뒤 공개된 지뢰로 다시 판정한 것이 아니며, 기본 결과 LOST는 그대로다.",
+   "INITIAL": "패배 보조 설명: 첫 입력에서 패배했다. 첫 입력에는 입력 전 근거가 없어 유형을 확인할 수 없다.",
+   "NOT_RECORDED": "패배 보조 설명: 마지막 입력의 입력 전 근거가 없어 패배 유형을 확인할 수 없다.",
+   "INTEGRITY": "패배 보조 설명: 추측이 아닌 입력에서 LOST가 기록됐다. 추측 패배로 설명하지 않으며 확인이 필요한 기록이다.",
+   "BASE": "기본 결과 LOST는 그대로다.",
+   "BLOCKED": "판이 끝나지 않았다. 입력하지 않은 제안이 있다: OPEN {cell}. 추측 허용이 꺼져 있어 보내지 않았고, 실제 입력도 패배 원인도 아니다."
+  },
+  "help": [
+   "K의 추측 선택: 확정 입력이 없으면 지뢰 확률이 가장 낮은 칸을 고른다. 아래 두 경우에만 그 선택을 바꾼다.",
+   "불가피한 50/50 먼저 처리: 두 칸 중 정확히 하나가 지뢰이고 한쪽에만 닿는 주변 칸이 없거나 모두 확정 지뢰인 쌍이 증명되면 그 쌍을 먼저 연다. 이때 여는 칸의 지뢰 확률(50%)이 현재 최소 위험보다 높을 수 있으며, 화면에는 실제로 여는 칸의 확률을 표시한다.",
+   "겉보기에 반반인 칸이 모두 불가피한 것은 아니다. 조건이 증명된 쌍만 불가피한 50/50으로 다룬다.",
+   "동률 전방 비교: 최소 위험이 같은 칸이 2개에서 8개일 때 각 칸을 연 뒤 다음 입력 하나까지 본 값(S_c, S_v)을 비교한다. 이 값은 제한된 전방 계산값이며 판 전체 승률이 아니다.",
+   "지뢰 확률은 지금 공개된 정보에서 그 칸을 한 번 열 때의 위험이다. 두 확률의 차이는 %p로 적는다.",
+   "pseudo 50/50 진단: 서로 거울 관계인 두 칸을 찾는 별도 진단이며 선택에 쓰지 않는다. 고립형은 한쪽에만 닿는 주변 칸이 없거나 모두 확정 지뢰인 쌍, 조건형은 그런 칸에 미확정 칸이 있지만 한 칸이 지뢰인 모든 경우에 그 칸도 지뢰인 쌍이다. 증명되면 판 전체에서 이기지 못할 확률의 하한을 보여 준다. 하한은 승률이나 최적 선택의 증명이 아니다. 지원 범위에서 조건 불충족, 한도 미검사, 범위 밖은 서로 다른 결과이며 어느 것도 pseudo 50/50이 없다는 증명이 아니다.",
+   "linked 풀림 진단: 한 칸을 열고 살아남았을 때 그 칸이 속하지 않은 쌍 묶음이 풀리는지를 그 한 입력의 범위에서 계산하는 별도 진단이며 선택에 쓰지 않는다. 칸을 공유하거나 기하적으로 이어진 것과 실제로 풀리는 것은 다르다. 풀리지 않았다는 결과는 독립의 증명이 아니고, 미검사와 범위 밖은 연결이 없다는 뜻이 아니다. 숫자 0이 나오는 결과는 주변이 함께 열리므로 판단을 보류할 수 있다.",
+   "패배 보조 설명: 마지막 실제 입력에 입력 전 근거가 있을 때만 그 근거로 설명한다. 패배 뒤 공개된 지뢰로 다시 판정하지 않고 기본 결과(LOST)를 바꾸지 않는다. 추측 허용이 꺼져 입력하지 않은 제안은 입력도 패배 원인도 아니다."
+  ]
+ },
+ "wording_rules": {
+  "every_line_with_승률_also_has": "아니",
+  "every_line_with_연결_없음_also_has": "아니",
+  "never_appears": ["최선", "더 안전", "가장 좋은", "pseudo가 아니", "독립이다"],
+  "selection_lines_never_contain": ["pseudo", "linked", "진단"],
+  "first_line_of_each_diagnosis_contains": "선택에 쓰지 않음",
+  "short": "한 줄, 줄바꿈 없음, 80자 이하",
+  "percent_point": "%p는 두 확률의 차이에만 쓴다"
+ },
+ "errors": {"EXPLANATION_TYPE": "자료형이 계약과 다르다", "EXPLANATION_BINDING": "진단이나 분류가 그 결정이나 그 입력의 것이 아니다",
+            "EXPLANATION_MATERIAL": "자료의 값이 서로 맞지 않거나 모르는 값이다"},
+ "expected": {
+  "A_forced_above_minimum": {
+   "material": "PD.RK02_DECLARED의 decide 결과와 손으로 쓴 split_risk_evidence(G5, G6의 첫 추측). 실제 대상 (3,0) 위험 1/2, 원 대상 (4,0) 위험 1/4, 쌍 (3,0)-(3,1), 전방 계산 2칸 8회, 대상 S_c 1/2",
+   "short": "불가피한 50/50 먼저 처리 · 이 칸의 지뢰 확률 50.0% (현재 최소 25.0%보다 25.0%p 높음)",
+   "selection": [
+    "실제 입력 대상: OPEN (3, 0). 이 입력의 지뢰 확률 50.0% (1/2).",
+    "원 제안(K-LC1): (4, 0), 지뢰 확률 25.0% (1/4). 원 제안의 위험이며 이 칸의 위험이 아니다.",
+    "선택 이유: 증명된 불가피한 50/50 쌍을 먼저 처리한다. 쌍: (3, 0)-(3, 1). 두 칸 중 정확히 하나가 지뢰이고, 한쪽에만 닿는 주변 칸이 없거나 모두 확정 지뢰라는 조건이 증명된 쌍이다.",
+    "이 칸의 지뢰 확률은 현재 최소 위험 25.0%보다 25.0%p 높다.",
+    "전방 계산: 후보 2칸, 가정 계산 8회(한도 72회). 쌍의 칸은 S_c, 입력 비용, 읽기 순서로 순위를 정했다. 이 칸의 S_c 1/2 (50.0%).",
+    "S_c와 S_v는 한 입력 뒤까지만 본 제한된 전방 계산값이다. 판 전체 승률이 아니다."]
+  },
+  "B_forced_at_minimum_real_k": {
+   "material": "GUESS_8X2를 새 K 세션이 분석한 결합 선택과 손으로 쓴 kept_forced_evidence. 대상 (3,0)이 원 대상과 같다. 전방 계산 2칸 4회",
+   "short": "불가피한 50/50 먼저 처리 · 이 칸의 지뢰 확률 50.0%",
+   "selection": [
+    "실제 입력 대상: OPEN (3, 0). 이 입력의 지뢰 확률 50.0% (1/2).",
+    "원 제안(K-LC1)과 같은 칸이다.",
+    "선택 이유: 증명된 불가피한 50/50 쌍을 먼저 처리한다. 쌍: (3, 0)-(3, 1). 두 칸 중 정확히 하나가 지뢰이고, 한쪽에만 닿는 주변 칸이 없거나 모두 확정 지뢰라는 조건이 증명된 쌍이다.",
+    "전방 계산: 후보 2칸, 가정 계산 4회(한도 72회). 쌍의 칸은 S_c, 입력 비용, 읽기 순서로 순위를 정했다. 이 칸의 S_c 1/2 (50.0%).",
+    "S_c와 S_v는 한 입력 뒤까지만 본 제한된 전방 계산값이다. 판 전체 승률이 아니다."]
+  },
+  "C_tie": {
+   "material": "PD.RK04_DECLARED의 decide 결과와 손으로 쓴 tie_evidence(E_TIE). 대상 (2,2), 원 대상 (0,2), 둘 다 1/3, 후보 3칸 12회, 대상 S_c 2/3, 원 대상 S_v 1/2",
+   "short": "최소 위험 동률 중 전방 비교로 선택 · 이 칸의 지뢰 확률 33.3%",
+   "selection": [
+    "실제 입력 대상: OPEN (2, 2). 이 입력의 지뢰 확률 33.3% (1/3).",
+    "원 제안(K-LC1): (0, 2), 지뢰 확률 33.3% (1/3). 위험은 같다.",
+    "선택 이유: 최소 위험이 같은 칸 3개를 제한된 전방 계산으로 비교해 골랐다. 이 칸의 S_c 2/3 (66.7%)가 원 제안의 S_v 1/2 (50.0%)보다 크다.",
+    "전방 계산: 후보 3칸, 가정 계산 12회(한도 72회).",
+    "S_c와 S_v는 한 입력 뒤까지만 본 제한된 전방 계산값이다. 판 전체 승률이 아니다."]
+  },
+  "D_kept": {
+   "material": "test_program_d23s_policy.RK03의 decide 결과와 손으로 쓴 min_evidence(G7, G8의 첫 추측). 대상 (2,0) 유지, 1/3, 후보 3칸 7회, S_c 2/3, S_v 2/3",
+   "short": "최소 위험 칸 유지 · 이 칸의 지뢰 확률 33.3%",
+   "selection": [
+    "실제 입력 대상: OPEN (2, 0). 이 입력의 지뢰 확률 33.3% (1/3).",
+    "원 제안(K-LC1)과 같은 칸이다.",
+    "선택 이유: 계산된 최소 위험 칸(원 제안)을 유지했다.",
+    "전방 계산: 후보 3칸, 가정 계산 7회(한도 72회). 원 제안의 S_v 2/3 (66.7%)보다 큰 S_c를 가진 동률 칸이 없었다.",
+    "S_c와 S_v는 한 입력 뒤까지만 본 제한된 전방 계산값이다. 판 전체 승률이 아니다."]
+  },
+  "limit_evidence": {
+   "short": "최소 위험 칸 유지 · 이 칸의 지뢰 확률 11.1%",
+   "lookahead_line": "전방 계산: 후보가 9칸으로 한도 8칸을 넘어 계산하지 않았다. 계산하지 않은 것이며 비교 결과가 아니다.",
+   "lines": 4, "has_s_note": false
+  },
+  "single_evidence": {"lookahead_line": "전방 계산: 후보가 한 칸이라 계산하지 않았다.", "lines": 4, "has_s_note": false},
+  "five_pairs_evidence": {
+   "short": "불가피한 50/50 먼저 처리 · 이 칸의 지뢰 확률 50.0%",
+   "original_line": "원 제안(K-LC1): (1, 0), 지뢰 확률 50.0% (1/2). 위험은 같다.",
+   "lookahead_line": "전방 계산: 후보가 10칸으로 한도 8칸을 넘어 계산하지 않았다. 계산하지 않은 것이며 비교 결과가 아니다. 쌍의 칸은 입력 비용과 읽기 순서로 순위를 정했다.",
+   "has_s_note": false
+  },
+  "certain": {
+   "X02_applied": {"actual": "실제 입력: OPEN (5, 0). 추측이 아닌 확정 입력이다.", "original": "원 제안(K-LC1): OPEN (4, 0).",
+                   "n": "객체의 applied.region.guaranteed_count. 짧은 줄과 이유 줄이 같은 수를 적는다"},
+   "s1_no_eligible": {"short": "확정 입력 · K-LC1 선택 유지",
+                      "selection": ["실제 입력: OPEN (4, 0). 추측이 아닌 확정 입력이다.", "원 제안(K-LC1)과 같은 입력이다.",
+                                    "선택 이유: 0이 증명된 칸은 있지만 바꿀 조건을 만족하지 않아 원 제안을 유지했다."]},
+   "a01_no_proven": {"reason": "선택 이유: 0이 증명된 칸이 없어 원 제안을 유지했다."}
+  },
+  "blocked_forced_evidence": {
+   "first": "제안 대상: OPEN (1, 3). 이 칸의 지뢰 확률 50.0% (1/2). 추측 허용이 꺼져 있어 입력하지 않았다. 실제 입력이 아니다.",
+   "second": "원 제안(K-LC1): (0, 3), 지뢰 확률 50.0% (1/2). 위험은 같다."
+  },
+  "pseudo": {
+   "PC01": ["pseudo 50/50 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 (0, 0).",
+            "결과: 증명된 거울 쌍의 칸이다. 짝: (1, 0) 고립형, (1, 1) 고립형.",
+            "판 전체에서 이기지 못할 확률의 하한: 1/3 (33.3%). 하한일 뿐이며 승률이나 최적 선택의 증명이 아니다. 이 입력 한 번의 지뢰 확률과 수는 같지만 뜻이 다르다.",
+            "탐색: 범위 안의 쌍 3개, 후보 3개, 판정 3개, 한도 미검사 0개. 조건부 계산 2회(한도 8회). 지원 범위의 후보를 모두 판정했다.",
+            "다른 칸의 증명된 쌍 1개: (1, 0)-(1, 1). 실제 대상에 대한 증명이 아니다."],
+   "PC04": {"result": "결과: 증명된 거울 쌍의 칸이다. 짝: (0, 0) 조건형.",
+            "search": "탐색: 범위 안의 쌍 7개, 후보 1개, 판정 1개, 한도 미검사 0개. 조건부 계산 1회(한도 8회). 지원 범위의 후보를 모두 판정했다.",
+            "lines": 4},
+   "PC02": {"bound": "판 전체에서 이기지 못할 확률의 하한: 1/2 (50.0%). 하한일 뿐이며 승률이나 최적 선택의 증명이 아니다. 이 입력 한 번의 지뢰 확률과 수는 같지만 뜻이 다르다.",
+            "forced": "불가피한 50/50 쌍 (0, 0)-(1, 0): 이 진단도 같은 쌍을 증명했다."},
+   "PC10A": ["pseudo 50/50 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 (0, 0).",
+             "결과: 지원 범위(거리 2 이하의 쌍)에서 실제 대상의 쌍 2개가 모두 조건을 만족하지 않았다. 지원하지 않는 구조에 대한 판정이 아니며 하한은 없다.",
+             "탐색: 범위 안의 쌍 15개, 후보 15개, 판정 15개, 한도 미검사 0개. 조건부 계산 8회(한도 8회). 지원 범위의 후보를 모두 판정했다.",
+             "범위 밖: 실제 대상에서 거리 3 이상인 떠 있는 칸 6개와의 관계는 지원하지 않아 검사하지 않았다."],
+   "PC10B": ["pseudo 50/50 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 (0, 0).",
+             "결과: 지원 범위(거리 2 이하의 쌍)에서 실제 대상의 쌍 2개가 모두 조건을 만족하지 않았다. 지원하지 않는 구조에 대한 판정이 아니며 하한은 없다.",
+             "탐색: 범위 안의 쌍 17개, 후보 17개, 판정 16개, 한도 미검사 1개. 조건부 계산 8회(한도 8회). 한도 때문에 일부만 판정했다.",
+             "한도 미검사: 후보 쌍 1개는 검사하지 못했다. 조건 불충족이 아니다.",
+             "범위 밖: 실제 대상에서 거리 3 이상인 떠 있는 칸 7개와의 관계는 지원하지 않아 검사하지 않았다."],
+   "PC13": {"result": "결과: 실제 대상에는 지원 범위(거리 2 이하) 안의 쌍이 없어 검사한 것이 없다. 조건 불충족이 아니며 하한은 없다.",
+            "search": "탐색: 범위 안의 쌍 0개, 후보 0개, 판정 0개, 한도 미검사 0개. 조건부 계산 0회(한도 8회). 후보 쌍이 없다.",
+            "far": "범위 밖: 실제 대상에서 거리 3 이상인 떠 있는 칸 1개와의 관계는 지원하지 않아 검사하지 않았다.",
+            "forced": "불가피한 50/50 쌍 (0, 0)-(4, 0): 거리 3 이상이라 이 진단의 범위 밖이다. 검사하지 않았다."},
+   "PC05_target_p": {"material": "PC05의 전제에 실제 대상을 (1,0)으로 선언한 diagnose_premises. 대상의 두 쌍은 조건 불충족, (0,1)-(2,1)은 증명",
+                     "result": "결과: 지원 범위(거리 2 이하의 쌍)에서 실제 대상의 쌍 2개가 모두 조건을 만족하지 않았다. 지원하지 않는 구조에 대한 판정이 아니며 하한은 없다.",
+                     "other": "다른 칸의 증명된 쌍 1개: (0, 1)-(2, 1). 실제 대상에 대한 증명이 아니다."},
+   "synthetic_undecided": {"material": "PC10B의 진단에서 실제 대상의 행과 대상 상태를 한도 미검사로 바꾼 합성 자료(수용된 계획에서는 나오지 않는다)",
+                           "result": "결과: 실제 대상의 후보 쌍 1개를 호출 한도 때문에 검사하지 못했다. 조건 불충족이 아니며 하한은 없다."}
+  },
+  "linked": {
+   "LC01": {"head": "linked 풀림 진단(별도 진단, 선택에 쓰지 않음): 실제 대상 (1, 0). 이 칸을 여는 한 입력의 범위다.",
+            "structure": "구조: 나열된 쌍 2개, 공유 묶음 2개, 칸 공유 0건, 기하적 연결 2건(다른 묶음 사이 2건). 칸 공유와 기하적 연결은 풀림이 아니다.",
+            "plan": "검사: 기준 칸 3개, 정밀 계산 8회(한도 54회).",
+            "target": "실제 대상: 이 칸을 열고 살아남으면, 이 칸이 속하지 않은 어떤 묶음이 모든 생존 결과에서 풀린다. 모든 다른 묶음이 풀린다는 뜻은 아니다.",
+            "row": "묶음 (2, 0), (3, 0): 모든 생존 결과에서 풀린다. 살아남는 경우 2 가운데 풀림 2, 풀리지 않음 0, 판단 보류 0.",
+            "row_hand_argument": "world 넷 가운데 (1,0)이 안전한 world는 둘이다. (1,0)의 숫자는 확정 지뢰 둘과 (0,0)의 지뢰에 (2,0)의 지뢰 여부를 더한 값이라 3 또는 4이고, 어느 쪽이든 (2,0)과 (3,0)이 정해진다.",
+            "other_head": "다른 기준 칸의 결과(그 칸을 열었을 때의 진단이며 실제 대상의 결과가 아니다):",
+            "close": "이 진단은 이 한 입력 뒤의 범위다. 여러 입력 뒤의 보장이나 판 전체 승률이 아니다."},
+   "LA01": {"target": "실제 대상: 이 칸을 열고 살아남으면, 이 칸이 속하지 않은 어떤 묶음이 일부 생존 결과에서 풀린다."},
+   "LC07": {"target": "실제 대상: 풀린 결과가 없고, 숫자 0이 나오는 결과는 주변이 함께 열리기 때문에 이 계산으로 판단하지 않았다(판단 보류).",
+            "out_of_scope": "범위 밖(쌍에 속하지 않은 구분 칸): (1, 0). 기준 칸으로 지원하지 않아 검사하지 않았다. 연결 없음이나 풀리지 않음의 판정이 아니다."},
+   "LC03": {"target": "실제 대상: 검사한 결과에서는 다른 묶음이 풀리지 않았다. 독립이라는 증명은 아니다."},
+   "LC04": {"structure": "구조: 나열된 쌍 3개, 공유 묶음 1개, 칸 공유 2건, 기하적 연결 3건(다른 묶음 사이 0건). 칸 공유와 기하적 연결은 풀림이 아니다.",
+            "plan": "검사: 실제 대상이 속하지 않은 묶음이 없어 계산한 것이 없다. 연결 없음의 판정이 아니다.",
+            "target": "실제 대상: 기준 칸으로 계산하지 않았다.",
+            "out_of_scope": "범위 밖(같은 묶음 안의 연결뿐): (1, 0), (0, 2), (1, 2). 기준 칸으로 지원하지 않아 검사하지 않았다. 연결 없음이나 풀리지 않음의 판정이 아니다."},
+   "LC08": {"plan": "검사: 기준 칸 6개, 정밀 계산 17회(한도 54회).",
+            "limit": "한도 미검사: 기준 칸 한도(6개) 때문에 검사하지 않은 연결 칸 (2, 6). 연결 없음이 아니다."},
+   "RK03_no_listed_pair": {"structure": "구조: 나열된 쌍 0개, 공유 묶음 0개, 칸 공유 0건, 기하적 연결 0건(다른 묶음 사이 0건). 칸 공유와 기하적 연결은 풀림이 아니다.",
+                           "plan": "검사: 나열된 쌍이 없어 계산한 것이 없다. 연결 없음의 판정이 아니다.",
+                           "target": "실제 대상: 기준 칸으로 계산하지 않았다."},
+   "RK04_bound_to_its_selection": {"material": "RK04_DECLARED의 decide 결과와 그 선택의 diagnose_links(수용된 보고: 실제 대상 (2,2)는 쌍을 어느 결과에서도 풀지 못하고, 원 대상 (0,2)는 살아남는 world의 절반에서 푼다. linked 호출 7회)",
+                                   "plan": "검사: 기준 칸 2개, 정밀 계산 7회(한도 54회).",
+                                   "target": "실제 대상: 검사한 결과에서는 다른 묶음이 풀리지 않았다. 독립이라는 증명은 아니다.",
+                                   "other_row_starts_with": "기준 칸 (0, 2) [원 대상] · 묶음 (1, 1), (2, 1): 일부 생존 결과에서만 풀린다."}
+  },
+  "loss": {
+   "record_min": {"shown": true, "basis": "PRE_INPUT_EVIDENCE", "input_index": 1, "lines": [
+    "패배 보조 설명: 당시 계산된 최소 위험 칸을 선택한 추측에서 패배했다. 입력 OPEN (2, 0), 입력 전 지뢰 확률 33.3% (1/3).",
+    "입력 전에 확인한 범위의 설명이다. 패배 뒤 공개된 지뢰로 다시 판정한 것이 아니며, 기본 결과 LOST는 그대로다."]},
+   "record_tie": {"shown": true, "input_index": 2, "lines": [
+    "패배 보조 설명: 당시 최소 위험이 같은 칸들 가운데 제한된 전방 계산으로 고른 추측에서 패배했다. 입력 OPEN (2, 2), 입력 전 지뢰 확률 33.3% (1/3).",
+    "입력 전에 확인한 범위의 설명이다. 패배 뒤 공개된 지뢰로 다시 판정한 것이 아니며, 기본 결과 LOST는 그대로다."]},
+   "record_forced": {"shown": true, "input_index": 4, "lines": [
+    "패배 보조 설명: 증명된 불가피한 50/50 쌍을 먼저 처리한 추측에서 패배했다. 입력 OPEN (1, 3), 입력 전 지뢰 확률 50.0% (1/2).",
+    "쌍의 어느 칸을 열어도 위험이 1/2이었다는 뜻이며, 판 전체의 패배가 정해져 있었다는 뜻이 아니다.",
+    "입력 전에 확인한 범위의 설명이다. 패배 뒤 공개된 지뢰로 다시 판정한 것이 아니며, 기본 결과 LOST는 그대로다."]},
+   "record_split_risk": {"shown": true, "input_index": 1, "lines": [
+    "패배 보조 설명: 증명된 불가피한 50/50 쌍을 먼저 처리한 추측에서 패배했다. 입력 OPEN (3, 0), 입력 전 지뢰 확률 50.0% (1/2).",
+    "쌍의 어느 칸을 열어도 위험이 1/2이었다는 뜻이며, 판 전체의 패배가 정해져 있었다는 뜻이 아니다.",
+    "당시 최소 위험은 원 제안 (4, 0)의 25.0% (1/4)였다.",
+    "입력 전에 확인한 범위의 설명이다. 패배 뒤 공개된 지뢰로 다시 판정한 것이 아니며, 기본 결과 LOST는 그대로다."]},
+   "record_forced_WON": {"status": "WON", "shown": false, "basis": null, "input_index": null, "lines": []},
+   "record_tie_PLAYING": {"status": "PLAYING", "shown": false, "lines": []},
+   "record_first_click": {"shown": true, "basis": "INITIAL_OPEN_WITHOUT_EVIDENCE", "input_index": 0, "lines": [
+    "패배 보조 설명: 첫 입력에서 패배했다. 첫 입력에는 입력 전 근거가 없어 유형을 확인할 수 없다.", "기본 결과 LOST는 그대로다."]},
+   "record_not_recorded": {"shown": true, "basis": "EVIDENCE_NOT_RECORDED", "input_index": 1, "lines": [
+    "패배 보조 설명: 마지막 입력의 입력 전 근거가 없어 패배 유형을 확인할 수 없다.", "기본 결과 LOST는 그대로다."]},
+   "synthetic_lost_on_certain": {"shown": true, "basis": "LOST_ON_CERTAIN_INPUT", "lines": [
+    "패배 보조 설명: 추측이 아닌 입력에서 LOST가 기록됐다. 추측 패배로 설명하지 않으며 확인이 필요한 기록이다.", "기본 결과 LOST는 그대로다."]},
+   "record_guess_off": {"status": "PLAYING", "shown": false, "basis": null, "input_index": null, "lines": [
+    "판이 끝나지 않았다. 입력하지 않은 제안이 있다: OPEN (1, 3). 추측 허용이 꺼져 있어 보내지 않았고, 실제 입력도 패배 원인도 아니다."]},
+   "stored_97": {"status": "WON", "guess_inputs": [3, 4, 5], "shown": false, "lines": []},
+   "stored_8191": {"status": "WON", "guess_inputs": [176], "shown": false, "lines": [],
+                   "guess_short": "최소 위험 칸 유지 · 이 칸의 지뢰 확률 11.1%"},
+   "synthetic_97_cut_after_input_5": {
+    "material": "저장 기록 97의 앞 여섯 입력(추측 입력 3, 4, 5). 마지막 입력의 상태만 LOST로 둔 합성 기록을 수용된 make_record로 만든다",
+    "shown": true, "basis": "PRE_INPUT_EVIDENCE", "input_index": 5,
+    "first_line": "패배 보조 설명: 당시 계산된 최소 위험 칸을 선택한 추측에서 패배했다. 입력 OPEN (0, 4), 입력 전 지뢰 확률 14.2% (91/643).",
+    "earlier_guess_shorts": ["최소 위험 칸 유지 · 이 칸의 지뢰 확률 4.0%", "최소 위험 칸 유지 · 이 칸의 지뢰 확률 20.0%"],
+    "must_not_contain": ["4.0%", "20.0%", "(0, 3)", "(3, 0)"]}
+  }
+ },
+ "new_module": {
+  "module": "tests.test_program_d3_explanation",
+  "class": "ExplanationTests",
+  "tests": [
+   {"name": "test_x01_forced_pair_above_minimum_risk_shows_the_actual_risk", "checks": "A의 짧은 줄과 상세 여섯 줄. 원 대상의 25.0%는 원 제안의 줄에만 나온다"},
+   {"name": "test_x02_forced_pair_at_minimum_risk_on_a_real_k_decision", "checks": "B. 새 K 세션의 결합 선택. 엔진 없음"},
+   {"name": "test_x03_tie_lookahead_names_bounded_values_not_a_win_rate", "checks": "C의 짧은 줄과 상세 다섯 줄"},
+   {"name": "test_x04_kept_minimum_risk_with_and_without_a_lookahead", "checks": "D, 후보 한도, 후보 한 칸, 다섯 쌍. 전방 계산의 세 상태"},
+   {"name": "test_x05_opening_applied_and_kept_are_certain_inputs", "checks": "X02의 적용, s1의 조건 불충족, a01의 증명된 칸 없음"},
+   {"name": "test_x06_memory_selection_and_stored_evidence_give_the_same_text", "checks": "A, C, D에서 메모리의 선택과 손으로 쓴 저장 근거의 문구가 같다"},
+   {"name": "test_x07_a_blocked_proposal_is_worded_as_a_proposal_not_an_input", "checks": "executed=False의 첫 줄. '실제 입력 대상'이 없다"},
+   {"name": "test_x08_pseudo_proven_isolated_and_conditional_with_a_lower_bound", "checks": "PC01, PC04, PC02"},
+   {"name": "test_x09_pseudo_refuted_no_pair_partial_and_out_of_range_are_kept_apart", "checks": "PC10A, PC10B, PC13, 합성 한도 미검사. 네 결과 줄이 서로 다르다"},
+   {"name": "test_x10_a_proven_pair_of_other_cells_is_not_a_proof_for_the_target", "checks": "PC05에 대상 (1,0)"},
+   {"name": "test_x11_linked_labels_follow_the_accepted_classification", "checks": "LC01, LA01, LC07, LC03, LC04의 대상 줄과 LC01의 전체 구조"},
+   {"name": "test_x12_linked_not_examined_out_of_scope_and_no_pair_are_not_no_link", "checks": "LC08, LC07, LC04, RK03"},
+   {"name": "test_x13_results_of_other_anchor_cells_are_not_the_targets_results", "checks": "RK04의 선택과 그 진단. 원 대상의 결과는 '다른 기준 칸' 아래에만 있다"},
+   {"name": "test_x14_diagnoses_are_bound_to_their_decision_and_never_change_the_reason", "checks": "다른 결정의 진단은 거부. 진단이 있든 없든 짧은 줄과 선택 줄이 같다"},
+   {"name": "test_x15_loss_note_only_for_a_lost_last_input_with_pre_input_evidence", "checks": "record_min, record_tie, record_forced, record_split_risk, WON, PLAYING"},
+   {"name": "test_x16_loss_without_evidence_is_reported_as_unknown", "checks": "첫 입력, 근거 미기록, 합성 확정 입력 LOST"},
+   {"name": "test_x17_a_blocked_proposal_is_neither_an_input_nor_a_loss_cause", "checks": "record_guess_off"},
+   {"name": "test_x18_several_guesses_the_note_follows_the_last_actual_input", "checks": "저장 기록 97, 8191과 합성 절단 기록"},
+   {"name": "test_x19_explanations_make_no_calculation_decision_judgement_or_engine_input", "checks": "정밀 계산, K 결정, 정책 선택, 판별, 진단, 검증, 엔진 생성과 입력을 모두 막은 채 모든 설명을 만든다. 모듈의 import와 호출 이름을 구문 분석으로 확인한다"},
+   {"name": "test_x20_inputs_are_unchanged_and_the_output_is_deterministic", "checks": "설명 전후 자료의 값과 기록 바이트, 저장 파일의 해시가 같다. 두 번 만든 출력이 같다"},
+   {"name": "test_x21_wording_rules_hold_for_every_generated_text", "checks": "wording_rules 전부"},
+   {"name": "test_x22_help_text_is_static_and_states_the_limits", "checks": "여덟 줄의 문자열이 templates.help와 같다"},
+   {"name": "test_x23_percent_and_point_formatting_never_rounds_to_certainty", "checks": "format_samples와 제품 표시 함수 대조"},
+   {"name": "test_x24_wrong_types_and_inconsistent_material_are_refused", "checks": "자료형, 결속, 값의 불일치에 대한 세 오류 코드"}
+  ]
+ }
+}

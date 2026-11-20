@@ -1,0 +1,24 @@
+{
+ "schema": "PROGRAM_D3_EXPLANATION_FIXTURE_BINDING_PRODUCT_V1",
+ "meaning": "tests/test_program_d3_explanation.py가 고정 자료로 읽는 저장 기록 두 개의 식별이다. 시험은 읽을 때마다 이 크기와 SHA-256을 다시 확인한다. 기록은 출력 폴더의 원본을 바이트 그대로 옮긴 것이며 경로 필드만 제품 저장소 안의 위치로 바꿨다. 과거 보드를 다시 실행해 만든 자료가 아니다.",
+ "record_files": [
+  {
+   "root": "tests/fixtures/program_d3_explanation",
+   "path": "97.json",
+   "bytes": 296698,
+   "sha256": "b210da4067962e68a94dfb1c7323c03b7763347a127837043680706a3651716e",
+   "origin": "integration_impl_01/runs/x97_01/records/97.json"
+  },
+  {
+   "root": "tests/fixtures/program_d3_explanation",
+   "path": "8191.json",
+   "bytes": 45542,
+   "sha256": "6be7339592f1d610995a65af24da378da377b2bcc230da95dd22270558041884",
+   "origin": "integration_impl_01/runs/x8191_01/records/8191.json"
+  }
+ ],
+ "origin_binding": {
+  "file": "live_adoption_prep_01/FIXTURE_BINDING.json",
+  "sha256": "ed2831c628d8041c1cc17f7fab38502901d5d29b74b990c072c43ed5eee932bc"
+ }
+}

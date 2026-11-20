@@ -1,0 +1,217 @@
+{
+ "schema": "S3D3_LINK_CASES_ADDENDUM_V1",
+ "written": "2026-11-20, 신규 네 파일을 쓰기 전",
+ "nature": "손으로 적은 추가 사례와 기대값이다. 원본 LINKED_CASES.json(같은 폴더의 바이트 사본)은 고치지 않았다. 여기의 값은 실행 결과를 보고 맞춘 것이 아니다. cases의 두 사례는 원본과 같은 구조이고 원본의 표기 규칙을 따른다.",
+ "conventions": {
+  "coordinates": "[x, y]. x는 왼쪽부터 0, y는 위부터 0.",
+  "kinds_of_evidence": {
+   "DECLARED_PREMISES": "격자, M, 전체 지뢰 수를 선언하고 그 위에서 계산한다. K 추론이 아니다.",
+   "REAL_K_PREFIX_STATE": "실제 엔진에 공개 입력을 차례로 넣어 만든 상태에서 새 K 세션이 내린 결정이다. 처음부터 실행한 판이 아니다.",
+   "FROM_FIRST_INPUT": "새 엔진에서 첫 입력부터 실행기가 끝까지 실행한 판이다.",
+   "ENGINE_FLOOD_ROWS": "실제 엔진이 한 입력으로 연 칸의 공개 숫자다. 그 위의 계산은 선언한 M을 그대로 쓴 계산이다."
+  }
+ },
+ "cases": [
+  {
+   "id": "LA01",
+   "title": "숫자 0의 결과만 판단 불충분으로 남는 후보와, 숫자 0의 결과가 가정 관측만으로 풀리는 후보",
+   "purpose": ["RESOLVED_SOME_FLOOD_OPEN의 격자 사례(후보 g)", "숫자 0인데 가정 관측만으로 풀리는 결과(후보 n의 숫자 0)", "쌍 밖의 미확정 칸(y, f)의 수를 결과마다 보관"],
+   "grid": ["H H 2 H", "2 3 H F", "H F H 4", "H F F F"],
+   "num_mines": 8,
+   "declared_M": [[3, 1], [1, 2], [1, 3], [2, 3], [3, 3]],
+   "cells": {"g": [0, 0], "n": [1, 0], "y": [3, 0], "c": [2, 1], "w": [0, 2], "d": [2, 2], "f": [0, 3]},
+   "worlds": [["n", "d", "f"], ["g", "c", "f"], ["g", "y", "d"], ["w", "c", "f"], ["w", "y", "d"]],
+   "world_list_argument": "(0,1)=2는 g, n, w 가운데 정확히 하나, (2,0)=2는 n, y, c 가운데 정확히 하나, (3,2)=4는 c, d 가운데 정확히 하나를 뜻한다. (1,1)=3은 앞의 둘에서 따라 나온다. f는 어느 열린 숫자에도 닿지 않는다. 남은 지뢰는 3개다. n이 지뢰면 y, c가 안전하고 d가 지뢰이며 g, w가 안전하므로 f가 지뢰다(1개). n이 안전하면 g, w 가운데 하나가 지뢰이고, c가 지뢰면 y, d가 안전하고 f가 지뢰(2개), c가 안전하면 y, d가 지뢰이고 f가 안전하다(2개). 모두 5개다.",
+   "total_worlds": 5,
+   "mine_worlds": {"g": 2, "n": 1, "y": 2, "c": 2, "w": 2, "d": 3, "f": 3},
+   "pairs": [
+    {"id": "P1", "a": [2, 1], "b": [2, 2], "verdict": "APPARENT_5050", "bases": [["CLUE", [3, 2]]],
+     "distinguishing": [[[1, 0], "UNRESOLVED_HIDDEN"], [[2, 0], "REVEALED_NUMBER"], [[3, 0], "UNRESOLVED_HIDDEN"], [[1, 3], "PROVEN_MINE"], [[2, 3], "PROVEN_MINE"], [[3, 3], "PROVEN_MINE"]]}
+   ],
+   "bundles": [{"id": "B1", "pairs": ["P1"], "cells": [[2, 1], [2, 2]]}],
+   "shares": [],
+   "links": [],
+   "plan_expected": {
+    "actual_target": [1, 0], "original_target": [1, 0],
+    "note": "지뢰 world 수가 가장 작은 칸은 n 하나다. n은 묶음 밖의 칸이므로 기준 칸이 된다. y는 어느 쌍에도 속하지 않는 미확정 구분 칸이다.",
+    "anchors": [{"cell": [1, 0], "role": "ACTUAL_TARGET", "calls": 3}],
+    "planned_calls": 3, "not_examined_limit": [],
+    "out_of_scope": [{"cell": [3, 0], "reason": "NON_PAIR_DISTINGUISHING_CELL"}]
+   },
+   "candidates": [
+    {"name": "g", "cell": [0, 0], "mine_neighbors": 0, "unresolved_neighbors": 1, "own_bundle": null,
+     "outcomes": [
+      {"number": 0, "worlds": 2, "flood": true, "mine_worlds": {"n": 0, "y": 1, "c": 1, "w": 2, "d": 1, "f": 1}},
+      {"number": 1, "worlds": 1, "flood": false, "mine_worlds": {"n": 1, "y": 0, "c": 0, "w": 0, "d": 1, "f": 1}}],
+     "bundle_results": [
+      {"bundle": "B1", "per_outcome": {"0": "FLOOD_NOT_DETERMINED", "1": "RESOLVED"},
+       "resolved_worlds": 1, "unresolved_worlds": 0, "flood_undetermined_worlds": 2, "survival_worlds": 3,
+       "label": "RESOLVED_SOME_FLOOD_OPEN", "conditional": "1/3", "unconditional": "1/5"}]},
+    {"name": "n", "cell": [1, 0], "mine_neighbors": 0, "unresolved_neighbors": 2, "own_bundle": null,
+     "outcomes": [
+      {"number": 0, "worlds": 1, "flood": true, "mine_worlds": {"g": 0, "y": 1, "c": 0, "w": 1, "d": 1, "f": 0}},
+      {"number": 1, "worlds": 2, "flood": false, "mine_worlds": {"g": 1, "y": 1, "c": 1, "w": 1, "d": 1, "f": 1}},
+      {"number": 2, "worlds": 1, "flood": false, "mine_worlds": {"g": 1, "y": 0, "c": 1, "w": 0, "d": 0, "f": 1}}],
+     "bundle_results": [
+      {"bundle": "B1", "per_outcome": {"0": "RESOLVED", "1": "UNRESOLVED_OTHER", "2": "RESOLVED"},
+       "resolved_worlds": 2, "unresolved_worlds": 2, "flood_undetermined_worlds": 0, "survival_worlds": 4,
+       "label": "RESOLVED_SOME", "conditional": "1/2", "unconditional": "2/5"}]}
+   ]
+  },
+  {
+   "id": "LA02",
+   "title": "숫자 0의 결과까지 가정 관측만으로 모두 풀리는 후보",
+   "purpose": ["숫자 0의 결과가 RESOLVED인 RESOLVED_ALL", "묶음 밖의 대상을 기준 칸으로 계획", "자기 묶음의 칸을 연 후보(n)의 불가능한 숫자 0"],
+   "grid": ["H H 3 F", "2 3 H F", "H F H 4", "F F F F"],
+   "num_mines": 9,
+   "declared_M": [[3, 0], [3, 1], [1, 2], [0, 3], [1, 3], [2, 3], [3, 3]],
+   "cells": {"g": [0, 0], "n": [1, 0], "c": [2, 1], "w": [0, 2], "d": [2, 2]},
+   "worlds": [["n", "d"], ["g", "c"], ["w", "c"]],
+   "world_list_argument": "(0,1)=2는 g, n, w 가운데 정확히 하나, (2,0)=3은 n, c 가운데 정확히 하나, (3,2)=4는 c, d 가운데 정확히 하나를 뜻한다. n이 지뢰면 c가 안전하고 d가 지뢰이며 g, w가 안전하다. n이 안전하면 c가 지뢰이고 d가 안전하며 g, w 가운데 하나가 지뢰다. 셋 모두 남은 지뢰가 2개다.",
+   "total_worlds": 3,
+   "mine_worlds": {"g": 1, "n": 1, "c": 2, "w": 1, "d": 1},
+   "pairs": [
+    {"id": "P1", "a": [1, 0], "b": [2, 1], "verdict": "APPARENT_5050", "bases": [["CLUE", [2, 0]]],
+     "distinguishing": [[[0, 0], "UNRESOLVED_HIDDEN"], [[3, 0], "PROVEN_MINE"], [[0, 1], "REVEALED_NUMBER"], [[3, 1], "PROVEN_MINE"], [[1, 2], "PROVEN_MINE"], [[2, 2], "UNRESOLVED_HIDDEN"], [[3, 2], "REVEALED_NUMBER"]]},
+    {"id": "P2", "a": [2, 1], "b": [2, 2], "verdict": "APPARENT_5050", "bases": [["CLUE", [3, 2]]],
+     "distinguishing": [[[1, 0], "UNRESOLVED_HIDDEN"], [[2, 0], "REVEALED_NUMBER"], [[3, 0], "PROVEN_MINE"], [[1, 3], "PROVEN_MINE"], [[2, 3], "PROVEN_MINE"], [[3, 3], "PROVEN_MINE"]]}
+   ],
+   "bundles": [{"id": "B1", "pairs": ["P1", "P2"], "cells": [[1, 0], [2, 1], [2, 2]]}],
+   "shares": [["P1", "P2", [2, 1]]],
+   "links": [
+    {"from": "P1", "to": "P2", "cells": [[1, 0]], "same_bundle": true},
+    {"from": "P2", "to": "P1", "cells": [[2, 2]], "same_bundle": true}],
+   "plan_expected": {
+    "actual_target": [0, 0], "original_target": [0, 0],
+    "note": "지뢰 world 수가 가장 작은 칸 가운데 읽기 순서의 첫 칸은 g다. g는 묶음 밖의 칸이므로 기준 칸이 된다. 묶음 안에서만 연결된 두 칸은 범위 밖으로 적는다.",
+    "anchors": [{"cell": [0, 0], "role": "ACTUAL_TARGET", "calls": 2}],
+    "planned_calls": 2, "not_examined_limit": [],
+    "out_of_scope": [{"cell": [1, 0], "reason": "IN_BUNDLE_LINK_ONLY"}, {"cell": [2, 2], "reason": "IN_BUNDLE_LINK_ONLY"}]
+   },
+   "candidates": [
+    {"name": "g", "cell": [0, 0], "mine_neighbors": 0, "unresolved_neighbors": 1, "own_bundle": null,
+     "outcomes": [
+      {"number": 0, "worlds": 1, "flood": true, "mine_worlds": {"n": 0, "c": 1, "w": 1, "d": 0}},
+      {"number": 1, "worlds": 1, "flood": false, "mine_worlds": {"n": 1, "c": 0, "w": 0, "d": 1}}],
+     "bundle_results": [
+      {"bundle": "B1", "per_outcome": {"0": "RESOLVED", "1": "RESOLVED"},
+       "resolved_worlds": 2, "unresolved_worlds": 0, "flood_undetermined_worlds": 0, "survival_worlds": 2,
+       "label": "RESOLVED_ALL", "conditional": "1", "unconditional": "2/3"}]},
+    {"name": "n", "cell": [1, 0], "mine_neighbors": 0, "unresolved_neighbors": 2, "own_bundle": "B1",
+     "outcomes": [
+      {"number": 0, "worlds": 0, "flood": true},
+      {"number": 1, "worlds": 1, "flood": false, "mine_worlds": {"g": 0, "c": 1, "w": 1, "d": 0}},
+      {"number": 2, "worlds": 1, "flood": false, "mine_worlds": {"g": 1, "c": 1, "w": 0, "d": 0}}],
+     "bundle_results": []}
+   ]
+  }
+ ],
+ "target_labels": {
+  "note": "각 사례의 plan_expected에 적힌 실제 대상에 붙는 표시다. 원 설계 5.3절의 규칙과 명세 보완 4.1절을 손으로 적용했다. LC08은 world 목록이 없어 고정하지 않는다(관측 항목).",
+  "LC01": "LINKED_ALL", "LC02": "LINKED_ALL", "LC03": "NOT_OBSERVED", "LC04": "NOT_APPLICABLE",
+  "LC05": "LINKED_ALL", "LC06": "NOT_OBSERVED", "LC07": "UNDETERMINED", "LC09": "NOT_OBSERVED",
+  "LA01": "LINKED_SOME", "LA02": "LINKED_ALL"
+ },
+ "plan_statuses": {
+  "LC01": "PLANNED", "LC02": "PLANNED", "LC03": "PLANNED", "LC04": "NO_OTHER_BUNDLE", "LC05": "PLANNED",
+  "LC06": "PLANNED", "LC07": "PLANNED", "LC08": "PLANNED", "LC09": "PLANNED", "LA01": "PLANNED", "LA02": "PLANNED"
+ },
+ "planned_calls": {
+  "note": "계획 호출 수이자, 진단을 한 번 만들 때의 실제 호출 수의 기대값이다.",
+  "LC01": 8, "LC02": 6, "LC03": 2, "LC04": 0, "LC05": 19, "LC06": 14, "LC07": 2, "LC08": 17, "LC09": 14,
+  "LA01": 3, "LA02": 2
+ },
+ "tallies": {
+  "note": "살아남는 결과 하나의 집계(명세 보완 2.4절). 입력 칸은 어느 수에도 넣지 않는다. 손으로 센 값이다.",
+  "rows": [
+   {"case": "LC04", "cell": [1, 0], "number": 4, "bundle_cells_total": 4, "certain_cells": 3, "certain_pair_cells": 3, "certain_other_cells": 0, "resolved_pairs": 3, "resolved_bundles": 1, "all_cells_certain": true},
+   {"case": "LC07", "cell": [0, 0], "number": 1, "certain_cells": 2, "certain_pair_cells": 0, "certain_other_cells": 2, "resolved_pairs": 0, "resolved_bundles": 0, "all_cells_certain": false},
+   {"case": "LC09", "cell": [2, 2], "number": 3, "certain_cells": 3, "certain_pair_cells": 3, "certain_other_cells": 0, "resolved_pairs": 4, "resolved_bundles": 1, "all_cells_certain": false},
+   {"case": "LC09", "cell": [2, 3], "number": 2, "certain_cells": 7, "certain_pair_cells": 6, "certain_other_cells": 1, "resolved_pairs": 6, "resolved_bundles": 2, "all_cells_certain": true},
+   {"case": "LC09", "cell": [2, 3], "number": 3, "certain_cells": 7, "certain_pair_cells": 6, "certain_other_cells": 1, "resolved_pairs": 6, "resolved_bundles": 2, "all_cells_certain": true},
+   {"case": "LC09", "cell": [1, 4], "number": 2, "certain_cells": 7, "certain_pair_cells": 6, "certain_other_cells": 1, "resolved_pairs": 6, "resolved_bundles": 2, "all_cells_certain": true},
+   {"case": "LC09", "cell": [1, 4], "number": 3, "certain_cells": 7, "certain_pair_cells": 6, "certain_other_cells": 1, "resolved_pairs": 6, "resolved_bundles": 2, "all_cells_certain": true},
+   {"case": "LA01", "cell": [0, 0], "number": 0, "certain_cells": 2, "certain_pair_cells": 0, "certain_other_cells": 2, "resolved_pairs": 0, "resolved_bundles": 0, "all_cells_certain": false},
+   {"case": "LA01", "cell": [0, 0], "number": 1, "certain_cells": 6, "certain_pair_cells": 2, "certain_other_cells": 4, "resolved_pairs": 1, "resolved_bundles": 1, "all_cells_certain": true}
+  ]
+ },
+ "lc09_floating_cell": {
+  "note": "LC09에서 (0,5)는 어느 쌍에도 속하지 않고 어느 열린 숫자에도 닿지 않는 칸이다. 연결 칸 (2,3)이나 (1,4)를 열고 살아남으면 다른 묶음이 풀리는 것과 별개로 이 칸도 확정된다. 실제 대상 (2,2)를 열면 이 칸은 확정되지 않는다.",
+  "cell": [0, 5],
+  "after_cell_2_3": {"2": "CERTAIN_SAFE", "3": "CERTAIN_MINE"},
+  "after_cell_1_4": {"2": "CERTAIN_SAFE", "3": "CERTAIN_SAFE"},
+  "after_cell_2_2": {"3": "UNCERTAIN"}
+ },
+ "mine_count_variants": {
+  "note": "LC09의 공개 숫자와 선언한 M을 그대로 두고 전체 지뢰 수만 바꾼 별도 전제다. (0,5)가 어느 열린 숫자에도 닿지 않으므로 세 배치의 공개 숫자가 같다. 지뢰 수 설정마다 새 세션이나 새 전제로 계산한다.",
+  "case": "LC09",
+  "declared": {
+   "6": {"total_worlds": 2, "mine_worlds": {"a": 1, "b": 1, "c": 1, "d": 1, "e": 0, "f": 2, "k": 0, "h": 0}, "safe_cells": [[0, 4], [0, 5], [1, 5]], "certain_mines": [[1, 4]]},
+   "7": {"total_worlds": 4, "mine_worlds": {"a": 2, "b": 2, "c": 2, "d": 2, "e": 2, "f": 2, "k": 2, "h": 2}, "safe_cells": [], "certain_mines": []},
+   "8": {"total_worlds": 2, "mine_worlds": {"a": 1, "b": 1, "c": 1, "d": 1, "e": 2, "f": 0, "k": 2, "h": 2}, "safe_cells": [[1, 4]], "certain_mines": [[0, 4], [0, 5], [1, 5]]}
+  },
+  "real_sessions": {
+   "note": "실제 엔진에 숫자 칸 25개를 읽기 순서로 열어 만든 앞부분 상태다. 열린 숫자가 모두 1 이상이라 flood가 없다. 각 설정은 새 엔진과 새 KLocalSession이다. 국소 단계는 남은 지뢰 수를 쓰지 않고 잔여 0인 단서도 없으므로(소스 계약에서 읽은 예측) 안전 칸은 정밀 단계에서 나온다.",
+   "6": {"layout_world": ["a", "d", "f"], "continuation": "EXACT_SAFE", "safe_cells": [[0, 4], [0, 5], [1, 5]], "M_after": [[1, 1], [4, 1], [4, 4], [1, 4]]},
+   "7": {"layout_world": ["a", "d", "f", "k"], "continuation": "EXACT_GUESS", "safe_cells": [], "M_after": [[1, 1], [4, 1], [4, 4]], "guess_target": [2, 2], "selection_reason": "K_LC1_GUESS_KEPT", "target": [2, 2], "lookahead_planned_calls": 34},
+   "8": {"layout_world": ["a", "d", "e", "h", "k"], "continuation": "EXACT_SAFE", "safe_cells": [[1, 4]], "M_after": [[1, 1], [4, 1], [4, 4], [0, 4], [0, 5], [1, 5]]}
+  }
+ },
+ "forced_pair_with_known_mine_count": {
+  "note": "지뢰 수를 알아도 남는 50/50이다. 쌍의 한 칸을 지뢰로 둔 두 가정이 같은 전체 지뢰 수에서 같은 수의 world를 갖고, 각 칸의 위험이 정확히 1/2다. 다른 후보를 열어도 그 묶음은 풀리지 않고 확정 안전·확정 지뢰 목록에 들지 않는다.",
+  "LC03": {"pairs": [[[0, 0], [1, 0]], [[4, 0], [5, 0]]], "total_worlds": 4, "mine_worlds_each": 2, "worlds_with_either_cell_as_the_mine": 2},
+  "LC02": {"pairs": [[[1, 1], [1, 2]]], "total_worlds": 4, "mine_worlds_each": 2, "worlds_with_either_cell_as_the_mine": 2}
+ },
+ "flood_engines": {
+  "note": "숫자 0의 가정 관측과 실제 엔진의 flood를 대조하는 고정 배치다. 숫자 칸을 읽기 순서로 연 뒤(모두 1 이상이라 flood 없음) 후보 칸을 연다. rows_after는 그 입력 뒤의 공개 격자다(H는 닫힌 칸). certain_after는 그 공개 격자에 선언한 M을 그대로 둔 계산에서 쌍의 칸이 확정되는 값이다.",
+  "LC07_c": {"case": "LC07", "mines": [[2, 0], [3, 0], [1, 2], [3, 2], [0, 2], [2, 1]], "open": [0, 0], "rows_after": ["0 2 H H", "2 4 H 4", "H H H H"], "certain_after": {"total_worlds": 1, "c": 1, "d": 0}},
+  "LC07_d": {"case": "LC07", "mines": [[2, 0], [3, 0], [1, 2], [3, 2], [0, 2], [2, 2]], "open": [0, 0], "rows_after": ["0 1 H H", "2 4 H 4", "H H H H"], "certain_after": {"total_worlds": 1, "c": 0, "d": 1}},
+  "LA01_c": {"case": "LA01", "mines": [[3, 1], [1, 2], [1, 3], [2, 3], [3, 3], [0, 2], [2, 1], [0, 3]], "open": [0, 0], "rows_after": ["0 1 2 H", "2 3 H H", "H H H 4", "H H H H"], "certain_after": {"total_worlds": 1, "c": 1, "d": 0}},
+  "LA01_d": {"case": "LA01", "mines": [[3, 1], [1, 2], [1, 3], [2, 3], [3, 3], [0, 2], [3, 0], [2, 2]], "open": [0, 0], "rows_after": ["0 0 2 H", "2 3 4 H", "H H H 4", "H H H H"], "certain_after": {"total_worlds": 1, "d": 1}}
+ },
+ "real_states": {
+  "note": "실제 K 결정에서의 손 기대값이다. E_TIE는 앞부분 상태, G6과 S8W는 첫 입력부터 실행한 판의 추측 결정이다. 묶음 번호는 0부터다.",
+  "E_TIE": {
+   "kind": "REAL_K_PREFIX_STATE", "board": [3, 3, [[0, 0], [0, 1], [1, 1], [0, 2]]], "prefix": [[1, 0], [2, 0]],
+   "selection_reason": "TIE_LOOKAHEAD", "actual_target": [2, 2], "original_target": [0, 2], "total_worlds": 6,
+   "pairs": [[[1, 1], [2, 1]]], "bundles": [[[1, 1], [2, 1]]], "plan_status": "PLANNED",
+   "anchors": [{"cell": [2, 2], "role": "ACTUAL_TARGET", "mine_neighbors": 0, "unresolved_neighbors": 3, "calls": 4},
+               {"cell": [0, 2], "role": "ORIGINAL_TARGET", "mine_neighbors": 1, "unresolved_neighbors": 2, "calls": 3}],
+   "planned_calls": 7, "out_of_scope": [], "lookahead_checked": [[2, 2], [0, 2]],
+   "outcome_worlds": {"2,2": {"0": 0, "1": 2, "2": 2, "3": 0}, "0,2": {"1": 1, "2": 2, "3": 1}},
+   "results": [
+    {"anchor": [2, 2], "bundle": 0, "per_outcome": {"1": "UNRESOLVED_ISOLATED", "2": "UNRESOLVED_OTHER"}, "R": 0, "N": 4, "F": 0, "S": 4, "label": "NOT_RESOLVED_EXAMINED", "conditional": "0", "unconditional": "0"},
+    {"anchor": [0, 2], "bundle": 0, "per_outcome": {"1": "RESOLVED", "2": "UNRESOLVED_OTHER", "3": "RESOLVED"}, "R": 2, "N": 2, "F": 0, "S": 4, "label": "RESOLVED_SOME", "conditional": "1/2", "unconditional": "1/3"}],
+   "target_label": "NOT_OBSERVED"
+  },
+  "G6": {
+   "kind": "FROM_FIRST_INPUT", "board": [6, 2, [[3, 0], [5, 0]]], "guess_input_index": 1,
+   "selection_reason": "FORCED_5050_FIRST", "actual_target": [3, 0], "original_target": [4, 0], "total_worlds": 8,
+   "pairs": [[[3, 0], [3, 1]]], "bundles": [[[3, 0], [3, 1]]], "plan_status": "PLANNED",
+   "anchors": [{"cell": [4, 0], "role": "ORIGINAL_TARGET", "mine_neighbors": 0, "unresolved_neighbors": 5, "calls": 6}],
+   "planned_calls": 6, "out_of_scope": [], "lookahead_checked": [],
+   "outcome_worlds": {"4,0": {"0": 0, "1": 0, "2": 6, "3": 0, "4": 0, "5": 0}},
+   "results": [
+    {"anchor": [4, 0], "bundle": 0, "per_outcome": {"2": "UNRESOLVED_ISOLATED"}, "R": 0, "N": 6, "F": 0, "S": 6, "label": "NOT_RESOLVED_EXAMINED", "conditional": "0", "unconditional": "0"}],
+   "target_label": "NOT_APPLICABLE"
+  },
+  "S8W": {
+   "kind": "FROM_FIRST_INPUT", "board": [8, 2, [[3, 1]]], "guess_input_index": 2,
+   "selection_reason": "FORCED_5050_FIRST", "actual_target": [3, 0], "original_target": [3, 0], "total_worlds": 2,
+   "pairs": [[[3, 0], [3, 1]]], "bundles": [[[3, 0], [3, 1]]], "plan_status": "NO_OTHER_BUNDLE",
+   "anchors": [], "planned_calls": 0, "out_of_scope": [], "lookahead_checked": [], "results": [],
+   "target_label": "NOT_APPLICABLE"
+  }
+ },
+ "link_states_from_first_input": {
+  "note": "새 실행기가 입력마다 돌려주는 linked 상태의 기대값이다. 추측이 아닌 입력은 UNSUPPORTED(진단 없음)다. 추측 입력의 수와 위치는 기존 실행기의 결과에서 읽고, 여기에는 추측 결정의 계획 상태만 고정한다.",
+  "S8W": "NO_OTHER_BUNDLE", "G4": "NO_OTHER_BUNDLE", "G1": "NO_OTHER_BUNDLE", "G2": "NO_OTHER_BUNDLE",
+  "G5": "PLANNED", "G6": "PLANNED", "G7": "NO_LISTED_PAIR", "R11L": "NO_LISTED_PAIR", "B7": "NO_GUESS_DECISION"
+ },
+ "interpretations": [
+  "실제 대상이 기준 칸이 아니면 계획이 비지 않았더라도 표시는 NOT_APPLICABLE이다(명세 보완 4.1절, G6).",
+  "계획의 상태 이름 PLANNED는 이번에 붙였다. 원본 사례의 plan_expected에 status가 없으면 PLANNED다(명세 보완 4.3절).",
+  "불가능한 숫자의 flood 표시는 살아남는 숫자와 같은 규칙으로 적는다. 원본 사례도 그렇게 적혀 있다(LC02의 q, LC03의 a).",
+  "묶음 번호는 원본 사례의 B1, B2, ...를 0부터 센 번호로 읽는다. 쌍 번호도 P1, P2, ...를 0부터 센 번호로 읽는다."
+ ]
+}

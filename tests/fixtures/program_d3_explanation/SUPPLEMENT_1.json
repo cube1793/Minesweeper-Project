@@ -1,0 +1,46 @@
+{
+ "schema": "LIVE_EXPLANATION_PREP_SUPPLEMENT_V1",
+ "number": 1,
+ "written": "2026-11-21",
+ "written_before_the_files_were_changed": true,
+ "kind": "국소 보완: 큰 수의 표기. 설명 모듈의 문구 규칙 둘과 그 시험의 단언 추가. 선택, 판별, 검증, 한도, 기록, 계측 도구는 건드리지 않는다.",
+ "original_observation": {
+  "what": "준비 실행이 실제 보드 상태에서 남긴 linked 설명의 결과 줄이 world 수를 그대로 적었다. 실제 보드에서는 그 수가 90자리를 넘는다. 제품용 문구로 쓸 수 없다. 같은 까닭으로 기약 분수의 항이 큰 값(S_c, 위험, 하한)도 분수를 그대로 적는다.",
+  "where": "runs/prep_s03_01/PREPARED.json, conditions.explanation_of_C2.linked의 다섯째 줄(275자, 한 수가 95자리). 같은 기록의 선택 줄에는 'S_c 642798/1381357 (46.5%)'가 있다.",
+  "record_sha256": "e4ea8f9eb1c65a8707512fc0cd77940647212ac88eb7985f821aee48eb0ac30b",
+  "why_the_tests_did_not_show_it": "기능 시험의 고정 사례는 world 수가 한 자리나 두 자리인 손 사례다. 계획의 문구 틀이 world 수와 기약 분수를 항상 그대로 적도록 했고 시험은 그 틀대로 통과했다(24/24). 시험의 실패가 아니라 계획한 문구 틀의 결함이다.",
+  "kept": "원 관측의 기록은 runs에 그대로 있다. 통과한 첫 시험 실행 t_explain_01과 수정 전 두 파일(supplement_1/before)을 그대로 둔다."
+ },
+ "files_before": {
+  "candidate_src/experiments/program_d3_explanation.py": {"kept_as": "supplement_1/before/program_d3_explanation.py.txt", "bytes": 36226, "sha256": "abae29fb7b81c50fe2499255d646f79e6dc3dee7f7b8bdac34cb834d2d6b199e"},
+  "candidate_src/tests/test_program_d3_explanation.py": {"kept_as": "supplement_1/before/test_program_d3_explanation.py.txt", "bytes": 39954, "sha256": "f3b3e565dd282bfb09cd70958a0b0302bb83b2ab42a1a23eec0b08c415e379c6"}
+ },
+ "rule": {
+  "limit": 9999,
+  "fraction": "위험, S_c, S_v, 하한의 기약 분수는 분모가 9999 이하일 때만 %와 함께 적는다. 더 크면 %만 적는다.",
+  "world_counts": "linked 결과 줄의 world 수는 살아남는 world 수가 9999 이하일 때만 그대로 적는다. 더 크면 기록된 세 수를 살아남는 수로 나눈 %로 적는다: '살아남는 경우 가운데 풀림 a, 풀리지 않음 b, 판단 보류 c'. 기록된 수의 표시 방법만 바꾸며 새 계산이 아니다.",
+  "unchanged": "분모와 world 수가 9999 이하인 모든 경우의 문구. TEST_PLAN.json의 기대값은 하나도 바뀌지 않는다."
+ },
+ "plan_files_amended": [],
+ "test_ids": "바뀌지 않는다(24개). 새 단언은 기존 시험 x03, x08, x11, x13, x18, x21 안에 더한다.",
+ "expected": {
+  "note": "파일을 고치기 전에 이 규칙을 손으로 적용해 적은 기대값이다. 합성 자료는 수용된 고정 사례의 수에 10의 20제곱을 곱하거나 항이 큰 분수를 넣은 것으로, 수용된 실행의 관측이 아니다.",
+  "stored_97_first_lines": {
+   "3": "실제 입력 대상: OPEN (0, 3). 이 입력의 지뢰 확률 4.0%.",
+   "4": "실제 입력 대상: OPEN (3, 0). 이 입력의 지뢰 확률 20.0%.",
+   "5": "실제 입력 대상: OPEN (0, 4). 이 입력의 지뢰 확률 14.2% (91/643)."
+  },
+  "linked_scaled_LC01_row": "묶음 (2, 0), (3, 0): 모든 생존 결과에서 풀린다. 살아남는 경우 가운데 풀림 100%, 풀리지 않음 0%, 판단 보류 0%.",
+  "linked_scaled_RK04_other_row": "기준 칸 (0, 2) [원 대상] · 묶음 (1, 1), (2, 1): 일부 생존 결과에서만 풀린다. 살아남는 경우 가운데 풀림 50.0%, 풀리지 않음 50.0%, 판단 보류 0%.",
+  "tie_with_a_large_s_c": {"target_s_c": [900001, 1000003],
+                           "reason_line": "선택 이유: 최소 위험이 같은 칸 3개를 제한된 전방 계산으로 비교해 골랐다. 이 칸의 S_c 90.0%가 원 제안의 S_v 1/2 (50.0%)보다 크다."},
+  "pseudo_bound_with_large_terms": {"target_bound": [333334, 1000003],
+                                    "bound_line": "판 전체에서 이기지 못할 확률의 하한: 33.3%. 하한일 뿐이며 승률이나 최적 선택의 증명이 아니다. 이 입력 한 번의 지뢰 확률과 수는 같지만 뜻이 다르다."},
+  "every_generated_line": "숫자가 아홉 자리를 넘게 이어지지 않는다(고정 사례, 저장 기록 97과 8191의 추측 근거, 위의 합성 자료 전부)"
+ },
+ "rerun_scope": {
+  "rerun": ["t_explain_02 (신규 시험 모듈 전체, 24개)"],
+  "not_rerun": ["경로 검사 시험(바뀐 것이 없다)", "선정", "준비", "계측"],
+  "why_no_new_measurement": "계측 수 상한 72를 모두 썼고 상한은 그대로다. 계측 도구는 고치지 않았다. 계측의 FT 선택, 입력 검증, pseudo, linked 단계는 설명 모듈과 무관하다. 설명 단계의 값(최대 1.4밀리초)만 보완 전 모듈의 것이며 그렇게 보고한다. 보완 전과 보완 후의 측정을 섞지 않았다(보완 후 측정이 없다)."
+ }
+}

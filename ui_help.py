@@ -6,6 +6,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from live_k_basis import HELP_LINES as K_HELP_LINES
+
 
 STAT_TOOLTIPS = {
     "time": "게임 경과 시간입니다.\nReplay에서는 현재 재생 시점의 시간을 표시합니다.",
@@ -47,6 +49,10 @@ class StatisticsTable(QTableWidget):
         return super().viewportEvent(event)
 
 
+# K_D23: the static help lines live in the parent-safe basis module.
+K_HELP_HTML = ("<h2>K의 선택 이유와 진단 읽는 법</h2><ul>"
+               + "".join(f"<li>{line}</li>" for line in K_HELP_LINES) + "</ul>")
+
 HELP_PAGES = (
     ("기본 조작", """
         <h2>게임 시작과 기본 조작</h2>
@@ -77,6 +83,8 @@ HELP_PAGES = (
           <li><b>Stage2 Simple:</b> 공개된 숫자에서 확정 수를 찾고, 필요하면 지뢰 확률을 계산합니다.</li>
           <li><b>Stage3 V1:</b> 확정된 수 중 이동과 입력 비용을 고려해 다음 행동을 고릅니다.</li>
           <li><b>K-P0 / K-LC0 / K-LC1:</b> 서로 다른 추론·선택 방식을 적용한 Stage3 계열 정책입니다.</li>
+          <li><b>K:</b> K-LC1의 선택에 증명된 오프닝 우선, 불가피한 50/50 먼저 처리, 동률 전방 비교를 더한
+          정책입니다. 상태 줄에 선택 이유가 나오고 <b>K 설명</b> 단추로 상세 설명을 펼칩니다.</li>
           <li><b>Stage4 S / M / R:</b> 입력 효율을 고려하는 세 가지 선택 방식입니다.
           S는 안전성 기준을, M은 평균 성과를, R은 지정한 목표 효율의 도달을 우선합니다.</li>
         </ul>
@@ -165,6 +173,7 @@ HELP_PAGES = (
         </ul>
         <p>개발자 도구는 실험·검토용이며, 일반 플레이에는 사용할 필요가 없습니다.</p>
     """),
+    ("K 설명", K_HELP_HTML),
 )
 
 

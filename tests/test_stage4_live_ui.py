@@ -244,7 +244,7 @@ class UsabilityUITests(UIBase):
 
 
 class WindowRetentionTests(UIBase):
-    POLICIES = ('S2_SIMPLE', 'STAGE3_V1', 'K_P0', 'K_LC0', 'K_LC1',
+    POLICIES = ('S2_SIMPLE', 'STAGE3_V1', 'K_P0', 'K_LC0', 'K_LC1', 'K_D23',
                 'STAGE4_S', 'STAGE4_M', 'STAGE4_R')
 
     def settle(self):

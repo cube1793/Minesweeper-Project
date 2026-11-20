@@ -1,0 +1,71 @@
+{
+ "schema": "PROGRAM_D3_EXPLANATION_FIXTURE_PROVENANCE_V1",
+ "meaning": "이 폴더와 tests/support의 자료가 어디서 왔는지의 기록이다. origin은 졸업프로젝트 outputs의 STAGE3_D3_RISK_SELECTION_2026-11-19 폴더 아래의 경로다. 시험은 그 경로를 읽지 않는다.",
+ "files": [
+  {
+   "file": "TEST_PLAN.json",
+   "product_path": "tests/fixtures/program_d3_explanation/TEST_PLAN.json",
+   "origin": "live_adoption_prep_01/TEST_PLAN.json",
+   "bytes": 38375,
+   "sha256": "4b1bdcab446f416608c35b9cbea8f4abb11cd9f2302c610298c741ee365c6e8e",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "SUPPLEMENT_1.json",
+   "product_path": "tests/fixtures/program_d3_explanation/SUPPLEMENT_1.json",
+   "origin": "live_adoption_prep_01/SUPPLEMENT_1.json",
+   "bytes": 5078,
+   "sha256": "5178950766f79a0306184ddc98334f11862a18af3c166f32aaf8fe57f8a6b387",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "LINKED_CASES.json",
+   "product_path": "tests/fixtures/program_d3_explanation/LINKED_CASES.json",
+   "origin": "live_adoption_prep_01/cases/LINKED_CASES.json",
+   "bytes": 48762,
+   "sha256": "83f6681f0e9d292ae392b6e2e178df051130bf455ced3e014d2dbe58fd0ad640",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "LINKED_CASES_ADDENDUM.json",
+   "product_path": "tests/fixtures/program_d3_explanation/LINKED_CASES_ADDENDUM.json",
+   "origin": "live_adoption_prep_01/cases/LINKED_CASES_ADDENDUM.json",
+   "bytes": 19451,
+   "sha256": "595c48f36e32cc34e2640f8c3d8600a1aa1c31435f562545d794635af493f760",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "97.json",
+   "product_path": "tests/fixtures/program_d3_explanation/97.json",
+   "origin": "integration_impl_01/runs/x97_01/records/97.json",
+   "bytes": 296698,
+   "sha256": "b210da4067962e68a94dfb1c7323c03b7763347a127837043680706a3651716e",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "8191.json",
+   "product_path": "tests/fixtures/program_d3_explanation/8191.json",
+   "origin": "integration_impl_01/runs/x8191_01/records/8191.json",
+   "bytes": 45542,
+   "sha256": "6be7339592f1d610995a65af24da378da377b2bcc230da95dd22270558041884",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "s3d2_input_cap.py",
+   "product_path": "tests/support/s3d2_input_cap.py",
+   "origin": "live_adoption_prep_01/tools/s3d2_input_cap.py",
+   "bytes": 3350,
+   "sha256": "5db50cef0da76423dfffd2b6f057d3b561631b4fb39b9335f628dcaee1bb75c8",
+   "byte_copy_of_the_origin": true
+  },
+  {
+   "file": "FIXTURE_BINDING.json",
+   "product_path": "tests/fixtures/program_d3_explanation/FIXTURE_BINDING.json",
+   "origin": "live_adoption_prep_01/FIXTURE_BINDING.json",
+   "bytes": 1137,
+   "sha256": "39b904ea9005f28c1d40052171f1a71add4f7d3264b96ed32d8223f5a4b689b2",
+   "byte_copy_of_the_origin": false,
+   "note": "제품용 사본. 기록의 bytes와 sha256은 원본과 같고 root, path 필드만 바꿨다"
+  }
+ ]
+}

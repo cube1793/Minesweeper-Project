@@ -65,7 +65,7 @@ from live_analysis import (
     present_v1_proposal, present_k_proposal, present_flag_preparation,
 )
 from live_policy import (
-    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, CANONICAL_NEW, ADOPT_CURRENT, FIXED_BOARD, PHASE_FLAG_REVIEW, PHASE_V1,
+    POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23, CANONICAL_NEW, ADOPT_CURRENT, FIXED_BOARD, PHASE_FLAG_REVIEW, PHASE_V1,
     admit_proposal, make_ack, make_snapshot, supports_v1_board, validate_ack,
 )
 from live_flag_review import report_to_dict
@@ -80,6 +80,7 @@ from live_fixed_cadence import FixedCadence
 from live_distance_pacing import DISTANCE, DistanceWait
 from live_pacing import (FIXED, MODEL_C, PacingRate, PacingWait, decimal_display,
                          exact_value, FixedPeriod)
+import live_k_basis as k_basis
 import live_k_policy as k_live
 from simple_algorithm import InconsistentObservationError
 from simple_decision import DecisionKind, analyze_position
@@ -755,6 +756,7 @@ class MinesweeperUI(QWidget):
         self._v1_owned = False
         self._v1_manual_only = False
         self._k_retired = False  # Failure latch only; normal retirement permits a new owner.
+        self._k_last_basis = None  # K_D23: basis of the last ACTUAL K input of this game (end note only).
         self._k_reset_ready = False  # Explicit new-game/reset provenance, not merely all-HIDDEN.
         self._k_start_input_revision = 0
         self._k_phase = (k_live.normal_phase(self._live_policy)
@@ -1348,6 +1350,7 @@ class MinesweeperUI(QWidget):
         self.live_policy_combo.addItem("K-P0", POLICY_K)
         self.live_policy_combo.addItem("K-LC0", POLICY_K_LC0)
         self.live_policy_combo.addItem("K-LC1", POLICY_K_LC1)
+        self.live_policy_combo.addItem("K", POLICY_K_D23)
         self.live_policy_combo.setToolTip("정책 변경은 Auto를 멈춥니다. 다음 Auto ON부터 현재 판에 적용합니다.")
         self.live_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.live_policy_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -1459,6 +1462,22 @@ class MinesweeperUI(QWidget):
             "수동 플레이", 2,
             hint="초록: SAFE | 빨강: MINE | 주황: 최소 지뢰 확률 후보 | 테두리: 실제 추천")
         main_layout.addWidget(self.analysis_status_label)
+        # K_D23 only: the reason of the actual input and its separate diagnoses, folded until asked for.
+        # Display only; never a popup and never an input.
+        self.k_detail_button = QToolButton()
+        self.k_detail_button.setText("K 설명 펼치기")
+        self.k_detail_button.setCheckable(True)
+        self.k_detail_button.setFocusPolicy(Qt.NoFocus)
+        self.k_detail_button.setToolTip("K의 선택 이유와 별도 진단을 펼쳐 봅니다. 입력이나 선택을 바꾸지 않습니다.")
+        self.k_detail_button.toggled.connect(self._on_k_detail_toggled)
+        self.k_detail_view = QPlainTextEdit()
+        self.k_detail_view.setReadOnly(True)
+        self.k_detail_view.setFocusPolicy(Qt.NoFocus)
+        self.k_detail_view.setFixedHeight(8 * max(1, self.k_detail_view.fontMetrics().lineSpacing()) + 12)
+        self.k_detail_button.setVisible(False)
+        self.k_detail_view.setVisible(False)
+        main_layout.addWidget(self.k_detail_button)
+        main_layout.addWidget(self.k_detail_view)
 
         mouse_trace_bar = QHBoxLayout()
         self.mouse_trace_record_checkbox = QCheckBox("마우스 경로 기록")
@@ -3291,7 +3310,7 @@ class MinesweeperUI(QWidget):
         if auto_observation is None:
             self._reset_simple_preparation()
             self._retire_v1_for_manual("수동 입력으로 인계")
-            if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+            if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
                 blocked = self.allow_guess_checkbox.blockSignals(True)
                 self.allow_guess_checkbox.setChecked(False)
                 self.allow_guess_checkbox.blockSignals(blocked)
@@ -3397,7 +3416,7 @@ class MinesweeperUI(QWidget):
         if self._replay_mode or self._live_closing:
             return
         self._cancel_replay_entry()
-        if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, *STAGE4_POLICIES):
+        if self.live_policy_combo.currentData() not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23, *STAGE4_POLICIES):
             self._stop_simple_auto()
             self._clear_live_analysis("선택한 정책은 이번 단계에서 지원하지 않습니다.")
             return
@@ -3669,7 +3688,7 @@ class MinesweeperUI(QWidget):
 
     def _on_live_policy_changed(self, *_args):
         selected = self.live_policy_combo.currentData()
-        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, *STAGE4_POLICIES):
+        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23, *STAGE4_POLICIES):
             blocked = self.live_policy_combo.blockSignals(True)
             self.live_policy_combo.setCurrentIndex(self.live_policy_combo.findData(self._live_policy))
             self.live_policy_combo.blockSignals(blocked)
@@ -3687,6 +3706,7 @@ class MinesweeperUI(QWidget):
     def _update_policy_controls(self, *_args):
         if not hasattr(self, "live_policy_combo") or not hasattr(self, "simple_auto_checkbox"):
             return
+        self._update_k_detail()
         if (self._replay_entry_pending is not None
                 and (self._live_first_failure is not None or self._live_input_uncertain
                      or self._live_close_error is not None)):
@@ -3694,12 +3714,12 @@ class MinesweeperUI(QWidget):
         self._update_same_board_retry_controls()
         if hasattr(self, "auto_cursor_overlay"):
             self.auto_cursor_overlay.set_available(
-                self._v1_owned and self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
+                self._v1_owned and self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23)
                 and not self._replay_mode and not self._live_closing
                 and not self._live_input_uncertain and not self._v1_manual_only
                 and not (k_live.is_k_policy(self._live_policy) and self._k_retired))
             self.auto_cursor_checkbox.setEnabled(
-                self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode and not self._live_closing)
+                self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode and not self._live_closing)
         live_available = not self._replay_mode and not self._live_closing
         self.reset_button.setEnabled(live_available)
         self.difficulty_combo.setEnabled(live_available)
@@ -3807,7 +3827,7 @@ class MinesweeperUI(QWidget):
             checkbox.blockSignals(blocked)
         self.allow_guess_checkbox.setEnabled(False)
         selected = self.live_policy_combo.currentData()
-        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, *STAGE4_POLICIES):
+        if selected not in (POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23, *STAGE4_POLICIES):
             selected = self._live_policy
             blocked = self.live_policy_combo.blockSignals(True)
             self.live_policy_combo.setCurrentIndex(self.live_policy_combo.findData(selected))
@@ -3847,6 +3867,7 @@ class MinesweeperUI(QWidget):
         self._v1_display_requested = False
         self._v1_status = "새 게임 · 수동 · Auto OFF"
         self._k_reset_ready = True
+        self._k_last_basis = None
         self.live_action_records = []
         self.live_input_records = []
         self.live_auto_totals = self._empty_live_auto_totals()
@@ -3892,7 +3913,7 @@ class MinesweeperUI(QWidget):
         self._k_preparation_seq = 0
         self._k_normal_start = None
         self._k_bootstrap = None
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
             self._v1_status = reason
         if cancel and not waiting and self._v1_job.active_run_id is not None:
             self._v1_job.cancel(reason)
@@ -4017,12 +4038,85 @@ class MinesweeperUI(QWidget):
             raise ValueError("K 원 입력/Replay 이력이 달라졌습니다.")
         return matches[0]
 
+    # ---- K_D23: the basis of a decision, shown as a short reason and a folded detail. Display only. ----
+    def _k_pending_basis(self):
+        """The basis the job validated for the current pending K_D23 decision proposal, else None."""
+        if self._live_policy != POLICY_K_D23 or self._v1_pending is None:
+            return None
+        basis = getattr(self._v1_job, "pending_basis", None)
+        return basis if basis is not None and basis.token == self._v1_pending.token else None
+
+    def _k_last_actual(self):
+        """The entry of the LAST ACTUAL input when that input was a K_D23 input of this game, else None.
+        It is read only through the input record of that very input: a permit, a wait or a proposal
+        that was not sent has no record, and a later manual input makes another record the last one."""
+        last, records = self._k_last_basis, self.live_input_records
+        if (last is None or not records or last["game_id"] != self._live_game_id
+                or records[-1]["game_id"] != self._live_game_id or not records[-1]["automatic"]
+                or records[-1]["input_revision"] != last["input_revision"]):
+            return None
+        return last
+
+    def _k_end_lines(self):
+        """The basic note under the unchanged base result: the LAST ACTUAL input and its pre-input basis.
+        A proposal that was not sent is never used, and nothing revealed after a loss is read."""
+        if self._live_policy != POLICY_K_D23 or self._replay_mode:
+            return ()
+        status = self.engine.status
+        if status not in (GameStatus.WON, GameStatus.LOST):
+            return ()
+        last = self._k_last_actual()
+        kind, basis = k_basis.LAST_UNKNOWN, None
+        if last is not None:
+            if last["initial"]:
+                kind = k_basis.LAST_K_INITIAL
+            elif last["basis"] is not None:
+                kind, basis = k_basis.LAST_K_DECISION, last["basis"]
+        return k_basis.end_lines(status.name, kind, basis)
+
+    def _game_end_text(self):
+        lines = self._k_end_lines()
+        return "게임 종료" + ("\n" + lines[0] if lines else "")
+
+    def _k_detail_text(self):
+        """None unless the new K is selected. A pending proposal is worded as a proposal (or as a blocked
+        guess); only an input that reached the Engine is worded as an actual input."""
+        if self._live_policy != POLICY_K_D23 or self._replay_mode:
+            return None
+        lines = []
+        basis = self._k_pending_basis()
+        if basis is not None:
+            blocked = self._v1_pending.is_guess and not self.allow_guess_checkbox.isChecked()
+            lines += k_basis.detail_lines(basis, k_basis.BLOCKED if blocked else k_basis.PROPOSED)
+        else:
+            last = self._k_last_actual()
+            if last is not None and last["basis"] is not None:
+                lines += k_basis.detail_lines(last["basis"], k_basis.EXECUTED)
+        lines += self._k_end_lines()
+        return "\n".join(lines) if lines else "표시할 K 설명이 없습니다."
+
+    def _update_k_detail(self, *_args):
+        if not hasattr(self, "k_detail_view"):
+            return
+        text = self._k_detail_text()
+        self.k_detail_button.setVisible(text is not None)
+        shown = text is not None and self.k_detail_button.isChecked()
+        self.k_detail_button.setText("K 설명 접기" if shown else "K 설명 펼치기")
+        if shown and self.k_detail_view.toPlainText() != text:
+            self.k_detail_view.setPlainText(text)
+        self.k_detail_view.setVisible(shown)
+
+    def _on_k_detail_toggled(self, _checked):
+        self._update_k_detail()
+        self._queue_board_fit()
+
     def _show_v1_pending(self):
         proposal = self._v1_pending
         if proposal is None:
             return
         # KLC1_INFO_D1: the job keeps the validated display info beside its pending.
-        self._analysis_result = (present_k_proposal(proposal, self._v1_job.pending_info)
+        self._analysis_result = (present_k_proposal(proposal, self._v1_job.pending_info,
+                                                    self._k_pending_basis())
                                  if k_live.is_k_policy(self._live_policy)
                                  else present_v1_proposal(proposal))
         self._analysis_observation = proposal.snapshot.observation
@@ -4032,6 +4126,7 @@ class MinesweeperUI(QWidget):
                      else proposal.is_flag_review)
         self._remember_live_certainty(preparing=preparing, carry=True)
         self._render_live_analysis()
+        self._update_k_detail()
         self._schedule_v1_step()
 
     def _analyze_v1_current(self):
@@ -4175,7 +4270,7 @@ class MinesweeperUI(QWidget):
 
     def _on_v1_proposal(self, proposal):
         if (self._live_closing or self._replay_mode or not self._v1_owned
-                or self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1)
+                or self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23)
                 or proposal.snapshot.run_id != self._live_run_id):
             return
         try:
@@ -4388,6 +4483,7 @@ class MinesweeperUI(QWidget):
             if admitted != proposal:
                 raise ValueError("K 소비 token이 승인과 다릅니다.")
             display_info = self._v1_job.pending_info   # KLC1_INFO_D1: record only, never a basis
+            display_basis = self._k_pending_basis()    # K_D23: joins the record only after the actual input
             self._v1_pending = None
             before_events = len(self._replay_recorder.events)
             counters = self.engine.get_counter_snapshot()
@@ -4417,9 +4513,17 @@ class MinesweeperUI(QWidget):
                 'ack_sent': False, 'ack_state': 'NOT_SENT', 'incomplete_reason': None,
                 'end_reason': None, 'cleanup': None,
                 'info_status': None if display_info is None else display_info.status,
+                'basis': None,
             }
             self.live_action_records.append(record)
             owner_record['k_actions'].append(record)
+            previous_basis = self._k_last_basis
+            if proposal.snapshot.policy_id == POLICY_K_D23:
+                # A losing input renders its end text inside the call below. The entry is read only
+                # through the input record that call appends after engine.step (_k_last_actual).
+                self._k_last_basis = {'game_id': self._live_game_id, 'run_id': self._live_run_id,
+                                      'token': proposal.token, 'input_revision': self._live_action_count + 1,
+                                      'initial': proposal.initial, 'basis': display_basis}
             try:
                 event_index = self._apply_live_action(proposal.x, proposal.y, proposal.move.action,
                                                        auto_observation=proposal.snapshot.observation)
@@ -4435,6 +4539,12 @@ class MinesweeperUI(QWidget):
                               cursor_after=self._v1_cursor, input_revision_after=self._live_action_count,
                               event_index=before_events if events == before_events + 1 else None,
                               actual_input_confirmed=actual)
+                if actual and proposal.snapshot.policy_id == POLICY_K_D23:
+                    # Only an input that really reached the Engine carries its basis. A permit or a
+                    # fixed-interval wait alone never does.
+                    record['basis'] = None if display_basis is None else k_basis.basis_to_dict(display_basis)
+                elif proposal.snapshot.policy_id == POLICY_K_D23:
+                    self._k_last_basis = previous_basis  # no actual input: nothing is bound
                 if actual:
                     category = 'preparation' if proposal.is_preparation else 'k'
                     self.live_auto_totals[category + '_inputs'] += 1
@@ -4616,7 +4726,7 @@ class MinesweeperUI(QWidget):
             self._clear_live_analysis(f"이전 Auto 오류 - {record.get('error') or record.get('status')}")
             self._update_policy_controls()
             return
-        if self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        if self._live_policy not in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
             self._update_policy_controls()
             return
         if (record.get("status") == "SUCCEEDED" and record.get("cleanup_complete") is True
@@ -4758,7 +4868,7 @@ class MinesweeperUI(QWidget):
         if self._stage4.selected:
             self._stage4.start()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
             self._v1_display_requested = True
             self._analyze_v1_current()
             return
@@ -4866,7 +4976,7 @@ class MinesweeperUI(QWidget):
         if self._replay_mode or self.engine.status != GameStatus.PLAYING:
             self._set_auto_off(clear_guess=True)
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, *STAGE4_POLICIES):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23, *STAGE4_POLICIES):
             self._update_policy_controls()
             return
         if auto_observation is not None:
@@ -5015,7 +5125,7 @@ class MinesweeperUI(QWidget):
             self._update_policy_controls()
 
     def _fail_simple_auto(self, message):
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
             self._fail_v1(message)
             return
         self._set_auto_off(clear_guess=True)
@@ -5167,7 +5277,7 @@ class MinesweeperUI(QWidget):
         if self._stage4.selected:
             self._stage4.schedule()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1):
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23):
             self._schedule_v1_step()
         elif self.simple_auto_checkbox.isChecked() and self._analysis_result is not None:
             self._schedule_simple_auto_step()
@@ -5247,7 +5357,7 @@ class MinesweeperUI(QWidget):
         self._restart_fixed_cadence()
         if self._stage4.selected and not self._replay_mode:
             self._stage4.schedule()
-        elif self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
+        elif self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode:
             self._schedule_v1_step()
         elif pending:
             # A fixed-unit edit changes only the existing wait, not its move.
@@ -5274,7 +5384,7 @@ class MinesweeperUI(QWidget):
         if enabled and self._mouse_buttons and not self._replay_mode:
             self._stop_simple_auto()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode:
             if (not enabled or self._live_closing or self._v1_manual_only
                     or self._live_input_uncertain or self._mouse_buttons
                     or self.engine.status != GameStatus.PLAYING):
@@ -5308,7 +5418,7 @@ class MinesweeperUI(QWidget):
         if self._stage4.selected and not self._replay_mode:
             self._stage4.guess_changed()
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode:
             self._schedule_v1_step()
             return
         if not self.simple_auto_checkbox.isChecked() or self._replay_mode:
@@ -5366,7 +5476,7 @@ class MinesweeperUI(QWidget):
         return self.simple_auto_checkbox.isChecked()
 
     def _schedule_simple_auto_step(self):
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode:
             self._schedule_v1_step()
             return
         self._cancel_simple_auto_step()
@@ -5397,7 +5507,7 @@ class MinesweeperUI(QWidget):
     def _on_simple_auto_timeout(self, nonce=None):
         if nonce is not None and nonce != self._v1_timer_nonce:
             return
-        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1) and not self._replay_mode:
+        if self._live_policy in (POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, POLICY_K_D23) and not self._replay_mode:
             # A generic Simple timeout may have been queued before selection.
             # Only the captured V1 reservation is authorized to execute V1.
             return
@@ -5428,7 +5538,8 @@ class MinesweeperUI(QWidget):
         engine = self._engine_for_current_mode()
         if engine.status != GameStatus.PLAYING:
             self._stop_simple_auto()
-            self._clear_live_analysis("게임 종료")
+            self._clear_live_analysis(self._game_end_text())
+            self._update_k_detail()
         obs = engine.get_observation()
         font_size = self._current_font_size()
         border = border_width_for(self._cell_size)

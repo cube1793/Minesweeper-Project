@@ -27,6 +27,7 @@ Milestones **1–9 are CLOSED**. Milestone 10 Program K has separate disposition
 | Main same-board replay, layout history and Replay entry/exit choices | Historical source333,49/143 +2owner +28probe, user native accepted; committed at cd8ee2e |
 | Main distance viewing and bounded performance diagnosis | Source335; functionality/helper/T1/T2 accepted; subsequent current-PC user native accepted; original main PARTIAL retained |
 | Main fixed6 optimization | Reviewed C1+C2 bytes applied; direct-pair median gap improvement 12.484226%; H1 complete and separate 56-test R2 PASS; current-PC native accepted; exhibition laptop pending |
+| Main 새 K(`K_D23`): K-LC1 원 선택 위의 D2·불가피한 쌍·동률 전방 선택과 선택 근거 표시 | 2026-11-21 제품 반영. 제한 회귀 17개 모듈과 현재 PC native 확인. 일반 효과성 미확립, 전체 회귀·전시 기기·배포본 미확인. [마감 문서](STAGE3_MAIN_LIVE_K_D23_CLOSEOUT.md) |
 | Burst/fixed-rate measurement B |40-row arithmetic reproduced; B1 same-owner60-per-setting NOT_SATISFIED; no function profiling/optimization |
 | Distance analysis C |30games/5035transitions/24player OOF arithmetic reproduced; sensitivity limits retained. Later distance_view_log_v1 is presentation-only, not a refit of the frozen research model |
 
@@ -50,6 +51,8 @@ The new viewing profile is implemented; B1 evidence extension, further profiling
 Global Extended closure, Stage4, new package and research remain separate decisions.
 
 ## Main/Live current accepted scope
+
+2026-11-21 추가: 새 K 정책(`K_D23`, 정책 목록의 표시명 K)을 Main/Live에 반영했다. K-LC1의 원 선택 위에 D2와 D3(불가피한 쌍 선처리, 동률 전방 선택)를 적용하고, pseudo 50/50 진단을 기본으로 보여 주며, linked 진단은 능력만 보존했다. 기존 K-P0/K-LC0/K-LC1은 그대로다. 범위, 검증, 한계는 [새 K 마감 문서](STAGE3_MAIN_LIVE_K_D23_CLOSEOUT.md)를 따른다. 아래 문단들은 2026-11-06 기준의 기록이다.
 
 Simple/V1/K-P0/K-LC0/K-LC1 are available. K-family policies adopt/readopt manual/Simple/V1 preset boards,
 including existing FLAGs after native public-proof preparation. Persistent session/M,

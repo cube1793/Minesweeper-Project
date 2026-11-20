@@ -47,7 +47,7 @@ class LiveLC1UITests(unittest.TestCase):
     def test_enabled_labels_policy_ids_all_three_presets_and_custom_block(self):
         combo = self.ui.live_policy_combo
         self.assertEqual([combo.itemData(i) for i in range(combo.count())],
-                         [POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1,
+                         [POLICY_SIMPLE, POLICY_V1, POLICY_K, POLICY_K_LC0, POLICY_K_LC1, 'K_D23',
                           'STAGE4_S', 'STAGE4_M', 'STAGE4_R'])
         for policy, label in ((POLICY_K, 'K-P0'), (POLICY_K_LC0, 'K-LC0'), (POLICY_K_LC1, 'K-LC1')):
             self.assertTrue(combo.model().item(combo.findData(policy)).isEnabled())

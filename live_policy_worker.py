@@ -19,8 +19,9 @@ def _check_sequence(sequence, bound):
         raise LivePolicyError("Entry-mode transport sequence bound exceeded.")
 
 
-def _k_proposal_payload(proposal, k_info):
-    """The unchanged 14 KProposal keys; K-LC1 decision proposals add ``info``.
+def _k_proposal_payload(proposal, k_info, k_owner=None, k_basis=None):
+    """The unchanged 14 KProposal keys; K-LC1 and K_D23 decision proposals add ``info``,
+    and K_D23 decision proposals add ``basis`` (the reason of the actual input and its diagnoses).
 
     The proposal is finished and immutable before the display pass reads it.
     A contradiction or integrity error raised here leaves nothing published.
@@ -30,6 +31,13 @@ def _k_proposal_payload(proposal, k_info):
         record = k_info.describe(proposal)
         if record is not None:
             payload["info"] = k_live.info_to_dict(record)
+    if k_basis is not None:
+        # K_D23: validation, diagnosis and explanation of the finished proposal. An error of any stage
+        # is raised here, nothing is published, and the run ends with that error.
+        basis = k_basis.describe(k_owner, proposal)
+        if basis is not None:
+            import live_k_basis
+            payload["basis"] = live_k_basis.basis_to_dict(basis)
     return payload
 
 
@@ -42,7 +50,8 @@ def serve(directory, run_id):
     review = None
     info = None  # V1 display-only supplement; this process serves exactly one owner run.
     k_owner = None
-    k_info = None  # KLC1_INFO_D1: K-LC1 only; K-P0/K-LC0 never create or load it.
+    k_info = None  # KLC1_INFO_D1: K-LC1 and K_D23; K-P0/K-LC0 never create or load it.
+    k_basis = None  # K_D23 only: one diagnosis configuration for the whole run.
     sequence_bound = MAX_V1_SEQUENCE
     while True:
         try:
@@ -60,16 +69,21 @@ def serve(directory, run_id):
                     if snapshot.run_id != run_id:
                         raise LivePolicyError("K START run identity mismatch.")
                     k_owner = k_live.KOwner(snapshot, table)
-                    if snapshot.policy_id == k_live.POLICY_K_LC1:
+                    if snapshot.policy_id in (k_live.POLICY_K_LC1, k_live.POLICY_K_D23):
                         from live_k_info import KInfoSupplement
                         k_info = KInfoSupplement()
+                    if snapshot.policy_id == k_live.POLICY_K_D23:
+                        import os
+                        import live_k_basis
+                        from live_k_d23 import KD23Explainer
+                        k_basis = KD23Explainer(live_k_basis.diagnosis_from_environment(os.environ))
                     sequence_bound = k_live.sequence_limit(snapshot)
                     if snapshot.entry_mode == k_live.FLAG_ADOPT:
                         outgoing = message(run_id, sequence, "BOOTSTRAPPED",
                                            k_live.to_dict(k_owner.bootstrap_proof.summary))
                     else:
                         outgoing = message(run_id, sequence, "PROPOSAL",
-                                           _k_proposal_payload(k_owner.propose(snapshot), k_info))
+                                           _k_proposal_payload(k_owner.propose(snapshot), k_info, k_owner, k_basis))
                     write_once(directory, "worker", sequence, outgoing)
                     sequence += 1
                     continue
@@ -96,7 +110,7 @@ def serve(directory, run_id):
                 elif kind == "NEXT":
                     snapshot = k_live.from_dict(payload, k_live.KSnapshot)
                     outgoing = message(run_id, sequence, "PROPOSAL",
-                                       _k_proposal_payload(k_owner.propose(snapshot), k_info))
+                                       _k_proposal_payload(k_owner.propose(snapshot), k_info, k_owner, k_basis))
                 else:
                     raise LivePolicyError("K pending requires VALIDATE/ACK, or explicit NEXT after ACK.")
             elif pending is not None:

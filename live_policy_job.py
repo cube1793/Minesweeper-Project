@@ -16,6 +16,7 @@ from live_policy import (
     snapshot_from_dict, snapshot_to_dict, validate_ack, validate_start_snapshot,
 )
 from live_policy_transport import MAX_V1_SEQUENCE, message, read_next, worker_reply_exists, write_once
+import live_k_basis as k_basis
 import live_k_policy as k_live
 
 
@@ -68,6 +69,9 @@ class LivePolicyJob(QObject):
         self._k_bootstrap = None
         self._k_preparation_count = self._k_input_count = self._k_decision_count = 0
         self._pending_info = None      # KLC1_INFO_D1: lives and dies with _pending
+        self._pending_basis = None     # K_D23 basis: lives and dies with _pending as well
+        self._k_diagnosis = None       # K_D23 runs only: the diagnosis configuration of the run
+        self._k_basis_count = 0
         self._k_info_counts = None     # per accepted PROPOSAL, K-LC1 runs only
         self.timer = QTimer(self)
         self.timer.setInterval(25)
@@ -86,6 +90,14 @@ class LivePolicyJob(QObject):
         return info
 
     @property
+    def pending_basis(self):
+        """The basis validated for the current pending K_D23 decision proposal, else None."""
+        basis = self._pending_basis
+        if self._pending is None or basis is None or basis.token != self._pending.token:
+            return None
+        return basis
+
+    @property
     def active_run_id(self):
         return self._active_run_id
 
@@ -100,6 +112,11 @@ class LivePolicyJob(QObject):
         else:
             snapshot = snapshot_from_dict(snapshot_to_dict(snapshot))
             validate_start_snapshot(snapshot)
+        # K_D23: the worker reads its diagnosis configuration from the environment it inherits. The
+        # parent reads the same value once, before anything is started, and requires it in every basis.
+        diagnosis = (k_basis.diagnosis_from_environment(os.environ)
+                     if type(snapshot) is k_live.KSnapshot and snapshot.policy_id == k_live.POLICY_K_D23
+                     else None)
         if (self.state != "idle" or self._process is not None or self._scope is not None
                 or self._directory is not None or self._shutting_down):
             raise RuntimeError("이전 자동 실행 worker의 정리가 끝나지 않았습니다.")
@@ -107,10 +124,11 @@ class LivePolicyJob(QObject):
         self._expected_snapshot = snapshot
         self._start_snapshot = snapshot
         self._pending = self._sent_ack = self._terminal_reply = None
-        self._pending_info = None
+        self._pending_info = self._pending_basis = None
         self._k_info_counts = (
             {name: 0 for name in (*k_live.INFO_STATUSES, k_live.INFO_NOT_APPLICABLE)}
-            if self._is_k and snapshot.policy_id == k_live.POLICY_K_LC1 else None)
+            if self._is_k and snapshot.policy_id in (k_live.POLICY_K_LC1, k_live.POLICY_K_D23) else None)
+        self._k_diagnosis, self._k_basis_count = diagnosis, 0
         self._intent = self._intent_reason = self._failure = None
         self._stop_deadline = self._exit_drain_deadline = None
         self._finish_exit_deadline = None
@@ -278,7 +296,7 @@ class LivePolicyJob(QObject):
 
     def _request_stop(self):
         self.state = "cancelling"
-        self._pending = self._pending_info = None
+        self._pending = self._pending_info = self._pending_basis = None
         self._permit = self._accepted_nonce = self._sent_validation = None
         self._awaiting = None
         self._deadline = None
@@ -330,7 +348,11 @@ class LivePolicyJob(QObject):
             self.state = "ready"
             self.bootstrapped.emit((self._start_snapshot, following))
         elif kind == "PROPOSAL":
-            if self._is_k:
+            has_basis, raw_basis = False, None
+            if self._is_k and self._k_diagnosis is not None:
+                # K_D23: "info" and "basis" are split off; the 14 KProposal keys stay strict.
+                proposal, has_info, raw_info, has_basis, raw_basis = k_basis.split_payload(payload)
+            elif self._is_k:
                 # The 14 KProposal keys stay strict; "info" is split off, never merged in.
                 proposal, has_info, raw_info = k_live.split_proposal_payload(payload)
             else:
@@ -340,8 +362,14 @@ class LivePolicyJob(QObject):
             # Presence rule, format and binding only. Any violation ends this run
             # exactly as a sender-side error does; nothing is kept on failure.
             info = k_live.receive_info(proposal, has_info, raw_info) if self._is_k else None
+            # K_D23: presence rule, exact format, binding to this proposal and the run's diagnosis
+            # configuration. The parent solves nothing; a violation ends the run.
+            basis = (k_basis.receive_basis(proposal, has_basis, raw_basis, self._k_diagnosis)
+                     if self._k_diagnosis is not None else None)
             self._pending = proposal
             self._pending_info = info
+            self._pending_basis = basis
+            self._k_basis_count += int(basis is not None)
             self._proposal_count += 1
             if self._k_info_counts is not None:   # once per accepted PROPOSAL, here only
                 self._k_info_counts[info.status if info is not None else k_live.INFO_NOT_APPLICABLE] += 1
@@ -377,7 +405,7 @@ class LivePolicyJob(QObject):
                                        else validate_ack(self._pending, ack))
             if self._is_k:
                 self._last_k_ack = ack
-            self._pending = self._sent_ack = self._pending_info = None
+            self._pending = self._sent_ack = self._pending_info = self._pending_basis = None
             self._permit = self._accepted_nonce = None
             self._ack_count += 1
             self._deadline = None
@@ -399,7 +427,7 @@ class LivePolicyJob(QObject):
                     or payload["status"] != self._sent_ack.status):
                 raise ValueError("Worker terminal receipt differs from the actual terminal ACK.")
             self._terminal_reply = payload
-            self._pending = self._sent_ack = self._pending_info = None
+            self._pending = self._sent_ack = self._pending_info = self._pending_basis = None
             self._permit = self._accepted_nonce = None
             self._ack_count += 1
             self._deadline = None
@@ -568,6 +596,10 @@ class LivePolicyJob(QObject):
             "response_cap_seconds": RESPONSE_CAP_SECONDS,
             "finish_exit_cap_seconds": EXIT_CAP_SECONDS,
         }
+        if self._k_diagnosis is not None:
+            # K_D23 runs only: the fixed diagnosis configuration and the accepted bases of this run.
+            record["k_diagnosis"] = self._k_diagnosis
+            record["k_basis_count"] = self._k_basis_count
         if self._k_info_counts is not None:
             # KLC1_INFO_D1, K-LC1 runs only: counted at PROPOSAL acceptance; the
             # error code is read once from this run's failure text.
@@ -587,7 +619,7 @@ class LivePolicyJob(QObject):
         self.last_record = record
         self.records.append(record)
         self._active_run_id = None
-        self._pending = self._sent_ack = self._expected_snapshot = self._pending_info = None
+        self._pending = self._sent_ack = self._expected_snapshot = self._pending_info = self._pending_basis = None
         self._awaiting = self._deadline = None
         self._finish_exit_deadline = None
         self.state = "blocked" if self._directory is not None or self._scope is not None else "idle"
@@ -619,7 +651,7 @@ class LivePolicyJob(QObject):
         self.last_record.update(cleanup_complete=True, reaped=True, tree_active_count=0,
                                 cleanup_retry_complete=True)
         self._active_run_id = None
-        self._pending = self._sent_ack = self._expected_snapshot = self._pending_info = None
+        self._pending = self._sent_ack = self._expected_snapshot = self._pending_info = self._pending_basis = None
         self._awaiting = self._deadline = self._finish_exit_deadline = None
         self._shutting_down = False
         self.state = "idle"
@@ -631,7 +663,7 @@ class LivePolicyJob(QObject):
         self._shutting_down = True
         self.timer.stop()
         self._intent, self._intent_reason = "CLOSED", "close"
-        self._pending = self._awaiting = self._pending_info = None
+        self._pending = self._awaiting = self._pending_info = self._pending_basis = None
         self._deadline = self._finish_exit_deadline = None
         process = self._process
         if process is not None:
