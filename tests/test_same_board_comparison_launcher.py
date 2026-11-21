@@ -195,8 +195,8 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.assertEqual(window.findChildren(QComboBox), [])
         self.assertEqual(window.findChildren(QLineEdit), [])
         self.assertEqual([button.text() for button in window.findChildren(QPushButton)],
-                         ["Run", "Cancel", "Open Result"])
-        self.assertIn("Ready", window.status_label.text())
+                         ["실행", "취소", "결과 열기"])
+        self.assertIn("준비됨", window.status_label.text())
         self.assert_idle_controls()
         self.assertFalse(window.open_result_button.isEnabled())
         self.assertEqual(self.job.started, [])
@@ -204,14 +204,14 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
 
     def test_captured_facts_and_provenance_are_plain_and_factual(self):
         labels = " ".join(label.text() for label in self.window.findChildren(QLabel))
-        self.assertIn("currently loaded Replay", labels)
+        self.assertIn("현재 불러온 Replay", labels)
         self.assertIn("4", labels)
         self.assertIn("WON", labels)
         self.assertIn(str(len(self.win.context.human_replay.events)), labels)
         self.assertIn(self.win.context.layout.board_fingerprint, labels)
-        self.assertIn("full-game Human recording", labels)
-        self.assertIn("do not prove exclusively Human historical input", labels)
-        self.assertIn("Auto input may be present", labels)
+        self.assertIn("완료된 Human 판 기록", labels)
+        self.assertIn("과거 입력이 모두 사람의 입력이었다는 증거가 아닙니다", labels)
+        self.assertIn("자동 입력이 섞여 있을 수 있습니다", labels)
         self.assertEqual(self.window.status_label.textFormat(), Qt.PlainText)
 
     def test_run_uses_exact_context_retains_token_and_blocks_duplicate_start(self):
@@ -219,7 +219,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.assertEqual(self.job.started, [(token, self.win.context)])
         self.assertIs(self.job.started[0][1], self.window.context)
         self.assertIs(type(token), int)
-        self.assertIn("Running", self.window.status_label.text())
+        self.assertIn("실행 중", self.window.status_label.text())
         self.assertFalse(self.window.run_button.isEnabled())
         self.assertTrue(self.window.cancel_button.isEnabled())
         self.assertFalse(self.window.open_result_button.isEnabled())
@@ -243,7 +243,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.viewer_factory.assert_called_once_with(self.win, self.window)
         self.assert_idle_controls()
         self.assertTrue(self.window.open_result_button.isEnabled())
-        self.assertIn("Completed", self.window.status_label.text())
+        self.assertIn("완료", self.window.status_label.text())
         self.assertEqual(self.job.shutdown_calls, 0)
 
     def test_legitimate_mined_origin_losses_are_completed_success_without_retry(self):
@@ -253,7 +253,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.assertIs(window._completed_execution.context, self.loss.context)
         self.assertIs(self.loss.stage2_metrics.outcome, GameStatus.LOST)
         self.assertIs(self.loss.stage3_metrics.outcome, GameStatus.LOST)
-        self.assertIn("Completed", window.status_label.text())
+        self.assertIn("완료", window.status_label.text())
         self.assertEqual(len(window.job.started), 1)
         self.assertTrue(window.open_result_button.isEnabled())
 
@@ -265,8 +265,8 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.job.finish_success(replace(self.win, context=other_context))
         self.assertIsNone(self.window._completed_execution)
         self.assertIsNone(self.window._result_window)
-        self.assertIn("Failed", self.window.status_label.text())
-        self.assertIn("context", self.window.status_label.text().lower())
+        self.assertIn("실패", self.window.status_label.text())
+        self.assertIn("가져온 판 정보", self.window.status_label.text())
         self.viewer_factory.assert_not_called()
         self.assert_idle_controls()
 
@@ -279,14 +279,14 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
                 self.start_request()
                 self.job.finish_success(unexpected)
                 self.assertIsNone(self.window._completed_execution)
-                self.assertIn("Failed", self.window.status_label.text())
+                self.assertIn("실패", self.window.status_label.text())
                 self.assert_idle_controls()
         self.viewer_factory.assert_not_called()
 
     def test_failure_is_plain_diagnostic_without_fabricated_result(self):
         self.start_request()
         self.job.finish_failure("<worker failed>")
-        self.assertIn("Failed", self.window.status_label.text())
+        self.assertIn("실패", self.window.status_label.text())
         self.assertIn("<worker failed>", self.window.status_label.text())
         self.assertIsNone(self.window._completed_execution)
         self.assertIsNone(self.window._result_window)
@@ -306,7 +306,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
 
         def inspect_cancel():
             self.assertTrue(self.window._cancel_requested)
-            self.assertIn("Cancelling", self.window.status_label.text())
+            self.assertIn("취소 중", self.window.status_label.text())
             self.assertFalse(self.window.cancel_button.isEnabled())
             self.job.succeeded.emit(token, self.win)
 
@@ -321,7 +321,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.assert_disabled_controls()
         self.viewer_factory.assert_not_called()
         self.job.finish_cancel()
-        self.assertIn("Cancelled", self.window.status_label.text())
+        self.assertIn("취소됨", self.window.status_label.text())
         self.assertFalse(self.window._cancel_requested)
         self.assert_idle_controls()
 
@@ -445,7 +445,7 @@ class SameBoardComparisonLauncherTests(unittest.TestCase):
         self.job.finish_success(self.win)
         self.assertIs(self.window._completed_execution, self.win)
         self.assertIsNone(self.window._result_window)
-        self.assertIn("Result window open failed", self.window.status_label.text())
+        self.assertIn("결과 창 열기 실패", self.window.status_label.text())
         self.assertIn("viewer unavailable", self.window.status_label.text())
         self.assertTrue(self.window.open_result_button.isEnabled())
         self.viewer_factory.side_effect = None

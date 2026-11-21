@@ -40,8 +40,8 @@ LIMIT_SECONDS = {
     "S4_S": 120.0, "S4_M": 120.0, "S4_R": 120.0,
 }
 TIME_DEPENDENT = frozenset(STAGE4_ALGORITHMS)
-TIME_DEPENDENCE_NOTE = ("Time-based limits (35 s per plan, model/kernel deadlines): "
-                        "the same board can give a different result on another run.")
+TIME_DEPENDENCE_NOTE = ("시간 기반 한도(계획 1회 35초, 모델·커널 마감) 때문에 "
+                        "같은 보드에서도 실행마다 결과가 달라질 수 있습니다.")
 OUTCOMES = ("WON", "LOST", "STOPPED", "LIMIT", "CANCELLED", "ERROR")
 PLAYABLE_OUTCOMES = ("WON", "LOST", "STOPPED")
 MOVE_ACTIONS = ("OPEN", "FLAG", "CHORD")
@@ -51,37 +51,43 @@ MOVE_STATUSES = ("PLAYING", "WON", "LOST")
 def support_reason(algorithm: str, board: ReplayBoard) -> str | None:
     """None when the algorithm can run on this board; otherwise the reason."""
     if algorithm not in ALGORITHMS:
-        return "Unknown algorithm."
+        return "알 수 없는 알고리즘입니다."
     if algorithm in LEGACY_PAIR:
         return None
     from live_policy import supports_v1_board
     if not supports_v1_board(board.width, board.height, board.num_mines):
-        return "K and Stage4 support only the 9x9/10, 16x16/40 and 30x16/99 presets (as in Live)."
+        return ("K와 Stage4는 기본 난이도 보드(9×9/10, 16×16/40, 30×16/99)에서만 실행할 수 있습니다"
+                "(실시간 자동 진행과 같은 지원 범위).")
     return None
 
 
 def settings_for(algorithm: str, r_target: str | None = None) -> tuple[tuple[str, str], ...]:
-    """The recorded run configuration (F-C2); r_target is a percent text for S4_R."""
+    """The recorded run configuration (F-C2); r_target is a percent text for S4_R.
+
+    Display text (F-S4, Korean); internal IDs stay with a Korean description.
+    Execution and validation never read these strings.
+    """
     if algorithm == "S2":
-        return (("guesses", "allowed"), ("first input", "OPEN (0, 0) declared"))
+        return (("추측", "허용"), ("첫 입력", "OPEN (0, 0) 선언"))
     if algorithm == "S3":
-        return (("first input", "OPEN (0, 0) declared"), ("cost model", "original Model C"))
+        return (("첫 입력", "OPEN (0, 0) 선언"), ("비용 모델", "원 Model C"))
     if algorithm in K_ALGORITHMS:
         import live_k_policy as k
-        pairs = (("entry", "FIXED_BOARD"),
-                 ("definition", k.definition_for_entry(k.FIXED_BOARD, _k_policy(algorithm))),
-                 ("first input", "chosen by the policy from the all-HIDDEN public board"),
-                 ("guesses", "policy's own exact guess"))
+        definition = k.definition_for_entry(k.FIXED_BOARD, _k_policy(algorithm))
+        pairs = (("진입", "FIXED_BOARD (고정 배치 보드에서 시작)"),
+                 ("정의", f"{definition} (고정 배치용 정의 ID)"),
+                 ("첫 입력", "전부 HIDDEN인 공개 보드에서 정책이 선택"),
+                 ("추측", "정책 고유의 정확 추측"))
         if algorithm == "K_D23":
-            pairs += (("diagnosis", "NONE (no display supplement, explanation or diagnosis)"),)
+            pairs += (("진단", "NONE (표시용 정보 보충·설명·진단을 만들지 않음)"),)
         return pairs
     if algorithm in STAGE4_ALGORITHMS:
-        pairs = (("entry", "FIXED_BOARD"), ("mode", algorithm[-1]),
-                 ("profile", "indexed (samples 8 / shortlist 4)"), ("model attempts", "max 8"),
-                 ("plan time limit", "35 s"), ("guesses", "allowed (required from an all-HIDDEN board)"),
-                 ("first input", "chosen by the policy from the all-HIDDEN public board"))
+        pairs = (("진입", "FIXED_BOARD (고정 배치 보드에서 시작)"), ("모드", algorithm[-1]),
+                 ("프로필", "indexed (표본 8 / 후보 4)"), ("모델 시도", "최대 8회"),
+                 ("계획 시간 한도", "35 s"), ("추측", "허용 (전부 HIDDEN인 보드에서 시작하려면 필요)"),
+                 ("첫 입력", "전부 HIDDEN인 공개 보드에서 정책이 선택"))
         if algorithm == "S4_R":
-            pairs += (("R target", f"{r_target}%"),)
+            pairs += (("R 목표", f"{r_target}%"),)
         return pairs
     raise ValueError("Unknown algorithm.")
 

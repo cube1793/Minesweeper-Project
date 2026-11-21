@@ -111,8 +111,8 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.assertEqual(window.slider.minimum(), 0)
         self.assertEqual(window.slider.maximum(), player.action_count())
         self.assertEqual(window.slider.value(), player.current_index)
-        self.assertEqual(window.index_label.text(), f"Action index {player.current_index} / {player.action_count()}")
-        self.assertEqual(window.status_label.text(), f"Current reconstructed status: {player.status.name}")
+        self.assertEqual(window.index_label.text(), f"행동 {player.current_index} / {player.action_count()}")
+        self.assertEqual(window.status_label.text(), f"현재 재구성 상태: {ui.STATUS_NAMES[player.status.name]} ({player.status.name})")
 
     def test_window_owns_one_coordinator_and_one_read_only_board(self):
         parent = QWidget()
@@ -214,7 +214,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.window.on_slider_changed(21)  # A valid Stage-2 index is invalid here.
         self.assertEqual(self.indices(), (0, 0, 2))
         self.assertEqual(self.window.slider.value(), 2)
-        self.assertIn("Playback error:", self.window.error_label.text())
+        self.assertIn("재생 오류:", self.window.error_label.text())
         self.assert_presentation()
 
     def test_all_navigation_buttons_affect_selected_run_only_and_do_not_wrap(self):
@@ -269,19 +269,19 @@ class SameBoardComparisonUITests(unittest.TestCase):
 
     def test_current_status_is_not_final_outcome_including_first_action_loss(self):
         window = self.create_window(self.loss)
-        final = self.summary(window)["Final outcome"]
+        final = self.summary(window)["최종 결과"]
         self.assertEqual(final, ("WON", "LOST", "LOST"))
         for run in RUNS:
             self.select(run, window)
-            self.assertEqual(window.status_label.text(), "Current reconstructed status: PLAYING")
+            self.assertEqual(window.status_label.text(), "현재 재구성 상태: 진행 중 (PLAYING)")
             if run is not ComparisonRun.HUMAN:
                 window.next_button.click()
                 self.assertEqual(window.playback.current_index, 1)
-                self.assertEqual(window.status_label.text(), "Current reconstructed status: LOST")
+                self.assertEqual(window.status_label.text(), "현재 재구성 상태: 패배 (LOST)")
             else:
                 window.last_button.click()
-                self.assertEqual(window.status_label.text(), "Current reconstructed status: WON")
-            self.assertEqual(self.summary(window)["Final outcome"], final)
+                self.assertEqual(window.status_label.text(), "현재 재구성 상태: 승리 (WON)")
+            self.assertEqual(self.summary(window)["최종 결과"], final)
             self.assertTrue(window.error_label.isHidden())
 
     def test_summary_uses_exact_metrics_and_separate_units(self):
@@ -290,14 +290,14 @@ class SameBoardComparisonUITests(unittest.TestCase):
             human, s2, s3 = execution.human_metrics, execution.stage2_metrics, execution.stage3_metrics
             metrics = (human, s2, s3)
             self.assertEqual(self.summary(window), {
-                "Final outcome": tuple(m.outcome.name for m in metrics),
-                "Semantic actions": tuple(str(m.actions.semantic_action_count) for m in metrics),
-                "OPEN inputs": tuple(str(m.actions.open_count) for m in metrics),
-                "FLAG inputs (incl. unflag)": tuple(str(m.actions.flag_input_count) for m in metrics),
-                "CHORD inputs": tuple(str(m.actions.chord_count) for m in metrics),
-                "Human Replay elapsed": (f"{human.replay_elapsed_seconds} s", "—", "—"),
-                "Model C cost through termination": ("—", f"{s2.model_c_total_us:,} µs", f"{s3.model_c_total_us:,} µs"),
-                "Decision compute total": ("—", f"{s2.decision_compute_total_ns:,} ns", f"{s3.decision_compute_total_ns:,} ns"),
+                "최종 결과": tuple(m.outcome.name for m in metrics),
+                "행동 수": tuple(str(m.actions.semantic_action_count) for m in metrics),
+                "OPEN 입력": tuple(str(m.actions.open_count) for m in metrics),
+                "FLAG 입력 (깃발 해제 포함)": tuple(str(m.actions.flag_input_count) for m in metrics),
+                "CHORD 입력": tuple(str(m.actions.chord_count) for m in metrics),
+                "Human Replay 경과 시간": (f"{human.replay_elapsed_seconds} s", "—", "—"),
+                "종료까지 Model C 비용": ("—", f"{s2.model_c_total_us:,} µs", f"{s3.model_c_total_us:,} µs"),
+                "판단 계산 시간 합계": ("—", f"{s2.decision_compute_total_ns:,} ns", f"{s3.decision_compute_total_ns:,} ns"),
             })
             before = self.summary(window)
             for run in RUNS:
@@ -307,35 +307,35 @@ class SameBoardComparisonUITests(unittest.TestCase):
             labels = " ".join(label.text().lower() for label in window.findChildren(QLabel))
             for forbidden in ("winner", "ranking", "faster", "slower", "%", "score", "time-to-win"):
                 self.assertNotIn(forbidden, labels)
-            self.assertIn('playback speed:', labels)
+            self.assertIn('재생 속도:', labels)
 
     def test_canonical_first_open_qualification_and_caveat(self):
         window = self.create_window(self.canonical)
         text = window.qualification_label.text()
-        for expected in ("Exact same fixed layout verified", "Human first recorded event: OPEN (0, 0)",
-                         "Human first OPEN: (0, 0); zero-based Replay event index 0", "Prelude before first OPEN: no",
-                         "Stage 2 first action: OPEN (0, 0)", "Stage 3 first action: OPEN (0, 0)",
-                         "Solver origin (0, 0): not a mine", "Matching recorded start: yes — Human event 0 is OPEN (0, 0)."):
+        for expected in ("같은 고정 배치임을 확인했습니다", "Human 첫 기록 입력: OPEN (0, 0)",
+                         "Human 첫 OPEN: (0, 0); 0부터 센 Replay 사건 번호 0", "첫 OPEN 앞의 다른 입력: 없음",
+                         "Stage 2 첫 행동: OPEN (0, 0)", "Stage 3 첫 행동: OPEN (0, 0)",
+                         "알고리즘 시작점 (0, 0): 지뢰 아님", "기록 시작 일치: 예 — Human 사건 0이 OPEN (0, 0)입니다."):
             self.assertIn(expected, text)
-        for expected in ("does not establish", "historical mine placement", "execution semantics",
-                         "exclusively-Human provenance", "controlled experiment"):
+        for expected in ("보장하지 않습니다", "과거의 지뢰 배치", "실행 의미",
+                         "사람만의 입력이라는 출처", "통제된 실험"):
             self.assertIn(expected, window.caveat_label.text())
 
     def test_prelude_first_open_qualification_keeps_original_event_position(self):
         text = self.window.qualification_label.text()
-        self.assertIn("Human first recorded event: CHORD (0, 0)", text)
-        self.assertIn("Human first OPEN: (0, 0); zero-based Replay event index 3", text)
-        self.assertIn("Prelude before first OPEN: yes", text)
-        self.assertIn("Matching recorded start: no — prelude before first OPEN.", text)
+        self.assertIn("Human 첫 기록 입력: CHORD (0, 0)", text)
+        self.assertIn("Human 첫 OPEN: (0, 0); 0부터 센 Replay 사건 번호 3", text)
+        self.assertIn("첫 OPEN 앞의 다른 입력: 있음", text)
+        self.assertIn("기록 시작 일치: 아니요 — 첫 OPEN 앞에 다른 입력 있음.", text)
 
     def test_other_human_open_and_mined_origin_are_factual_not_failure(self):
         window = self.create_window(self.loss)
         text = window.qualification_label.text()
-        self.assertIn("Human first recorded event: OPEN (1, 0)", text)
-        self.assertIn("Human first OPEN: (1, 0); zero-based Replay event index 0", text)
-        self.assertIn("first OPEN targets (1, 0)", text)
-        self.assertIn("Solver origin (0, 0): mine", text)
-        self.assertIn("ordinary fresh-game first-OPEN placement safety does not apply",
+        self.assertIn("Human 첫 기록 입력: OPEN (1, 0)", text)
+        self.assertIn("Human 첫 OPEN: (1, 0); 0부터 센 Replay 사건 번호 0", text)
+        self.assertIn("첫 OPEN 대상이 (1, 0)", text)
+        self.assertIn("알고리즘 시작점 (0, 0): 지뢰", text)
+        self.assertIn("새 게임의 첫 OPEN 안전 배치가 적용되지 않습니다",
                       " ".join(label.text() for label in window.findChildren(QLabel)))
         self.assertTrue(window.error_label.isHidden())
 
@@ -352,8 +352,8 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.assertEqual(overlay.geometry(), window.board_container.rect())
         self.assertEqual(overlay._cell_size, CELL_SIZE)
         self.assertTrue(overlay.testAttribute(Qt.WA_TransparentForMouseEvents))
-        self.assertEqual(window.mouse_trace_checkbox.text(), "Show Human Mouse Trace (entire recording)")
-        self.assertIn("independent of the current action index", window.mouse_trace_checkbox.toolTip())
+        self.assertEqual(window.mouse_trace_checkbox.text(), "Human 마우스 궤적 보기 (기록 전체)")
+        self.assertIn("현재 행동 위치와 관계없습니다", window.mouse_trace_checkbox.toolTip())
 
     def test_absent_mouse_trace_never_enables_or_displays_overlay(self):
         window = self.create_window(self.canonical)
@@ -406,7 +406,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
             window.slider.setValue(7)
         self.assertEqual((self.indices(), self.rendered(), self.summary()), before)
         self.assertEqual(window.slider.value(), 3)
-        self.assertEqual(window.error_label.text(), "Playback error: <bad seek>")
+        self.assertEqual(window.error_label.text(), "재생 오류: <bad seek>")
         self.assertEqual(window.error_label.textFormat(), Qt.PlainText)
         self.assertFalse(window.error_label.isHidden())
         window.next_button.click()
@@ -535,14 +535,14 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.assertGreater(window.scroll_area.viewport().height(), 0)
         self.select(ComparisonRun.STAGE3, window)
         window.on_next()
-        self.assertEqual(window.status_label.text(), "Current reconstructed status: LOST")
+        self.assertEqual(window.status_label.text(), "현재 재구성 상태: 패배 (LOST)")
 
     def test_viewer_owns_presentation_timer_and_reference_truth_but_no_execution_or_private_state(self):
         window = self.window
         self.assertEqual(window.findChildren(QTimer), [window.presentation_timer])
         self.assertEqual(window.presentation_timer.interval(), 16)
         self.assertEqual({button.text() for button in window.findChildren(QPushButton)},
-                         {"First", "Previous", "Next", "Last", "Play"})
+                         {"처음", "이전", "다음", "마지막", "재생"})
         for name in ("job", "worker", "process", "token", "modeled_playback"):
             self.assertFalse(hasattr(window, name), name)
         tree = ast.parse(Path(ui.__file__).read_text(encoding="utf-8"))
@@ -664,9 +664,9 @@ class SameBoardComparisonUITests(unittest.TestCase):
         self.assertEqual(len({id(c) for c in w.controllers.values()}), 3)
         for run in RUNS:
             self.select(run)
-            native = 'Replay Time' if run is ComparisonRun.HUMAN else 'Model C Time'
+            native = 'Replay 시간' if run is ComparisonRun.HUMAN else 'Model C 시간'
             self.assertEqual([w.mode_selector.itemText(i) for i in range(w.mode_selector.count())],
-                             ['Index', native])
+                             ['행동 단위', native])
             self.assertTrue(w.interval_entry.isEnabled())
             self.assertFalse(w.speed_entry.isEnabled())
             w.mode_selector.setCurrentIndex(1)
@@ -712,8 +712,8 @@ class SameBoardComparisonUITests(unittest.TestCase):
             self.assertEqual(entry.value(), expected)
             self.assertEqual(w.controller.interval_ms, expected)
         entry.setValue(20)
-        self.assertEqual(entry.text(), 'Max (20 ms)')
-        self.assertIn('Index — Max (20 ms/action)', w.playback_label.text())
+        self.assertEqual(entry.text(), '최대 (20 ms)')
+        self.assertIn('행동 단위 — 최대 (20 ms/행동)', w.playback_label.text())
         QTest.keyClick(entry, Qt.Key_Up)
         self.assertEqual(entry.text(), '21 ms')
         QTest.keyClick(entry, Qt.Key_Down)
@@ -746,7 +746,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
             self.app.sendEvent(entry, QEvent(QEvent.StyleChange))
             self.app.processEvents()
             widths.append(entry.width())
-            for value, text in ((20, 'Max (20 ms)'), (5000, '5000 ms')):
+            for value, text in ((20, '최대 (20 ms)'), (5000, '5000 ms')):
                 entry.setValue(value)
                 option = QStyleOptionSpinBox()
                 entry.initStyleOption(option)
@@ -922,7 +922,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
             self.assertEqual(w.route_overlay.targets, w.controller.timing.targets)
             self.assertFalse(w.presentation_timer.isActive())
             self.assertFalse(w.play_button.isEnabled())
-            self.assertEqual(w.play_button.text(), 'Play')
+            self.assertEqual(w.play_button.text(), '재생')
 
     def test_hidden_answers_are_renderer_only_on_public_hidden_cells(self):
         w = self.window
@@ -971,7 +971,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
     def test_route_prefixes_no_origin_no_future_repetitions_and_selected_context(self):
         w = self.window
         self.assertFalse(w.route_checkbox.isChecked())
-        self.assertIn('not recorded cursor trajectory', w.route_checkbox.toolTip())
+        self.assertIn('기록된 커서 궤적이 아님', w.route_checkbox.toolTip())
         self.assertEqual(w.route_overlay.targets, ())
         w.route_checkbox.setChecked(True)
         for run in RUNS:
@@ -1139,7 +1139,7 @@ class SameBoardComparisonUITests(unittest.TestCase):
                     bar.setValue(bar.maximum())
                     self.assertEqual(bar.value(), bar.maximum())
         self.assertEqual([w.tabs.tabText(i) for i in range(w.tabs.count())],
-                         ['Board', 'Summary', 'Recorded opening'])
+                         ['보드', '요약', '기록된 시작'])
 
     def test_recreated_viewer_has_fresh_indices_and_overlay_preference(self):
         old = self.window

@@ -67,7 +67,7 @@ class AlgorithmQueueTests(unittest.TestCase):
             with self.subTest(algorithm=algorithm, case="limit"):
                 run = self.run_one(algorithm, limit=0.2)
                 self.assertEqual((run.algorithm, run.outcome), (algorithm, "LIMIT"))
-                self.assertIn("Algorithm limit", run.detail)
+                self.assertIn("알고리즘별 한도", run.detail)
                 self.assertEqual((run.moves, run.actions, run.model_c_total_us), ((), None, None))
             with self.subTest(algorithm=algorithm, case="cancel"):
                 run = self.run_one(algorithm, cancel=True)
@@ -76,7 +76,7 @@ class AlgorithmQueueTests(unittest.TestCase):
             with self.subTest(algorithm=algorithm, case="worker error"):
                 run = self.run_one(algorithm, BAD_BOARD)
                 self.assertEqual((run.algorithm, run.outcome), (algorithm, "ERROR"))
-                self.assertIn("Execution failed", run.detail)
+                self.assertIn("실행 실패", run.detail)
                 self.assertEqual(run.moves, ())
 
     def test_completed_run_is_validated_in_the_parent(self):
@@ -112,7 +112,7 @@ class AlgorithmQueueTests(unittest.TestCase):
             clock[0] = 1.5  # Past both limits before the first child is reaped.
             self.wait(done)
         self.assertEqual([run.outcome for _, run in received], ["LIMIT", "LIMIT"])
-        self.assertIn("Overall limit", received[1][1].detail)
+        self.assertIn("전체 한도", received[1][1].detail)
 
     def test_queue_results_are_keyed_by_algorithm(self):
         queue, received, done = self.make_queue()

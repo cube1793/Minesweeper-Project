@@ -43,14 +43,14 @@ def calculate_algorithm_run(payload: dict) -> dict:
         if payload["r_target"] is not None and type(payload["r_target"]) is not str:
             raise ValueError("The R target must be text or None.")
     except Exception as exc:
-        return {"token": token, "run": None, "error": f"Transport failed: {exc!r}"}
+        return {"token": token, "run": None, "error": f"전송 실패: {exc!r}"}
     try:
         run = execute_algorithm(payload["algorithm"], payload["board"], r_target=payload["r_target"])
         if type(run) is not AlgorithmRun:
             raise ValueError("Expected an AlgorithmRun.")
         return {"token": token, "run": run, "error": None}
     except Exception as exc:
-        return {"token": token, "run": None, "error": f"Execution failed: {exc!r}"[:4096]}
+        return {"token": token, "run": None, "error": f"실행 실패: {exc!r}"[:4096]}
 
 
 def main(argv: list[str]) -> int:
@@ -63,7 +63,7 @@ def main(argv: list[str]) -> int:
             if payload_file.read(1):
                 raise ValueError("Unexpected data after worker payload.")
     except Exception as exc:
-        result = {"token": None, "run": None, "error": f"Transport failed: {exc!r}"}
+        result = {"token": None, "run": None, "error": f"전송 실패: {exc!r}"}
     else:
         result = calculate_algorithm_run(payload)
     try:

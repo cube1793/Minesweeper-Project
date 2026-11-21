@@ -68,6 +68,7 @@ Stage4 S/M/R은 Main/Live에서 사용할 수 있습니다. Unit73에서 **N1 �
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
   - **2026-11-21 알고리즘 선택 확대(F, 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전):** 실행 전에 실행할 알고리즘을 고릅니다. 기본은 지금처럼 Stage 2 Simple + Stage 3 V1이며 이 둘만 고르면 기존 비교와 같습니다. 추가 후보는 K-P0·K-LC0·K-LC1·K(K_D23)와 Stage4 S·M·R이며 초급·중급·상급 preset 보드에서만 고를 수 있습니다(Live와 같은 지원 범위). Stage4 R은 고를 때 R 목표(양의 백분율, 추천값 없음)를 입력합니다. 추가 알고리즘은 하나씩 순서대로 실행하며 알고리즘별 한도(K 30초, Stage4 120초, Stage 2·3을 따로 실행할 때 120초)를 넘으면 `LIMIT`로 끝냅니다. 결과는 별도 결과 창에서 알고리즘별 종료 구분(WON·LOST·STOPPED·LIMIT·CANCELLED·ERROR)·행동 수·OPEN/FLAG/CHORD·Model C 시간·설정과 함께 보이고, 'Shown result'로 표시할 결과만 바꿉니다(다시 실행하지 않음). Stage4 결과는 시간 기반 한도 때문에 실행마다 달라질 수 있다고 표시합니다. K·Stage4의 첫 입력은 각 정책이 전부 닫힌 공개 보드에서 스스로 고르며, 지뢰 배치는 엔진 준비·검증과 지표 계산에만 씁니다. 새 결과의 재생은 행동 index 재생이고, 기존 시간 재생(timed playback)은 Human / Stage 2 / Stage 3 기존 결과에만 있습니다. Model C 시간은 속도 순위가 아닙니다.
+  - **2026-11-22 F 보완 1(사용자 화면 확인에서 나온 결함 1건과 사용자 추가 요구, F 화면 재확인 전·원격 반영 전):** 결과 창의 슬라이더는 트랙을 누른 위치로 바로 이동합니다(기존 상세 창과 같은 방식). 결과 창에 행동 단위 자동 재생(재생·일시정지, 간격 기본 200 ms·범위 20~5000 ms, 끝이나 다른 이동 조작·표시 결과 변경 때 멈춤)과 '숨은 정답 보기'가 있습니다. 결과 창은 요약·보드·통계 탭으로 나뉩니다. 요약 표는 실행·결과·3BV·행동 수·Efficiency·IOE·Model C 시간만 보이고, 설정과 설명은 표에서 고른 행의 상세에 줄바꿈해 보입니다. 통계 탭은 Human과 실행한 모든 알고리즘의 메인 플레이 통계를 메인 창 Replay 통계와 같은 코드로 계산해 보입니다. 알고리즘의 시간·예상 시간·3BV/s·CPS는 실제 경과 시간이 없어 '—'이고(Model C 시간으로 대신 계산하지 않음), ZiNi·ZNE·ZNT는 이 창에서 ZiNi 계산을 실행하지 않아 '—'입니다. 끝나지 않은 판은 기존 통계처럼 '-'입니다. 실행기 창, Stage4 R 목표 입력 창, 결과 창, 기존 상세 창의 문구를 한국어로 바꿨습니다(약어·고유 이름·내부 ID는 그대로, 동작·계산은 그대로).
 
 ## Stage 4 — Unit37까지의 구현 이력
 
@@ -639,7 +640,8 @@ Minesweeper-Project/
 ├─ same_board_algorithms.py     # (2026-11-21) 추가 알고리즘 어댑터·실행 기록·부모 쪽 독립 재검증
 ├─ same_board_algorithm_worker.py # (2026-11-21) 알고리즘 1개를 고정 board에서 실행하는 subprocess
 ├─ same_board_algorithm_job.py  # (2026-11-21) 순차 실행·알고리즘별 한도·취소·오류
-├─ same_board_runs_ui.py        # (2026-11-21) 여러 알고리즘 결과 표·표시 선택·index 재생
+├─ same_board_runs_ui.py        # (2026-11-21) 여러 알고리즘 결과 표·표시 선택·index 재생 (2026-11-22 자동 재생·숨은 정답·통계 탭)
+├─ same_board_statistics.py     # (2026-11-22) 같은 보드 결과의 메인 플레이 통계(기존 Replay 통계 코드 재사용)
 ├─ replay_model.py              # Replay 데이터 계약
 ├─ replay_recorder.py           # 실제 이벤트와 확정 보드 기록
 ├─ replay_json.py               # JSON 변환·파일 입출력

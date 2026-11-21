@@ -134,16 +134,16 @@ class AlgorithmRunTests(unittest.TestCase):
                 settings = dict(run.settings)
                 self.assertEqual(run.settings, settings_for(algorithm, target(algorithm)))
                 if algorithm in K_ALGORITHMS:
-                    self.assertEqual(settings["entry"], "FIXED_BOARD")
-                    self.assertIn("FIXED_BOARD", settings["definition"])
+                    self.assertEqual(settings["진입"], "FIXED_BOARD (고정 배치 보드에서 시작)")
+                    self.assertIn("FIXED_BOARD", settings["정의"])
                 if algorithm in STAGE4_ALGORITHMS:
-                    self.assertEqual((settings["entry"], settings["model attempts"]), ("FIXED_BOARD", "max 8"))
-                    self.assertIn("allowed", settings["guesses"])
+                    self.assertEqual((settings["진입"], settings["모델 시도"]), ("FIXED_BOARD (고정 배치 보드에서 시작)", "최대 8회"))
+                    self.assertIn("허용", settings["추측"])
                     self.assertTrue(run.time_dependent)
                 else:
                     self.assertFalse(run.time_dependent)
-        self.assertEqual(dict(self.runs["win", "K_D23"][1].settings)["diagnosis"][:4], "NONE")
-        self.assertEqual(dict(self.runs["win", "S4_R"][1].settings)["R target"], "120%")
+        self.assertEqual(dict(self.runs["win", "K_D23"][1].settings)["진단"][:4], "NONE")
+        self.assertEqual(dict(self.runs["win", "S4_R"][1].settings)["R 목표"], "120%")
         self.assertEqual(LIMIT_SECONDS, {"S2": 120.0, "S3": 120.0, "K_P0": 30.0, "K_LC0": 30.0, "K_LC1": 30.0,
                                          "K_D23": 30.0, "S4_S": 120.0, "S4_M": 120.0, "S4_R": 120.0})
 
@@ -219,10 +219,10 @@ class BoundaryAndShapeTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 bad = worker.calculate_algorithm_run(payload)
                 self.assertIsNone(bad["run"])
-                self.assertTrue(bad["error"].startswith("Transport failed"))
+                self.assertTrue(bad["error"].startswith("전송 실패"))
         failed = worker.calculate_algorithm_run(
             {"token": 4, "board": WIN_BOARD, "algorithm": "S4_R", "r_target": "-5"})
-        self.assertTrue(failed["error"].startswith("Execution failed"))
+        self.assertTrue(failed["error"].startswith("실행 실패"))
         self.assertEqual(worker.WORKER_FLAG, "--same-board-algorithm-worker")
 
     def test_worker_cli_round_trip_in_a_real_process(self):

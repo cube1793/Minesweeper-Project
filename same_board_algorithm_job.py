@@ -129,19 +129,19 @@ class SameBoardAlgorithmQueue(QObject):
                 return
             algorithm = self._pending.pop(0)
             if self._cancel_requested:
-                self._emit(not_run(algorithm, "CANCELLED", "Cancelled before start.",
+                self._emit(not_run(algorithm, "CANCELLED", "시작 전에 취소됨.",
                                    settings=self._settings(algorithm)))
                 continue
             now = self._clock()
             if now >= self._overall_deadline:
-                self._emit(not_run(algorithm, "LIMIT", "Overall limit reached before start.",
+                self._emit(not_run(algorithm, "LIMIT", "시작 전에 전체 한도에 도달함.",
                                    settings=self._settings(algorithm)))
                 continue
             try:
                 self._launch(algorithm)
             except Exception as exc:
                 self._process = None
-                detail = f"Worker start failed: {exc!r}"
+                detail = f"작업자 시작 실패: {exc!r}"
                 try:
                     self._cleanup_directory()
                 except RuntimeError as cleanup:
@@ -151,9 +151,9 @@ class SameBoardAlgorithmQueue(QObject):
                 continue
             limit = LIMIT_SECONDS[algorithm]
             if now + limit <= self._overall_deadline:
-                self._deadline, self._limit_detail = now + limit, f"Algorithm limit {limit:g} s reached."
+                self._deadline, self._limit_detail = now + limit, f"알고리즘별 한도 {limit:g} s에 도달함."
             else:
-                self._deadline, self._limit_detail = self._overall_deadline, "Overall limit reached."
+                self._deadline, self._limit_detail = self._overall_deadline, "전체 한도에 도달함."
             self._started = now
             return
 
@@ -213,18 +213,18 @@ class SameBoardAlgorithmQueue(QObject):
         algorithm, elapsed = self._current, round(self._clock() - self._started, 3)
         settings = self._settings(algorithm)
         if self._cancel_requested:
-            run = not_run(algorithm, "CANCELLED", "Cancelled while running.", settings=settings,
+            run = not_run(algorithm, "CANCELLED", "실행 중 취소됨.", settings=settings,
                           elapsed_seconds=elapsed)
         elif self._terminate_requested:
             run = not_run(algorithm, "LIMIT", self._limit_detail, settings=settings, elapsed_seconds=elapsed)
         elif exit_code != 0:
-            run = not_run(algorithm, "ERROR", f"Worker exited with code {exit_code}.",
+            run = not_run(algorithm, "ERROR", f"작업자가 종료 코드 {exit_code}로 끝남.",
                           settings=settings, elapsed_seconds=elapsed)
         else:
             try:
                 run = self._read_result(algorithm, elapsed)
             except Exception as exc:
-                run = not_run(algorithm, "ERROR", f"Result rejected: {exc!r}"[:2048],
+                run = not_run(algorithm, "ERROR", f"결과 거부: {exc!r}"[:2048],
                               settings=settings, elapsed_seconds=elapsed)
         try:
             self._cleanup_directory()

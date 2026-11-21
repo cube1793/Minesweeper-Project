@@ -127,23 +127,25 @@ class AlgorithmSelectionUITests(unittest.TestCase):
         self.assertEqual(window.queue.started, [])
         viewer.assert_called_once_with(execution, window)
         self.assertIsNone(window._runs_window)
-        self.assertIn("Completed — Stage 2: WON; Stage 3: WON", window.status_label.text())
+        self.assertIn("완료 — Stage 2: WON; Stage 3: WON", window.status_label.text())
 
     def test_selection_controls_r_target_and_board_support(self):
         window = self.launcher_window()
         self.assertTrue(all(window.algorithm_checks[key].isEnabled() for key in ALGORITHMS))
         r_check = window.algorithm_checks["S4_R"]
         for text, accepted in (("", True), ("abc", True), ("-3", True), ("120", False)):
-            with patch.object(launcher.QInputDialog, "getText", return_value=(text, accepted)):
+            with patch.object(launcher.SameBoardComparisonLauncherWindow, "_ask_r_target",
+                              return_value=(text, accepted)):
                 r_check.setChecked(True)
             self.assertFalse(r_check.isChecked(), text)
             self.assertIsNone(window._r_target)
-            self.assertIn("Stage4 R not selected", window.status_label.text())
-        with patch.object(launcher.QInputDialog, "getText", return_value=("135", True)):
+            self.assertIn("Stage4 R을 선택하지 않음", window.status_label.text())
+        with patch.object(launcher.SameBoardComparisonLauncherWindow, "_ask_r_target",
+                          return_value=("135", True)):
             r_check.setChecked(True)
         self.assertTrue(r_check.isChecked())
         self.assertEqual(window._r_target, "135")
-        self.assertIn("target 135%", r_check.text())
+        self.assertIn("목표 135%", r_check.text())
         window.algorithm_checks["S2"].setChecked(False)
         window.algorithm_checks["K_P0"].setChecked(True)
         window.run_button.click()
@@ -175,7 +177,7 @@ class AlgorithmSelectionUITests(unittest.TestCase):
                     viewer.shown_selector.setCurrentIndex(viewer.shown_selector.findData(key))
                     viewer.last_button.click()
                     self.assertEqual(viewer.index_label.text(),
-                                     f"Action index {len(self.runs[key].moves)} / {len(self.runs[key].moves)}")
+                                     f"행동 {len(self.runs[key].moves)} / {len(self.runs[key].moves)}")
                     self.assertEqual(viewer.players[key].moves, self.runs[key].moves)
 
     def test_shown_result_change_never_runs_or_computes(self):
@@ -211,9 +213,9 @@ class AlgorithmSelectionUITests(unittest.TestCase):
 
     def test_runs_window_shows_settings_outcomes_and_time_dependence(self):
         runs = {"K_P0": self.runs["K_P0"], "S4_R": self.runs["S4_R"],
-                "K_LC0": not_run("K_LC0", "LIMIT", "Algorithm limit 30 s reached."),
-                "K_LC1": not_run("K_LC1", "CANCELLED", "Cancelled while running."),
-                "K_D23": not_run("K_D23", "ERROR", "Execution failed: boom")}
+                "K_LC0": not_run("K_LC0", "LIMIT", "알고리즘별 한도 30 s에 도달함."),
+                "K_LC1": not_run("K_LC1", "CANCELLED", "실행 중 취소됨."),
+                "K_D23": not_run("K_D23", "ERROR", "실행 실패: boom")}
         viewer = SameBoardRunsWindow(self.context, runs)
         self.windows.append(viewer)
         table = {viewer.table.item(row, 0).text(): [viewer.table.item(row, c).text()
@@ -222,18 +224,23 @@ class AlgorithmSelectionUITests(unittest.TestCase):
         self.assertEqual({row: values[1] for row, values in table.items()},
                          {"Human": "LOST", "K-P0": "WON", "K-LC0": "LIMIT", "K-LC1": "CANCELLED",
                           "K (K_D23)": "ERROR", "Stage4 R": "WON"})
-        self.assertIn(TIME_DEPENDENCE_NOTE, table["Stage4 R"][8])
-        self.assertNotIn(TIME_DEPENDENCE_NOTE, table["K-P0"][8])
-        self.assertIn("R target: 120%", table["Stage4 R"][7])
-        self.assertIn("entry: FIXED_BOARD", table["K-P0"][7])
-        self.assertEqual(table["K-LC0"][2:7], ["—"] * 5)
-        self.assertIn("boom", table["K (K_D23)"][8])
+        # F-S3: settings and notes moved from the table to the selected result's detail.
+        def detail(key):
+            viewer.table.setCurrentCell(viewer.row_keys.index(key), 0)
+            return viewer.detail_label.text()
+
+        self.assertIn(TIME_DEPENDENCE_NOTE, detail("S4_R"))
+        self.assertNotIn(TIME_DEPENDENCE_NOTE, detail("K_P0"))
+        self.assertIn("R 목표: 120%", detail("S4_R"))
+        self.assertIn("진입: FIXED_BOARD", detail("K_P0"))
+        self.assertEqual(table["K-LC0"][2:7], ["-", "—", "-", "-", "—"])
+        self.assertIn("boom", detail("K_D23"))
         self.assertEqual(f"{runs['K_P0'].model_c_total_us / 1e6:.3f}", table["K-P0"][6])
         # Only played runs are offered for playback; failed ones stay in the table.
         self.assertEqual([viewer.shown_selector.itemData(i) for i in range(viewer.shown_selector.count())],
                          ["HUMAN", "K_P0", "S4_R"])
         labels = " ".join(label.text() for label in viewer.findChildren(launcher.QLabel))
-        self.assertIn("not a speed ranking", labels)
+        self.assertIn("속도 순위가 아닙니다", labels)
 
     def test_runs_window_plays_flag_and_chord_by_index(self):
         run = self.runs["K_D23"]
@@ -248,16 +255,16 @@ class AlgorithmSelectionUITests(unittest.TestCase):
         move = run.moves[flag_index - 1]
         observation = viewer.players["K_D23"].observation()
         self.assertEqual(int(observation[move.y][move.x]), CellState.FLAGGED.value)
-        self.assertEqual(viewer.index_label.text(), f"Action index {flag_index} / {len(run.moves)}")
+        self.assertEqual(viewer.index_label.text(), f"행동 {flag_index} / {len(run.moves)}")
         viewer.last_button.click()
         self.assertEqual(viewer.players["K_D23"].status(), "WON")
         viewer.first_button.click()
         self.assertTrue(all(int(v) == CellState.HIDDEN.value
                             for row in viewer.players["K_D23"].observation() for v in row))
         viewer.shown_selector.setCurrentIndex(0)
-        self.assertEqual(viewer.index_label.text(), "Action index 0 / 1")
+        self.assertEqual(viewer.index_label.text(), "행동 0 / 1")
         viewer.shown_selector.setCurrentIndex(1)
-        self.assertEqual(viewer.index_label.text(), f"Action index 0 / {len(run.moves)}")
+        self.assertEqual(viewer.index_label.text(), f"행동 0 / {len(run.moves)}")
 
     def test_cancel_during_run_keeps_finished_results(self):
         window = self.launcher_window()
@@ -272,8 +279,8 @@ class AlgorithmSelectionUITests(unittest.TestCase):
         window.cancel_button.click()
         self.assertEqual(window.queue.cancel_calls, 1)
         self.assertFalse(window.cancel_button.isEnabled())
-        window.queue.deliver([not_run("S4_S", "CANCELLED", "Cancelled while running.")])
-        self.assertIn("Cancelled", window.status_label.text())
+        window.queue.deliver([not_run("S4_S", "CANCELLED", "실행 중 취소됨.")])
+        self.assertIn("취소됨", window.status_label.text())
         self.assertIsNone(window._runs_window)  # A cancelled comparison is not auto-opened.
         self.assertTrue(window.open_result_button.isEnabled())
         window.open_result_button.click()

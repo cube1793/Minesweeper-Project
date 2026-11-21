@@ -28,10 +28,30 @@ from visualization_reference_overlays import (
 )
 
 
-CURSOR_NOTE = ('Synthetic smooth interpolation between executed action targets. '
-               'Not recorded mouse motion or an actual OS cursor trajectory. '
-               'Easing is presentation only, not calibrated acceleration.')
-ROUTE_NOTE = 'Action-target route — not recorded cursor trajectory'
+# User-visible text is Korean (F-S4); behavior, layout and enum values are unchanged.
+CURSOR_NOTE = ('실행된 행동 대상 사이를 부드럽게 이어 그린 합성 커서입니다. '
+               '기록된 마우스 움직임이나 실제 OS 커서 궤적이 아닙니다. '
+               '가감속은 표시용이며 보정된 가속이 아닙니다.')
+ROUTE_NOTE = '행동 대상 경로 — 기록된 커서 궤적이 아님'
+MODE_NAMES = {
+    PlaybackMode.INDEX: '행동 단위',
+    PlaybackMode.REPLAY_TIME: 'Replay 시간',
+    PlaybackMode.MODEL_C_TIME: 'Model C 시간',
+}
+STATUS_NAMES = {'PLAYING': '진행 중', 'WON': '승리', 'LOST': '패배'}
+
+
+class _ComparisonCell(Stage3VisualizerCell):
+    """The shared Stage 3 visualizer cell with a Korean tooltip for opened numbers.
+
+    Only the visible tooltip text changes (F-S4); state, drawing and the
+    accessible name stay those of the shared widget, which is not modified.
+    """
+
+    def render_state(self, value: int):
+        super().render_state(value)
+        if 0 <= value <= 8:
+            self.setToolTip(f"{self.coordinate}: 열림 {value}")
 
 
 class _IndexSlider(QSlider):
@@ -178,7 +198,7 @@ class SameBoardComparisonWindow(QWidget):
     def __init__(self, execution: SameBoardExecution, parent=None, *, clock=monotonic_ns):
         super().__init__(parent, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setWindowTitle("Same-board Comparison")
+        self.setWindowTitle("같은 보드 비교 — 상세 (Human / Stage 2 / Stage 3)")
         self.execution = execution
         self.playback = SameBoardPlayback(execution)
         timings = project_same_board_timings(execution)
@@ -196,14 +216,14 @@ class SameBoardComparisonWindow(QWidget):
         facts = QVBoxLayout(summary)
         facts.addWidget(self._build_summary())
         self.caveat_label = self._label(
-            "Same layout or matching recorded start does not establish identical historical "
-            "mine placement, execution semantics, exclusively-Human provenance, or a controlled experiment."
+            "같은 배치나 일치하는 기록 시작은 과거의 지뢰 배치, 실행 의미, 사람만의 입력이라는 출처가 "
+            "같다는 것이나 통제된 실험임을 보장하지 않습니다."
         )
         facts.addWidget(self.caveat_label)
         facts.addStretch()
 
         selection = QHBoxLayout()
-        selection.addWidget(QLabel("Run:"))
+        selection.addWidget(QLabel("실행:"))
         self.run_selector = QComboBox()
         self.run_selector.setAccessibleName("Comparison run")
         self.run_selector.addItem("Human", ComparisonRun.HUMAN)
@@ -227,7 +247,7 @@ class SameBoardComparisonWindow(QWidget):
         self.cells = {}
         for y in range(board.height):
             for x in range(board.width):
-                cell = Stage3VisualizerCell(x, y, self.board_container)
+                cell = _ComparisonCell(x, y, self.board_container)
                 self.cells[x, y] = cell
                 grid.addWidget(cell, y, x)
         self.board_container.setFixedSize(board.width * CELL_SIZE, board.height * CELL_SIZE)
@@ -251,8 +271,8 @@ class SameBoardComparisonWindow(QWidget):
         self.scroll_area.setWidgetResizable(False)
         self.scroll_area.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.scroll_area.setMinimumSize(100, 100)
-        self.tabs.addTab(self.scroll_area, 'Board')
-        for caption, widget in (('Summary', summary), ('Recorded opening', self._build_qualification())):
+        self.tabs.addTab(self.scroll_area, '보드')
+        for caption, widget in (('요약', summary), ('기록된 시작', self._build_qualification())):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(widget)
@@ -261,10 +281,10 @@ class SameBoardComparisonWindow(QWidget):
 
         controls = QHBoxLayout()
         for name, text, handler in (
-            ("first_button", "First", self.on_first),
-            ("previous_button", "Previous", self.on_previous),
-            ("next_button", "Next", self.on_next),
-            ("last_button", "Last", self.on_last),
+            ("first_button", "처음", self.on_first),
+            ("previous_button", "이전", self.on_previous),
+            ("next_button", "다음", self.on_next),
+            ("last_button", "마지막", self.on_last),
         ):
             button = QPushButton(text)
             button.clicked.connect(handler)
@@ -282,25 +302,25 @@ class SameBoardComparisonWindow(QWidget):
         layout.addLayout(controls)
 
         timing_controls = QHBoxLayout()
-        self.play_button = QPushButton('Play')
+        self.play_button = QPushButton('재생')
         self.play_button.clicked.connect(self.on_play_pause)
         timing_controls.addWidget(self.play_button)
         self.mode_selector = QComboBox()
         self.mode_selector.setAccessibleName('Selected run playback mode')
         self.mode_selector.currentIndexChanged.connect(self.on_mode_changed)
         timing_controls.addWidget(self.mode_selector)
-        timing_controls.addWidget(QLabel('Interval:'))
+        timing_controls.addWidget(QLabel('간격:'))
         self.interval_entry = _IndexInterval()
         self.interval_entry.setRange(20, 5000)
         self.interval_entry.setValue(200)
         self.interval_entry.setSuffix(' ms')
-        self.interval_entry.setSpecialValueText('Max (20 ms)')
+        self.interval_entry.setSpecialValueText('최대 (20 ms)')
         self.interval_entry.setKeyboardTracking(False)
         self.interval_entry.setAccessibleName('Index presentation interval')
         self.interval_entry.fit_text_width()
         self.interval_entry.valueChanged.connect(self.on_interval_changed)
         timing_controls.addWidget(self.interval_entry)
-        timing_controls.addWidget(QLabel('Playback speed:'))
+        timing_controls.addWidget(QLabel('재생 속도:'))
         self.speed_entry = QDoubleSpinBox()
         self.speed_entry.setRange(0.25, 8)
         self.speed_entry.setSingleStep(0.25)
@@ -314,31 +334,31 @@ class SameBoardComparisonWindow(QWidget):
         layout.addLayout(timing_controls)
         self.playback_label = self._label('')
         self.playback_label.setToolTip(
-            'Independent selected-run presentation. The 16 ms refresh request is not a time authority. '
-            'The board and route remain at the completed prefix during partial motion. '
-            'Green hollow ring: synthetic cursor. Orange: last completed target; '
-            'blue: previous target/transition. ' + CURSOR_NOTE)
+            '선택한 실행만 따로 재생합니다. 16 ms 화면 갱신 요청은 시간 기준이 아닙니다. '
+            '이동 중에는 보드와 경로가 완료된 행동까지만 보입니다. '
+            '초록 빈 원: 합성 커서. 주황: 마지막으로 완료한 대상, '
+            '파랑: 이전 대상·이동. ' + CURSOR_NOTE)
         layout.addWidget(self.playback_label)
 
         references = QHBoxLayout()
-        self.answer_checkbox = QCheckBox('Show hidden answers')
-        self.answer_checkbox.setToolTip('Faint fixed-board reference on public HIDDEN cells only.')
+        self.answer_checkbox = QCheckBox('숨은 정답 보기')
+        self.answer_checkbox.setToolTip('고정 배치의 정답을 공개 상태가 HIDDEN인 칸에만 흐리게 보여 줍니다.')
         self.answer_checkbox.toggled.connect(self._update_references)
         references.addWidget(self.answer_checkbox)
-        self.route_checkbox = QCheckBox('Show action-target route')
-        self.route_checkbox.setToolTip(ROUTE_NOTE + '. Completed targets only; no future targets.')
+        self.route_checkbox = QCheckBox('행동 대상 경로 보기')
+        self.route_checkbox.setToolTip(ROUTE_NOTE + '. 완료한 대상만 보이며 앞으로의 대상은 보이지 않습니다.')
         self.route_checkbox.toggled.connect(self._update_references)
         references.addWidget(self.route_checkbox)
         references.addStretch()
         layout.addLayout(references)
 
-        self.mouse_trace_checkbox = QCheckBox("Show Human Mouse Trace (entire recording)")
+        self.mouse_trace_checkbox = QCheckBox("Human 마우스 궤적 보기 (기록 전체)")
         self.mouse_trace_checkbox.setToolTip(
-            "Entire recorded Human path; independent of the current action index."
+            "기록된 Human 경로 전체입니다. 현재 행동 위치와 관계없습니다."
         )
         self.mouse_trace_checkbox.toggled.connect(self._update_mouse_trace)
         self.mouse_trace_checkbox.setToolTip(self.mouse_trace_checkbox.toolTip() +
-            ' Separate from the purple action-target route and green synthetic cursor.')
+            ' 보라색 행동 대상 경로·초록 합성 커서와 별개입니다.')
         layout.addWidget(self.mouse_trace_checkbox)
         self.refresh()
         available = self.screen().availableGeometry()
@@ -359,7 +379,7 @@ class SameBoardComparisonWindow(QWidget):
         return label
 
     def _build_summary(self):
-        box = QGroupBox("Summary")
+        box = QGroupBox("요약")
         grid = QGridLayout(box)
         grid.setColumnStretch(0, 2)
         for column, caption in enumerate(("Human", "Stage 2", "Stage 3"), 1):
@@ -370,16 +390,16 @@ class SameBoardComparisonWindow(QWidget):
         )
         metrics = (human, stage2, stage3)
         rows = (
-            ("Final outcome", tuple(m.outcome.name for m in metrics)),
-            ("Semantic actions", tuple(str(m.actions.semantic_action_count) for m in metrics)),
-            ("OPEN inputs", tuple(str(m.actions.open_count) for m in metrics)),
-            ("FLAG inputs (incl. unflag)", tuple(str(m.actions.flag_input_count) for m in metrics)),
-            ("CHORD inputs", tuple(str(m.actions.chord_count) for m in metrics)),
-            ("Human Replay elapsed", (f"{human.replay_elapsed_seconds} s", "—", "—")),
-            ("Model C cost through termination", ("—", f"{stage2.model_c_total_us:,} µs",
-                                                  f"{stage3.model_c_total_us:,} µs")),
-            ("Decision compute total", ("—", f"{stage2.decision_compute_total_ns:,} ns",
-                                           f"{stage3.decision_compute_total_ns:,} ns")),
+            ("최종 결과", tuple(m.outcome.name for m in metrics)),
+            ("행동 수", tuple(str(m.actions.semantic_action_count) for m in metrics)),
+            ("OPEN 입력", tuple(str(m.actions.open_count) for m in metrics)),
+            ("FLAG 입력 (깃발 해제 포함)", tuple(str(m.actions.flag_input_count) for m in metrics)),
+            ("CHORD 입력", tuple(str(m.actions.chord_count) for m in metrics)),
+            ("Human Replay 경과 시간", (f"{human.replay_elapsed_seconds} s", "—", "—")),
+            ("종료까지 Model C 비용", ("—", f"{stage2.model_c_total_us:,} µs",
+                                        f"{stage3.model_c_total_us:,} µs")),
+            ("판단 계산 시간 합계", ("—", f"{stage2.decision_compute_total_ns:,} ns",
+                                     f"{stage3.decision_compute_total_ns:,} ns")),
         )
         self.summary_labels = {}
         for row, (caption, values) in enumerate(rows, 1):
@@ -389,46 +409,46 @@ class SameBoardComparisonWindow(QWidget):
             for column, label in enumerate(labels, 1):
                 grid.addWidget(label, row, column)
         box.setToolTip(
-            "Recorded elapsed, modeled cost and decision compute are separate authorities. "
-            "Compute totals sum recorded non-None measurements; canonical first inputs have no decision measurement."
+            "기록된 경과 시간, 모델 비용, 판단 계산 시간은 서로 다른 기준입니다. "
+            "계산 시간 합계는 기록된 측정값만 더하며, 선언된 첫 입력에는 판단 측정이 없습니다."
         )
         return box
 
     def _build_qualification(self):
-        box = QGroupBox("Recorded opening")
+        box = QGroupBox("기록된 시작")
         layout = QVBoxLayout(box)
         context = self.execution.context
         first, opened = context.first_event, context.first_open_event
-        first_text = "none" if first is None else f"{first.action} ({first.x}, {first.y})"
-        open_text = "none" if opened is None else (
-            f"({opened.x}, {opened.y}); zero-based Replay event index {context.first_open_event_index}"
+        first_text = "없음" if first is None else f"{first.action} ({first.x}, {first.y})"
+        open_text = "없음" if opened is None else (
+            f"({opened.x}, {opened.y}); 0부터 센 Replay 사건 번호 {context.first_open_event_index}"
         )
         if context.matches_canonical_recorded_start:
-            match = "yes — Human event 0 is OPEN (0, 0)."
+            match = "예 — Human 사건 0이 OPEN (0, 0)입니다."
         elif opened is None:
-            match = "no — no Human OPEN was recorded."
+            match = "아니요 — 기록된 Human OPEN이 없습니다."
         else:
             reasons = []
             if context.has_prelude_events:
-                reasons.append("prelude before first OPEN")
+                reasons.append("첫 OPEN 앞에 다른 입력 있음")
             if (opened.x, opened.y) != (0, 0):
-                reasons.append(f"first OPEN targets ({opened.x}, {opened.y})")
-            match = "no — " + "; ".join(reasons) + "."
+                reasons.append(f"첫 OPEN 대상이 ({opened.x}, {opened.y})")
+            match = "아니요 — " + "; ".join(reasons) + "."
         s2, s3 = STAGE2_CANONICAL_FIRST_ACTION, STAGE3_CANONICAL_FIRST_ACTION
         self.qualification_label = self._label(
-            "Exact same fixed layout verified.\n"
-            f"Human first recorded event: {first_text}\n"
-            f"Human first OPEN: {open_text}\n"
-            f"Prelude before first OPEN: {'yes' if context.has_prelude_events else 'no'}\n"
-            f"Stage 2 first action: {s2[0]} ({s2[1]}, {s2[2]})\n"
-            f"Stage 3 first action: {s3[0]} ({s3[1]}, {s3[2]})\n"
-            f"Solver origin (0, 0): {'mine' if context.solver_origin_is_mine else 'not a mine'}\n"
-            f"Matching recorded start: {match}"
+            "같은 고정 배치임을 확인했습니다.\n"
+            f"Human 첫 기록 입력: {first_text}\n"
+            f"Human 첫 OPEN: {open_text}\n"
+            f"첫 OPEN 앞의 다른 입력: {'있음' if context.has_prelude_events else '없음'}\n"
+            f"Stage 2 첫 행동: {s2[0]} ({s2[1]}, {s2[2]})\n"
+            f"Stage 3 첫 행동: {s3[0]} ({s3[1]}, {s3[2]})\n"
+            f"알고리즘 시작점 (0, 0): {'지뢰' if context.solver_origin_is_mine else '지뢰 아님'}\n"
+            f"기록 시작 일치: {match}"
         )
         layout.addWidget(self.qualification_label)
         if context.solver_origin_is_mine:
             layout.addWidget(self._label(
-                "This is an already-fixed layout; ordinary fresh-game first-OPEN placement safety does not apply."
+                "이미 정해진 배치라서 새 게임의 첫 OPEN 안전 배치가 적용되지 않습니다."
             ))
         layout.addStretch()
         return box
@@ -453,8 +473,8 @@ class SameBoardComparisonWindow(QWidget):
         self.context_overlay.current_target = targets[index - 1] if index else None
         self.context_overlay.previous_target = targets[index - 2] if index > 1 else None
         self.context_overlay.update()
-        self.status_label.setText(f"Current reconstructed status: {status.name}")
-        self.index_label.setText(f"Action index {index} / {count}")
+        self.status_label.setText(f"현재 재구성 상태: {STATUS_NAMES.get(status.name, status.name)} ({status.name})")
+        self.index_label.setText(f"행동 {index} / {count}")
         blocked = self.run_selector.blockSignals(True)
         try:
             self.run_selector.setCurrentIndex(self.run_selector.findData(run))
@@ -488,7 +508,7 @@ class SameBoardComparisonWindow(QWidget):
             if tuple(self.mode_selector.itemData(i) for i in range(self.mode_selector.count())) != modes:
                 self.mode_selector.clear()
                 for mode in modes:
-                    self.mode_selector.addItem(mode.value, mode)
+                    self.mode_selector.addItem(MODE_NAMES[mode], mode)
             self.mode_selector.setCurrentIndex(self.mode_selector.findData(controller.state.mode))
             # A board boundary must not overwrite uncommitted editor text while
             # the user changes a running interval/speed. Run changes reset it.
@@ -507,19 +527,19 @@ class SameBoardComparisonWindow(QWidget):
         """No board observation/render, reference-prefix work or clock read here."""
         state = self.controller.state
         self.context_overlay.set_cursor(state)
-        self.play_button.setText('Pause' if state.running else 'Play')
+        self.play_button.setText('일시정지' if state.running else '재생')
         self.play_button.setEnabled(not state.terminal)
         if state.mode is PlaybackMode.INDEX:
             interval = self.controller.interval_ms
-            rate = 'Max (20 ms/action)' if interval == 20 else f'{interval} ms/action'
-            text = f'Index — {rate}'
+            rate = '최대 (20 ms/행동)' if interval == 20 else f'{interval} ms/행동'
+            text = f'{MODE_NAMES[PlaybackMode.INDEX]} — {rate}'
         else:
             # Formatting is presentation only, never fed back to exact timing.
             divisor = 1_000_000 if state.mode is PlaybackMode.MODEL_C_TIME else 1
-            text = (f'{state.mode.value} — {float(self.controller.speed):g}x — '
+            text = (f'{MODE_NAMES[state.mode]} — {float(self.controller.speed):g}x — '
                     f'{float(state.playhead / divisor):.6f} / '
                     f'{float(self.controller.timing.total_time / divisor):.6f} s')
-        self.playback_label.setText(text + ' • Synthetic action-target cursor')
+        self.playback_label.setText(text + ' • 합성 행동 대상 커서')
         if not state.running:
             self.presentation_timer.stop()
 
@@ -563,7 +583,7 @@ class SameBoardComparisonWindow(QWidget):
             self.error_label.clear()
             self.error_label.hide()
         else:
-            self.error_label.setText(f"Playback error: {error}")
+            self.error_label.setText(f"재생 오류: {error}")
             self.error_label.show()
 
     def on_run_changed(self, _index):
