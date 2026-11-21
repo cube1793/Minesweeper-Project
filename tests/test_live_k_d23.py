@@ -527,10 +527,28 @@ class LiveKD23Tests(unittest.TestCase):
     def test_d08_diagnosis_configuration_is_fixed_for_a_run_and_named_in_every_basis(self):
         self.assertEqual(b.DIAGNOSIS_ENV, "MINESWEEPER_K_D23_DIAGNOSIS")
         self.assertEqual(b.DIAGNOSES, ("NONE", "PSEUDO", "PSEUDO_LINKED"))
-        self.assertEqual(b.diagnosis_from_environment({}), "PSEUDO")
-        self.assertEqual(b.diagnosis_from_environment({b.DIAGNOSIS_ENV: ""}), "PSEUDO")
+        # The product default (2026-11-21): absent or empty means NONE. An explicit value stays that value.
+        self.assertEqual(b.diagnosis_from_environment({}), "NONE")
+        self.assertEqual(b.diagnosis_from_environment({b.DIAGNOSIS_ENV: ""}), "NONE")
         for value in b.DIAGNOSES:
             self.assertEqual(b.diagnosis_from_environment({b.DIAGNOSIS_ENV: value}), value)
+        # The default reaches the real parent job: without the variable the run is NONE and its basis says NONE.
+        unset_start = state_of("FORCED_ABOVE_MINIMUM")
+        unset_process = Mock()
+        unset_process.poll.return_value = None
+        unset_process.wait.return_value = 0
+        with patch.dict(os.environ), patch.object(jobs.subprocess, "Popen", return_value=unset_process), \
+                patch.object(jobs, "create_scope", return_value=None):
+            os.environ.pop(b.DIAGNOSIS_ENV, None)
+            unset_job = jobs.LivePolicyJob(clock=lambda: self.now)
+            self.addCleanup(unset_job.shutdown)
+            unset_job.start(unset_start)
+            unset_job.timer.stop()
+        self.assertEqual(unset_job._k_diagnosis, "NONE")
+        _, _, unset_payload = worker_payload(unset_start, b.diagnosis_from_environment({}))
+        self.publish(unset_job, "PROPOSAL", json.loads(json.dumps(unset_payload)))
+        self.assertEqual((unset_job.state, unset_job.pending_basis.diagnosis, unset_job.pending_basis.pseudo),
+                         ("pending", "NONE", ()))
         for value in ("pseudo", "LINKED", "0"):
             with self.subTest(value=value), self.assertRaises(LivePolicyError):
                 b.diagnosis_from_environment({b.DIAGNOSIS_ENV: value})

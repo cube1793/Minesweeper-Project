@@ -10,8 +10,10 @@ required for a K_D23 decision proposal (not initial, not preparation) and forbid
 ``binding_sha256`` binds the content to the run, the input number, the policy, the token, the public grid
 and the actual input. It is a content binding: no mathematical proof and no authentication of the sender.
 
-The diagnosis configuration of a worker run is read once from the environment. It is the temporary switch
-of this copy, not a user setting and not the final product configuration.
+The diagnosis configuration of a worker run is read once, when the run starts, from the environment variable
+MINESWEEPER_K_D23_DIAGNOSIS. The product default is NONE: with the variable absent or empty no separate
+diagnosis is computed. PSEUDO or PSEUDO_LINKED is switched on by hand, by setting the variable before the app
+is started; removing it and starting the app again returns to NONE. It is not a setting of the user interface.
 """
 
 from dataclasses import dataclass, fields
@@ -27,7 +29,7 @@ BASIS_FORMAT = 1
 DIAGNOSIS_ENV = "MINESWEEPER_K_D23_DIAGNOSIS"
 DIAGNOSIS_NONE, DIAGNOSIS_PSEUDO, DIAGNOSIS_PSEUDO_LINKED = "NONE", "PSEUDO", "PSEUDO_LINKED"
 DIAGNOSES = (DIAGNOSIS_NONE, DIAGNOSIS_PSEUDO, DIAGNOSIS_PSEUDO_LINKED)
-DEFAULT_DIAGNOSIS = DIAGNOSIS_PSEUDO  # the temporary default of this copy
+DEFAULT_DIAGNOSIS = DIAGNOSIS_NONE  # the product default since 2026-11-21; a diagnosis is switched on by hand
 BRANCH_CERTAIN, BRANCH_GUESS = "CERTAIN_D2", "GUESS_D3"
 OPENING, NO_PROVEN, NO_ELIGIBLE = "PROVEN_OPENING_OVERRIDE", "NO_PROVEN_OPENING", "NO_ELIGIBLE_OPENING"
 FORCED, TIE, KEPT = "FORCED_5050_FIRST", "TIE_LOOKAHEAD", "K_LC1_GUESS_KEPT"
