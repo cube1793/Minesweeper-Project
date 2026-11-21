@@ -1,9 +1,12 @@
-"""Regressions for alias identity, result events and parent-side accounting."""
+"""Regressions for alias identity, result events, parent-side accounting and real child processes."""
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -203,9 +206,12 @@ class ParentAccountingTests(unittest.TestCase):
     def test_matching_journal_receipt_and_exit_code_succeed(self):
         rows = (ran(self.ONE) + ran(self.TWO, 'skip', 'explicit opt-in') +
                 ran(self.THREE, 'expected_failure', 'expected'))
-        code, summary, files, printed = self.run_parent(journal=rows, claimed=rows)
+        # G2 (FU-03): the stand-in skip is declared as this run's expected opt-in skip.
+        with mock.patch.object(runner, 'EXPECTED_OPT_IN_SKIPS', frozenset({self.TWO})):
+            code, summary, files, printed = self.run_parent(journal=rows, claimed=rows)
         self.assertEqual(code, 0)
         self.assertTrue(summary['successful'])
+        self.assertEqual(summary['skip_gate']['result'], 'PASS')
         counts = summary['counts']
         self.assertEqual((counts['pass'], counts['skip'], counts['expected_failure']), (1, 1, 1))
         self.assertEqual((counts['selected'], counts['run'], counts['completed']), (3, 3, 3))
@@ -312,6 +318,35 @@ class ParentAccountingTests(unittest.TestCase):
         self.assert_rejected(code, summary, 'Exit/receipt mismatch')
         self.assertEqual((summary['counts']['pass'], summary['infrastructure_errors']), (3, 2))
 
+    def test_skip_gate_rejects_unexpected_and_missing_expected_skips(self):
+        """G2 (FU-03): the gate compares actual skips with the expected opt-in list."""
+        skipped_two = ran(self.ONE) + ran(self.TWO, 'skip', 'opt-in') + ran(self.THREE)
+        cases = dict(
+            unexpected=(skipped_two, frozenset(), [self.TWO], []),
+            expected_but_ran=(self.all_passed(), frozenset({self.THREE}), [], [self.THREE]),
+            other_skipped=(skipped_two, frozenset({self.THREE}), [self.TWO], [self.THREE]),
+            outside_selection_ignored=(self.all_passed(), frozenset({'tests.elsewhere.Case.test_x'}), [], []))
+        for name, (rows, expected, unexpected, missing) in cases.items():
+            with self.subTest(name), mock.patch.object(runner, 'EXPECTED_OPT_IN_SKIPS', expected):
+                code, summary, _, printed = self.run_parent(journal=rows, claimed=rows)
+                gate = summary['skip_gate']
+                self.assertEqual((gate['unexpected_skips'], gate['expected_not_skipped']), (unexpected, missing))
+                failed = bool(unexpected or missing)
+                self.assertEqual(gate['result'], 'FAIL' if failed else 'PASS')
+                self.assertEqual((code, summary['successful']), (1, False) if failed else (0, True))
+                self.assertTrue(runner.successful(summary['counts']))
+                self.assertEqual(summary['fixed_environment']['unset'], list(runner.OPT_IN_ENVIRONMENT))
+                self.assertIn('"skip_gate"', printed)
+
+    def test_expected_skip_list_is_the_full_02_opt_in_set(self):
+        self.assertEqual(len(runner.EXPECTED_OPT_IN_SKIPS), 11)
+        modules = {identity.split('.')[1] for identity in runner.EXPECTED_OPT_IN_SKIPS}
+        self.assertEqual(modules, {'test_live_feedback_process', 'test_live_k_certainty_process',
+                                   'test_live_k_process'})
+        for name in ('MINESWEEPER_UI_FEEDBACK_PROCESS_PLAN', 'MINESWEEPER_K_CERTAINTY_PROCESS_PLAN',
+                     'MINESWEEPER_NEW_K_PROCESS_PLAN', 'MINESWEEPER_K_D23_DIAGNOSIS'):
+            self.assertIn(name, runner.OPT_IN_ENVIRONMENT)
+
     def test_unwritable_recovery_keeps_the_summary_and_the_existing_file(self):
         journal = ran(self.ONE) + ran(self.TWO, 'failure', 'deliberate') + ran(self.THREE)
         code, summary, files, _ = self.run_parent(journal=journal, claimed=self.all_passed(),
@@ -321,3 +356,158 @@ class ParentAccountingTests(unittest.TestCase):
                             for row in summary['accounting_errors']))
         self.assertEqual((summary['counts']['pass'], summary['counts']['failure']), (2, 1))
         self.assertEqual(files['recovered_receipt.json'], b'occupied')
+
+
+# --- G1 (FU-02): real child processes, outside the source tree -------------
+
+PROBE_MODULE = '''
+import json, os, subprocess, sys, time, unittest
+
+class Probe(unittest.TestCase):
+    def test_sleeps(self):
+        time.sleep(120)
+
+    def test_reports_environment(self):
+        names = json.loads(os.environ["MS_RUNNER_PROBE_NAMES"])
+        with open(os.environ["MS_RUNNER_PROBE_ENV_FILE"], "w", encoding="utf-8") as stream:
+            json.dump({name: os.environ.get(name) for name in names}, stream)
+
+    def test_leaves_descendant(self):
+        child = subprocess.Popen([sys.executable, "-B", "-c", "import time; time.sleep(120)"],
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        with open(os.environ["MS_RUNNER_PROBE_PID_FILE"], "w", encoding="ascii") as stream:
+            stream.write(str(child.pid))
+'''
+
+
+def _process_alive(pid):
+    """Query only; never signals or terminates the process."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED
+    if not handle:
+        return False
+    try:
+        return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+    finally:
+        kernel.CloseHandle(handle)
+
+
+@unittest.skipUnless(os.name == "nt", "Windows Job Object process path")
+class RealProcessPathTests(unittest.TestCase):
+    """Real child processes and real Jobs; probe modules live in system TEMP."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp(prefix="ms_runner_probe_"))
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        self.assertNotIn(runner.ROOT.resolve(), self.temp.resolve().parents)
+        (self.temp / "ms_runner_probe.py").write_text(PROBE_MODULE, encoding="ascii")
+        self.pid_file = self.temp / "descendant.pid"
+        environment = mock.patch.dict(os.environ, {
+            "PYTHONPATH": str(self.temp), "MS_RUNNER_PROBE_PID_FILE": str(self.pid_file),
+            "MS_RUNNER_PROBE_NAMES": json.dumps(list(runner.OPT_IN_ENVIRONMENT))})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def partition(self, test_name):
+        directory = self.temp / ("part_" + test_name)
+        directory.mkdir()
+        ids = ["ms_runner_probe.Probe." + test_name]
+        request = directory / "request.json"
+        runner.write_json(request, ids)
+        return directory, request, ids
+
+    def test_real_child_timeout_is_killed_and_reported(self):
+        directory, request, ids = self.partition("test_sleeps")
+        started = time.monotonic()
+        info = runner.launch(["--test-child", str(request), str(directory)], directory, 5)
+        self.assertLess(time.monotonic() - started, 60)
+        self.assertIsNone(info["exit_code"])
+        self.assertTrue(any(error.startswith("TimeoutExpired") for error in info["errors"]), info)
+        self.assertEqual(info["active_after_cleanup"], 0)
+        self.assertEqual(json.loads((directory / "process.json").read_text(encoding="utf-8")), info)
+        self.assertFalse(_process_alive(info["pid"]))
+        receipt, problems = runner.reconcile(directory, ids, info["exit_code"])
+        self.assertIn("Missing child receipt", problems)
+        self.assertEqual(receipt["counts"]["unfinished"], 1)
+        self.assertFalse((directory / "receipt.json").exists())
+
+    def test_real_process_start_failure_is_reported_without_a_child(self):
+        directory, request, ids = self.partition("test_sleeps")
+        with mock.patch.object(runner, "APPROVED_PYTHON", self.temp / "missing" / "python.exe"):
+            info = runner.launch(["--test-child", str(request), str(directory)], directory, 30)
+        self.assertIsNone(info["exit_code"])
+        self.assertNotIn("pid", info)
+        self.assertTrue(any(error.startswith("FileNotFoundError") for error in info["errors"]), info)
+        self.assertEqual(info["active_after_cleanup"], 0)
+        receipt, problems = runner.reconcile(directory, ids, info["exit_code"])
+        self.assertIn("Missing child journal", problems)
+        self.assertEqual(receipt["counts"]["not_started"], 1)
+
+    def test_real_descendant_left_in_owned_job_fails_and_is_cleaned(self):
+        directory, request, ids = self.partition("test_leaves_descendant")
+        info = runner.launch(["--test-child", str(request), str(directory)], directory, 60)
+        self.assertEqual(info["exit_code"], 0)
+        self.assertIn("RuntimeError: Child left owned processes running", info["errors"])
+        self.assertGreater(info["active_after"], 0)
+        self.assertEqual(info["active_after_cleanup"], 0)
+        descendant = int(self.pid_file.read_text(encoding="ascii"))
+        self.assertFalse(_process_alive(descendant))
+        receipt, problems = runner.reconcile(directory, ids, info["exit_code"])
+        self.assertEqual((problems, receipt["counts"]["pass"]), ([], 1))
+
+    def test_real_job_cleanup_failure_is_reported_and_close_still_kills(self):
+        from experiments import random_expert_exhibition_process as process_scope
+
+        class QueryOnlyTerminateScope(process_scope.WindowsWorkerScope):
+            """A real Job whose terminate call uses a handle without TERMINATE access."""
+
+            def terminate(self):
+                handle = process_scope._check(self.api.OpenJobObjectW(0x4, False, self.name))
+                try:
+                    process_scope._check(self.api.TerminateJobObject(handle, 1))  # OS refuses
+                finally:
+                    self.api.CloseHandle(handle)
+
+        directory, request, ids = self.partition("test_leaves_descendant")
+        with mock.patch.object(process_scope, "create_scope", QueryOnlyTerminateScope):
+            info = runner.launch(["--test-child", str(request), str(directory)], directory, 60)
+        self.assertEqual(info["exit_code"], 0)
+        self.assertIn("RuntimeError: Child left owned processes running", info["errors"])
+        self.assertTrue(any(error.startswith("Cleanup OSError") or error.startswith("Cleanup PermissionError")
+                            for error in info["errors"]), info["errors"])
+        self.assertIsNone(info["active_after_cleanup"])
+        descendant = int(self.pid_file.read_text(encoding="ascii"))
+        deadline = time.monotonic() + 10
+        while _process_alive(descendant) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(_process_alive(descendant))  # KILL_ON_JOB_CLOSE at scope.close()
+
+    def test_real_discovery_child_failure_stops_before_partitions(self):
+        output = self.temp / "run"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = runner.full_source(output, timeout=1)
+        self.assertEqual(code, 2)
+        summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        self.assertEqual((summary["successful"], summary["discovery"]), (False, "FAILED"))
+        self.assertTrue(any(error.startswith("TimeoutExpired") for error in summary["process"]["errors"]))
+        self.assertEqual(summary["process"]["active_after_cleanup"], 0)
+        self.assertEqual(sorted(path.name for path in output.iterdir()), ["discovery", "summary.json"])
+
+    def test_opt_in_environment_is_unset_in_a_real_child(self):
+        directory, request, ids = self.partition("test_reports_environment")
+        report = self.temp / "environment.json"
+        forced = {name: "parent-value" for name in runner.OPT_IN_ENVIRONMENT}
+        with mock.patch.dict(os.environ, dict(forced, MS_RUNNER_PROBE_ENV_FILE=str(report))):
+            info = runner.launch(["--test-child", str(request), str(directory)], directory, 60)
+        self.assertEqual((info["exit_code"], info["errors"]), (0, []))
+        self.assertEqual(info["fixed_environment"]["removed_from_parent"], sorted(forced))
+        seen = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(seen, {name: None for name in runner.OPT_IN_ENVIRONMENT})
+

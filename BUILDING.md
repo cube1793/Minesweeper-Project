@@ -57,6 +57,13 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 if ($LASTEXITCODE -ne 0) { throw 'Full source acceptance failed.' }
 ```
 
+Since 2026-11-21 (FU-03) the runner also holds the expected explicit opt-in skip
+list (`EXPECTED_OPT_IN_SKIPS`, the 11 skips of `full_02`). `summary.json` reports a
+`skip_gate` with any skip outside the list and any listed test that was not skipped
+(limited to the selected tests); either one fails the run. Every child runs with the
+opt-in, evidence-path and diagnosis variables in `OPT_IN_ENVIRONMENT` unset, and
+`process.json` records that list and which names the parent had set.
+
 This runner discovers tests in a separate child using canonical `tests.*` module
 names. Imported TestCase aliases are collapsed only when their class, method,
 pristine instance state, and standard unittest ID/run implementations match.

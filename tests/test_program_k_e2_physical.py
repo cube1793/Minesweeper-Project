@@ -956,9 +956,14 @@ class QualifiedCaptureTests(unittest.TestCase):
 
     def test_extension_branch_hashes_exact_native_file_with_matching_origin(self):
         # This success case requires ASCII artifact paths by profile contract.
-        # Keep the fixture under the source tree rather than locale-dependent TEMP.
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
-            native = Path(directory) / "synthetic-zlib-native.bin"
+        # FU-07: the fixture lives under the system TEMP, outside the source tree,
+        # so an abnormal exit can never leave an untracked folder in the repository.
+        # The real (resolved) path must be ASCII; no other location is invented.
+        with tempfile.TemporaryDirectory(prefix="ms_zlib_ascii_") as directory:
+            real = Path(directory).resolve()
+            self.assertTrue(str(real).isascii(), f"System TEMP path is not ASCII: {real!r}")
+            self.assertNotIn(Path(__file__).resolve().parents[1], real.parents)
+            native = real / "synthetic-zlib-native.bin"
             native.write_bytes(b"controlled native provider fixture")
             with patch.object(zlib, "__file__", str(native), create=True), \
                     patch.object(zlib, "__spec__", types.SimpleNamespace(name="zlib", origin=str(native))):

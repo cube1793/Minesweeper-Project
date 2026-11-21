@@ -19,7 +19,33 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 APPROVED_PYTHON = Path(r"C:\venvs\minesweeper\Scripts\python.exe")
 ISOLATED_CLASS = "tests.test_program_k_harness.ProgramKSlice7SupervisorTests"
-STATUSES = ("pass", "failure", "error", "skip", "expected_failure",
+# The explicit opt-in skips of a standard run (full_02, 2026-11-16). Any other
+# skip, or a listed test that is not skipped, fails the gate (FU-03).
+EXPECTED_OPT_IN_SKIPS = frozenset({
+    "tests.test_live_feedback_process.LiveFeedbackProcessTests.test_ui_p01_k_exact_probability_wire_pause_readmit",
+    "tests.test_live_feedback_process.LiveFeedbackProcessTests.test_ui_p02_v1_v4_initial_terminal",
+    "tests.test_live_k_certainty_process.LiveKCertaintyProcessTests.test_certainty_p01_k_guess_safe_colors_terminal",
+    "tests.test_live_k_certainty_process.LiveKCertaintyProcessTests.test_certainty_p02_v1_v5_terminal",
+    "tests.test_live_k_process.LiveKProcessTests.test_k01_native_small_engine_flag_fresh_chord_terminal",
+    "tests.test_live_k_process.LiveKProcessTests.test_k02_native_initial_terminal_no_next",
+    "tests.test_live_k_process.LiveKProcessTests.test_k03_real_pending_pause_validation_revoke_resume_cancel",
+    "tests.test_live_k_process.LiveKProcessTests.test_k04_validation_timeout_heartbeat_cleanup",
+    "tests.test_live_k_process.LiveKProcessTests.test_k05_close_owned_descendant_cleanup",
+    "tests.test_live_k_process.LiveKProcessTests.test_k06_tampered_permit_zero_inputs_cleanup",
+    "tests.test_live_k_process.LiveKProcessTests.test_k07_finished_exit_cap_keeps_actual_terminal_input",
+})
+# Opt-in campaigns, evidence paths and product diagnosis settings read by tests.
+# Every child runs with all of them unset, whatever the parent environment holds.
+OPT_IN_ENVIRONMENT = (
+    "MINESWEEPER_UI_FEEDBACK_PROCESS_PLAN", "MINESWEEPER_UI_FEEDBACK_PROCESS_LEDGER",
+    "MINESWEEPER_K_CERTAINTY_PROCESS_PLAN", "MINESWEEPER_K_CERTAINTY_PROCESS_LEDGER",
+    "MINESWEEPER_NEW_K_PROCESS_PLAN", "MINESWEEPER_NEW_K_PROCESS_RECEIPTS",
+    "MINESWEEPER_LOWLOAD_OPT_IN", "MINESWEEPER_LOWLOAD_STARTUP_DIRECTORY",
+    "MINESWEEPER_FIXED_CADENCE_REAL_OPT_IN", "MINESWEEPER_PACING_REAL_OPT_IN",
+    "PACING_RUN_ROOT", "PACING_TEST_FONT", "MINESWEEPER_UI_POLISH_RENDER_DIR",
+    "MINESWEEPER_LC1_TRACE_DIRECTORY", "MINESWEEPER_K_D23_DIAGNOSIS",
+)
+STATUSES =("pass", "failure", "error", "skip", "expected_failure",
             "unexpected_success", "not_started", "unfinished")
 
 
@@ -203,6 +229,18 @@ def validate_receipt(receipt, selected_ids):
     require(make_receipt(selected_ids, records) == receipt, "Receipt accounting mismatch")
 
 
+def skip_gate_result(selected_ids, receipts):
+    """Compare actual skips with the expected opt-in list, limited to the selection."""
+    skipped = {identity for receipt in receipts
+               for identity, status in receipt["outcomes"].items() if status == "skip"}
+    expected = EXPECTED_OPT_IN_SKIPS & set(selected_ids)
+    gate = dict(expected=sorted(expected), skipped=sorted(skipped),
+                unexpected_skips=sorted(skipped - EXPECTED_OPT_IN_SKIPS),
+                expected_not_skipped=sorted(expected - skipped))
+    gate["result"] = "FAIL" if gate["unexpected_skips"] or gate["expected_not_skipped"] else "PASS"
+    return gate
+
+
 def successful(counts):
     return not any(counts[key] for key in ("failure", "error", "unexpected_success",
                                           "not_started", "unfinished", "fixture_errors"))
@@ -290,6 +328,11 @@ def launch(arguments, directory, timeout):
     environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8",
                        QT_QPA_PLATFORM="offscreen")
     # Never enable opt-in campaigns or relocate global TEMP into an evidence path.
+    info["fixed_environment"] = dict(
+        unset=list(OPT_IN_ENVIRONMENT),
+        removed_from_parent=sorted(name for name in OPT_IN_ENVIRONMENT if name in environment))
+    for name in OPT_IN_ENVIRONMENT:
+        environment.pop(name, None)
     if os.name == "nt":
         environment.setdefault("QT_QPA_FONTDIR", str(Path(os.environ["WINDIR"]) / "Fonts"))
     try:
@@ -385,13 +428,16 @@ def full_source(output, modules=(), collect_only=False, timeout=3600):
               json.dumps(receipt["counts"], sort_keys=True) + f" infrastructure_errors={len(info['errors'])}" +
               f" journal={'RECOVERED' if problems else 'MATCH'}", flush=True)
     counts = {key: sum(row["counts"][key] for row in combined) for key in combined[0]["counts"]} if combined else {}
+    skip_gate = skip_gate_result(selected_ids, combined)
     summary = dict(scope="subset" if modules else "full_source", raw_discovered=discovery["raw_discovered"],
                    unique_discovered=discovery["unique_discovered"], removed_aliases=len(discovery["duplicates"]),
                    partitions=len(groups), counts=counts, processes=launches,
                    infrastructure_errors=sum(len(row["errors"]) for row in launches),
                    partition_integrity="PASS", result_accounting="PASS" if not accounting_errors else "INCOMPLETE",
-                   journal_reconciled=reconciled, accounting_errors=accounting_errors)
-    summary["successful"] = bool(counts) and successful(counts) and not summary["infrastructure_errors"]
+                   journal_reconciled=reconciled, accounting_errors=accounting_errors,
+                   skip_gate=skip_gate, fixed_environment=dict(unset=list(OPT_IN_ENVIRONMENT)))
+    summary["successful"] = (bool(counts) and successful(counts) and not summary["infrastructure_errors"]
+                             and skip_gate["result"] == "PASS")
     write_json(output / "summary.json", summary)
     print("SOURCE_UNITTEST_SUMMARY " + json.dumps({k: v for k, v in summary.items() if k != "processes"}, sort_keys=True), flush=True)
     return 0 if summary["successful"] else 1
