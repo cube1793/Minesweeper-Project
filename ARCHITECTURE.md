@@ -696,7 +696,7 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 
 검증은 repository 읽기 전용/파일 보존, 실행 목록의 불변성·SELECT-only, 순수 포맷/정확한 확률 순서, 실제 offscreen Qt의 연결·언어·그래프·main engine ownership 경계를 포함한다. 자동 테스트는 자체 임시 DB를 쓰며 외부 pilot artifact에 의존하지 않는다.
 
-### 4.0a 같은 보드 비교의 알고리즘 선택 확대 (2026-11-21, F — 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전)
+### 4.0a 같은 보드 비교의 알고리즘 선택 확대 (2026-11-21, F — 사용자 화면 확인 통과(2026-11-22, 사용자 보고), 원격 반영은 EFG Git 마감 보고서)
 
 ```text
 launcher(실행 전 선택) ─ S2+S3 둘 다 → 기존 SameBoardExecutionJob → 기존 결과 창(timed playback)
@@ -705,7 +705,7 @@ launcher(실행 전 선택) ─ S2+S3 둘 다 → 기존 SameBoardExecutionJob �
 
 실행 전 선택과 실행 뒤 표시 선택을 나눈다. 기본 선택(S2·S3)은 기존 경로만 실행하므로 기존 결과·형식과 같다. 추가 알고리즘의 판단은 기존 제품 정책 코드를 그대로 부르며(선택 로직 무변경), 공개 스냅숏만 받는다. 첫 입력은 K·Stage4 정책이 전부 HIDDEN인 공개 보드에서 고른다(S2·S3는 기존 OPEN (0,0) 선언). Stage4는 고정 배치에서 시작하려면 추측 허용이 필요하므로 비교에서는 추측 허용으로 실행하고 설정으로 기록한다. 시간 기반 한도 때문에 Stage4 결과는 실행마다 달라질 수 있다. 알고리즘별 한도는 2026-11-21 시범(30×16/99 두 보드, K 최대 3.266초, Stage4 최대 109.641초)으로 K 30초·Stage4 120초로 정했다. worker는 행동과 설정만 보내고 부모가 고정 배치 엔진 재생으로 상태·수·Model C 합계를 다시 계산한다. 영구 저장 형식은 바꾸지 않았다. 근거: `C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/EFG_SEQUENCE_2026-11-21/F_01/`(계약·시범·시험 결과).
 
-2026-11-22 F 보완 1(사용자 화면 확인의 결함 1건 + 사용자 추가 요구, F 화면 재확인 전·원격 반영 전): 결과 창 슬라이더를 기존 `_IndexSlider`로 바꿔 트랙 클릭이 바로 이동하게 했고, Index 자동 재생(기존 간격 상수·멈춤 규칙)과 숨은 정답 표시(기존 `_AnswerOverlay`)를 더했다. 통계는 `same_board_statistics`가 기존 `ReplayStatisticsAnalyzer`를 그대로 불러 계산한다(새 지표 정의 없음). 네 창(실행기, R 목표 입력, 결과 창, 기존 상세 창)의 사용자 문구를 한국어로 바꿨고, 기존 상세 창은 문구만 바꿨다(F-C8의 예외, 동작·배치 무변경). 보드 칸의 열린 숫자 툴팁은 공유 위젯(`stage3_visualizer_ui`)을 고치지 않고 비교 창 전용 하위 클래스에서 한국어로 바꾼다. Model C 시간축 재생·커서 경로·두 창 통합은 넣지 않았다(후속). 근거: `.../EFG_SEQUENCE_2026-11-21/F_01/amendment_01/`.
+2026-11-22 F 보완 1(사용자 화면 확인의 결함 1건 + 사용자 추가 요구, F 화면 재확인 통과(2026-11-22, 사용자 보고), 원격 반영은 EFG Git 마감 보고서): 결과 창 슬라이더를 기존 `_IndexSlider`로 바꿔 트랙 클릭이 바로 이동하게 했고, Index 자동 재생(기존 간격 상수·멈춤 규칙)과 숨은 정답 표시(기존 `_AnswerOverlay`)를 더했다. 통계는 `same_board_statistics`가 기존 `ReplayStatisticsAnalyzer`를 그대로 불러 계산한다(새 지표 정의 없음). 네 창(실행기, R 목표 입력, 결과 창, 기존 상세 창)의 사용자 문구를 한국어로 바꿨고, 기존 상세 창은 문구만 바꿨다(F-C8의 예외, 동작·배치 무변경). 보드 칸의 열린 숫자 툴팁은 공유 위젯(`stage3_visualizer_ui`)을 고치지 않고 비교 창 전용 하위 클래스에서 한국어로 바꾼다. Model C 시간축 재생·커서 경로·두 창 통합은 넣지 않았다(후속). 근거: `.../EFG_SEQUENCE_2026-11-21/F_01/amendment_01/`.
 
 ### 4.1 Live 입력과 분석·자동 진행
 
@@ -917,7 +917,7 @@ ui_manager → zini_explorer controller → zini_trace → V1 core simulation
           └→ zini_explorer_ui → controller의 불변 결과와 index 탐색
 ```
 
-2026-11-21 갱신(E 재생 단위, 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전): 위 그림의 'index 탐색'은 이제 다음과 같다.
+2026-11-21 갱신(E 재생 단위, 사용자 화면 확인 통과(2026-11-22, 사용자 보고), 원격 반영은 EFG Git 마감 보고서): 위 그림의 'index 탐색'은 이제 다음과 같다.
 
 ```text
 ui_manager → zini_explorer controller ─ request_trace(): build_zini_trace() 1회 → ZiniPlaybackPlayer(trace) 1회
