@@ -67,6 +67,7 @@ Stage4 S/M/R은 Main/Live에서 사용할 수 있습니다. Unit73에서 **N1 �
 - **같은 보드 재플레이:** 종료판의 동일 배치로 새 판 시작, 같은 배치 완료 기록 보관, Replay 기본 종료와 원 배치 재플레이 선택
 - **Human Mouse Trace:** Live 보드의 실제 포인터 경로와 action marker 기록, 게임 종료 후 또는 Replay에서 선택적으로 표시
 - **Same-board Comparison:** 완료 Human Replay의 고정 배치에서 Human / Stage 2 / Stage 3 결과와 선택 run의 독립 Index/시간 재생, 정답 참조·완료 action-target route 표시
+  - **2026-11-21 알고리즘 선택 확대(F, 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전):** 실행 전에 실행할 알고리즘을 고릅니다. 기본은 지금처럼 Stage 2 Simple + Stage 3 V1이며 이 둘만 고르면 기존 비교와 같습니다. 추가 후보는 K-P0·K-LC0·K-LC1·K(K_D23)와 Stage4 S·M·R이며 초급·중급·상급 preset 보드에서만 고를 수 있습니다(Live와 같은 지원 범위). Stage4 R은 고를 때 R 목표(양의 백분율, 추천값 없음)를 입력합니다. 추가 알고리즘은 하나씩 순서대로 실행하며 알고리즘별 한도(K 30초, Stage4 120초, Stage 2·3을 따로 실행할 때 120초)를 넘으면 `LIMIT`로 끝냅니다. 결과는 별도 결과 창에서 알고리즘별 종료 구분(WON·LOST·STOPPED·LIMIT·CANCELLED·ERROR)·행동 수·OPEN/FLAG/CHORD·Model C 시간·설정과 함께 보이고, 'Shown result'로 표시할 결과만 바꿉니다(다시 실행하지 않음). Stage4 결과는 시간 기반 한도 때문에 실행마다 달라질 수 있다고 표시합니다. K·Stage4의 첫 입력은 각 정책이 전부 닫힌 공개 보드에서 스스로 고르며, 지뢰 배치는 엔진 준비·검증과 지표 계산에만 씁니다. 새 결과의 재생은 행동 index 재생이고, 기존 시간 재생(timed playback)은 Human / Stage 2 / Stage 3 기존 결과에만 있습니다. Model C 시간은 속도 순위가 아닙니다.
 
 ## Stage 4 — Unit37까지의 구현 이력
 
@@ -635,6 +636,10 @@ Minesweeper-Project/
 ├─ same_board_playback.py       # 세 run의 독립 remembered action index
 ├─ same_board_comparison_launcher.py # captured context·job·완료 결과 소유
 ├─ same_board_comparison_ui.py  # 읽기 전용 결과·public observation·Human overlay
+├─ same_board_algorithms.py     # (2026-11-21) 추가 알고리즘 어댑터·실행 기록·부모 쪽 독립 재검증
+├─ same_board_algorithm_worker.py # (2026-11-21) 알고리즘 1개를 고정 board에서 실행하는 subprocess
+├─ same_board_algorithm_job.py  # (2026-11-21) 순차 실행·알고리즘별 한도·취소·오류
+├─ same_board_runs_ui.py        # (2026-11-21) 여러 알고리즘 결과 표·표시 선택·index 재생
 ├─ replay_model.py              # Replay 데이터 계약
 ├─ replay_recorder.py           # 실제 이벤트와 확정 보드 기록
 ├─ replay_json.py               # JSON 변환·파일 입출력

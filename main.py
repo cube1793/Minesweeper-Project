@@ -40,6 +40,11 @@ def main():
 
         return worker_main(sys.argv[1:])
 
+    if sys.argv[1:2] == ["--same-board-algorithm-worker"]:
+        from same_board_algorithm_worker import main as worker_main
+
+        return worker_main(sys.argv[1:])
+
     if sys.argv[1:2] == ["--live-policy-worker"]:
         from live_policy_worker import main as worker_main
 

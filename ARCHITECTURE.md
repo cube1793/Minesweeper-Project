@@ -309,6 +309,9 @@ contract and historical acceptance remain preserved.
 | `same_board_timed_playback.py` | Qt-independent immutable run timing projections and per-run presentation progress; exact Human Replay timestamps / solver Model C boundaries, pause/re-anchor/catch-up; no Engine execution |
 | `same_board_comparison_launcher.py` | One captured context, job, retained completed execution and at most one result viewer |
 | `same_board_comparison_ui.py` | One public-observation board; selected-run controls and one presentation QTimer; three timed states, full Human Mouse Trace, separate reference layers/context/synthetic cursor; no worker ownership |
+| `same_board_algorithms.py` (2026-11-21, F) | Registry of 9 runnable algorithms (S2, S3, K-P0, K-LC0, K-LC1, K_D23, Stage4 S/M/R), per-algorithm limits from the pilot, fixed-layout adapters (K: `KOwner` FIXED_BOARD, Stage4: `Session` FIXED_BOARD, public snapshots only), `AlgorithmRun`, parent-side `validate_run` (engine replay + Model C recompute) |
+| `same_board_algorithm_worker.py` / `same_board_algorithm_job.py` (2026-11-21, F) | One child per algorithm (token, board, algorithm, R target text); parent queue runs them one at a time in registry order with per-algorithm and summed limits, cancel (current + pending CANCELLED, finished kept), worker error, poll-only |
+| `same_board_runs_ui.py` (2026-11-21, F) | Result table keyed by algorithm ID in registry order; "Shown result" switches only the replayed stream; index playback of OPEN/FLAG/CHORD on a fresh fixed engine; existing timed window opened on request |
 | `visualization_reference_overlays.py` | Neutral immutable clue derivation and answer/route painters; caller supplies truth, public HIDDEN mask and route points; no acquisition, prefix selection, clocks/playback, Engine, solver, Model C or jobs |
 
 Main Tools **Compare as full-game Human Replay…** declares caller intent and
@@ -691,6 +694,15 @@ ui_manager.py                    상단 도구 메뉴 진입점과 보조 창 �
 - **Pairing UI: DEFER / REVISIT WHEN STAGE 3 COMPARISON UI EXISTS.** 실제 Stage 3 비교 흐름이 생길 때 두 실행·접두 범위 선택 GUI를 재검토한다. `validate_paired_prefix()`, paired identity, 공식/진단 규칙과 Batch 8 테스트는 유지된다.
 
 검증은 repository 읽기 전용/파일 보존, 실행 목록의 불변성·SELECT-only, 순수 포맷/정확한 확률 순서, 실제 offscreen Qt의 연결·언어·그래프·main engine ownership 경계를 포함한다. 자동 테스트는 자체 임시 DB를 쓰며 외부 pilot artifact에 의존하지 않는다.
+
+### 4.0a 같은 보드 비교의 알고리즘 선택 확대 (2026-11-21, F — 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전)
+
+```text
+launcher(실행 전 선택) ─ S2+S3 둘 다 → 기존 SameBoardExecutionJob → 기존 결과 창(timed playback)
+                      └ 그 밖의 선택 → SameBoardAlgorithmQueue → 알고리즘마다 worker 1개(순차) → validate_run → SameBoardRunsWindow(표시 선택)
+```
+
+실행 전 선택과 실행 뒤 표시 선택을 나눈다. 기본 선택(S2·S3)은 기존 경로만 실행하므로 기존 결과·형식과 같다. 추가 알고리즘의 판단은 기존 제품 정책 코드를 그대로 부르며(선택 로직 무변경), 공개 스냅숏만 받는다. 첫 입력은 K·Stage4 정책이 전부 HIDDEN인 공개 보드에서 고른다(S2·S3는 기존 OPEN (0,0) 선언). Stage4는 고정 배치에서 시작하려면 추측 허용이 필요하므로 비교에서는 추측 허용으로 실행하고 설정으로 기록한다. 시간 기반 한도 때문에 Stage4 결과는 실행마다 달라질 수 있다. 알고리즘별 한도는 2026-11-21 시범(30×16/99 두 보드, K 최대 3.266초, Stage4 최대 109.641초)으로 K 30초·Stage4 120초로 정했다. worker는 행동과 설정만 보내고 부모가 고정 배치 엔진 재생으로 상태·수·Model C 합계를 다시 계산한다. 영구 저장 형식은 바꾸지 않았다. 근거: `C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/EFG_SEQUENCE_2026-11-21/F_01/`(계약·시범·시험 결과).
 
 ### 4.1 Live 입력과 분석·자동 진행
 
@@ -1241,6 +1253,7 @@ worker와 부모는 동일 monotonic ns로 permit 기한을 검사한다. 추측
 | Same-board domain / execution | `test_same_board_comparison.py`, `test_same_board_runner.py`, `test_benchmark_modeled_actions.py` | Human full-stream admission·exact layout·safe/mined origin·native evidence·분리된 metrics |
 | Same-board transport / lifecycle | `test_same_board_execution_worker.py`, `test_same_board_execution_job.py`, `test_same_board_solver_transport.py`, `test_same_board_worker_dispatch.py` | board-only transport·token·parent validation·cancel/reap/cleanup·source/frozen dispatch |
 | Same-board playback / UI | `test_same_board_timed_playback.py`, `test_same_board_playback.py`, `test_same_board_comparison_ui.py`, `test_same_board_comparison_launcher.py`, `test_same_board_main_ui.py` | 독립 timing/index·partial pause/catch-up·public observation·Human overlay 분리·captured source·result reopen·main close |
+| Same-board 알고리즘 선택 확대 (2026-11-21) | `test_same_board_algorithms.py`, `test_same_board_algorithm_job.py`, `test_same_board_algorithm_ui.py` | 9개 알고리즘 승리·패배·한도·취소·worker 오류, 지표 독립 재계산, 정보 경계, 기본 선택 = 기존 경로, 표시 선택 무재실행, 도착 순서 무관, R 목표·preset 지원 |
 | Neutral reference overlays | `test_visualization_reference_overlays.py`, Same-board/Visualizer UI modules | immutable clues·HIDDEN mask·completed prefix·opacity/z-order·public glyph 보존·partial/toggle no-domain guards |
 | Program K research demo | `test_program_k_trace_adapter.py`, `test_program_k_control_trace_adapter.py`, `test_program_k_trace_comparison.py`, `test_program_k_trace_viewer.py`, `test_program_k_trace_comparison_ui.py` | pinned evidence·immutable projection·exact pairing·독립 clocks·committed M·no I/O/execution·R2 presentation |
 | Frozen Stage-3 | `test_stage3_runner.py`, `test_stage3_planner.py`, `test_stage3_physical.py`, `test_stage3_telemetry.py` | V1 action/plan·authenticated profile·정수 timing·telemetry 보호 |
