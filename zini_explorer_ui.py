@@ -1,8 +1,10 @@
-"""Qt presentation of an already built ZiNi trace, by logical step index.
+"""Qt presentation of an already built ZiNi trace, by click playback unit.
 
 The main UI owns eligibility, lazy trace construction, and session lifetime.
-This window only reads the controller and delegates navigation to it. Closing
-the window leaves the cached trace and the controller's current index intact.
+This window only reads the controller's playback API and delegates navigation
+to it: one position per physical click (each flag, then the chord, of a
+flag_chord move). Closing the window leaves the cached trace and the
+controller's playback position intact.
 """
 
 from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
@@ -30,6 +32,23 @@ SELECTION_TEXT = {
     ZiniTraceSelection.FALLBACK_GREEDY: "현재 상태 기준 첫 fallback",
     ZiniTraceSelection.FALLBACK_ALT: "현재 상태 기준 다른 fallback",
 }
+# Keyed by ZiniPlaybackUnitKind values (a str Enum), so no extra import here.
+UNIT_KIND_TEXT = {
+    "click": "클릭",
+    "fallback_click": "fallback 클릭",
+    "chord": "화음",
+}
+DEFAULT_INTERVAL_MS = 500
+UNIT_NOTE_TEXT = (
+    "깃발 순서는 좌상단(행 우선) 표시 순서이며 실제 클릭 순서가 아닙니다. "
+    "Premium·선택 관계·동률 수 외의 값은 논리 단계 전체 기준입니다."
+)
+
+
+def unit_kind_text(unit) -> str:
+    if unit.kind == "flag":
+        return f"깃발 {unit.flag_number}/{unit.flag_count}"
+    return UNIT_KIND_TEXT[unit.kind]
 
 
 class ZiniExplorerCell(QLabel):
@@ -126,17 +145,18 @@ class _JumpSlider(QSlider):
 
 
 class ZiniExplorerWindow(QWidget):
-    """Separate Index-only view of one trace-ready controller session.
+    """Separate click-unit view of one trace-ready controller session.
 
     Construction never requests a trace. Reopening a valid cached session
-    preserves its logical index; only the autoplay timer belongs to this view.
+    preserves its playback position; only the autoplay timer belongs to this
+    view. The window uses the controller's playback API, never its logical one.
     """
 
     closed = pyqtSignal()
 
     def __init__(self, controller: ZiniExplorerController, parent=None):
         if (controller.state != "ready" or controller.trace is None
-                or controller.snapshot is None or controller.current_index is None):
+                or controller.snapshot is None or controller.playback_position is None):
             raise ValueError("ZiNi Explorer requires an eligible, trace-ready controller.")
         super().__init__(parent, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -147,7 +167,7 @@ class ZiniExplorerWindow(QWidget):
         self._details_auto_resize = None
 
         self.timer = QTimer(self)
-        self.timer.setInterval(200)
+        self.timer.setInterval(DEFAULT_INTERVAL_MS)
         self.timer.timeout.connect(self._advance_autoplay)
         layout = QVBoxLayout(self)
 
@@ -197,9 +217,9 @@ class ZiniExplorerWindow(QWidget):
         controls = QHBoxLayout()
         button_specs = (
             ("first_button", QStyle.SP_MediaSkipBackward, "처음", self.on_first),
-            ("previous_button", QStyle.SP_MediaSeekBackward, "이전 단계", self.on_previous),
+            ("previous_button", QStyle.SP_MediaSeekBackward, "이전 재생 단위", self.on_previous),
             ("play_button", QStyle.SP_MediaPlay, "재생", self.on_play_pause),
-            ("next_button", QStyle.SP_MediaSeekForward, "다음 단계", self.on_next),
+            ("next_button", QStyle.SP_MediaSeekForward, "다음 재생 단위", self.on_next),
             ("last_button", QStyle.SP_MediaSkipForward, "마지막", self.on_last),
         )
         for name, icon, tooltip, handler in button_specs:
@@ -213,18 +233,18 @@ class ZiniExplorerWindow(QWidget):
             setattr(self, name, button)
             controls.addWidget(button)
         controls.addStretch()
-        controls.addWidget(QLabel("Index 간격"))
+        controls.addWidget(QLabel("재생 간격"))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(20, 5000)
-        self.interval_spin.setValue(200)
-        self.interval_spin.setSuffix(" ms/step")
-        self.interval_spin.setToolTip("논리 단계당 자동 재생 간격")
+        self.interval_spin.setValue(DEFAULT_INTERVAL_MS)
+        self.interval_spin.setSuffix(" ms/클릭")
+        self.interval_spin.setToolTip("재생 단위(클릭 1회)당 자동 재생 간격")
         self.interval_spin.valueChanged.connect(self.timer.setInterval)
         controls.addWidget(self.interval_spin)
         layout.addLayout(controls)
 
         self.slider = _JumpSlider(Qt.Horizontal)
-        self.slider.setAccessibleName("논리 단계 Index")
+        self.slider.setAccessibleName("재생 위치 (누적 Clicks)")
         self.slider.valueChanged.connect(self.on_slider_changed)
         self.slider.sliderPressed.connect(self._stop_autoplay)
         self.slider.trackPressed.connect(self._stop_autoplay)
@@ -242,30 +262,49 @@ class ZiniExplorerWindow(QWidget):
         details_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.details_panel)
         self.details_panel.hide()
+        self.unit_note_label = QLabel(UNIT_NOTE_TEXT)
+        self.unit_note_label.setWordWrap(True)
+        details_layout.addWidget(self.unit_note_label)
+        # Two columns keep the expanded panel no taller than the former single
+        # list: the click unit and whole-move values on the left, the move's
+        # pre-state Premium diagnostics on the right.
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(18)
+        details_layout.addLayout(grid)
         self.diagnostic_labels = {}
         self.diagnostic_rows = {}
-        for key, caption in (
-            ("action", "Action"),
-            ("coordinate", "좌표 (x, y; 0부터)"),
-            ("premium", "Move Premium"),
-            ("best_premium", "적용 전 최대 Premium"),
-            ("selection", "선택 관계 (적용 전 상태)"),
-            ("newly_revealed", "새로 열린 칸"),
-            ("newly_flagged", "새로 꽂은 깃발"),
-            ("tie_count", "최대 Premium 숫자 칸 동률 수"),
+        captions = {0: [], 1: []}
+        for key, caption, row_index, column in (
+            ("unit", "재생 단위 · 대상 좌표 · 논리 단계", 0, 0),
+            ("action", "Action", 1, 0),
+            ("coordinate", "논리 단계 좌표 (x, y; 0부터)", 2, 0),
+            ("newly_revealed", "새로 열린 칸", 3, 0),
+            ("newly_flagged", "새로 꽂은 깃발", 4, 0),
+            ("premium_basis", "Premium 기준 시점", 0, 1),
+            ("premium", "Move Premium", 1, 1),
+            ("best_premium", "적용 전 최대 Premium", 2, 1),
+            ("selection", "선택 관계 (적용 전 상태)", 3, 1),
+            ("tie_count", "최대 Premium 숫자 칸 동률 수", 4, 1),
         ):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
             caption_label = QLabel(caption)
-            caption_label.setMinimumWidth(215)
             row_layout.addWidget(caption_label)
             value_label = QLabel("—")
             value_label.setWordWrap(True)
             row_layout.addWidget(value_label, 1)
+            captions[column].append(caption_label)
             self.diagnostic_labels[key] = value_label
             self.diagnostic_rows[key] = row
-            details_layout.addWidget(row)
+            grid.addWidget(row, row_index, column)
+        for column, labels in captions.items():
+            # Align values within each column, as the former fixed width did.
+            width = max(label.sizeHint().width() for label in labels)
+            for label in labels:
+                label.setMinimumWidth(width)
+            grid.setColumnStretch(column, 1)
         self.refresh()
 
     def _toggle_details(self, expanded: bool):
@@ -332,19 +371,21 @@ class ZiniExplorerWindow(QWidget):
             and self.controller.state == "ready"
             and self.controller.trace is not None
             and self.controller.snapshot is not None
-            and self.controller.current_index is not None
+            and self.controller.playback_position is not None
         )
 
     def _refresh_board(self):
         """Rerender cells only; display changes never navigate or request a trace."""
         ready = self._session_ready()
-        snapshot = self.controller.snapshot if ready else None
-        step = self.controller.current_step if ready else None
-        revealed = self.controller.revealed if ready else frozenset()
-        flagged = self.controller.flagged_mines if ready else frozenset()
-        newly_revealed = frozenset(step.newly_revealed) if step else frozenset()
-        newly_flagged = frozenset(step.newly_flagged) if step else frozenset()
-        selected = (step.move.x, step.move.y) if step else None
+        controller = self.controller
+        snapshot = controller.snapshot if ready else None
+        unit = controller.playback_unit if ready else None
+        revealed = controller.playback_revealed if ready else frozenset()
+        flagged = controller.playback_flagged_mines if ready else frozenset()
+        newly_revealed = controller.playback_newly_revealed if ready else frozenset()
+        newly_flagged = controller.playback_newly_flagged if ready else frozenset()
+        # A flag unit selects its flag cell; chord/click/fallback the move cell.
+        selected = unit.target if unit else None
         for coordinate, cell in self.cells.items():
             x, y = coordinate
             state = (
@@ -361,21 +402,29 @@ class ZiniExplorerWindow(QWidget):
             )
 
     def refresh(self):
-        """Render only the controller's exposed snapshot, state, and current step."""
+        """Render only the controller's exposed snapshot, state, and current unit."""
         self._refresh_board()
         ready = self._session_ready()
-        step = self.controller.current_step if ready else None
-        index = self.controller.current_index if ready else 0
-        count = self.controller.step_count if ready else 0
-        if not ready or index == count:
+        unit = self.controller.playback_unit if ready else None
+        step = self.controller.playback_step if ready else None
+        position = self.controller.playback_position if ready else 0
+        count = self.controller.playback_count if ready else 0
+        if not ready or position == count:
             self._stop_autoplay()
+        # One unit is one physical click, so the position is the click count.
         self.clicks_label.setText(
-            f"Clicks {self.controller.cumulative_clicks} / {self.controller.clicks}"
+            f"Clicks {position} / {self.controller.clicks}"
             if ready else "Clicks — / —"
         )
         values = {}
-        if step is not None:
+        if unit is not None and step is not None:
+            step_number = step.step_index + 1
             values = {
+                "unit": (
+                    f"{unit_kind_text(unit)} · ({unit.target[0]}, {unit.target[1]})"
+                    f" · {step_number} / {len(self.controller.trace.steps)}"
+                ),
+                "premium_basis": f"논리 단계 {step_number}의 적용 전 상태 기준",
                 "action": step.move.action,
                 "coordinate": f"({step.move.x}, {step.move.y})",
                 "premium": step.move.premium,
@@ -395,15 +444,15 @@ class ZiniExplorerWindow(QWidget):
         previous_block = self.slider.blockSignals(True)
         try:
             self.slider.setRange(0, count)
-            self.slider.setValue(index)
+            self.slider.setValue(position)
             self.slider.setEnabled(ready and count > 0)
         finally:
             self.slider.blockSignals(previous_block)
-        self.first_button.setEnabled(ready and index > 0)
-        self.previous_button.setEnabled(ready and index > 0)
-        self.next_button.setEnabled(ready and index < count)
-        self.last_button.setEnabled(ready and index < count)
-        self.play_button.setEnabled(ready and index < count)
+        self.first_button.setEnabled(ready and position > 0)
+        self.previous_button.setEnabled(ready and position > 0)
+        self.next_button.setEnabled(ready and position < count)
+        self.last_button.setEnabled(ready and position < count)
+        self.play_button.setEnabled(ready and position < count)
 
     def _stop_autoplay(self):
         self.timer.stop()
@@ -414,38 +463,38 @@ class ZiniExplorerWindow(QWidget):
     def on_first(self):
         self._stop_autoplay()
         if self._session_ready():
-            self.controller.go_to(0)
+            self.controller.seek_playback(0)
         self.refresh()
 
     def on_previous(self):
         self._stop_autoplay()
         if self._session_ready():
-            self.controller.previous()
+            self.controller.previous_playback()
         self.refresh()
 
     def on_next(self):
         self._stop_autoplay()
         if self._session_ready():
-            self.controller.next()
+            self.controller.next_playback()
         self.refresh()
 
     def on_last(self):
         self._stop_autoplay()
         if self._session_ready():
-            self.controller.go_to(self.controller.step_count)
+            self.controller.seek_playback(self.controller.playback_count)
         self.refresh()
 
-    def on_slider_changed(self, index: int):
+    def on_slider_changed(self, position: int):
         self._stop_autoplay()
         if self._session_ready():
-            self.controller.go_to(index)
+            self.controller.seek_playback(position)
         self.refresh()
 
     def on_play_pause(self):
         if self.timer.isActive():
             self._stop_autoplay()
         elif (self._session_ready()
-              and self.controller.current_index < self.controller.step_count):
+              and self.controller.playback_position < self.controller.playback_count):
             self.timer.start(self.interval_spin.value())
             self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             self.play_button.setToolTip("일시 정지")
@@ -455,7 +504,7 @@ class ZiniExplorerWindow(QWidget):
         if not self.timer.isActive():
             return
         if self._session_ready():
-            self.controller.next()
+            self.controller.next_playback()
         self.refresh()
 
     def closeEvent(self, event):

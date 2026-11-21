@@ -5,11 +5,16 @@ finished job's cleanup must not invalidate this controller; board/mode changes
 must. Receive performs transport checks only. Premium and path semantics are
 checked once, on explicit request_trace(), using the existing trace backend.
 No search, engine access, I/O, timers, or UI operations happen here.
+
+Playback has one cursor: a click-unit position owned by ZiniPlaybackPlayer.
+The logical API (current_index, go_to, next, ...) keeps its names and meaning
+and is derived from that position; the playback_* API exposes click units.
 """
 
 from board_snapshot import BoardSnapshot, Coordinate
 from zini_calculator import ZiniMove, ZiniResult
-from zini_trace import ZiniTrace, ZiniTracePlayer, ZiniTraceStep, build_zini_trace
+from zini_playback import ZiniPlaybackPlayer, ZiniPlaybackUnit
+from zini_trace import ZiniTrace, ZiniTraceStep, build_zini_trace
 
 
 def _validate_snapshot_shape(snapshot: BoardSnapshot) -> None:
@@ -87,7 +92,7 @@ class ZiniExplorerController:
         self._clicks: int | None = None
         self._moves: tuple[ZiniMove, ...] | None = None
         self._trace: ZiniTrace | None = None
-        self._player: ZiniTracePlayer | None = None
+        self._player: ZiniPlaybackPlayer | None = None
         self._completed = False
         self._eligible = False
         self._worker_error: str | None = None
@@ -161,7 +166,8 @@ class ZiniExplorerController:
                 trace = build_zini_trace(
                     self._snapshot, ZiniResult(self._clicks, self._moves),
                 )
-                player = ZiniTracePlayer(trace)
+                # Units are derived once, here, from the stored trace only.
+                player = ZiniPlaybackPlayer(trace)
             except Exception as exc:
                 self._trace_error = repr(exc)
                 return None
@@ -262,3 +268,50 @@ class ZiniExplorerController:
 
     def previous(self) -> bool:
         return self._player.previous() if self._can_play() else False
+
+    # Playback API: one click unit per position, 0..playback_count.
+
+    @property
+    def playback_position(self) -> int | None:
+        return self._player.playback_position if self._can_play() else None
+
+    @property
+    def playback_count(self) -> int | None:
+        return self._player.playback_count if self._can_play() else None
+
+    @property
+    def playback_unit(self) -> ZiniPlaybackUnit | None:
+        return self._player.playback_unit if self._can_play() else None
+
+    @property
+    def playback_step(self) -> ZiniTraceStep | None:
+        return self._player.playback_step if self._can_play() else None
+
+    @property
+    def playback_revealed(self) -> frozenset[Coordinate]:
+        return self._player.playback_revealed if self._can_play() else frozenset()
+
+    @property
+    def playback_flagged_mines(self) -> frozenset[Coordinate]:
+        return self._player.playback_flagged_mines if self._can_play() else frozenset()
+
+    @property
+    def playback_newly_revealed(self) -> frozenset[Coordinate]:
+        return self._player.playback_newly_revealed if self._can_play() else frozenset()
+
+    @property
+    def playback_newly_flagged(self) -> frozenset[Coordinate]:
+        return self._player.playback_newly_flagged if self._can_play() else frozenset()
+
+    def seek_playback(self, position: int) -> bool:
+        """Delegate validated seeks; unavailable playback never starts a build."""
+        if not self._can_play():
+            return False
+        self._player.seek_playback(position)
+        return True
+
+    def next_playback(self) -> bool:
+        return self._player.next_playback() if self._can_play() else False
+
+    def previous_playback(self) -> bool:
+        return self._player.previous_playback() if self._can_play() else False

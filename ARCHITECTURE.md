@@ -902,11 +902,21 @@ ui_manager → zini_explorer controller → zini_trace → V1 core simulation
           └→ zini_explorer_ui → controller의 불변 결과와 index 탐색
 ```
 
+2026-11-21 갱신(E 재생 단위, 사용자 화면 확인 전(마지막에 모아서 확인)·원격 반영 전): 위 그림의 'index 탐색'은 이제 다음과 같다.
+
+```text
+ui_manager → zini_explorer controller ─ request_trace(): build_zini_trace() 1회 → ZiniPlaybackPlayer(trace) 1회
+          └→ zini_explorer_ui → controller의 playback_* API(재생 위치 하나)만 사용
+zini_playback: derive_playback_units(trace) — 저장된 Trace 필드만 읽는다(snapshot·지뢰 배치를 읽지 않음)
+```
+
 Worker는 한 번의 탐색이 반환한 최종 moves를 전달한다. Controller는 해당 job에 전송한 snapshot을 유지하며, Counters 갱신 중에는 Trace를 만들지 않는다. 사용자가 Explorer를 열 때만 `build_zini_trace()`로 최종 경로를 검증·재구성하고 cache한다. 이 과정은 search/RNG를 호출하지 않는다. Trace 실패는 이미 유효한 숫자 ZiNi를 없애지 않는다.
 
 접근 조건은 Live WON/LOST 또는 완료 Replay이며, 완료 Replay에서는 현재 seek 위치와 무관하다. 진행 중 Live와 미완료 Replay에서는 접근할 수 없다. Board/mode 변경은 세션을 무효화하고 창을 닫는다. Explorer만 닫으면 Trace와 논리 index가 유지된다.
 
 Explorer는 처음·이전·다음·마지막, slider와 간격을 조절하는 Index 자동 재생을 유지한다. 헤더는 누적 physical Clicks만 표시하며, 좌표·새 reveals/flags·Premium/tie 진단은 새 창마다 기본으로 접힌 상세 정보에 둔다. 접힌 동안에도 진단 값을 갱신하며 펼침/접힘은 재생 상태를 바꾸지 않는다. 초기 창은 보드 크기와 실제 layout chrome으로 계산하고 화면의 available geometry 이내로 제한한다. 큰 보드와 작은 화면을 위한 QScrollArea는 유지한다. Index 0은 적용 전, N은 논리 move N개를 적용한 상태다. **Replay != ZiNi Trace**: 실제 행동 시간이나 ReplayEvent 모델을 공유하지 않으며, 적용 전 선택 관계는 탐색 phase·beam·RNG 이력을 뜻하지 않는다. Trace schema와 ZiNi semantics version은 각각 1이다.
+
+**재생 단위(2026-11-21, E):** 위 문단의 Index 자동 재생과 'Index 0은 적용 전, N은 논리 move N개' 설명은 논리 API의 의미로 그대로 남고, 창의 이동 단위는 재생 단위로 바뀌었다. `zini_playback.derive_playback_units()`는 검증된 Trace에서만 단위를 만든다: `click`·`fallback_click`은 1단위, `flag_chord`는 새 깃발마다 1단위(`newly_flagged` 순서 = `_top_left_key`의 (y, x) 행 우선) 다음 화음 1단위다. 단위 수는 `total_clicks`와 같고 재생 위치 p는 누적 Clicks와 같다. 깃발 순서는 표시 순서이며 실제 클릭 순서를 재현하지 않는다. `ZiniPlaybackPlayer`는 정수 재생 위치 하나만 저장하고 논리 값(`current_index` 등)을 그 위치에서 계산한다: P(i)를 논리 move i개를 마친 위치라 할 때 `current_index`는 P(i) ≤ p인 최대 i이며, move 중간에서 논리 조회는 index i의 상태(진행 중 깃발 제외)를, `next`/`previous`/`go_to`는 P(i+1)/P(i−1)/P(j)로 이동한다. 모든 P(i)에서 재생 상태는 기존 `ZiniTracePlayer`의 index i 상태와 같다. `ZiniTracePlayer`·`build_zini_trace`·`ZiniTrace`와 schema·semantics version(각 1)은 바꾸지 않았다. 깃발 단위에서는 열린 칸이 바뀌지 않고 그 깃발 하나만 강조·선택 테두리를 받는다. 화음·클릭·fallback 단위는 move 적용 뒤 상태와 move의 `newly_revealed` 강조, move 좌표 선택 테두리를 쓴다. Move Premium·적용 전 최대 Premium·선택 관계·동률 수는 그 move의 적용 전 상태 값(Trace 저장값)을 모든 단위에서 그대로 보이며 다시 계산하지 않는다. 상세 정보는 2열이다: 왼쪽은 재생 단위(종류·대상 좌표·소속 논리 단계)와 논리 단계 전체 값(Action·좌표·새 칸·새 깃발 수), 오른쪽은 'Premium 기준 시점: 논리 단계 k의 적용 전 상태 기준'과 적용 전 Premium 진단이며, 위에 깃발 표시 순서 안내가 있다. 자동 재생 기본 간격은 500 ms(범위 20~5000)다. Trace와 단위는 처음 열 때 `request_trace()`에서 한 번만 만들고, 창을 닫았다 열면 재생 위치가 유지되며, board/mode 변경·`invalidate()`·`begin()`은 재생 위치도 없앤다. Counters 경로는 Trace와 단위를 만들지 않는다. 근거: `C:/Users/User/Documents/ChatGPT/졸업프로젝트/outputs/EFG_SEQUENCE_2026-11-21/E_01/`(계약·시험 결과).
 
 ## 5. 중요한 설계 경계와 invariants
 
@@ -1226,6 +1236,7 @@ worker와 부모는 동일 monotonic ns로 permit 기한을 검사한다. 추측
 | ZiNi advanced | `test_zini_advanced.py` | 정책별 rollout, budget·종료 metadata, baseline 유지, 고정 seed/evaluation 재현성, trace 재적용 |
 | ZiNi golden / TYPE S | `test_zini_golden.py`, `test_zini_core.py` | 고정 10 workloads의 전체 moves·clicks·non-elapsed metadata, reference Premium 및 solved 판정 동등성 |
 | ZiNi Trace / Explorer | `test_zini_trace.py`, `test_zini_explorer.py`, `test_zini_explorer_ui.py` | 사후 Trace 검증, lazy 생성, 정보 gate, index/delta·Qt 표시 및 세션 수명 |
+| ZiNi Explorer 재생 단위 (2026-11-21) | `test_zini_playback.py`, `test_zini_explorer_playback.py`, `test_zini_explorer_playback_ui.py` | 단위 파생·중간 깃발 상태·논리 경계 일치·클릭 수, 단일 위치와 move 중간 논리 호출, 창의 재생 API 전용·Premium 기준 시점·500 ms·Trace 1회 생성 |
 | Stage-3 Extended | `test_stage3_identity.py`, `test_stage3_execution.py`, `test_stage3_trace_player.py`, `test_stage3_modeled_playback.py`, `test_stage3_execution_worker.py`, `test_stage3_visualizer_ui.py`, `test_stage3_execution_job.py`, `test_stage3_visualizer_launcher.py` | identity·incremental 재생·fake-clock exact timeline·synthetic cursor·worker transport·취소·종료·cleanup |
 | Same-board domain / execution | `test_same_board_comparison.py`, `test_same_board_runner.py`, `test_benchmark_modeled_actions.py` | Human full-stream admission·exact layout·safe/mined origin·native evidence·분리된 metrics |
 | Same-board transport / lifecycle | `test_same_board_execution_worker.py`, `test_same_board_execution_job.py`, `test_same_board_solver_transport.py`, `test_same_board_worker_dispatch.py` | board-only transport·token·parent validation·cancel/reap/cleanup·source/frozen dispatch |

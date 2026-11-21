@@ -75,6 +75,21 @@ def ready_controller(snapshot=CENTER_SNAPSHOT, result=CENTER_RESULT):
     return controller
 
 
+def expected_playback_cells(trace, position):
+    """Independent click-position state: whole moves, then the next move's leading flags."""
+    revealed, flags, used = set(), set(), 0
+    for step in trace.steps:
+        cost = step.move.clicks_added
+        if used + cost <= position:
+            revealed.update(step.newly_revealed)
+            flags.update(step.newly_flagged)
+            used += cost
+        else:
+            flags.update(step.newly_flagged[:position - used])
+            break
+    return frozenset(revealed), frozenset(flags)
+
+
 def forbid_search(stack):
     for target in (
         "zini_calculator.calculate_g_zini",
@@ -146,7 +161,9 @@ class ExplorerWindowTests(unittest.TestCase):
             window.first_button.click()
             window.slider.setValue(2)
         self.assertIs(self.controller.trace, trace)
-        self.assertEqual(self.controller.current_index, 2)
+        # The slider is a click-unit playback position (E-C9); 2 is mid-move 1.
+        self.assertEqual(self.controller.playback_position, 2)
+        self.assertEqual(self.controller.current_index, 1)
 
     def test_constructor_requires_an_eligible_already_built_trace(self):
         controller = ZiniExplorerController()
@@ -187,7 +204,7 @@ class ExplorerWindowTests(unittest.TestCase):
         self.window.close()
         reopened = self.create_window(self.controller)
         self.assertTrue(reopened.answer_display_checkbox.isChecked())
-        self.assertEqual(self.controller.current_index, 2)
+        self.assertEqual(self.controller.playback_position, 2)
 
     def assert_covered_answer(self, cell, text, color):
         self.assertEqual(cell.state, "closed")
@@ -281,7 +298,9 @@ class ExplorerWindowTests(unittest.TestCase):
                     if cell.state == "flagged":
                         self.assertEqual(cell.text(), "🚩")
                         self.assertIn("color: #c00000", cell.styleSheet())
-                        self.assertIn("border: 2px outset #ffffff", cell.styleSheet())
+                        # E-C8: a flag unit selects the cell it flags.
+                        self.assertIn("border: 2px solid #2463c5" if cell.selected
+                                      else "border: 2px outset #ffffff", cell.styleSheet())
                     else:
                         self.assertEqual(cell.text(), "1")
                         self.assertIn(NUMBER_COLORS[1], cell.styleSheet())
@@ -336,14 +355,14 @@ class ExplorerWindowTests(unittest.TestCase):
             for action, index in ((window.next_button.click, 1), (window.next_button.click, 2),
                                   (window.previous_button.click, 1),
                                   (lambda: window.slider.setValue(3), 3),
-                                  (window.last_button.click, 4), (window.first_button.click, 0)):
+                                  (window.last_button.click, 5), (window.first_button.click, 0)):
                 with self.subTest(enabled=enabled, index=index):
                     action()
-                    self.assertEqual(controller.current_index, index)
-                    self.assertEqual(window.clicks_label.text(), f"Clicks {controller.cumulative_clicks} / 5")
+                    self.assertEqual(controller.playback_position, index)
+                    self.assertEqual(window.clicks_label.text(), f"Clicks {index} / 5")
                     for coord, cell in window.cells.items():
-                        state = ("flagged" if coord in controller.flagged_mines else
-                                 "revealed" if coord in controller.revealed else "closed")
+                        state = ("flagged" if coord in controller.playback_flagged_mines else
+                                 "revealed" if coord in controller.playback_revealed else "closed")
                         self.assertEqual(cell.state, state)
                         self.assertEqual(cell.answer_label.isHidden(), not (enabled and state == "closed"))
                         if state == "closed" and enabled:
@@ -667,19 +686,19 @@ class ExplorerWindowTests(unittest.TestCase):
         self.assertTrue(window.last_button.isEnabled())
         self.assertTrue(window.play_button.isEnabled())
         for action, expected in ((window.next_button.click, 1), (window.next_button.click, 2),
-                                 (window.previous_button.click, 1), (window.last_button.click, 4),
+                                 (window.previous_button.click, 1), (window.last_button.click, 5),
                                  (window.first_button.click, 0), (lambda: window.slider.setValue(3), 3)):
             action()
-            self.assertEqual(self.controller.current_index, expected)
+            self.assertEqual(self.controller.playback_position, expected)
             self.assertEqual(window.slider.value(), expected)
-            self.assertEqual(window.clicks_label.text(), f"Clicks {self.controller.cumulative_clicks} / 5")
+            self.assertEqual(window.clicks_label.text(), f"Clicks {expected} / 5")
         window.last_button.click()
         self.assertTrue(window.first_button.isEnabled())
         self.assertTrue(window.previous_button.isEnabled())
         self.assertFalse(window.next_button.isEnabled())
         self.assertFalse(window.last_button.isEnabled())
         self.assertFalse(window.play_button.isEnabled())
-        self.assertEqual((window.slider.minimum(), window.slider.maximum()), (0, 4))
+        self.assertEqual((window.slider.minimum(), window.slider.maximum()), (0, 5))
 
     def slider_handle_rect(self, slider):
         option = QStyleOptionSlider()
@@ -700,7 +719,8 @@ class ExplorerWindowTests(unittest.TestCase):
                            "zini_trace._find_premium_candidates"):
                 stack.enter_context(patch(target, side_effect=AssertionError(target)))
             request = stack.enter_context(patch.object(controller, "request_trace"))
-            go_to = stack.enter_context(patch.object(controller, "go_to", wraps=controller.go_to))
+            seek = stack.enter_context(patch.object(controller, "seek_playback",
+                                                    wraps=controller.seek_playback))
             for enabled in (False, True):
                 window.answer_display_checkbox.setChecked(enabled)
                 for fraction in (0.25, 0.5, 0.75):
@@ -708,27 +728,24 @@ class ExplorerWindowTests(unittest.TestCase):
                         window.first_button.click()
                         window.play_button.click()
                         self.assertTrue(window.timer.isActive())
-                        go_to.reset_mock()
+                        seek.reset_mock()
                         point = QPoint(round((slider.width() - 1) * fraction), slider.height() // 2)
                         QTest.mousePress(slider, Qt.LeftButton, pos=point)
                         try:
-                            index = controller.current_index
-                            self.assertAlmostEqual(index, round(controller.step_count * fraction), delta=1)
+                            index = controller.playback_position
+                            self.assertAlmostEqual(index, round(controller.playback_count * fraction), delta=1)
                             self.assertEqual(slider.value(), index)
-                            go_to.assert_called_once_with(index)
+                            seek.assert_called_once_with(index)
                             self.assertFalse(window.timer.isActive())
-                            self.assertEqual(controller.revealed, frozenset(
-                                cell for step in trace.steps[:index] for cell in step.newly_revealed
-                            ))
-                            self.assertEqual(controller.flagged_mines, frozenset(
-                                cell for step in trace.steps[:index] for cell in step.newly_flagged
-                            ))
+                            revealed, flags = expected_playback_cells(trace, index)
+                            self.assertEqual(controller.playback_revealed, revealed)
+                            self.assertEqual(controller.playback_flagged_mines, flags)
                             self.assertEqual(window.clicks_label.text(),
-                                             f"Clicks {controller.cumulative_clicks} / {controller.clicks}")
+                                             f"Clicks {index} / {controller.clicks}")
                         finally:
                             QTest.mouseRelease(slider, Qt.LeftButton, pos=point)
                         window._advance_autoplay()  # A queued timeout cannot undo the seek.
-                        self.assertEqual(controller.current_index, index)
+                        self.assertEqual(controller.playback_position, index)
                         self.assertIs(controller.trace, trace)
                         self.assertIs(controller.moves, moves)
             request.assert_not_called()
@@ -737,14 +754,14 @@ class ExplorerWindowTests(unittest.TestCase):
         for window in (self.window, self.create_expert_window()):
             self.show_on_screen(window, QRect(0, 0, 1920, 1080))
             slider, controller = window.slider, window.controller
-            for x, expected in ((0, 0), (slider.width() - 1, controller.step_count)):
-                with self.subTest(step_count=controller.step_count, expected=expected):
-                    slider.setValue(controller.step_count // 2)
+            for x, expected in ((0, 0), (slider.width() - 1, controller.playback_count)):
+                with self.subTest(playback_count=controller.playback_count, expected=expected):
+                    slider.setValue(controller.playback_count // 2)
                     QTest.mouseClick(slider, Qt.LeftButton, pos=QPoint(x, slider.height() // 2))
                     self.assertEqual(slider.value(), expected)
-                    self.assertEqual(controller.current_index, expected)
+                    self.assertEqual(controller.playback_position, expected)
                     self.assertEqual(window.previous_button.isEnabled(), expected > 0)
-                    self.assertEqual(window.next_button.isEnabled(), expected < controller.step_count)
+                    self.assertEqual(window.next_button.isEnabled(), expected < controller.playback_count)
 
     def test_slider_track_click_at_same_index_stops_autoplay(self):
         window = self.window
@@ -754,12 +771,12 @@ class ExplorerWindowTests(unittest.TestCase):
         window.interval_spin.setValue(5000)
         window.play_button.click()
         self.assertTrue(window.timer.isActive())
-        with patch.object(self.controller, "go_to", wraps=self.controller.go_to) as go_to:
+        with patch.object(self.controller, "seek_playback", wraps=self.controller.seek_playback) as seek:
             QTest.mouseClick(slider, Qt.LeftButton, pos=point)
         self.assertFalse(window.timer.isActive())
         self.assertEqual(slider.value(), 0)
-        self.assertEqual(self.controller.current_index, 0)
-        go_to.assert_not_called()
+        self.assertEqual(self.controller.playback_position, 0)
+        seek.assert_not_called()
 
     def test_slider_handle_drag_keeps_grab_offset_and_navigation_working(self):
         window = self.window
@@ -773,10 +790,10 @@ class ExplorerWindowTests(unittest.TestCase):
         QTest.mousePress(slider, Qt.LeftButton, pos=press)
         try:
             self.assertTrue(slider.isSliderDown())
-            self.assertEqual(self.controller.current_index, 1)
+            self.assertEqual(self.controller.playback_position, 1)
             self.assertFalse(window.timer.isActive())
             for expected in (2, 3):
-                point = press + QPoint(round((slider.width() - handle.width()) * (expected - 1) / 4), 0)
+                point = press + QPoint(round((slider.width() - handle.width()) * (expected - 1) / 5), 0)
                 # Explicit held-button state makes native dragging deterministic offscreen.
                 event = QMouseEvent(QEvent.MouseMove, QPointF(point),
                                     QPointF(slider.mapToGlobal(point)), Qt.NoButton,
@@ -784,18 +801,19 @@ class ExplorerWindowTests(unittest.TestCase):
                 self.app.sendEvent(slider, event)
                 self.assertTrue(slider.isSliderDown())
                 self.assertEqual(slider.value(), expected)
-                self.assertEqual(self.controller.current_index, expected)
+                self.assertEqual(self.controller.playback_position, expected)
         finally:
             QTest.mouseRelease(slider, Qt.LeftButton, pos=press)
         self.assertFalse(slider.isSliderDown())
         for action, expected in ((window.previous_button.click, 2), (window.next_button.click, 3),
-                                 (window.first_button.click, 0), (window.last_button.click, 4)):
+                                 (window.first_button.click, 0), (window.last_button.click, 5)):
             action()
             self.assertEqual(slider.value(), expected)
-            self.assertEqual(self.controller.current_index, expected)
+            self.assertEqual(self.controller.playback_position, expected)
 
     def test_flag_chord_diagnostics_distinguish_logical_steps_and_physical_clicks(self):
-        self.window.slider.setValue(2)
+        # Position 3 is the chord unit that completes the flag_chord move.
+        self.window.slider.setValue(3)
         self.assertEqual(self.controller.current_index, 2)
         self.assertEqual(self.window.clicks_label.text(), "Clicks 3 / 5")
         expected = {"action": "flag_chord", "coordinate": "(1, 0)", "premium": "2",
@@ -853,30 +871,31 @@ class ExplorerWindowTests(unittest.TestCase):
     def test_selected_and_delta_highlights_match_step_and_clear_at_zero(self):
         for index in (1, 2, 3, 0):
             self.window.slider.setValue(index)
-            step = self.controller.current_step
-            before = (self.controller.revealed, self.controller.flagged_mines)
+            unit = self.controller.playback_unit
+            before = (self.controller.playback_revealed, self.controller.playback_flagged_mines)
             self.window.refresh()
-            self.assertEqual((self.controller.revealed, self.controller.flagged_mines), before)
+            self.assertEqual((self.controller.playback_revealed,
+                              self.controller.playback_flagged_mines), before)
             for coord, cell in self.window.cells.items():
-                self.assertEqual(cell.selected, bool(step and coord == (step.move.x, step.move.y)))
-                self.assertEqual(cell.newly_revealed, bool(step and coord in step.newly_revealed))
-                self.assertEqual(cell.newly_flagged, bool(step and coord in step.newly_flagged))
+                self.assertEqual(cell.selected, bool(unit and coord == unit.target))
+                self.assertEqual(cell.newly_revealed, coord in self.controller.playback_newly_revealed)
+                self.assertEqual(cell.newly_flagged, coord in self.controller.playback_newly_flagged)
                 if index == 2 and coord == (1, 1):
                     self.assertEqual(cell.state, "flagged")
                     self.assertTrue(cell.text())
         self.assertTrue(self.window.diagnostic_rows["tie_count"].isHidden())
 
-    def test_real_qtimer_advances_one_logical_step_per_timeout_and_stops(self):
+    def test_real_qtimer_advances_one_playback_unit_per_timeout_and_stops(self):
         observed = []
         self.window.interval_spin.setValue(20)
-        self.window.timer.timeout.connect(lambda: observed.append(self.controller.current_index))
+        self.window.timer.timeout.connect(lambda: observed.append(self.controller.playback_position))
         self.window.play_button.click()
         deadline = time.monotonic() + 3
         while self.window.timer.isActive() and time.monotonic() < deadline:
             QTest.qWait(10)
         self.assertFalse(self.window.timer.isActive())
-        self.assertEqual(observed, [1, 2, 3, 4])
-        self.assertEqual(self.controller.current_index, 4)
+        self.assertEqual(observed, [1, 2, 3, 4, 5])
+        self.assertEqual(self.controller.playback_position, 5)
         self.assertEqual(self.window.clicks_label.text(), "Clicks 5 / 5")
         self.assertFalse(self.window.play_button.isEnabled())
 
@@ -900,7 +919,7 @@ class ExplorerWindowTests(unittest.TestCase):
                 self.assertEqual(self.controller.current_index, before)
 
     def test_play_pause_and_interval_change_update_active_timer(self):
-        self.assertEqual(self.window.interval_spin.value(), 200)
+        self.assertEqual(self.window.interval_spin.value(), 500)
         self.assertEqual((self.window.interval_spin.minimum(), self.window.interval_spin.maximum()),
                          (20, 5000))
         self.window.play_button.click()
@@ -918,11 +937,11 @@ class ExplorerWindowTests(unittest.TestCase):
         self.window.close()
         self.assertFalse(self.window.timer.isActive())
         self.assertIs(self.controller.trace, trace)
-        self.assertEqual(self.controller.current_index, 2)
+        self.assertEqual(self.controller.playback_position, 2)
         with patch("zini_explorer.build_zini_trace", side_effect=AssertionError("rebuild")):
             reopened = self.create_window(self.controller)
         self.assertEqual(reopened.slider.value(), 2)
-        self.assertEqual(reopened.clicks_label.text(), "Clicks 3 / 5")
+        self.assertEqual(reopened.clicks_label.text(), "Clicks 2 / 5")
         self.assertFalse(reopened.timer.isActive())
 
     def test_empty_trace_has_no_enabled_navigation_and_mine_stays_covered(self):
@@ -1064,7 +1083,7 @@ class ExplorerMainUITests(unittest.TestCase):
             self.assertIsNot(reopened, window)
             self.assertIs(self.ui._zini_explorer.trace, trace)
             self.assertEqual(reopened.slider.value(), 2)
-            self.assertEqual(reopened.clicks_label.text(), "Clicks 3 / 5")
+            self.assertEqual(reopened.clicks_label.text(), "Clicks 2 / 5")
             self.assertEqual(request.call_count, 3)
             build.assert_called_once()
         self.assertEqual((self.engine.get_observation(), self.engine.get_counter_snapshot()), before)
@@ -1091,7 +1110,7 @@ class ExplorerMainUITests(unittest.TestCase):
             self.ui._update_statistics_panel(self.engine.get_stats())
             self.ui.on_open_zini_explorer()
             self.assertIs(self.ui._zini_explorer.trace, trace)
-            self.assertEqual(self.ui._zini_explorer.current_index, 2)
+            self.assertEqual(self.ui._zini_explorer.playback_position, 2)
             build.assert_called_once()
 
     def test_successful_worker_cleanup_does_not_close_completed_explorer(self):
